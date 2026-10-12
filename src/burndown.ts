@@ -2240,9 +2240,11 @@ export const createPipeline = (ctx: PipelineContext) => {
       let repairs = 0;
       // Passes that left the branch where it was: the repairer judged the red a flake, or could do nothing.
       let idle = 0;
+      // Whether the pass before committed: only then is a new failure an effect of the repair worth the extra pass.
+      let lastCommitted = true;
       for (
         let red = gated.failure;
-        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || !seen.has(failureKey(red)));
+        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
         red = gated.failure
       ) {
         const failure = red;
@@ -2349,7 +2351,8 @@ export const createPipeline = (ctx: PipelineContext) => {
             return false;
           },
         );
-        if (sh("git", ["rev-parse", branch], project.root) === beforePass) idle++;
+        lastCommitted = sh("git", ["rev-parse", branch], project.root) !== beforePass;
+        if (!lastCommitted) idle++;
         if (!fixed) break;
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
       }
