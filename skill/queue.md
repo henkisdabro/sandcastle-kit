@@ -77,12 +77,15 @@ comments, and the gates can prove it.
    from the files in `.sandcastle/triage/`. Add the queue's shape from `sandcastle queue --lint`
    (read-only, no model calls; give it the ticket numbers the run will name, if it is limited to some,
    and it lints those alone): the longest `Blocked by` chain, edges that only order overlapping
-   `Touches:`, wide tickets, hot and unmergeable files, `Touches:` paths missing from the base
+   `Touches:`, wide tickets, tickets to consider splitting (large by the estimate's size rule),
+   hot and unmergeable files, `Touches:` paths missing from the base
    branch (a plain path: a new file said to be new under `## Fix`, or a typo; a glob matching no file
    orders nothing, so name the new files themselves or fix the glob), and a rough turn count. It is advice, so
    quote it as a guess and offer to trim a chain or a `Blocked by` edge it flags.
    A ticket it lists under protected paths will always be held for a human merge: say so, and offer
    to unqueue it (or to leave the protected file to the user) rather than spend a pipeline on it.
+   A ticket it suggests splitting is one pass the estimate prices as large: offer child tickets, as
+   in the triage table above, and ask before creating them.
 
 ## Writing a ticket body
 

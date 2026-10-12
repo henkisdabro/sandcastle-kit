@@ -449,8 +449,9 @@ export type UsageWatch = {
   /**
    * A ticket's agent pass has ended and the run counts its tokens itself (its result's own figure): what the logs showed of
    * the passes so far stops counting as live, and so does anything of them read later. Reads what the logs gained first.
+   * Returns the largest context one assistant message of those passes had (`peakContext`), undefined when none showed.
    */
-  settle(issue: string): void;
+  settle(issue: string): number | undefined;
   /** One last look, written whatever the interval says, and no more after it. */
   stop(): void;
 };
@@ -469,7 +470,15 @@ type Tail = {
   pass: number;
   settled: number;
   tokens: PassTokens;
+  /** The largest context of one message since the last `settle` - kept across a marker, which resets `tokens`, so two passes in one file both count. */
+  peak: number;
 };
+
+/** What one assistant message put in the context: the input it sent, new, written to the cache and read from it. */
+export const contextOf = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead;
+
+/** A pass whose largest turn held more context than this is flagged in the closing summary: long passes grow it unchecked, and every turn re-reads it. */
+export const PEAK_CONTEXT_WARN = 150_000;
 
 const NO_PASS = (): PassTokens => ({ seen: new Map(), total: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 } });
 
@@ -552,6 +561,7 @@ export const watchUsage = ({
     const { seen, total } = tail.tokens;
     const before = found.id === undefined ? undefined : seen.get(found.id);
     if (found.id !== undefined) seen.set(found.id, found.tokens);
+    tail.peak = Math.max(tail.peak, contextOf(found.tokens));
     for (const key of Object.keys(total) as (keyof Tokens)[]) total[key] += found.tokens[key] - (before?.[key] ?? 0);
     changed.add(tail.owner!);
   };
@@ -563,7 +573,7 @@ export const watchUsage = ({
     let tail = tails.get(name);
     // A file that shrank or changed identity is another file under the same name (archived, then started again).
     if (!tail || st.size < tail.offset || st.ino !== tail.ino) {
-      tail = { ino: st.ino, offset: 0, decoder: new StringDecoder("utf8"), carry: "", skipping: false, mine: false, owner: tokens?.owner(name), pass: 0, settled: 0, tokens: NO_PASS() };
+      tail = { ino: st.ino, offset: 0, decoder: new StringDecoder("utf8"), carry: "", skipping: false, mine: false, owner: tokens?.owner(name), pass: 0, settled: 0, tokens: NO_PASS(), peak: 0 };
       tails.set(name, tail);
     }
     if (st.size === tail.offset) return undefined;
@@ -653,8 +663,14 @@ export const watchUsage = ({
 
   const settle = (issue: string) => {
     scan();
-    for (const tail of tails.values()) if (tail.owner === issue) tail.settled = tail.pass;
+    let peak = 0;
+    for (const tail of tails.values()) {
+      if (tail.owner !== issue) continue;
+      peak = Math.max(peak, tail.peak);
+      Object.assign(tail, { settled: tail.pass, peak: 0 });
+    }
     changed.delete(issue);
+    return peak > 0 ? peak : undefined;
   };
 
   const timer = setInterval(() => (finished() ? stop() : poll()), interval);
