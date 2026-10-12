@@ -156,9 +156,11 @@ export type TicketRecord = {
   /** Test ids a red gate named. */
   failing?: string[];
   /**
-   * Tests (or, when the output named none, the gate) that went red on one gate run and green on a later one with no
-   * commit between, each once: likely flaky. The record keeps only the final red's `failing`, so this is where the
-   * red-then-green is kept; the closing summary lists each test once with the tickets it hit.
+   * Tests (or, when the output named none, the gate) that went red and then green with no commit between, each once: likely
+   * flaky. Two sources: a gate that went red on one run and green on a re-run (the record keeps only the final red's
+   * `failing`, so this is where the red-then-green is kept), and the tests a repair pass judged flaky (its
+   * `<verdict>outside-branch</verdict>` line) when it committed nothing. The closing summary lists each test once with the
+   * tickets it hit.
    */
   flaky?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
