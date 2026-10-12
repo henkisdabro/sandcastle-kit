@@ -7,8 +7,9 @@ name: Check
 #
 # On Linux and macOS: agents test only in the Linux sandbox, and two tests that
 # passed there failed on macOS (BSD `script`, a mise `node` shim) until a
-# maintainer ran them by hand. macOS also runs the status view under its own
-# bash 3.2, the bash the kit's users have there.
+# maintainer ran them by hand. macOS also starts the status view under its own
+# bash 3.2, the bash the kit's users have there: status.sh is a wrapper now, but
+# it is still the file `sandcastle status` and the Herdr popup run.
 
 # Push only on main: a branch's pushes are covered by its pull request, and
 # running both doubled every job and queued the macOS jobs behind each other.
@@ -58,10 +59,9 @@ jobs:
         run: pnpm lint
       - if: matrix.part == 'status'
         run: pnpm exec tsc --noEmit
-      # macOS draws the view under its own bash 3.2 as well. Every frame starts processes, slow to
-      # start on macOS, so one run after the other took about four minutes, the slowest job by a
-      # minute and a half. Each run is a single-threaded chain of processes, so side by side they
-      # share the runner's cores rather than fight for them.
+      # macOS starts the view under its own bash 3.2 as well, through the status.sh wrapper. The two
+      # runs go side by side: each is a chain of processes started one after another, so together
+      # they share the runner's cores rather than fight for them.
       - parallel:
           - name: Status view
             if: matrix.part == 'status'
