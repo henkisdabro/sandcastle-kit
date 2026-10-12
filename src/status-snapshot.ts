@@ -36,12 +36,14 @@ export type BranchFact = {
   exists: boolean;
   /** Commits over the base; absent when git could not count them (no branch). */
   commits?: number;
+  /** Lines the branch adds and removes against the base (its merge base with it); absent when git could not say. */
+  diff?: { added: number; removed: number };
   /** The branch's tip is on the base: a branch with nothing over it, or one merged by hand. */
   onBase: boolean;
   /** Every commit has an equal patch on the base (a rebased landing); asked only of a branch with commits that the view infers. */
   equalPatches?: boolean;
-  /** The kit's merge of the ticket on the base, newest first: when, its subject, and the commits it landed (a squash is one). */
-  landing?: { at: number; subject: string; commits?: number };
+  /** The kit's merge of the ticket on the base, newest first: when, and its subject. */
+  landing?: { at: number; subject: string };
   /** For a branch on the base: its merge (or its tip) is on origin's base too, so the push happened. */
   pushed?: boolean;
 };
@@ -439,19 +441,24 @@ const readBranches = async (dir: string, env: NodeJS.ProcessEnv, base: string, i
     if (exists) {
       const n = await git(dir, env, ["rev-list", "--count", `${base}..agent/issue-${id}`], signal);
       if (n !== undefined && /^\d+$/.test(n.trim())) fact.commits = Number(n.trim());
+      if (fact.commits === 0) fact.diff = { added: 0, removed: 0 };
+      else if (fact.commits !== undefined) {
+        // Read here with the rest of git, never while drawing. A binary file counts `-` for both and adds no line.
+        const stat = await git(dir, env, ["diff", "--numstat", "--no-ext-diff", `${base}...agent/issue-${id}`], signal);
+        if (stat !== undefined) {
+          const diff = { added: 0, removed: 0 };
+          for (const line of stat.split("\n")) {
+            const m = /^(\d+)\t(\d+)\t/.exec(line);
+            if (m) [diff.added, diff.removed] = [diff.added + Number(m[1]), diff.removed + Number(m[2])];
+          }
+          fact.diff = diff;
+        }
+      }
       if (inferred.has(id) && (fact.commits ?? 0) > 0) fact.equalPatches = !/^\+/m.test((await git(dir, env, ["cherry", base, `agent/issue-${id}`], signal)) ?? "+");
     }
     const shown = shownId(id);
     const landing = landings.find((l) => l.message.includes(`Merge agent/issue-${id} (closes ${shown})`) || l.message.includes(`Merge agent/issue-${id} (part of ${shown})`));
-    if (landing) {
-      let commits: number | undefined;
-      if (landing.parents.length >= 2) {
-        // --no-merges, as the kit counts a branch's own commits: a base merge or a resolution is not one.
-        const n = await git(dir, env, ["rev-list", "--count", "--no-merges", `${landing.parents[0]}..${landing.parents[1]}`, ...landing.parents.slice(2)], signal);
-        if (n !== undefined && /^\d+$/.test(n.trim())) commits = Number(n.trim());
-      } else if (landing.parents.length === 1) commits = 1;
-      fact.landing = { at: landing.at, subject: landing.subject, ...(commits !== undefined ? { commits } : {}) };
-    }
+    if (landing) fact.landing = { at: landing.at, subject: landing.subject };
     // A branch on the base, merged by hand: the merge that took its tip in (or the tip itself, for a fast-forward)
     // being on origin's base says the push happened. No fetch here - no network.
     if (fact.onBase && originBase) {

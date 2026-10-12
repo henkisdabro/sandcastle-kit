@@ -122,6 +122,8 @@ export type TicketFacts = {
   /** The state word, `impl` or `gate red` as the view says it. */
   state: string;
   time?: string;
+  /** What the step usually has left (`~4m`), shown beside the time by the TypeScript view only; not compared. */
+  left?: string;
   commits?: string;
   cpuMem?: string;
   tokens?: string;
@@ -338,7 +340,8 @@ export const readFacts = (raw: string, root: string): Facts => {
       id: cells[0],
       group: GROUP_OF_GLYPH[state?.[1] ?? ""] ?? "unknown",
       state: state?.[2] ?? cells[col("STATE")]!,
-      time: at("TIME"),
+      time: at("TIME")?.replace(/ ?~\S+$/, ""),
+      left: at("TIME")?.match(/~\S+$/)?.[0],
       commits: at("COMMITS"),
       cpuMem: at("CPU/MEM"),
       tokens: at("TOKENS"),

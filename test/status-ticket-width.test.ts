@@ -24,7 +24,7 @@ const row = (id: string, over: Partial<Row> = {}): Row => ({
   group: "working",
   time: "6m",
   timeTone: "head",
-  commits: "2",
+  diff: "+96 \u22121159",
   note: "working",
   noteTone: "head",
   prio: 0,

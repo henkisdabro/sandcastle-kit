@@ -28,7 +28,7 @@ const row = (id: string, over: Partial<Row> = {}): Row => ({
   group: "working",
   time: "6m",
   timeTone: "head",
-  commits: "2",
+  diff: "+96 \u22121159",
   note: "working",
   noteTone: "head",
   prio: 0,
@@ -47,7 +47,7 @@ const tableOf = (rows: Row[]): Table => ({
 const TABLE = tableOf([
   row("120", { note: LONG_NOTE, cpu: { cpu: "1.4c", mem: "2.1G", hot: false }, tokens: "2.5M/27k" }),
   row("269", { state: "gates", note: "test-unit running (api project serial, 14/22 files, retry 1)", tokens: "533k/8k" }),
-  row("67", { state: "blocked", glyph: "~", tone: "blu", group: "blocked", time: "-", commits: "-", note: "waits for #103 to close", prio: 4 }),
+  row("67", { state: "blocked", glyph: "~", tone: "blu", group: "blocked", time: "-", diff: "-", note: "waits for #103 to close", prio: 4 }),
 ]);
 
 /** A live run two hours old, its settings, models and one plan reading: every lane has something to show. */
@@ -108,16 +108,16 @@ const columnsOf = (frame: string[]) => {
   return { names: cells.map((c) => c.trim()), widths: cells.map((c) => c.length) };
 };
 
-// What the ticket sets, for ticket ids of 4 characters (TICKET at its least, 8): the fixed columns 8, 15, 7, 9, 13
-// and 11 wide and eight bars leave ACTIVITY 40 from 111 columns; without CPU/MEM from 97, without COMMITS too from
-// 87, without TOKENS too from 75; STATE then narrows a cell a column to 11 at 71; below that ACTIVITY takes the rest.
+// What the ticket sets, for ticket ids of 4 characters (TICKET at its least, 8): the fixed columns 8, 15, 9, 13, 13
+// and 14 wide and eight bars leave ACTIVITY 40 from 120 columns; without CPU/MEM from 106, without DIFF too from
+// 92, without TOKENS too from 77; STATE then narrows a cell a column to 11 at 73; below that ACTIVITY takes the rest.
 const expectedColumns = (cols: number): [string, number][] => {
-  if (cols >= 111) return [["TICKET", 8], ["STATE", 15], ["TIME", 7], ["COMMITS", 9], ["CPU/MEM", 13], ["TOKENS", 11], ["ACTIVITY", cols - 71]];
-  if (cols >= 97) return [["TICKET", 8], ["STATE", 15], ["TIME", 7], ["COMMITS", 9], ["TOKENS", 11], ["ACTIVITY", cols - 57]];
-  if (cols >= 87) return [["TICKET", 8], ["STATE", 15], ["TIME", 7], ["TOKENS", 11], ["ACTIVITY", cols - 47]];
-  if (cols >= 75) return [["TICKET", 8], ["STATE", 15], ["TIME", 7], ["ACTIVITY", cols - 35]];
-  if (cols >= 71) return [["TICKET", 8], ["STATE", cols - 60], ["TIME", 7], ["ACTIVITY", 40]];
-  return [["TICKET", 8], ["STATE", 11], ["TIME", 7], ["ACTIVITY", cols - 31]];
+  if (cols >= 120) return [["TICKET", 8], ["STATE", 15], ["TIME", 9], ["DIFF", 13], ["CPU/MEM", 13], ["TOKENS", 14], ["ACTIVITY", cols - 80]];
+  if (cols >= 106) return [["TICKET", 8], ["STATE", 15], ["TIME", 9], ["DIFF", 13], ["TOKENS", 14], ["ACTIVITY", cols - 66]];
+  if (cols >= 92) return [["TICKET", 8], ["STATE", 15], ["TIME", 9], ["TOKENS", 14], ["ACTIVITY", cols - 52]];
+  if (cols >= 77) return [["TICKET", 8], ["STATE", 15], ["TIME", 9], ["ACTIVITY", cols - 37]];
+  if (cols >= 73) return [["TICKET", 8], ["STATE", cols - 62], ["TIME", 9], ["ACTIVITY", 40]];
+  return [["TICKET", 8], ["STATE", 11], ["TIME", 9], ["ACTIVITY", cols - 33]];
 };
 
 // The lanes' widths, padding included, from their widest rows: RUN 33 ("● running · 2h00m · since 11:00"), MACHINE
@@ -222,7 +222,7 @@ test("the plan lane is left out without a reading", () => {
   assert.deepEqual(lanesOf(draw(330, 400, { snapshot })).beside, ["RUN", "MACHINE", "MODELS", "SETTINGS"]);
 });
 
-test("the table's columns keep their set widths and give way in order, ACTIVITY taking the rest, at least 40 from 71 columns", () => {
+test("the table's columns keep their set widths and give way in order, ACTIVITY taking the rest, at least 40 from 73 columns", () => {
   for (const cols of WIDTHS) {
     const { names, widths } = columnsOf(draw(cols));
     assert.deepEqual(
@@ -230,7 +230,7 @@ test("the table's columns keep their set widths and give way in order, ACTIVITY 
       expectedColumns(cols),
       `${cols} columns`,
     );
-    if (cols >= 71) assert.ok(widths.at(-1)! >= 40, `${cols} columns: ACTIVITY ${widths.at(-1)}`);
+    if (cols >= 73) assert.ok(widths.at(-1)! >= 40, `${cols} columns: ACTIVITY ${widths.at(-1)}`);
   }
 });
 
@@ -243,18 +243,18 @@ test("TICKET fits the longest id shown, between 8 and 16, and cuts a longer one 
   assert.ok(long.some((l) => l.startsWith("│ a-ticket-slug… │")), long.join("\n"));
 });
 
-test("STATE narrows to its glyph and a short word, cut with …, in a pane under 75 columns", () => {
+test("STATE narrows to its glyph and a short word, cut with …, in a pane under 77 columns", () => {
   const table = tableOf([row("1", { state: "uncommitted", glyph: "!", group: "needs you" })]);
-  assert.ok(draw(75, 400, { table }).some((l) => l.includes("│ ! uncommitted │")));
-  assert.ok(draw(71, 400, { table }).some((l) => l.includes("│ ! uncomm… │")));
+  assert.ok(draw(77, 400, { table }).some((l) => l.includes("│ ! uncommitted │")));
+  assert.ok(draw(73, 400, { table }).some((l) => l.includes("│ ! uncomm… │")));
   assert.ok(draw(60, 400, { table }).some((l) => l.includes("│ ! uncomm… │")));
 });
 
 test("every column but STATE and ACTIVITY is centred, and a note that does not fit is cut with … on one line", () => {
   const frame = draw(140);
   const r = frame.find((l) => l.includes("#120"))!;
-  assert.deepEqual(r.split("│").slice(1, 7), ["  #120  ", " ● impl        ", "  6m   ", "    2    ", "  1.4c/2.1G  ", " 2.5M/27k  "]);
-  assert.match(r, /│ editing docs\/DEPLOYMENT\.md - removing the Pages deploy section, th… │$/);
+  assert.deepEqual(r.split("│").slice(1, 7), ["  #120  ", " ● impl        ", "   6m    ", "  +96 \u22121159  ", "  1.4c/2.1G  ", "   2.5M/27k   "]);
+  assert.match(r, /│ editing docs\/DEPLOYMENT\.md - removing the Pages deploy se… │$/);
   assert.equal(frame.filter((l) => l.includes("API_WORKER")).length, 0);
   // Where it fits, the whole note.
   assert.ok(draw(330).some((l) => / the API_WORKER paragraph +│$/.test(l)));

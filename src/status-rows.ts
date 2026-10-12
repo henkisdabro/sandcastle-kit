@@ -29,11 +29,14 @@ export type Row = {
   group: ViewGroup;
   time: string;
   timeTone: Tone;
-  commits: string;
+  /** Lines added and removed on the ticket's branch against its base (`+96 −1159`), `-` without a branch. */
+  diff: string;
   /** The sandbox's CPU and memory, absent without one. */
   cpu?: { cpu: string; mem: string; hot: boolean };
   /** In and out tokens (`3.1M/42k`), absent without a reading. */
   tokens?: string;
+  /** The share of the input served from cache, in whole percent; absent for a record from before the kit counted cache reads. */
+  cache?: number;
   note: string;
   noteTone: Tone;
   /** The log the ticket's id links to, when links are on and it has one. */
@@ -128,6 +131,40 @@ const tokensCell = (tokens: unknown): string | undefined => {
   return m ? `${m[1]}/${m[2]}` : undefined;
 };
 
+/**
+ * The share of a ticket's input that came from cache, in whole percent: the record's cache-read count over the
+ * input of its `tokens` text. That text is rounded (`2.5M`), so the share is good to a point or two, which is all a
+ * cell that goes amber at 70% needs. No share without the count (an older record) or without any input.
+ */
+const cacheShare = (tokens: unknown, cacheRead: unknown): number | undefined => {
+  const m = typeof tokens === "string" ? /^([0-9.]+)([kM]?) in \//.exec(tokens) : null;
+  if (!m || typeof cacheRead !== "number" || !Number.isFinite(cacheRead) || cacheRead < 0) return undefined;
+  const input = Number(m[1]) * (m[2] === "M" ? 1_000_000 : m[2] === "k" ? 1000 : 1);
+  return input > 0 ? Math.min(Math.round((cacheRead / input) * 100), 100) : undefined;
+};
+
+/** A count of lines for the DIFF column: whole to 9999, then `12k`. */
+const count = (n: number): string => (n < 10000 ? String(n) : `${Math.round(n / 1000)}k`);
+
+/** The DIFF cell of a branch's fact: `+96 −1159`, or `-` without a branch (or without a reading of it). */
+const diffCell = (branch: { exists: boolean; diff?: { added: number; removed: number } } | undefined): string =>
+  branch?.exists && branch.diff ? `+${count(branch.diff.added)} \u2212${count(branch.diff.removed)}` : "-";
+
+/** What TIME holds: its 9 columns less the padding. */
+const TIME_CELLS = 7;
+
+/**
+ * TIME with what the step usually has left: `6m ~4m`, from the record's typical length of the step. Just the time
+ * once the step is at or past it, and where the whole would not fit TIME (7 cells) the space goes, then the rest.
+ */
+const withLeft = (time: string, spent: number, usual: number): string => {
+  if (spent >= usual) return time;
+  const left = `~${ago(usual - spent)}`;
+  for (const joined of [`${time} ${left}`, `${time}${left}`]) if (joined.length <= TIME_CELLS) return joined;
+  return time;
+};
+
+
 /** Where a ticket's link points: its newest log, the characters a file URL cannot hold escaped. */
 const linkOf = (snapshot: Snapshot, id: string): string | undefined => {
   if (!snapshot.links) return undefined;
@@ -197,15 +234,8 @@ export const ticketRows = (snapshot: Snapshot): Table => {
 
   const emit = (row: Omit<Row, "group" | "glyph" | "tone" | "prio" | "shown"> & { glyph?: string; tone?: Tone }, partlyDone = false) => {
     const group = groupOf(row.state);
-    let commits = row.commits;
-    // Once merged, a branch has no commits over the base: the merge commit says how many it landed.
-    if (row.state === "merged" && (commits === "0" || commits === "-")) {
-      const landed = branches[row.id]?.landing?.commits;
-      commits = landed === undefined ? "-" : String(landed);
-    }
     const full: Row = {
       ...row,
-      commits,
       shown: shownId(row.id),
       group,
       glyph: row.glyph ?? GLYPH[group],
@@ -241,7 +271,6 @@ export const ticketRows = (snapshot: Snapshot): Table => {
       let key = since;
       time = finishedTime(raw, since, t.started) ?? time;
       const branch = branches[id];
-      const commits = branch?.commits === undefined ? "-" : String(branch.commits);
       const cpu = containers[id];
       let log: string | undefined;
       switch (raw) {
@@ -300,6 +329,7 @@ export const ticketRows = (snapshot: Snapshot): Table => {
           // A step at twice its usual length says which to suspect; at three times it says so in words.
           const usual = whole(typical[raw]);
           if (usual !== undefined && usual > 0) {
+            time = withLeft(time, now - since, usual);
             if (now - since > usual * 3) {
               timeTone = "hot";
               noteTone = "hot";
@@ -325,7 +355,7 @@ export const ticketRows = (snapshot: Snapshot): Table => {
       }
       // This run's landings above earlier runs' merged rows (their keys are epoch seconds).
       if (groupOf(state) === "merged") key += 10000000000;
-      emit({ id, state, time, timeTone, commits, cpu, tokens: tokensCell(t.tokens), note: activity, noteTone, key, apart: false, glyph, tone });
+      emit({ id, state, time, timeTone, diff: diffCell(branch), cpu, tokens: tokensCell(t.tokens), cache: cacheShare(t.tokens, t.cacheRead), note: activity, noteTone, key, apart: false, glyph, tone });
     }
   }
 
@@ -354,7 +384,7 @@ export const ticketRows = (snapshot: Snapshot): Table => {
       note = live ? "in this run - waiting for a sandbox" : "for the next run";
       if (live) key = 1;
     }
-    emit({ id, state, time: "-", timeTone: "gry", commits: "-", note, noteTone: "mute", key, apart: recorded });
+    emit({ id, state, time: "-", timeTone: "gry", diff: "-", note, noteTone: "mute", key, apart: recorded });
   }
 
   // 3. Tickets with logs the record does not hold: earlier runs', and all of them once the run has ended.
@@ -471,7 +501,7 @@ export const ticketRows = (snapshot: Snapshot): Table => {
     // A suffixed branch shows its number in TICKET and its suffix here.
     if (/^[0-9]+(-[a-z]+)*$/.test(id) && id.includes("-")) activity = `[${id.slice(id.indexOf("-") + 1)}] ${activity}`;
     emit(
-      { id, state, time, timeTone: "head", commits: String(commits), cpu, tokens: tokensCell(tickets[id]?.tokens), note: activity, noteTone, key: log.mtime, apart: recorded, glyph, tone },
+      { id, state, time, timeTone: "head", diff: diffCell(branch), cpu, tokens: tokensCell(tickets[id]?.tokens), cache: cacheShare(tickets[id]?.tokens, tickets[id]?.cacheRead), note: activity, noteTone, key: log.mtime, apart: recorded, glyph, tone },
       partlyDone,
     );
   }
