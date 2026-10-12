@@ -8,7 +8,7 @@ import { registerHooks } from "node:module";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { configureModels, configureTools, type Effort } from "./agents.ts";
+import { AUTO_COMPACT_MAX, AUTO_COMPACT_MIN, configureAutoCompact, configureModels, configureTools, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
 import { CLAUDE_CODE_TOOLS, managedDenied, nearestTool } from "./claude-tools.ts";
 import { nearest, OperatorError } from "./errors.ts";
@@ -117,6 +117,12 @@ export type ProjectConfig = {
    */
   keepWarm?: boolean;
   /**
+   * Context size, in tokens (100,000 to 1,000,000, Claude Code's own range), at which a Claude agent in a
+   * sandbox compacts its conversation: passed to it as `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. Unset: nothing is
+   * passed and Claude Code's own default applies. Codex agents are unchanged.
+   */
+  autoCompactWindow?: number;
+  /**
    * Plan usage, in percent (1 to 100), at which a run pauses itself: when the 5-hour or the weekly window of a
    * provider the run uses reaches it, or an agent hits the limit anyway, the run takes the soft pause of
    * `sandcastle pause` and resumes by itself a minute after that window's reset. Unset: no pause, and a
@@ -209,8 +215,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause" | "keepWarm">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "keepWarm"> & { root: string; tracker: Resolved };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause" | "keepWarm" | "autoCompactWindow">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "keepWarm" | "autoCompactWindow"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
@@ -239,7 +245,7 @@ export const hostPnpmStore = (root: string): string | undefined => {
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "usagePause", "keepWarm", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "usagePause", "keepWarm", "autoCompactWindow", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "changelog", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -304,6 +310,9 @@ const checkShape = (config: ProjectConfig) => {
   }
   if (config.changelog !== undefined && typeof config.changelog !== "boolean") refuse(`\`changelog\` must be true or false, not ${JSON.stringify(config.changelog)}.`);
   if (config.keepWarm !== undefined && typeof config.keepWarm !== "boolean") refuse(`\`keepWarm\` must be true or false, not ${JSON.stringify(config.keepWarm)}.`);
+  if (config.autoCompactWindow !== undefined && !(isCount(config.autoCompactWindow, AUTO_COMPACT_MIN) && config.autoCompactWindow <= AUTO_COMPACT_MAX)) {
+    refuse(`\`autoCompactWindow\` must be a whole number of tokens from ${AUTO_COMPACT_MIN.toLocaleString("en-US")} to ${AUTO_COMPACT_MAX.toLocaleString("en-US")} (Claude Code's own range), not ${JSON.stringify(config.autoCompactWindow)}.`);
+  }
   if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
   if (config.usagePause !== undefined && !(typeof config.usagePause === "number" && config.usagePause >= 1 && config.usagePause <= 100)) {
     refuse(`\`usagePause\` must be a number from 1 to 100 (the percent of a plan window at which a run pauses), not ${JSON.stringify(config.usagePause)}.`);
@@ -397,6 +406,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   }
   configureModels(config);
   configureTools(config.lean?.keep ?? []);
+  configureAutoCompact(config.autoCompactWindow);
   // Resolved here, on the host, so the committed config holds no path that exists on one machine
   // only. A literal mount of the same sandbox path (a config from before the key) wins: Docker
   // refuses two mounts at one path.
