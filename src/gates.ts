@@ -26,7 +26,7 @@ import { shq } from "./generated.ts";
 
 // `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
-type Failure = { name: string; command: string; exitCode: number; output: string };
+export type Failure = { name: string; command: string; exitCode: number; output: string };
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
@@ -530,6 +530,44 @@ export const failingTests = (output: string, limit = FAILING_TESTS_SHOWN) => {
     at = SPEC_LOCATION.exec(line)?.[1];
   }
   return [...new Set([...before, ...listed])].slice(0, limit);
+};
+
+/**
+ * Whether a red re-run failed on tests the first red did not name at all: a flake each time, so the gate is run once
+ * more rather than repaired. Both lists must be readable (a gate with no test ids, lint or types, says nothing about
+ * flakiness) and share no test.
+ */
+export const disjointReds = (first: Failure, rerun: Failure) => {
+  const a = failingTests(first.output, Infinity);
+  const b = failingTests(rerun.output, Infinity);
+  return a.length > 0 && b.length > 0 && !a.some((t) => b.includes(t));
+};
+
+/**
+ * The test ids that went red on one run of a gate and were green on a later one, from the red runs in order and
+ * whether the last run was green. A run whose red names no tests hides what a later run did with the ones before
+ * it, so the ids before an unreadable red are left out: only what is known is kept.
+ */
+export const flakedTests = (reds: Failure[], greenAfter: boolean) => {
+  const runs = reds.map((f) => failingTests(f.output, Infinity));
+  const flaked: string[] = [];
+  for (const [i, ids] of runs.entries()) {
+    const later = runs.slice(i + 1);
+    if (!greenAfter && !later.length) continue;
+    if (later.some((l) => l.length === 0)) continue;
+    for (const id of ids) if (!later.some((l) => l.includes(id)) && !flaked.includes(id)) flaked.push(id);
+  }
+  return flaked;
+};
+
+/** The three runs' failing tests, for the repair prompt: a gate that went red on different tests each time. */
+export const threeRunsNote = (name: string, reds: Failure[]) => {
+  const cap = 20;
+  const lines = reds.map((f, i) => {
+    const ids = failingTests(f.output, Infinity);
+    return `- run ${i + 1}: ${ids.slice(0, cap).join(", ")}${ids.length > cap ? `, and ${ids.length - cap} more` : ""}`;
+  });
+  return `The ${name} gate ran three times and went red on different tests each time, so the output below is the third run's only. The failing tests of each run:\n${lines.join("\n")}\n\n`;
 };
 
 /**
