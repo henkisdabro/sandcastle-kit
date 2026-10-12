@@ -1069,16 +1069,21 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
   return lines;
 };
 
-/** Tests that went red and then green on a re-run, on any ticket: each once, with the tickets it hit. The record is a file in a repository: only strings count. */
+/**
+ * Likely flaky tests, on any ticket: each once, with the tickets it hit. Two fields name them - `flaked` (red on one run of a
+ * gate, green on a later one) and `flaky` (a repair pass's verdict) - and a test either names is one test. The record is a
+ * file in a repository: only strings count.
+ */
 const flakyLines = (f: Facts): string[] => {
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x) : []);
   const hit = new Map<string, string[]>();
   for (const [id, t] of Object.entries(f.tickets)) {
-    for (const test of new Set(Array.isArray(t.flaky) ? t.flaky.filter((x): x is string => typeof x === "string" && !!x) : [])) hit.set(test, [...(hit.get(test) ?? []), id]);
+    for (const test of new Set([...strings(t.flaked), ...strings(t.flaky)])) hit.set(test, [...(hit.get(test) ?? []), id]);
   }
   if (!hit.size) return [];
   const all = [...hit].sort(([, a], [, b]) => b.length - a.length);
   const shown = all.slice(0, 8).map(([test, ids]) => `${test} (${ids.map(refOf).join(", ")})`);
-  return [`Likely flaky - red, then green on a re-run: ${shown.join("; ")}${all.length > 8 ? `; and ${all.length - 8} more` : ""}.`];
+  return [`Likely flaky - red, then green on a re-run, or judged flaky by a repair pass: ${shown.join("; ")}${all.length > 8 ? `; and ${all.length - 8} more` : ""}.`];
 };
 
 /** The closing summary as Markdown-ish text, every section present. */

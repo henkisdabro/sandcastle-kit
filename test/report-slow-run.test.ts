@@ -1,6 +1,6 @@
 // The closing summary sets a run's time and tokens beside its start estimate when they are more than twice off, names the
-// largest causes the record can measure when the run was slow, and lists a test that went red and then green on a re-run
-// once, with the tickets it hit. Made-up facts and timings lines; no Docker, model or network.
+// largest causes the record can measure when the run was slow, and lists a likely flaky test (`flaked` or `flaky` on a
+// ticket's record) once, with the tickets it hit. Made-up facts and timings lines; no Docker, model or network.
 //
 //   pnpm test:file test/report-slow-run.test.ts
 
@@ -78,18 +78,33 @@ test("a run with no estimate, a live run and a dry run give no line", () => {
   assert.deepEqual(headline(render(facts({ estimate, dryRun: true }))), []);
 });
 
+const flakyLine = (out: string) => out.split("\n").filter((l) => l.startsWith("Likely flaky"));
+const FLAKY = "Likely flaky - red, then green on a re-run, or judged flaky by a repair pass: ";
+
 test("a test red then green on a re-run is listed once with every ticket it hit", () => {
   const out = render(
     facts({
       tickets: {
-        "11": { state: "merged", title: "a", flaky: ["test/pool.test.ts", "test/a.test.ts"] },
-        "12": { state: "merged", title: "b", flaky: ["test/pool.test.ts"] },
-        "13": { state: "merged", title: "c", flaky: ["test/pool.test.ts", "test/pool.test.ts"] },
+        "11": { state: "merged", title: "a", flaked: ["test/pool.test.ts", "test/a.test.ts"] },
+        "12": { state: "merged", title: "b", flaked: ["test/pool.test.ts"] },
+        "13": { state: "merged", title: "c", flaked: ["test/pool.test.ts", "test/pool.test.ts"] },
       },
     }),
   );
-  const lines = out.split("\n").filter((l) => l.startsWith("Likely flaky"));
-  assert.deepEqual(lines, ["Likely flaky - red, then green on a re-run: test/pool.test.ts (#11, #12, #13); test/a.test.ts (#11)."]);
+  assert.deepEqual(flakyLine(out), [`${FLAKY}test/pool.test.ts (#11, #12, #13); test/a.test.ts (#11).`]);
+});
+
+test("the in-slot re-run's flakes and a repair verdict's flaky tests are one list, each test once", () => {
+  const out = render(
+    facts({
+      tickets: {
+        "21": { state: "merged", title: "a", flaked: ["test/pool.test.ts::takes a slot"] },
+        "22": { state: "red", title: "b", flaky: ["test/clock.test.ts::ticks"] },
+        "23": { state: "merged", title: "c", flaked: ["test/clock.test.ts::ticks"], flaky: ["test/clock.test.ts::ticks"] },
+      },
+    }),
+  );
+  assert.deepEqual(flakyLine(out), [`${FLAKY}test/clock.test.ts::ticks (#22, #23); test/pool.test.ts::takes a slot (#21).`]);
 });
 
 test("no ticket with a flaky test, no line", () => {

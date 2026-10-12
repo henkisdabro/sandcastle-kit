@@ -532,18 +532,6 @@ export const failingTests = (output: string, limit = FAILING_TESTS_SHOWN) => {
   return [...new Set([...before, ...listed])].slice(0, limit);
 };
 
-/** How many tests one red-then-green re-run puts on a ticket's record: a run that turned a whole suite red names a cause, not a list. */
-export const FLAKY_KEPT = 10;
-
-/**
- * What a gate that went red and then green on a re-run with nothing committed between leaves as likely flaky: the tests
- * its output named, else the gate itself (a runner whose output names no test). The run record's `flaky` for the ticket.
- */
-export const flakyOf = (failure: { name: string; output: string }) => {
-  const tests = failingTests(failure.output, FLAKY_KEPT);
-  return tests.length ? tests : [failure.name];
-};
-
 /**
  * Whether a red re-run failed on tests the first red did not name at all: a flake each time, so the gate is run once
  * more rather than repaired. Both lists must be readable (a gate with no test ids, lint or types, says nothing about

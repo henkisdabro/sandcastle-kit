@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, threeRunsNote, failingTestFile, failingTests, failureKey, flakyOf, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -1431,8 +1431,6 @@ export const createPipeline = (ctx: PipelineContext) => {
   const landed = ctx.landed ?? new Map<string, { files: string[]; commit: string }>();
   const base = project.baseBranch;
   const ref = tracker.ref;
-  // Each ticket's tests that went red and then green on a re-run, kept across its attempts: a ticket's record takes the whole set.
-  const flaky = new Map<string, Set<string>>();
   /**
    * The records of a kit worktree the host is about to run git in, held to git's own (`assertWorktreeRecords`). A
    * failure is the ticket's `tampered`, which stops the run as a failed `.git` check does, and is thrown.
@@ -2270,14 +2268,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         earlier.push(first);
         // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
         gated = { ...rerun, gates: [...gated.gates.slice(0, redAt), ...rerun.gates] };
-        if (!gated.failure) {
-          console.log(`${ref(issue.id)}: ${first.name} red, then green on a re-run - a flake, no repair pass`);
-          // The record keeps only a final red's tests, so the ticket would read `test=pass` with no trace of this.
-          const found = flaky.get(issue.id) ?? new Set<string>();
-          for (const id of flakyOf(first)) found.add(id);
-          flaky.set(issue.id, found);
-          run.ticket(issue.id, { flaky: [...found] });
-        }
+        if (!gated.failure) console.log(`${ref(issue.id)}: ${first.name} red, then green on a re-run - a flake, no repair pass`);
       }
       // A re-run that went red on tests the first red did not name is another flake, not a failure to repair: the gate
       // runs a third time. Red again, on any tests, goes to repair with all three runs' tests named; unreadable test
@@ -3426,7 +3417,7 @@ export const burndown = async (
           ...(tokens ? ticketTokens(tokens) : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.flaked?.length ? { flaked: value.flaked } : {}),
-          ...(value.outside?.tests.length ? { flaky: [...new Set([...(run.tickets()[issue.id]?.flaky ?? []), ...value.outside.tests])] } : {}),
+          ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
