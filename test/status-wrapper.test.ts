@@ -59,7 +59,8 @@ test("the view's exit code and words come through the wrapper: 1 without a proje
   const none = throughWrapper(["0"], { SANDCASTLE_PROJECT: join(TMP, "nowhere") });
   assert.equal(none.status, 1);
   assert.match(none.stderr, /nowhere\/\.sandcastle: No such file or directory/);
-  assert.doesNotMatch(none.stderr, /jq/);
+  // The word, not the letters: the stderr names the fixture's temp directory, whose random suffix can hold "jq".
+  assert.doesNotMatch(none.stderr, /\bjq\b/);
 });
 
 test("no test switch is left: nothing in the suite or the kit names SANDCASTLE_TEST_STATUS_IMPL or STATUS_STRICT", () => {
