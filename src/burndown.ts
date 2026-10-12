@@ -95,6 +95,8 @@ type Outcome = {
   /** The repair passes that committed: one that changed nothing (the repairer judged the red a flake) is `idleRepairs`. */
   repairs: number;
   idleRepairs?: number;
+  /** The last repair pass committed nothing and ended with `<verdict>outside-branch</verdict>` (`repairVerdict`): its line and the tests it judged flaky. */
+  outside?: { line: string; tests: string[] };
   gates: Gate[];
   /** Test ids the last red gate named. */
   failing?: string[];
@@ -223,6 +225,19 @@ const tags = (text: string) => {
   const report = last("report");
   const blocked = last("blocked");
   return blocked && (!report || blocked.at > report.at) ? { blocked: blocked.text } : { report: report?.text };
+};
+
+/**
+ * A repair pass that judged the red outside its branch (`<verdict>outside-branch</verdict>`, as `prompts/repair.md` asks) and
+ * the line it gave: `Flaky: a; b`, the tests it judged flaky separated by semicolons (a test title may hold a comma). The last
+ * verdict tag counts; a line is the verdict's own without the tests too.
+ */
+export const repairVerdict = (text: string): { line: string; tests: string[] } | undefined => {
+  const at = [...text.matchAll(/<verdict>\s*outside-branch\s*<\/verdict>/g)].at(-1);
+  if (!at) return undefined;
+  const line = [...text.matchAll(/^[ \t]*Flaky:[ \t]*(.+)$/gm)].map((m) => m[1].trim()).filter((l) => l && l !== "...").at(-1);
+  const tests = (line ?? "").split(";").map((t) => t.trim()).filter(Boolean);
+  return { line: line ?? "", tests };
 };
 
 // A spent plan allowance fails every issue after it the same way, each one
@@ -2273,6 +2288,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       let idle = 0;
       // Whether the pass before committed: only then is a new failure an effect of the repair worth the extra pass.
       let lastCommitted = true;
+      // The last pass committed nothing and said the red is outside the branch: one gate run, then no more passes.
+      let outside: { line: string; tests: string[] } | undefined;
       for (
         let red = gated.failure;
         red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
@@ -2348,6 +2365,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         );
         forced = false;
         const beforePass = sh("git", ["rev-parse", branch], project.root);
+        let verdict: ReturnType<typeof repairVerdict>;
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
@@ -2375,6 +2393,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           (fixedRun) => {
             const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
             if (said) addReport(issue.id, "Repair", said);
+            verdict = repairVerdict(fixedRun.stdout);
             return true;
           },
           (error) => {
@@ -2386,7 +2405,13 @@ export const createPipeline = (ctx: PipelineContext) => {
         lastCommitted = sh("git", ["rev-parse", branch], project.root) !== beforePass;
         if (!lastCommitted) idle++;
         if (!fixed) break;
+        // A tag on a pass that committed is ignored: the commits are the repair, and they are gated as ever.
+        outside = verdict && !lastCommitted ? verdict : undefined;
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        if (outside) {
+          console.log(`${ref(issue.id)}: the repair judged the red outside this branch${outside.line ? ` (${outside.line})` : ""} - one gate run, no further repair pass`);
+          break;
+        }
       }
       // Remembered across attempts and runs: a repair fixes what the gate named, often a file the ticket's
       // `Touches:` line has no reason to list, so landing leaves what only these commits changed out of its overrun.
@@ -2458,6 +2483,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         reviewCommits,
         repairs: earlierRepairs + repairs - idle,
         idleRepairs: earlierIdle + idle,
+        ...(outside && { outside }),
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
         ...(flaked.length ? { flaked } : {}),
@@ -2713,11 +2739,13 @@ export const burndown = async (
   const slots = estimateSlots(workers, split, !DRY_RUN);
   // The path count of each ticket's `Touches:` line (0 with none): the estimate prices a ticket by its size, and each timings line records it for later runs.
   const touchPaths = new Map(candidates.map((i) => [i.id, parseTouches(i.body ?? "").length]));
+  // The length of each ticket's body: with the path count it sizes the ticket (`sizeOf`, src/run.ts), and each timings line records it.
+  const bodyChars = new Map(candidates.map((i) => [i.id, (i.body ?? "").length]));
   const chainIds = blockerChain(project, tracker, candidates);
   const rough = priceRun(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
-    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
+    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), bodyChars: candidates.map((i) => bodyChars.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
   );
   if (rough) console.log(rough.text);
   console.log(`Machine-wide: ${usage()}`);
@@ -2879,6 +2907,7 @@ export const burndown = async (
         ...(carriedAtStart.has(issue) ? { carried: true } : {}),
         ...(remainderAtStart.has(issue) ? { remainder: true } : {}),
         ...(touchPaths.has(issue) ? { touches: touchPaths.get(issue) } : {}),
+        ...(bodyChars.has(issue) ? { bodyChars: bodyChars.get(issue) } : {}),
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
@@ -3359,6 +3388,7 @@ export const burndown = async (
           ...(tokens ? ticketTokens(tokens) : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.flaked?.length ? { flaked: value.flaked } : {}),
+          ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),

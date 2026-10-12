@@ -157,6 +157,8 @@ export type TicketRecord = {
   failing?: string[];
   /** Test ids that went red on one run of a gate and green on a later one (the ticket gate's re-runs), whatever became of the ticket. */
   flaked?: string[];
+  /** The tests a repair pass judged flaky (its `<verdict>outside-branch</verdict>` line) when it committed nothing: the closing summary's likely-flaky list reads them. */
+  flaky?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];
   /** The ticket's second attempt after a conflict (at landing, or found before its review or gates) or a red at landing ("requeued after conflict before review with #3"); null once that attempt is not going to run. */

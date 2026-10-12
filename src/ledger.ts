@@ -48,6 +48,8 @@ export type Finished = {
   commits: number;
   head?: string;
   repairs: number;
+  /** The line of a repair's `<verdict>outside-branch</verdict>`: a red ticket says the repairer judged the failure not this branch's. */
+  outside?: { line: string };
   gates: Gate[];
 };
 
@@ -329,7 +331,7 @@ const describePipeline = (o: Finished, c: Context): Said => {
       case "merged-earlier":
         return { state: "ready", note: `merged earlier (${o.head}) - to close` };
       case "gate-failed":
-        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}` };
+        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}${o.outside ? ` - the repair judged it outside this branch${o.outside.line ? `: ${o.outside.line}` : ""}` : ""}` };
       case "held":
         return { state: "held", note: o.heldNote ?? "held for a human" };
       // The scheduler ends such a branch as a `conflict` (`describeConflict`): this is the pipeline's own word for it.
