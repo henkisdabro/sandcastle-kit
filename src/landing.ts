@@ -759,10 +759,14 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
  * the run's worker count. Beside another run it is one of the run's share, while the share is 2 or more: the pool
  * holds the run's ticket pipelines to share - 1 at each lease (`leaseSlot`'s `keep`). At a share of 1 the run's one
  * slot is a ticket's, and a landing goes first when a slot frees (`slotTurn`); a ticket already running is never
- * taken back (ADR 0001).
+ * taken back (ADR 0001). `share` is the run's share at its start beside another run, none when it is alone: only the
+ * clause that applies is said, as every clause at once read as though another run were live.
  */
-export const landingSlotNote = (pool: number) =>
-  `one of the ${pool} machine-wide sandbox slots is kept for landing - beside another run, one of this run's share while it is 2 or more, and at a share of 1 a landing goes first when a slot frees`;
+export const landingSlotNote = (pool: number, share?: number) => {
+  const kept = `one of the ${pool} machine-wide sandbox slots is kept for landing`;
+  if (share === undefined) return kept;
+  return share >= 2 ? `${kept} - beside another run, one of this run's share of ${share}` : `${kept} - beside another run, at this run's share of 1, a landing goes first when a slot frees`;
+};
 
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */
 export type Waiting = Landable & { carried?: boolean };

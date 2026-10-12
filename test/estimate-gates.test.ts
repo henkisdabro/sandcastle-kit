@@ -58,3 +58,13 @@ test("enough gate slots, or a history with no gate lines: the figure and the lin
   })();
   assert.equal(estimate(bare, 18, 9, 0, undefined, { gateSlots: 1 }), estimate(bare, 18, 9));
 });
+
+test("gate runs that outlast a chain name only themselves: one bound sets the time, so one label", () => {
+  const p = project();
+  // Chain: 3 x 10m is 30m, above the 20m of the tickets over the slots. Gate-bound: 54m, above both.
+  const both = estimate(p, 18, 9, 3, undefined, { gateSlots: 2 })!;
+  assert.match(both, /and 54m for 18 ticket\(s\), 9 at a time \(gate runs on 2 slot\(s\) set the time\)\.(?: No history at .*)?$/);
+  assert.doesNotMatch(both, /in sequence/);
+  // Enough gate slots: the chain sets the time and says so.
+  assert.match(estimate(p, 18, 9, 3, undefined, { gateSlots: 100 })!, /and 30m for 18 ticket\(s\), 9 at a time \(3 tickets in sequence\)\.(?: No history at .*)?$/);
+});

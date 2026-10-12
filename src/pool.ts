@@ -731,6 +731,13 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
 const REPRINT_MS = 15 * 60_000;
 
 /**
+ * The last wait line said for each label, across waits, and when: each pipeline worker's next ticket is a wait of its
+ * own under one label, so a run whose workers waited in turn said the same line about 30 times. The same line is said
+ * again only after REPRINT_MS, which still shows a long wait is alive.
+ */
+const lastWaitLine = new Map<string, { line: string; at: number }>();
+
+/**
  * Why a wait waits: every slot is taken, this run is at its share while another run waits below its own (or at its
  * cap), or the last slot of the run's share is kept for a landing (`keptForLanding`).
  */
@@ -797,8 +804,9 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
     for (let why = attempt(); !slot; why = attempt()) {
       if (giveUp?.()) return undefined;
       // The line is said when the wait starts and again after REPRINT_MS, not at every change of reason:
-      // with a second run live the reason alternates and one wait printed about 30 lines. `onWait` still
-      // fires at each change, since the run's note of waiting for its share follows it.
+      // with a second run live the reason alternates and one wait printed about 30 lines. Either time it is
+      // said only when it differs from the label's last or that one is REPRINT_MS old (`lastWaitLine`). `onWait` still fires at each
+      // change, since the run's note of waiting for its share follows it.
       if (yielded !== "earlier" && (printedAt === undefined || clock() - printedAt >= REPRINT_MS)) {
         printedAt = clock();
         const me = why === "share" || why === "landing" ? myShare() : undefined;
@@ -807,7 +815,12 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
           : yielded === "run" ? "another run has waited longer"
           : yielded === "priority" ? "a landing, base or verify gate of this run goes first"
           : `${limit(pool)} in use`;
-        console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${reason})`);
+        const line = `  ${label}: waiting for a machine-wide ${pool} slot (${reason})`;
+        const last = lastWaitLine.get(label);
+        if (last?.line !== line || printedAt - last.at >= REPRINT_MS) {
+          console.log(line);
+          lastWaitLine.set(label, { line, at: printedAt });
+        }
       }
       if (why !== told) {
         told = why;

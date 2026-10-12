@@ -1477,11 +1477,17 @@ export const createPipeline = (ctx: PipelineContext) => {
           sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
           console.log(`${was} - cut again from ${base}'s tip.`);
         }
-        // Cut again, so it is forked from the base's tip now (`staleBaseParents` reads where a branch began).
-        recordFork(project.root, branch, sh("git", ["rev-parse", `refs/heads/${base}`], project.root));
       } catch (error) {
         if (error instanceof GuardStop) throw error;
         console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
+        return;
+      }
+      // Cut again, so it is forked from the base's tip now (`staleBaseParents` reads where a branch began). Its own try:
+      // the branch has moved, so a failed write (a full disk) must not report it as left on the old tree.
+      try {
+        recordFork(project.root, branch, sh("git", ["rev-parse", `refs/heads/${base}`], project.root));
+      } catch (error) {
+        console.log(`${ref(issue)}: could not record where ${branch} was cut again (${errorLine(error)}); a later rewrite of ${base} is found from its merges alone.`);
       }
     };
     return host.write ? host.write(cut) : cut();
@@ -2615,11 +2621,14 @@ export const burndown = async (
   // A dry run lands nothing, so it needs no sandbox slot for it.
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
+  // Another live run shares the pool: read before the header, whose note on the kept slot says only what applies to this run.
+  const others = otherRuns();
+  const split = others.length ? splitAtStart(workers, others) : undefined;
   // "up to": another project's live run can cut this run's share below it, which the split line under the
   // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
     `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, up to ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
-      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"))})` : ""),
+      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"), split?.share)})` : ""),
   );
   for (const i of candidates) {
     const o = overrides.get(i.id) ?? {};
@@ -2654,8 +2663,6 @@ export const burndown = async (
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
-  const others = otherRuns();
-  const split = others.length ? splitAtStart(workers, others) : undefined;
   const neighbours = others.map((m) => {
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;

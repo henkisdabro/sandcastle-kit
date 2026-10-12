@@ -1209,12 +1209,13 @@ export const estimate = (
   const split = carriedCount || remainderCount
     ? ` (${[carriedCount ? `${carriedCount} carried` : "", remainderCount ? `${remainderCount} remainder` : "", `${tickets - carriedCount - remainderCount} fresh`].filter(Boolean).join(", ")})`
     : "";
-  const sequence = chain > 1 && highMs.chained > highMs.serial ? ` (${chain} tickets in sequence)` : "";
   // At a tie too: the tickets' figure ends with a landing of its own, so landings in a row as long as it still set the time.
   const landBound = highMs.landed > 0 && highMs.landed >= Math.max(highMs.serial, highMs.chained, highMs.gated);
   const gateBound = landBound
     ? " (landing gates, one after another, set the time)"
     : highMs.gated > Math.max(highMs.serial, highMs.chained, highMs.landed) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
+  // One bound sets the time, so one label: the chain is named only when neither the gates nor the landings outlast it.
+  const sequence = chain > 1 && highMs.chained > highMs.serial && !gateBound ? ` (${chain} tickets in sequence)` : "";
   const sized = [...sizing.values()].filter((v) => v.from > 0);
   const off = [...sizing.values()].filter((v) => v.from === 0 && v.window !== undefined && v.window !== v.size);
   const smaller = off.filter((v) => v.size === "small").length;

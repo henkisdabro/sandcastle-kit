@@ -31,19 +31,20 @@ test("the second of two waits names the full pool, not the queue order", async (
 });
 
 test("a wait behind its own run's earlier wait prints nothing while a slot is free, then the full pool's reason", async () => {
+  // Labels of its own: a line the label said last, in the test above, is not said again (`lastWaitLine`).
   joinPool("alpha", 6, 6);
   setHeld("beta", 6);
-  const first = ticket("first");
+  const first = ticket("early");
   await until(() => first.why.length === 1, "the first wait");
   // A slot frees and, in the same tick, a second wait begins: the first has not looked yet, so the slot is the first's.
   setHeld("beta", 5);
-  const second = ticket("second");
+  const second = ticket("late");
   assert.ok(!first.taken);
   // A wait's first look runs in the tick it begins: with the slot still free, it said nothing.
-  assert.ok(!lines().some((l) => l.includes("second:")), lines().join("\n"));
+  assert.ok(!lines().some((l) => l.includes("late:")), lines().join("\n"));
   await until(() => first.taken, "the first wait to take the free slot");
-  assert.ok(lines().every((l) => !l.includes("second:") || !l.includes("earlier wait")), "the queue order is never the reason");
-  await until(() => lines().some((l) => l.includes("second:")), "the second wait's line");
-  assert.match(lines().filter((l) => l.includes("second:"))[0]!, /second: .*\(6 in use\)/, "said once the pool is full");
+  assert.ok(lines().every((l) => !l.includes("late:") || !l.includes("earlier wait")), "the queue order is never the reason");
+  await until(() => lines().some((l) => l.includes("late:")), "the second wait's line");
+  assert.match(lines().filter((l) => l.includes("late:"))[0]!, /late: .*\(6 in use\)/, "said once the pool is full");
   assert.ok(second.why.length >= 1);
 });
