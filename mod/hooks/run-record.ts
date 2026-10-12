@@ -301,6 +301,17 @@ export type RunRecord = {
    * none was printed (no history to price from). The figures are the line's, unrounded: milliseconds and tokens.
    */
   estimate?: RunEstimate;
+  /**
+   * Milliseconds the run spent with another run live in the pool while its share was below the slots it asked for
+   * (`share` under `demand`), summed as the run goes: the closing summary names it as a cause of a run that took far
+   * longer than its estimate. Absent until there is some.
+   */
+  sharedMs?: number;
+  /**
+   * Milliseconds in which at least one of the run's workers was waiting for a sandbox slot (the union, not the sum over
+   * workers), written as the run goes and at its end. Absent until there is some.
+   */
+  sandboxWaitMs?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
   /**
