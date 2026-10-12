@@ -744,6 +744,8 @@ PATH="$FAKE:$PATH" FAKE_QUEUE="$(printf 'checkout-%02d ' $(seq 1 12))" SANDCASTL
   SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture TERM_COLS="$COLS" TERM_ROWS=30 XDG_CACHE_HOME="$TMP/cache" STATUS_FRAMES=1 \
   view 1 >"$TMP/live" 2>&1 </dev/null
 ESC=$'\e'; erased=0; n=0; last=""
+# The last frame only: a view may paint before every source has answered, and STATUS_FRAMES counts the frames after.
+live_out=$(cat "$TMP/live"); printf '%s\n' "${live_out##*"${ESC}[H"}" >"$TMP/live-last"
 while IFS= read -r l; do
   # Only the frame: the screen set-up and restore codes are not rows.
   case "$l" in *"${ESC}[?1049l"*) break;; esac
@@ -751,7 +753,7 @@ while IFS= read -r l; do
   p=$(printf '%s' "$l" | sed $'s/\e\\[[0-9;?]*[a-zA-Z]//g')
   [ "${#p}" -ge "$COLS" ] && [[ "$l" == *"${ESC}[K"* ]] && erased=$((erased+1))
   [ -n "$p" ] && last="$p"
-done <"$TMP/live"
+done <"$TMP/live-last"
 [ "$erased" = 0 ] || { echo "FAIL [$SCENARIO] $erased full-width line(s) followed by an erase to the end"; fails=$((fails+1)); }
 [ "$n" -le 29 ] || { echo "FAIL [$SCENARIO] $n rows in a 30-row pane: the bottom row must stay free"; fails=$((fails+1)); }
 [[ "$last" == └*┘ ]] || { echo "FAIL [$SCENARIO] the frame does not end in its bottom border: $last"; fails=$((fails+1)); }
