@@ -322,16 +322,18 @@ export const pressureFromTimings = (text: string, runId: string): { some: number
 
 /**
  * Where a run's time went beyond the work itself, from its timings lines: `gateWaitMs` is the waits for a gates slot (the
- * `waitMs` of the gate, landing, base and verify lines), `reruns` the gate runs of a ticket after its first and `repairs`
+ * `waitMs` of the gate, landing gate, base and verify lines), `landingWaitMs` the landings' waits for a sandbox slot (the
+ * `waitMs` of a `landing` line, which is no gates slot's, and which the run record's `sandboxWaitMs` does not hold: a
+ * landing leases its slot apart from the ticket workers), `reruns` the gate runs of a ticket after its first and `repairs`
  * its repair passes, each with the time they took (`ms` of the lines, the slot wait already out of it).
  */
-export type TimeLost = { gateWaitMs: number; reruns: number; rerunMs: number; repairs: number; repairMs: number };
+export type TimeLost = { gateWaitMs: number; landingWaitMs: number; reruns: number; rerunMs: number; repairs: number; repairMs: number };
 
-const SLOT_PHASES: readonly string[] = ["gates", LANDING_GATES, LANDING, "base gates", "verify"];
+const GATE_SLOT_PHASES: readonly string[] = ["gates", LANDING_GATES, "base gates", "verify"];
 
 /** One run's `TimeLost` from timings.jsonl text; undefined when the run has no line. */
 export const timeLostFromTimings = (text: string, runId: string): TimeLost | undefined => {
-  const lost: TimeLost = { gateWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 };
+  const lost: TimeLost = { gateWaitMs: 0, landingWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 };
   const gated = new Set<string>();
   let any = false;
   for (const raw of text.split("\n")) {
@@ -344,7 +346,9 @@ export const timeLostFromTimings = (text: string, runId: string): TimeLost | und
     if (!line || line.run !== runId || typeof line.phase !== "string") continue;
     any = true;
     const ms = typeof line.ms === "number" && line.ms > 0 ? line.ms : 0;
-    if (typeof line.waitMs === "number" && line.waitMs > 0 && SLOT_PHASES.includes(line.phase)) lost.gateWaitMs += line.waitMs;
+    const waitMs = typeof line.waitMs === "number" && line.waitMs > 0 ? line.waitMs : 0;
+    if (GATE_SLOT_PHASES.includes(line.phase)) lost.gateWaitMs += waitMs;
+    if (line.phase === LANDING) lost.landingWaitMs += waitMs;
     const issue = String(line.issue ?? "");
     if (line.phase === "gates" && issue) {
       if (gated.has(issue)) {
@@ -1001,7 +1005,6 @@ const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
 /** Ends a carried bullet with the turn it comes from; the indented rows under one are commands to copy, and stay as they are. */
 const fromTurn = (turn: number, lines: string[]) => lines.map((l) => (l.startsWith("- ") ? `${l} (turn ${turn})` : l));
 
-/** The closing summary as Markdown-ish text, every section present. */
 const SLOW = 2;
 
 /**
@@ -1036,6 +1039,7 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
     ...(f.sharedMs ? [{ ms: f.sharedMs, text: `${span(f.sharedMs)} at a share below what it asked for, beside another run` }] : []),
     ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets` }] : []),
     ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
+    ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
     ...(lost && lost.reruns + lost.repairs
       ? [{
           ms: lost.rerunMs + lost.repairMs,
@@ -1059,6 +1063,7 @@ const flakyLines = (f: Facts): string[] => {
   return [`Likely flaky - red, then green on a re-run: ${shown.join("; ")}${all.length > 8 ? `; and ${all.length - 8} more` : ""}.`];
 };
 
+/** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
   const { ids, merged, notClosed, partly, closed, partlyRerun, ungated, byHand, held, uncommitted, followUps, filingFailed, toTriage } = o;

@@ -46,13 +46,13 @@ test("the largest causes the record measured are named, largest first, and anyth
       tokenTotal,
       sharedMs: 180 * MIN,
       sandboxWaitMs: 20 * MIN,
-      timeLost: { gateWaitMs: 55 * MIN, reruns: 3, rerunMs: 12 * MIN, repairs: 1, repairMs: 8 * MIN },
+      timeLost: { gateWaitMs: 55 * MIN, landingWaitMs: 4 * MIN, reruns: 3, rerunMs: 12 * MIN, repairs: 1, repairMs: 8 * MIN },
     }),
   );
   assert.deepEqual(headline(out).slice(1), [
-    "Largest causes measured: 3h 00m at a share below what it asked for, beside another run; 55m waiting for gates slots, summed over tickets; 20m with a worker waiting for a sandbox slot; 3 gate re-runs and 1 repair pass (20m of pass time).",
+    "Largest causes measured: 3h 00m at a share below what it asked for, beside another run; 55m waiting for gates slots, summed over tickets; 20m with a worker waiting for a sandbox slot; 3 gate re-runs and 1 repair pass (20m of pass time); 4m with landings waiting for a sandbox slot.",
   ]);
-  const small = render(facts({ estimate, sharedMs: 30_000, timeLost: { gateWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 } }));
+  const small = render(facts({ estimate, sharedMs: 30_000, timeLost: { gateWaitMs: 0, landingWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 } }));
   assert.match(headline(small)[1], /^No cause measured/);
 });
 
@@ -98,7 +98,7 @@ test("no ticket with a flaky test, no line", () => {
 
 const line = (over: Record<string, unknown>) => JSON.stringify({ run: "r1", ms: 1000, ok: true, ...over });
 
-test("the timings lines give the gates slot waits, the gate re-runs and the repair passes of the run", () => {
+test("the timings lines give the gates slot waits, the landings' sandbox slot waits apart, the gate re-runs and the repair passes of the run", () => {
   const text = [
     line({ issue: "", phase: "base gates", ms: 5000, waitMs: 2 * MIN }),
     line({ issue: "1", phase: "setup", ms: 4000, waitMs: 9 * MIN }),
@@ -111,6 +111,6 @@ test("the timings lines give the gates slot waits, the gate re-runs and the repa
     line({ run: "r0", issue: "1", phase: "gates", ms: 99 * MIN, waitMs: 99 * MIN }),
     "not json",
   ].join("\n");
-  assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 30 * MIN, reruns: 2, rerunMs: 6 * MIN, repairs: 1, repairMs: 6 * MIN });
+  assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 27 * MIN, landingWaitMs: 3 * MIN, reruns: 2, rerunMs: 6 * MIN, repairs: 1, repairMs: 6 * MIN });
   assert.equal(timeLostFromTimings(text, "none"), undefined);
 });
