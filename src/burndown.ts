@@ -2250,7 +2250,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // A re-run that went red on tests the first red did not name is another flake, not a failure to repair: the gate
       // runs a third time. Red again, on any tests, goes to repair with all three runs' tests named; unreadable test
       // ids (a lint or type gate) keep the re-run's result as it was.
-      let threeRuns: string | undefined;
+      let threeRuns: { red: Failure; note: string } | undefined;
       const second = gated.failure;
       if (ctx.regate && second && earlier.length === 1 && second.exitCode !== 124 && disjointReds(earlier[0], second)) {
         const again = ctx.regate;
@@ -2260,7 +2260,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         earlier.push(second);
         gated = { ...third, gates: [...gated.gates.slice(0, Math.max(0, secondAt)), ...third.gates] };
         if (!gated.failure) console.log(`${ref(issue.id)}: ${second.name} red twice on different tests, then green on a third run - a flake, no repair pass`);
-        else threeRuns = threeRunsNote(gated.failure.name, [...earlier, gated.failure]);
+        else threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
       }
       // Kept on the ticket's record whatever follows (a repair may still fail): these went red and then green.
       const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure) : [];
@@ -2362,8 +2362,8 @@ export const createPipeline = (ctx: PipelineContext) => {
               ...promptArgs,
               GATE_NAME: failure.name,
               GATE_COMMAND: failure.command,
-              // Only the pass that follows the three runs: a later red is what a repair left, not a flake.
-              GATE_OUTPUT: (repairs === 1 && threeRuns ? threeRuns : "") + fence(failure.output),
+              // Only for the third run's own red: a later one is what a repair or a merged fix left, not a flake.
+              GATE_OUTPUT: (failure === threeRuns?.red ? threeRuns.note : "") + fence(failure.output),
             }),
             maxIterations: project.repair.maxIterations ?? 4,
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,

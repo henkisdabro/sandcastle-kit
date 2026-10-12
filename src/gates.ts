@@ -560,14 +560,16 @@ export const flakedTests = (reds: Failure[], greenAfter: boolean) => {
   return flaked;
 };
 
-/** The three runs' failing tests, for the repair prompt: a gate that went red on different tests each time. */
+/** The three runs' failing tests, for the repair prompt: a gate red on different tests in its first two runs, then red again. */
 export const threeRunsNote = (name: string, reds: Failure[]) => {
   const cap = 20;
   const lines = reds.map((f, i) => {
     const ids = failingTests(f.output, Infinity);
+    // A third red with no readable test ids (a crash, a load failure) still gets its line, said as such.
+    if (!ids.length) return `- run ${i + 1}: no test ids in its output`;
     return `- run ${i + 1}: ${ids.slice(0, cap).join(", ")}${ids.length > cap ? `, and ${ids.length - cap} more` : ""}`;
   });
-  return `The ${name} gate ran three times and went red on different tests each time, so the output below is the third run's only. The failing tests of each run:\n${lines.join("\n")}\n\n`;
+  return `The ${name} gate ran three times: its first two runs went red on different tests, and the third went red too, so the output below is the third run's only. The failing tests of each run:\n${lines.join("\n")}\n\n`;
 };
 
 /**

@@ -24,6 +24,7 @@ type Box = import("../src/burndown.ts").PipelineBox;
 type Outcome = Awaited<ReturnType<ReturnType<typeof createPipeline>>>;
 type GateRun = import("../src/gates.ts").GateRun;
 type RedLanding = import("../src/landing.ts").RedLanding;
+type FixBoard = import("../src/schedule.ts").FixBoard;
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-pipeline-rerun-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -64,7 +65,7 @@ type Agent = (worktree: string) => string | void;
  * A project in a temp repo and a pipeline over it, with every port faked. `events` is each agent pass, gate
  * run (`gate`) and re-run (`regate`) in order; `reruns` the gate each re-run was asked to start from.
  */
-const harness = (options: { testRedGate?: boolean; repair?: number; regate?: boolean } = {}) => {
+const harness = (options: { testRedGate?: boolean; repair?: number; regate?: boolean; fixes?: FixBoard } = {}) => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
@@ -176,6 +177,7 @@ const harness = (options: { testRedGate?: boolean; repair?: number; regate?: boo
     took: new Map(),
     keptWorktrees: [],
     tampered: new Map(),
+    ...(options.fixes ? { fixes: options.fixes } : {}),
   });
 
   /** One attempt; its result is kept as burndown's attempt keeps it, and what the test reads starts afresh. */
@@ -305,4 +307,41 @@ test("a re-run that timed out is not run a third time", async () => {
   const o = await h.attempt();
   assert.deepEqual(h.events, ["impl", "review", "gate", "regate"]);
   assert.equal(o.status, "gate-failed");
+});
+
+test("a repair after another ticket's fix was merged in is not told about the three runs", async () => {
+  // Another ticket's fix to the third run's red lands while this one is gated: merged in, and the gates run again.
+  let land = () => {};
+  let asked = 0;
+  const fixes = {
+    fixing: () => (asked++ === 0 ? (land(), { by: "9", landed: true }) : undefined),
+    claim: () => {},
+    wait: async () => true,
+  } as unknown as FixBoard;
+  const h = harness({ fixes });
+  land = () => h.land("other.txt", "the other ticket's fix\n");
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push(red("test", specRed("alpha"), ["lint"]));
+  h.regates.push(red("test", specRed("beta")), red("test", specRed("gamma")));
+  h.gates.push(red("test", specRed("epsilon"), ["lint"]), BOTH);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "regate", "gate", "repair", "gate", "review"]);
+  const repairs = h.passes.filter((p) => p.name === `repair-${ID}`);
+  assert.equal(repairs.length, 1);
+  assert.doesNotMatch(repairs[0].args.GATE_OUTPUT, /ran three times|run 1:/);
+  assert.match(repairs[0].args.GATE_OUTPUT, /epsilon/);
+  assert.equal(o.status, "green");
+});
+
+test("a third red that names no tests is said as such in the repair prompt", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push(red("test", specRed("alpha"), ["lint"]));
+  h.regates.push(red("test", specRed("beta")), red("test", "the runner crashed"));
+  h.gates.push(BOTH);
+  await h.attempt();
+  const repairs = h.passes.filter((p) => p.name === `repair-${ID}`);
+  assert.match(repairs[0].args.GATE_OUTPUT, /run 3: no test ids in its output\n/);
 });
