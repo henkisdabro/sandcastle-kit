@@ -186,6 +186,16 @@ export type TicketRecord = {
  */
 export const sessionId = (value: unknown): string | undefined => (typeof value === "string" && /^[\w-]{1,100}$/.test(value) ? value : undefined);
 
+/** The estimate a turn printed at its start (`estimate` in `src/run.ts`): time and tokens as a median and a high figure, the slots it divided by and the tickets it priced. */
+export type RunEstimate = {
+  /** The run's time in milliseconds, base gates and verify included. */
+  ms: { mid: number; high: number };
+  tokensIn: { mid: number; high: number };
+  tokensOut: { mid: number; high: number };
+  slots: number;
+  tickets: number;
+};
+
 /**
  * The run's settings as one turn's record holds them (GLOSSARY.md: run setting): the autonomy
  * level, the turn this record is, the level's cap, the repair attempts, the concurrency (asked
@@ -280,6 +290,11 @@ export type RunRecord = {
    * count. An older kit's record has none, and the estimate counts that run as unknown.
    */
   load?: { concurrency: number; tickets: number };
+  /**
+   * The estimate printed at the turn's start, kept so the history line can be set beside what the run took. Absent when
+   * none was printed (no history to price from). The figures are the line's, unrounded: milliseconds and tokens.
+   */
+  estimate?: RunEstimate;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
   /**

@@ -18,7 +18,7 @@ import { OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
-import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunEstimate, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
 // run is `sandcastle stop`'s, one in a terminal is Ctrl-C; a SIGTERM or SIGHUP is named as it is.
@@ -990,9 +990,9 @@ const SIZE_WORDS = { small: `1-${SMALL_PATHS} Touches paths`, large: `${SMALL_PA
  * history tickets', none for one that landed without a gate), are a floor of their own: landings run in
  * a row on the one worker, whatever the slots, so they count with or without `gateSlots`.
  */
-export const estimate = (
+export const priceRun = (
   project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[]; beside?: string[] } = {},
-): string | undefined => {
+): { text: string; figures: RunEstimate } | undefined => {
   let text: string;
   try {
     text = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8");
@@ -1237,12 +1237,23 @@ export const estimate = (
   // or it read as the load the whole run keeps (the start lines above it tell the widening).
   const share = detail.beside?.length ? `, at this run's share now, ${slots} at a time` : `, ${slots} at a time`;
   const shorter = detail.beside?.length ? `; shorter as ${detail.beside.join(" and ")} finish${detail.beside.length === 1 ? "es" : ""}` : "";
-  return (
+  const line =
     `Estimate (rough, from ${pricedFrom.size} ticket(s) in the last 3 runs): ` +
     `about ${span(sum((p) => p.mid.inTokens), sum((p) => p.high.inTokens), k)} tokens in / ${span(sum((p) => p.mid.out), sum((p) => p.high.out), k)} out ` +
-    `and ${span(bound(midMs) + midSteps, bound(highMs) + highSteps, clock)} for ${tickets} ticket(s)${split}${share}${sequence}${gateBound}${shorter}.${low}`
-  );
+    `and ${span(bound(midMs) + midSteps, bound(highMs) + highSteps, clock)} for ${tickets} ticket(s)${split}${share}${sequence}${gateBound}${shorter}.${low}`;
+  // The figures the line prints, unrounded, for the run record: a later change to the estimate is judged against the actual.
+  const kept: RunEstimate = {
+    ms: { mid: Math.round(bound(midMs) + midSteps), high: Math.round(bound(highMs) + highSteps) },
+    tokensIn: { mid: Math.round(sum((p) => p.mid.inTokens)), high: Math.round(sum((p) => p.high.inTokens)) },
+    tokensOut: { mid: Math.round(sum((p) => p.mid.out)), high: Math.round(sum((p) => p.high.out)) },
+    slots,
+    tickets,
+  };
+  return { text: line, figures: kept };
 };
+
+/** The estimate line of a run about to start (`priceRun`'s text); undefined while there is no history to price it from. */
+export const estimate = (...args: Parameters<typeof priceRun>): string | undefined => priceRun(...args)?.text;
 
 // ---------------------------------------------------------------------------
 // Outcomes - what each branch's last run decided, kept across runs in
