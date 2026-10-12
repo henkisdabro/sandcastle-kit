@@ -3,19 +3,24 @@
 // from the project's `.sandcastle/`, git, `docker` and `sandcastle queue --json`. Every frame is drawn from a
 // snapshot (src/status-rows.ts, src/status-render.ts), never from the sources themselves.
 //
-// Read synchronously, one source after another, for now: the collectors that refresh each source in the
-// background come later (#706). The queue is a child process, as status.sh runs it: the tracker and blocker
-// code is synchronous and is never imported into the view (ADR 0003).
+// Each source has a collector (GLOSSARY.md): the run record and logs, git, Docker, the queue and the machine
+// pool. A collector refreshes its source in the background within a deadline, one refresh at a time, and keeps
+// its last good reading when one fails or is given up, marked stale; a result that comes after its deadline is
+// dropped. The plan's usage is a field of the run record, so it comes with the record. Every command runs in a
+// process group of its own, ended with the refresh that started it: a collector given up or stopped leaves
+// nothing running. The queue is a child process, as status.sh runs it: the tracker and blocker code is
+// synchronous and is never imported into the view (ADR 0003).
 //
 // The record is a file in a repository, so each field is read on its own and checked: one a newer or older
 // kit wrote in another shape empties only itself, as status.sh's one-jq read does.
 
-import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isKit, liveness } from "../mod/hooks/run-live.ts";
 import { readTickets, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { commandOf, KIT_CACHE, PLUGIN_MARKER } from "./live-runs.ts";
+import { KIT_CACHE, PLUGIN_MARKER } from "./live-runs.ts";
 
 /** One outcome of outcomes.json, as the view reads it: the run that wrote it, its kind (none from an older kit) and its line. */
 export type OutcomeFact = { run: string; kind: string; text: string };
@@ -49,6 +54,12 @@ export type QueueFact = { id: string; updated?: number; blockedOn: string[] };
 
 /** The run settings a settings row draws from, and whose they are: the live run's, the next run's, or the last run's. */
 export type SettingsFact = { from: "live" | "next run" | "last run"; settings: Record<string, unknown> | undefined };
+
+/** The sources a snapshot is read from, one collector each (the plan's usage is a field of the run record). */
+export type SourceName = "record" | "git" | "docker" | "queue" | "pool";
+
+/** Where a source's reading stands: not answered yet, answered by its last refresh, kept from an earlier one after a failure, or never had. */
+export type SourceStatus = "loading" | "current" | "stale" | "unavailable";
 
 export type Snapshot = {
   /** Epoch seconds the snapshot was read at: every age in the frame is measured from it. */
@@ -88,20 +99,10 @@ export type Snapshot = {
   /** Whether ticket ids link to their logs (OSC 8), and the click hint's modifier. */
   links: boolean;
   clickMod: string;
+  /** Where each source's reading stands; a snapshot without it read every source in full. */
+  sources?: Record<SourceName, SourceStatus>;
 };
 
-const git = (dir: string, args: string[]): string | undefined => {
-  const r = spawnSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
-  return r.status === 0 ? r.stdout : undefined;
-};
-
-const readJson = (file: string): unknown => {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return undefined;
-  }
-};
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -186,17 +187,6 @@ export const saysLimit = (text: string): boolean => {
   return /out of usage credits|usage limit|limit reached/i.test(tail.join("\n"));
 };
 
-// The end of a log is what a row shows; a log can be megabytes of transcript.
-const TAIL_BYTES = 64 * 1024;
-const readTail = (file: string): string | undefined => {
-  try {
-    const text = readFileSync(file);
-    return text.subarray(Math.max(0, text.length - TAIL_BYTES)).toString("utf8");
-  } catch {
-    return undefined;
-  }
-};
-
 /** A whole number of seconds from a record's field (a number, or digits as text), or undefined. */
 export const whole = (v: unknown): number | undefined => {
   if (typeof v === "number" && Number.isInteger(v) && v >= 0) return v;
@@ -233,8 +223,96 @@ export const freeSlots = (record: RunRecord, tickets: Record<string, TicketRecor
   return Math.max(concurrency - Object.values(tickets).filter((t) => WORKING.includes(t.state ?? "")).length, 0);
 };
 
-const readOutcomes = (file: string): Record<string, OutcomeFact> => {
-  const raw = readJson(file);
+// ---------------------------------------------------------------------------
+// Commands, each in a process group of its own.
+// ---------------------------------------------------------------------------
+
+type Ran = { status: number | null; stdout: string; stderr: string };
+
+/**
+ * Runs a command in a process group of its own and answers what it printed; a command that cannot start answers
+ * status null, as spawnSync does. When `signal` aborts, the whole group is ended (a command it waits on too) and
+ * the promise rejects: nothing a collector started outlives the refresh that started it.
+ */
+const run = (command: string, args: string[], signal: AbortSignal, { cwd, env }: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<Ran> =>
+  new Promise((done, fail) => {
+    if (signal.aborted) return fail(signal.reason);
+    const child = spawn(command, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    const abort = () => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGTERM");
+      } catch {
+        // already gone
+      }
+      fail(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    child.stdout!.on("data", (chunk: Buffer) => out.push(chunk));
+    child.stderr!.on("data", (chunk: Buffer) => err.push(chunk));
+    child.on("error", () => {
+      signal.removeEventListener("abort", abort);
+      done({ status: null, stdout: "", stderr: "" });
+    });
+    child.on("close", (status) => {
+      signal.removeEventListener("abort", abort);
+      done({ status, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
+    });
+  });
+
+const git = async (dir: string, env: NodeJS.ProcessEnv, args: string[], signal: AbortSignal): Promise<string | undefined> => {
+  const r = await run("git", args, signal, { cwd: dir, env });
+  return r.status === 0 ? r.stdout : undefined;
+};
+
+/** The command line of a running process (live-runs.ts `commandOf`, without blocking), or undefined when there is none. */
+const commandOf = async (pid: number, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string | undefined> => {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") return undefined;
+  }
+  const r = await run("ps", ["-p", String(pid), "-o", "command="], signal, { env });
+  return r.status === 0 ? r.stdout.trim() || undefined : undefined;
+};
+
+const readJson = async (file: string): Promise<unknown> => {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return undefined;
+  }
+};
+
+const exists = (path: string) => stat(path).then(() => true, () => false);
+
+// ---------------------------------------------------------------------------
+// The sources, one reader each.
+// ---------------------------------------------------------------------------
+
+/** The run record and the logs: what `.sandcastle/logs` and the worktrees directory hold, and whether the run is live. */
+export type RecordPart = Pick<Snapshot, "hasRecord" | "record" | "tickets" | "live" | "outcomes" | "logs" | "tails" | "worktrees" | "runOutput">;
+/** What git says: the base, each ticket's branch, the commits the base's upstream lacks. */
+export type GitPart = Pick<Snapshot, "base" | "branches" | "unpushed">;
+/** What Docker says: each sandbox container's CPU and memory, against the host's cores. */
+export type DockerPart = Pick<Snapshot, "containers" | "cpus">;
+/** The machine pool's slots in use. */
+export type PoolPart = Snapshot["pool"];
+
+// The end of a log is what a row shows; a log can be megabytes of transcript.
+const TAIL_BYTES = 64 * 1024;
+const readTail = async (file: string): Promise<string | undefined> => {
+  try {
+    const text = await readFile(file);
+    return text.subarray(Math.max(0, text.length - TAIL_BYTES)).toString("utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+const readOutcomes = async (file: string): Promise<Record<string, OutcomeFact>> => {
+  const raw = await readJson(file);
   if (!isObject(raw)) return {};
   const text = (v: unknown) => (v === undefined || v === null || v === false ? "" : typeof v === "string" ? v : JSON.stringify(v));
   return Object.fromEntries(
@@ -245,188 +323,10 @@ const readOutcomes = (file: string): Record<string, OutcomeFact> => {
   );
 };
 
-// The container name is a bare UUID with no labels, so the only thing tying it to a ticket is the worktree it
-// bind-mounts - and only a worktree of this project: another project's run can have the same ticket number.
-const readContainers = (dir: string, cpus: number): Record<string, ContainerFact> => {
-  const docker = (args: string[]) => {
-    const r = spawnSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 });
-    return r.status === 0 ? r.stdout : "";
-  };
-  const ids = docker(["ps", "-q", "--filter", "name=sandcastle-"]).split("\n").filter(Boolean);
-  if (!ids.length) return {};
-  const owner = new Map<string, string>();
-  const prefix = `${dir}/worktrees/agent-issue-`;
-  for (const line of docker(["inspect", ...ids, "--format", "{{.Name}}{{range .Mounts}}|{{.Source}}{{end}}"]).split("\n")) {
-    const [name, ...mounts] = line.split("|");
-    if (!name) continue;
-    const mount = mounts.find((m) => m.includes(prefix));
-    const ticket = mount?.match(/.*\/worktrees\/agent-issue-([a-z0-9][a-z0-9-]*)/)?.[1];
-    if (ticket) owner.set(name.replace(/^\//, ""), ticket);
-  }
-  const out: Record<string, ContainerFact> = {};
-  for (const line of docker(["stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}", ...ids]).split("\n")) {
-    const [name, cpu = "", mem = ""] = line.split("|");
-    const ticket = name ? owner.get(name) : undefined;
-    if (!ticket) continue;
-    // "275.8MiB / 11.73GiB" -> "276M"; a GiB figure under 10 keeps a decimal: "2.1GiB" -> "2.1G".
-    const used = (mem.split("/")[0] ?? "").trim().replace(/iB$/, "");
-    const unit = used.slice(-1);
-    const amount = parseFloat(used.slice(0, -1)) || 0;
-    // "1399.02%" -> "14.0c", hot past 80% of the host's cores.
-    const cores = (parseFloat(cpu.replace(/%$/, "")) || 0) / 100;
-    out[ticket] = { cpu: `${cores.toFixed(1)}c`, mem: `${unit === "G" && amount < 10 ? amount.toFixed(1) : amount.toFixed(0)}${unit}`, hot: cores >= cpus * 0.8 };
-  }
-  return out;
-};
-
-// docker reports CPU against one core, so 1399% is ~14 cores: shown as cores against the host's.
-const hostCpus = (): number => {
-  for (const [command, args] of [["sysctl", ["-n", "hw.ncpu"]], ["nproc", []]] as const) {
-    const r = spawnSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    const n = Number(r.stdout?.trim());
-    if (r.status === 0 && Number.isFinite(n) && n > 0) return n;
-  }
-  return 1;
-};
-
-// Machine-wide slots (src/pool.ts): one lock file per slot, its owner's pid first. A slot counts while its owner
-// is a process of the kit (pool.ts `holderRunning`); when `ps` cannot say, while the process exists.
-const readPool = (env: NodeJS.ProcessEnv): Snapshot["pool"] => {
-  const dir = join(KIT_CACHE, "slots");
-  let files: string[] = [];
-  try {
-    files = readdirSync(dir);
-  } catch {
-    // no slots taken yet
-  }
-  const seen = new Map<number, boolean>();
-  const alive = (pid: number) => {
-    if (!seen.has(pid)) {
-      const command = commandOf(pid);
-      let exists = command !== undefined;
-      if (!exists) {
-        try {
-          process.kill(pid, 0);
-          exists = true;
-        } catch (error) {
-          exists = (error as NodeJS.ErrnoException).code === "EPERM";
-        }
-      }
-      seen.set(pid, command !== undefined ? isKit(command) : exists);
-    }
-    return seen.get(pid)!;
-  };
-  const used = (pool: string) =>
-    files
-      .filter((f) => f.startsWith(`${pool}-`) && f.endsWith(".lock"))
-      .filter((f) => {
-        let pid = "";
-        try {
-          pid = readFileSync(join(dir, f), "utf8").split(" ")[0]!.trim();
-        } catch {
-          return false;
-        }
-        return /^[0-9]+$/.test(pid) && alive(Number(pid));
-      }).length;
-  return {
-    sandboxes: { used: used("sandboxes"), limit: env.SANDCASTLE_MAX_SANDBOXES || "6" },
-    gates: { used: used("gates"), limit: env.SANDCASTLE_MAX_GATES || "2" },
-  };
-};
-
-// The queue is every open ticket the project's ready label is on, with each one's open blockers, read by the
-// kit the way a run reads it. stderr is kept apart from the JSON: a warning on a good read must not spoil it,
-// and on a failed one it is the reason to show.
-const readQueue = (env: NodeJS.ProcessEnv, dir: string): Snapshot["queue"] => {
-  const r = spawnSync(env.SANDCASTLE_BIN || "sandcastle", ["queue", "--json"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
-  if (r.status !== 0) {
-    // The first line that says something; control characters out, so an escape code cannot move the cursor mid-frame.
-    // oxlint-disable-next-line no-control-regex -- the control characters are what the pattern removes
-    const said = (r.stderr ?? "").replace(/[\x00-\x08\x0b-\x1f]/g, "").split("\n").find((l) => /\S/.test(l));
-    return { tickets: [], error: said || "sandcastle queue failed" };
-  }
-  let list: unknown;
-  try {
-    list = JSON.parse(r.stdout);
-  } catch {
-    list = undefined;
-  }
-  if (!Array.isArray(list)) return { tickets: [], error: "the queue was not a list of tickets" };
-  const tickets = list
-    .filter(isObject)
-    .filter((t) => t.id !== undefined && t.id !== null)
-    .map((t): QueueFact => ({
-      id: String(t.id),
-      ...(typeof t.updated === "number" ? { updated: t.updated } : {}),
-      blockedOn: Array.isArray(t.blockedOn) ? t.blockedOn.map(String) : [],
-    }))
-    .sort((a, b) => versionOrder(a.id, b.id));
-  return { tickets };
-};
-
-// The kit's merge of a ticket is named for it ("Merge agent/issue-12 (closes #12)", or "(part of #12)" when a
-// criterion was left undone): one log of the base finds every ticket's, newest first.
-type Landing = { at: number; parents: string[]; subject: string; message: string };
-const readLandings = (dir: string, base: string): Landing[] =>
-  (git(dir, ["log", base, "--fixed-strings", "--grep=Merge agent/issue-", "--format=%x1e%ct%x1f%P%x1f%s%x1f%B"]) ?? "")
-    .split("\x1e")
-    .filter(Boolean)
-    .map((entry) => {
-      const [at = "0", parents = "", subject = "", message = ""] = entry.split("\x1f");
-      return { at: Number(at) || 0, parents: parents.split(" ").filter(Boolean), subject, message };
-    });
-
-/** A ticket id as the view shows it: "#12", a suffixed branch's "#12", or a slug such as "checkout-03" as it is. */
-export const shownId = (id: string): string => (/^[0-9]+(-[a-z]+)*$/.test(id) ? `#${id.split("-")[0]}` : id);
-
-const readBranches = (dir: string, base: string, ids: Set<string>, inferred: Set<string>): Record<string, BranchFact> => {
-  const heads = new Set((git(dir, ["for-each-ref", "--format=%(refname)", "refs/heads/agent/"]) ?? "").split("\n").filter(Boolean));
-  const onBase = new Set((git(dir, ["for-each-ref", `--merged=${base}`, "--format=%(refname)", "refs/heads/agent/"]) ?? "").split("\n").filter(Boolean));
-  const landings = readLandings(dir, base);
-  const originBase = git(dir, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${base}`]) !== undefined;
-  const out: Record<string, BranchFact> = {};
-  for (const id of ids) {
-    const ref = `refs/heads/agent/issue-${id}`;
-    const exists = heads.has(ref);
-    const fact: BranchFact = { exists, onBase: onBase.has(ref) };
-    if (exists) {
-      const n = git(dir, ["rev-list", "--count", `${base}..agent/issue-${id}`]);
-      if (n !== undefined && /^\d+$/.test(n.trim())) fact.commits = Number(n.trim());
-      if (inferred.has(id) && (fact.commits ?? 0) > 0) fact.equalPatches = !/^\+/m.test(git(dir, ["cherry", base, `agent/issue-${id}`]) ?? "+");
-    }
-    const shown = shownId(id);
-    const landing = landings.find((l) => l.message.includes(`Merge agent/issue-${id} (closes ${shown})`) || l.message.includes(`Merge agent/issue-${id} (part of ${shown})`));
-    if (landing) {
-      let commits: number | undefined;
-      if (landing.parents.length >= 2) {
-        // --no-merges, as the kit counts a branch's own commits: a base merge or a resolution is not one.
-        const n = git(dir, ["rev-list", "--count", "--no-merges", `${landing.parents[0]}..${landing.parents[1]}`, ...landing.parents.slice(2)]);
-        if (n !== undefined && /^\d+$/.test(n.trim())) commits = Number(n.trim());
-      } else if (landing.parents.length === 1) commits = 1;
-      fact.landing = { at: landing.at, subject: landing.subject, ...(commits !== undefined ? { commits } : {}) };
-    }
-    // A branch on the base, merged by hand: the merge that took its tip in (or the tip itself, for a fast-forward)
-    // being on origin's base says the push happened. No fetch here - no network.
-    if (fact.onBase && originBase) {
-      const tip = git(dir, ["rev-parse", "--verify", "--quiet", ref])?.trim();
-      if (tip) {
-        const merges = git(dir, ["rev-list", "--merges", "--ancestry-path", "--parents", `${tip}..refs/heads/${base}`]) ?? "";
-        const merge = merges
-          .split("\n")
-          .map((l) => l.split(" "))
-          .find((f) => f.slice(2).includes(tip))?.[0];
-        fact.pushed = git(dir, ["merge-base", "--is-ancestor", merge || tip, `refs/remotes/origin/${base}`]) !== undefined;
-      }
-    }
-    out[id] = fact;
-  }
-  return out;
-};
-
-const readRunOutput = (file: string): string[] => {
+const readRunOutput = async (file: string): Promise<string[]> => {
   let text: string;
   try {
-    text = readFileSync(file, "utf8");
+    text = await readFile(file, "utf8");
   } catch {
     return [];
   }
@@ -443,6 +343,416 @@ const readRunOutput = (file: string): string[] => {
     );
 };
 
+/** The tickets a live run records, and those only the logs name (inferred): which branches git is asked about. */
+const ticketIds = (part: RecordPart) => {
+  const logIds = new Set(part.logs.map((l) => logTicket(l.name)).filter((id): id is string => !!id));
+  const recorded = part.live ? new Set(Object.keys(part.tickets)) : new Set<string>();
+  return { logIds, recorded, inferred: new Set([...logIds].filter((id) => !recorded.has(id))) };
+};
+
+/** Reads the run record, the outcomes, the logs and their last lines, and the worktrees. `dir` is the project's `.sandcastle`. */
+export const readRecord = async (dir: string, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<RecordPart> => {
+  const logsDir = join(dir, "logs");
+  const recordFile = join(logsDir, "run.json");
+  const hasRecord = await exists(recordFile);
+  const raw = hasRecord ? await readJson(recordFile) : undefined;
+  const record = (isObject(raw) ? raw : {}) as RunRecord;
+  const tickets = readTickets(raw);
+  const pid = typeof record.pid === "number" && Number.isInteger(record.pid) && record.pid > 0 ? record.pid : undefined;
+  const command = pid !== undefined ? await commandOf(pid, env, signal) : undefined;
+  const live = hasRecord && liveness({ record }, (p) => (p === pid ? command : undefined)).state === "live";
+
+  let logs: LogFact[] = [];
+  try {
+    const names = (await readdir(logsDir)).filter((n) => n.startsWith("agent-issue-") && n.endsWith(".log"));
+    logs = (
+      await Promise.all(
+        names.map(async (name) => {
+          try {
+            return [{ name, mtime: Math.floor((await stat(join(logsDir, name))).mtimeMs / 1000) }];
+          } catch {
+            return [];
+          }
+        }),
+      )
+    ).flat();
+  } catch {
+    // no logs yet
+  }
+
+  let worktrees: string[] = [];
+  try {
+    worktrees = (await readdir(join(dir, "worktrees"))).filter((n) => n.startsWith("agent-issue-")).map((n) => n.slice("agent-issue-".length));
+  } catch {
+    // none
+  }
+
+  const part: RecordPart = {
+    hasRecord,
+    record,
+    tickets,
+    live,
+    outcomes: await readOutcomes(join(logsDir, "outcomes.json")),
+    logs,
+    tails: {},
+    worktrees,
+    runOutput: live ? await readRunOutput(join(logsDir, "run-output.log")) : [],
+  };
+
+  // The logs a row may show: a recorded ticket's current step, an inferred ticket's newest phase.
+  const shown = new Set<string>();
+  for (const [id, t] of Object.entries(tickets)) if (live && WORKING.includes(t.state ?? "") && t.state !== "setup") shown.add(phaseLog(id, t.state as TicketState));
+  for (const id of ticketIds(part).inferred) {
+    const log = latestPhaseLog(logs, id);
+    if (log) shown.add(log.name);
+  }
+  for (const name of shown) {
+    const text = await readTail(join(logsDir, name));
+    if (text !== undefined) part.tails[name] = { activity: activityOf(text), limit: saysLimit(text) };
+  }
+  return part;
+};
+
+// The kit's merge of a ticket is named for it ("Merge agent/issue-12 (closes #12)", or "(part of #12)" when a
+// criterion was left undone): one log of the base finds every ticket's, newest first.
+type Landing = { at: number; parents: string[]; subject: string; message: string };
+const readLandings = async (dir: string, env: NodeJS.ProcessEnv, base: string, signal: AbortSignal): Promise<Landing[]> =>
+  ((await git(dir, env, ["log", base, "--fixed-strings", "--grep=Merge agent/issue-", "--format=%x1e%ct%x1f%P%x1f%s%x1f%B"], signal)) ?? "")
+    .split("\x1e")
+    .filter(Boolean)
+    .map((entry) => {
+      const [at = "0", parents = "", subject = "", message = ""] = entry.split("\x1f");
+      return { at: Number(at) || 0, parents: parents.split(" ").filter(Boolean), subject, message };
+    });
+
+const readBranches = async (dir: string, env: NodeJS.ProcessEnv, base: string, ids: Set<string>, inferred: Set<string>, signal: AbortSignal): Promise<Record<string, BranchFact>> => {
+  const refs = async (args: string[]) => new Set(((await git(dir, env, ["for-each-ref", ...args, "--format=%(refname)", "refs/heads/agent/"], signal)) ?? "").split("\n").filter(Boolean));
+  const heads = await refs([]);
+  const onBase = await refs([`--merged=${base}`]);
+  const landings = await readLandings(dir, env, base, signal);
+  const originBase = (await git(dir, env, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${base}`], signal)) !== undefined;
+  const out: Record<string, BranchFact> = {};
+  for (const id of ids) {
+    const ref = `refs/heads/agent/issue-${id}`;
+    const exists = heads.has(ref);
+    const fact: BranchFact = { exists, onBase: onBase.has(ref) };
+    if (exists) {
+      const n = await git(dir, env, ["rev-list", "--count", `${base}..agent/issue-${id}`], signal);
+      if (n !== undefined && /^\d+$/.test(n.trim())) fact.commits = Number(n.trim());
+      if (inferred.has(id) && (fact.commits ?? 0) > 0) fact.equalPatches = !/^\+/m.test((await git(dir, env, ["cherry", base, `agent/issue-${id}`], signal)) ?? "+");
+    }
+    const shown = shownId(id);
+    const landing = landings.find((l) => l.message.includes(`Merge agent/issue-${id} (closes ${shown})`) || l.message.includes(`Merge agent/issue-${id} (part of ${shown})`));
+    if (landing) {
+      let commits: number | undefined;
+      if (landing.parents.length >= 2) {
+        // --no-merges, as the kit counts a branch's own commits: a base merge or a resolution is not one.
+        const n = await git(dir, env, ["rev-list", "--count", "--no-merges", `${landing.parents[0]}..${landing.parents[1]}`, ...landing.parents.slice(2)], signal);
+        if (n !== undefined && /^\d+$/.test(n.trim())) commits = Number(n.trim());
+      } else if (landing.parents.length === 1) commits = 1;
+      fact.landing = { at: landing.at, subject: landing.subject, ...(commits !== undefined ? { commits } : {}) };
+    }
+    // A branch on the base, merged by hand: the merge that took its tip in (or the tip itself, for a fast-forward)
+    // being on origin's base says the push happened. No fetch here - no network.
+    if (fact.onBase && originBase) {
+      const tip = (await git(dir, env, ["rev-parse", "--verify", "--quiet", ref], signal))?.trim();
+      if (tip) {
+        const merges = (await git(dir, env, ["rev-list", "--merges", "--ancestry-path", "--parents", `${tip}..refs/heads/${base}`], signal)) ?? "";
+        const merge = merges
+          .split("\n")
+          .map((l) => l.split(" "))
+          .find((f) => f.slice(2).includes(tip))?.[0];
+        fact.pushed = (await git(dir, env, ["merge-base", "--is-ancestor", merge || tip, `refs/remotes/origin/${base}`], signal)) !== undefined;
+      }
+    }
+    out[id] = fact;
+  }
+  return out;
+};
+
+/** Reads the base, the branches of the tickets `part` names (none before the record is read) and the unpushed commits. */
+export const readGit = async (dir: string, env: NodeJS.ProcessEnv, part: RecordPart | undefined, signal: AbortSignal): Promise<GitPart> => {
+  const base = env.SANDCASTLE_BASE || ((await git(dir, env, ["rev-parse", "--abbrev-ref", "HEAD"], signal)) ?? "").trim();
+  const { logIds, recorded, inferred } = part ? ticketIds(part) : { logIds: new Set<string>(), recorded: new Set<string>(), inferred: new Set<string>() };
+  const branches = await readBranches(dir, env, base, new Set([...logIds, ...recorded]), inferred, signal);
+  let unpushed = 0;
+  const upstream = (await git(dir, env, ["rev-parse", "--abbrev-ref", `${base}@{upstream}`], signal))?.trim();
+  if (upstream) unpushed = Number((await git(dir, env, ["rev-list", "--count", `${upstream}..${base}`], signal))?.trim()) || 0;
+  return { base, branches, unpushed };
+};
+
+// docker reports CPU against one core, so 1399% is ~14 cores: shown as cores against the host's. Asked once, and
+// kept apart from docker's answer: a docker that is not running or hangs leaves the host's cores known.
+let cores: number | undefined;
+const hostCpus = async (env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<number> => {
+  if (cores) return cores;
+  for (const [command, args] of [["sysctl", ["-n", "hw.ncpu"]], ["nproc", []]] as const) {
+    const r = await run(command, [...args], signal, { env });
+    const n = Number(r.stdout.trim());
+    if (r.status === 0 && Number.isFinite(n) && n > 0) return (cores = n);
+  }
+  return 1;
+};
+
+// The container name is a bare UUID with no labels, so the only thing tying it to a ticket is the worktree it
+// bind-mounts - and only a worktree of this project: another project's run can have the same ticket number.
+// A docker call that fails fails the reading: the containers last seen are kept, marked stale.
+export const readDocker = async (dir: string, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<DockerPart> => {
+  const docker = async (args: string[]) => {
+    const r = await run("docker", args, signal, { env });
+    if (r.status !== 0) throw new Error(`docker ${args[0]} failed`);
+    return r.stdout;
+  };
+  // The cores are asked to the end even when docker fails, so the snapshot of a failed reading has them too.
+  const [counted, listed] = await Promise.allSettled([hostCpus(env, signal), docker(["ps", "-q", "--filter", "name=sandcastle-"])]);
+  if (counted.status === "rejected") throw counted.reason;
+  if (listed.status === "rejected") throw listed.reason;
+  const cpus = counted.value;
+  const ids = listed.value.split("\n").filter(Boolean);
+  if (!ids.length) return { containers: {}, cpus };
+  const owner = new Map<string, string>();
+  const prefix = `${dir}/worktrees/agent-issue-`;
+  for (const line of (await docker(["inspect", ...ids, "--format", "{{.Name}}{{range .Mounts}}|{{.Source}}{{end}}"])).split("\n")) {
+    const [name, ...mounts] = line.split("|");
+    if (!name) continue;
+    const mount = mounts.find((m) => m.includes(prefix));
+    const ticket = mount?.match(/.*\/worktrees\/agent-issue-([a-z0-9][a-z0-9-]*)/)?.[1];
+    if (ticket) owner.set(name.replace(/^\//, ""), ticket);
+  }
+  const containers: Record<string, ContainerFact> = {};
+  for (const line of (await docker(["stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}", ...ids])).split("\n")) {
+    const [name, cpu = "", mem = ""] = line.split("|");
+    const ticket = name ? owner.get(name) : undefined;
+    if (!ticket) continue;
+    // "275.8MiB / 11.73GiB" -> "276M"; a GiB figure under 10 keeps a decimal: "2.1GiB" -> "2.1G".
+    const used = (mem.split("/")[0] ?? "").trim().replace(/iB$/, "");
+    const unit = used.slice(-1);
+    const amount = parseFloat(used.slice(0, -1)) || 0;
+    // "1399.02%" -> "14.0c", hot past 80% of the host's cores.
+    const n = (parseFloat(cpu.replace(/%$/, "")) || 0) / 100;
+    containers[ticket] = { cpu: `${n.toFixed(1)}c`, mem: `${unit === "G" && amount < 10 ? amount.toFixed(1) : amount.toFixed(0)}${unit}`, hot: n >= cpus * 0.8 };
+  }
+  return { containers, cpus };
+};
+
+// Machine-wide slots (src/pool.ts): one lock file per slot, its owner's pid first. A slot counts while its owner
+// is a process of the kit (pool.ts `holderRunning`); when `ps` cannot say, while the process exists.
+export const readPool = async (env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<PoolPart> => {
+  const dir = join(KIT_CACHE, "slots");
+  let files: string[] = [];
+  try {
+    files = (await readdir(dir)).filter((f) => (f.startsWith("sandboxes-") || f.startsWith("gates-")) && f.endsWith(".lock"));
+  } catch {
+    // no slots taken yet
+  }
+  const owners = new Map<string, number>();
+  for (const f of files) {
+    try {
+      const pid = (await readFile(join(dir, f), "utf8")).split(" ")[0]!.trim();
+      if (/^[0-9]+$/.test(pid)) owners.set(f, Number(pid));
+    } catch {
+      // released meanwhile
+    }
+  }
+  const alive = new Map<number, boolean>();
+  for (const pid of new Set(owners.values())) {
+    const command = await commandOf(pid, env, signal);
+    let exists = command !== undefined;
+    if (!exists) {
+      try {
+        process.kill(pid, 0);
+        exists = true;
+      } catch (error) {
+        exists = (error as NodeJS.ErrnoException).code === "EPERM";
+      }
+    }
+    alive.set(pid, command !== undefined ? isKit(command) : exists);
+  }
+  const used = (pool: string) => [...owners].filter(([f, pid]) => f.startsWith(`${pool}-`) && alive.get(pid)).length;
+  return {
+    sandboxes: { used: used("sandboxes"), limit: env.SANDCASTLE_MAX_SANDBOXES || "6" },
+    gates: { used: used("gates"), limit: env.SANDCASTLE_MAX_GATES || "2" },
+  };
+};
+
+// The queue is every open ticket the project's ready label is on, with each one's open blockers, read by the
+// kit the way a run reads it. stderr is kept apart from the JSON: a warning on a good read must not spoil it,
+// and on a failed one it is the reason to show - the reading's error.
+export const readQueue = async (env: NodeJS.ProcessEnv, dir: string, signal: AbortSignal): Promise<QueueFact[]> => {
+  const r = await run(env.SANDCASTLE_BIN || "sandcastle", ["queue", "--json"], signal, { cwd: dir, env });
+  if (r.status !== 0) {
+    // The first line that says something; control characters out, so an escape code cannot move the cursor mid-frame.
+    // oxlint-disable-next-line no-control-regex -- the control characters are what the pattern removes
+    const said = r.stderr.replace(/[\x00-\x08\x0b-\x1f]/g, "").split("\n").find((l) => /\S/.test(l));
+    throw new Error(said || "sandcastle queue failed");
+  }
+  let list: unknown;
+  try {
+    list = JSON.parse(r.stdout);
+  } catch {
+    list = undefined;
+  }
+  if (!Array.isArray(list)) throw new Error("the queue was not a list of tickets");
+  return list
+    .filter(isObject)
+    .filter((t) => t.id !== undefined && t.id !== null)
+    .map((t): QueueFact => ({
+      id: String(t.id),
+      ...(typeof t.updated === "number" ? { updated: t.updated } : {}),
+      blockedOn: Array.isArray(t.blockedOn) ? t.blockedOn.map(String) : [],
+    }))
+    .sort((a, b) => versionOrder(a.id, b.id));
+};
+
+/** A ticket id as the view shows it: "#12", a suffixed branch's "#12", or a slug such as "checkout-03" as it is. */
+export const shownId = (id: string): string => (/^[0-9]+(-[a-z]+)*$/.test(id) ? `#${id.split("-")[0]}` : id);
+
+// ---------------------------------------------------------------------------
+// Collectors.
+// ---------------------------------------------------------------------------
+
+/** A source's reading: its last good value (none before the first), whether it is current, and why the last refresh failed. */
+export type Reading<T> = { status: SourceStatus; value?: T; error?: string };
+
+export type Collector<T> = {
+  /** The reading now: `loading` until the first refresh ends, then `current`, or after a failure `stale` (the last good value kept) or `unavailable` (none yet). */
+  readonly reading: Reading<T>;
+  /** Whether a refresh is in flight. */
+  readonly busy: boolean;
+  /** Starts a refresh, unless one is in flight: then that one is the answer. Settles when it ends or is given up at its deadline. */
+  refresh: () => Promise<void>;
+  /** Gives up the refresh in flight and starts none again. */
+  stop: () => void;
+};
+
+const said = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const same = <T>(a: Reading<T>, b: Reading<T>) => a.status === b.status && a.error === b.error && JSON.stringify(a.value) === JSON.stringify(b.value);
+
+/**
+ * A collector of one source: `read` within `deadline` ms. At most one refresh is in flight. One that fails keeps
+ * the last good value, marked stale; one still out at its deadline is given up - its signal aborts, which ends
+ * what it started - and failed, and whatever it answers after is dropped. `onChange` is told when the reading
+ * changes, never when a refresh reads what it had.
+ */
+export const createCollector = <T>({ read, deadline, onChange }: { read: (signal: AbortSignal) => Promise<T>; deadline: number; onChange?: () => void }): Collector<T> => {
+  let reading: Reading<T> = { status: "loading" };
+  let flight: Promise<void> | undefined;
+  let giveUp: ((why: string) => void) | undefined;
+  let stopped = false;
+  const set = (next: Reading<T>) => {
+    if (stopped || same(reading, next)) return;
+    reading = next;
+    onChange?.();
+  };
+  const fail = (error: string) => set(reading.value !== undefined ? { status: "stale", value: reading.value, error } : { status: "unavailable", error });
+  const refresh = (): Promise<void> => {
+    if (stopped) return Promise.resolve();
+    if (flight) return flight;
+    const controller = new AbortController();
+    flight = new Promise<void>((settle) => {
+      let over = false;
+      /** Ends this refresh once: false when it already ended, and what it answers then is late. */
+      const end = () => {
+        if (over) return false;
+        over = true;
+        clearTimeout(timer);
+        flight = undefined;
+        giveUp = undefined;
+        settle();
+        return true;
+      };
+      giveUp = (why) => {
+        if (!end()) return;
+        controller.abort(new Error(why));
+        fail(why);
+      };
+      const timer = setTimeout(() => giveUp?.(`no answer in ${deadline / 1000} s`), deadline);
+      read(controller.signal).then(
+        (value) => end() && set({ status: "current", value }),
+        (error: unknown) => end() && fail(said(error)),
+      );
+    });
+    return flight;
+  };
+  return {
+    get reading() {
+      return reading;
+    },
+    get busy() {
+      return flight !== undefined;
+    },
+    refresh,
+    stop: () => {
+      stopped = true;
+      giveUp?.("stopped");
+    },
+  };
+};
+
+/** How long each source's refresh may take before it is given up: the queue asks a tracker over the network. */
+export const DEADLINES: Record<SourceName, number> = { record: 10_000, git: 30_000, docker: 30_000, queue: 60_000, pool: 10_000 };
+
+/** The queue is read at most once a minute, unless the run record changed (a run starting or ending changes the queue). */
+export const QUEUE_CACHE_MS = 60_000;
+
+export type Readings = {
+  record: Reading<RecordPart>;
+  git: Reading<GitPart>;
+  docker: Reading<DockerPart>;
+  queue: Reading<QueueFact[]>;
+  pool: Reading<PoolPart>;
+};
+
+export type Sources = {
+  /** Each source's reading now. */
+  readings: () => Readings;
+  /** Whether every source has answered once (a failure is an answer). */
+  answered: () => boolean;
+  /**
+   * Refreshes every source not already refreshing: the record and then git (which asks about the record's
+   * tickets), Docker and the pool at once, and the queue when its minute is up or the record changed since.
+   */
+  refresh: () => Promise<void>;
+  /** Gives up every refresh in flight, ending what each started; nothing starts after. */
+  stop: () => void;
+};
+
+/** The collectors of a project's sources. `dir` is its `.sandcastle`; `onChange` is told whenever a reading changes. */
+export const createSources = (dir: string, env: NodeJS.ProcessEnv, onChange?: () => void): Sources => {
+  const record = createCollector({ read: (signal) => readRecord(dir, env, signal), deadline: DEADLINES.record, onChange });
+  const gitSource = createCollector({ read: (signal) => readGit(dir, env, record.reading.value, signal), deadline: DEADLINES.git, onChange });
+  const docker = createCollector({ read: (signal) => readDocker(dir, env, signal), deadline: DEADLINES.docker, onChange });
+  const queue = createCollector({ read: (signal) => readQueue(env, dir, signal), deadline: DEADLINES.queue, onChange });
+  const pool = createCollector({ read: (signal) => readPool(env, signal), deadline: DEADLINES.pool, onChange });
+  const all = { record, git: gitSource, docker, queue, pool };
+  // The run record's change time, as status.sh's queue cache keys on it: a run rewrites it when it starts and
+  // when it exits, having closed what it landed.
+  const recordTime = () => {
+    try {
+      return statSync(join(dir, "logs/run.json")).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  let queuedAt: number | undefined;
+  let queuedFor = 0;
+  return {
+    readings: () => ({ record: record.reading, git: gitSource.reading, docker: docker.reading, queue: queue.reading, pool: pool.reading }),
+    answered: () => Object.values(all).every((c) => c.reading.status !== "loading"),
+    refresh: () => {
+      const waits = [record.refresh().then(() => gitSource.refresh()), docker.refresh(), pool.refresh()];
+      const t = performance.now();
+      const changed = recordTime();
+      if (!queue.busy && (queuedAt === undefined || t - queuedAt >= QUEUE_CACHE_MS || changed !== queuedFor)) {
+        [queuedAt, queuedFor] = [t, changed];
+        waits.push(queue.refresh());
+      }
+      return Promise.all(waits).then(() => undefined);
+    },
+    stop: () => Object.values(all).forEach((c) => c.stop()),
+  };
+};
+
 /** Whether ticket ids link to their logs: inside Herdr with the kit's plugin linked, on a terminal; `SANDCASTLE_LINKS` 1 or 0 overrides. */
 const linksOn = (env: NodeJS.ProcessEnv, terminal: boolean): boolean => {
   const given = env.SANDCASTLE_LINKS || "";
@@ -450,76 +760,18 @@ const linksOn = (env: NodeJS.ProcessEnv, terminal: boolean): boolean => {
   return given === "1";
 };
 
-/** The project's `.sandcastle` directory, or undefined when it has none: the view then has nothing to show. */
-export const sandcastleDir = (env: NodeJS.ProcessEnv = process.env): string | undefined => {
-  const dir = resolve(env.SANDCASTLE_PROJECT || process.cwd(), ".sandcastle");
-  try {
-    return statSync(dir).isDirectory() ? dir : undefined;
-  } catch {
-    return undefined;
-  }
-};
+const NO_RECORD: RecordPart = { hasRecord: false, record: {} as RunRecord, tickets: {}, live: false, outcomes: {}, logs: [], tails: {}, worktrees: [], runOutput: [] };
 
-/** Reads everything one frame shows. `dir` is the project's `.sandcastle`; `terminal` whether stdout is one. */
-export const readSnapshot = (dir: string, { env = process.env, terminal = false }: { env?: NodeJS.ProcessEnv; terminal?: boolean } = {}): Snapshot => {
-  const now = Math.floor(Date.now() / 1000);
-  const root = resolve(dir, "..");
-  const logsDir = join(dir, "logs");
-  const base = env.SANDCASTLE_BASE || (git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]) ?? "").trim();
-  const queue = readQueue(env, dir);
-  const cpus = hostCpus();
-  const containers = readContainers(dir, cpus);
-
-  const recordFile = join(logsDir, "run.json");
-  const hasRecord = existsSync(recordFile);
-  const raw = hasRecord ? readJson(recordFile) : undefined;
-  const record = (isObject(raw) ? raw : {}) as RunRecord;
-  const tickets = readTickets(raw);
-  const live = hasRecord && liveness({ record }, commandOf).state === "live";
-
-  let logs: LogFact[] = [];
-  try {
-    logs = readdirSync(logsDir)
-      .filter((n) => n.startsWith("agent-issue-") && n.endsWith(".log"))
-      .flatMap((name) => {
-        try {
-          return [{ name, mtime: Math.floor(statSync(join(logsDir, name)).mtimeMs / 1000) }];
-        } catch {
-          return [];
-        }
-      });
-  } catch {
-    // no logs yet
-  }
-  const logIds = new Set(logs.map((l) => logTicket(l.name)).filter((id): id is string => !!id));
-  const recorded = live ? new Set(Object.keys(tickets)) : new Set<string>();
-  const inferred = new Set([...logIds].filter((id) => !recorded.has(id)));
-
-  // The logs a row may show: a recorded ticket's current step, an inferred ticket's newest phase.
-  const tails: Record<string, LogTail> = {};
-  const tail = (name: string) => {
-    if (tails[name]) return;
-    const text = readTail(join(logsDir, name));
-    if (text !== undefined) tails[name] = { activity: activityOf(text), limit: saysLimit(text) };
-  };
-  for (const [id, t] of Object.entries(tickets)) if (live && WORKING.includes(t.state ?? "") && t.state !== "setup") tail(phaseLog(id, t.state as TicketState));
-  for (const id of inferred) {
-    const log = latestPhaseLog(logs, id);
-    if (log) tail(log.name);
-  }
-
-  let worktrees: string[] = [];
-  try {
-    worktrees = readdirSync(join(dir, "worktrees"))
-      .filter((n) => n.startsWith("agent-issue-"))
-      .map((n) => n.slice("agent-issue-".length));
-  } catch {
-    // none
-  }
-
-  let unpushed = 0;
-  const upstream = git(dir, ["rev-parse", "--abbrev-ref", `${base}@{upstream}`])?.trim();
-  if (upstream) unpushed = Number(git(dir, ["rev-list", "--count", `${upstream}..${base}`])?.trim()) || 0;
+/**
+ * The snapshot of the readings at `now` (epoch seconds; a redraw passes the clock, so ages count up between
+ * refreshes). A source with no value yet draws as empty, and `sources` says which are loading.
+ */
+export const snapshotOf = (dir: string, readings: Readings, { env = process.env, terminal = false, now = Math.floor(Date.now() / 1000) }: { env?: NodeJS.ProcessEnv; terminal?: boolean; now?: number } = {}): Snapshot => {
+  const { hasRecord, record, tickets, live, outcomes, logs, tails, worktrees, runOutput } = readings.record.value ?? NO_RECORD;
+  const { base, branches, unpushed } = readings.git.value ?? { base: env.SANDCASTLE_BASE || "", branches: {}, unpushed: 0 };
+  const { containers, cpus } = readings.docker.value ?? { containers: {}, cpus: cores ?? 1 };
+  const pool = readings.pool.value ?? { sandboxes: { used: 0, limit: env.SANDCASTLE_MAX_SANDBOXES || "6" }, gates: { used: 0, limit: env.SANDCASTLE_MAX_GATES || "2" } };
+  const queue = { tickets: readings.queue.value ?? [], ...(readings.queue.error ? { error: readings.queue.error } : {}) };
 
   let settings: SettingsFact | undefined;
   const group = (v: unknown) => (isObject(v) ? v : undefined);
@@ -540,7 +792,7 @@ export const readSnapshot = (dir: string, { env = process.env, terminal = false 
 
   return {
     now,
-    root,
+    root: resolve(dir, ".."),
     dir,
     name: env.SANDCASTLE_NAME || "",
     base,
@@ -548,20 +800,38 @@ export const readSnapshot = (dir: string, { env = process.env, terminal = false 
     record,
     tickets,
     live,
-    outcomes: readOutcomes(join(logsDir, "outcomes.json")),
+    outcomes,
     logs,
     tails,
     worktrees,
-    branches: readBranches(dir, base, new Set([...logIds, ...recorded]), inferred),
+    branches,
     containers,
     cpus,
-    pool: readPool(env),
+    pool,
     queue,
     unpushed,
     settings,
     models,
-    runOutput: live ? readRunOutput(join(logsDir, "run-output.log")) : [],
+    runOutput,
     links: linksOn(env, terminal),
     clickMod: env.SANDCASTLE_CLICK_MOD || "",
+    sources: { record: readings.record.status, git: readings.git.status, docker: readings.docker.status, queue: readings.queue.status, pool: readings.pool.status },
   };
+};
+
+/** The project's `.sandcastle` directory, or undefined when it has none: the view then has nothing to show. */
+export const sandcastleDir = (env: NodeJS.ProcessEnv = process.env): string | undefined => {
+  const dir = resolve(env.SANDCASTLE_PROJECT || process.cwd(), ".sandcastle");
+  try {
+    return statSync(dir).isDirectory() ? dir : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Reads every source once, each within its deadline, and the snapshot of what they answered: a one-off frame's. */
+export const readSnapshot = async (dir: string, { env = process.env, terminal = false }: { env?: NodeJS.ProcessEnv; terminal?: boolean } = {}): Promise<Snapshot> => {
+  const sources = createSources(dir, env);
+  await sources.refresh();
+  return snapshotOf(dir, sources.readings(), { env, terminal });
 };

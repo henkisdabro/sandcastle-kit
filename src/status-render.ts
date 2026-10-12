@@ -10,7 +10,7 @@
 import { HINT_TEXT } from "./click-hint.ts";
 import { align, barsOf, fit, junction as rule, splitColumns, splitWeights, visibleWidth } from "./status-grid.ts";
 import { duration, ago, type Row, type Table, type Tone } from "./status-rows.ts";
-import { runEnds, shownId, type Snapshot } from "./status-snapshot.ts";
+import { runEnds, shownId, type Snapshot, type SourceName } from "./status-snapshot.ts";
 import { USAGE_AMBER, USAGE_RED, USAGE_STALE_SECONDS } from "./usage.ts";
 
 const PALETTE = ["bold", "off", "rule", "mute", "head", "accent", "wht", "grn", "ylw", "cyn", "blu", "gry", "hot", "moon", "dusk", "night", "deep", "star"] as const;
@@ -193,6 +193,8 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   const junction = (left: string, right: string, up: number[], down: number[]) => `${c.rule}${rule(WIN, left, right, "─", up, down)}${c.off}`;
   const rep = (ch: string, n: number) => ch.repeat(Math.max(n, 0));
   const dot = `${c.rule} · ${c.off}`;
+  // A source that has not answered yet (the live view's first paint) draws as empty, and says so where empty would mislead.
+  const loading = (source: SourceName) => snapshot.sources?.[source] === "loading";
 
   // The collapsing view draws no row for a ticket outside the live run: one line at the foot counts them.
   const listed = !showAll && table.later.ids.length > 0 ? table.rows.filter((r) => r.state !== "later") : table.rows;
@@ -245,6 +247,7 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
 
   // RUN: the state and when the run started, its turn (and the estimated end), its tokens.
   const runLane = (): string[] => {
+    if (loading("record")) return [`${c.gry}○${c.off} ${c.mute}loading…${c.off}`, "", ""];
     if (!snapshot.hasRecord) return [`${c.gry}○${c.off} ${c.mute}no run recorded yet${c.off}`, "", ""];
     const t0 = utcEpoch(text(record.startedAt));
     const started = when(t0, now);
@@ -486,10 +489,11 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
       out.push(line(one, [summary(lanes.slice(shown))], ["l"]));
       bars = [];
     }
-    // An unreadable queue is not an empty one: say so, under the band.
-    if (snapshot.queue.error) {
+    // An unreadable queue is not an empty one, and neither is one still being read: say so, under the band.
+    const queueNote = loading("queue") ? "queue: loading…" : snapshot.queue.error ? `queue: could not read - ${snapshot.queue.error}` : "";
+    if (queueNote) {
       out.push(junction("├", "┤", bars, []));
-      out.push(line(one, [`${c.mute}queue: could not read - ${snapshot.queue.error}${c.off}`], ["l"]));
+      out.push(line(one, [`${c.mute}${queueNote}${c.off}`], ["l"]));
       bars = [];
     }
     // The table's headings, under a light rule: their bold text sets them apart.
@@ -563,7 +567,7 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   if (shown.length === 0) {
     // A project whose merged tickets' logs were archived has had runs; the run cell says how the last one ended.
     const cells: string[] = [];
-    cells[TW.length - 1] = `${c.mute}${snapshot.hasRecord ? "(nothing to show)" : "(no runs yet)"}${c.off}`;
+    cells[TW.length - 1] = `${c.mute}${loading("record") ? "(loading…)" : snapshot.hasRecord ? "(nothing to show)" : "(no runs yet)"}${c.off}`;
     body.push(line(TW, cells, TAL));
   } else {
     // The rows left are the pane less the header, the footer and the bottom row, which stays free. A light rule

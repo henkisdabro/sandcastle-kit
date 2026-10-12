@@ -8,12 +8,12 @@
 //   pnpm test:file test/status-lifecycle.test.ts
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
 import { buildFixture, hang, release } from "./status-fixture.ts";
-import { impl, needsScript, orphans, settledTty, started, startSession, until, type Session } from "./status-run.ts";
+import { impl, needsScript, orphans, settledTty, started, startSession, until, type Painted, type Session } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-lifecycle-"));
 // An older orchestrator's live run: a few rows, one sandbox container, so a frame is quick and the view calls docker, git and sandcastle.
@@ -181,3 +181,125 @@ test("a resize that lands while a frame is being drawn is not lost", needsScript
   const frame = await view.frame(0, (f) => widthOf(f) === 70, 15_000);
   assert.match(frame.text, /fixture/);
 });
+
+// ---------------------------------------------------------------------------
+// Instant redraws: the view draws from its snapshot and never waits on a source (#706). Timed from outside, with
+// room for a loaded CI machine; the numbers each test saw are in its failure message.
+// ---------------------------------------------------------------------------
+
+// The bash loop reads every source for each frame: no tick, no debounce. These hold the TypeScript view.
+const instant = { skip: impl() === "bash" ? "status.sh reads every source for each frame" : needsScript.skip };
+
+/** Every frame painted from now on, with when it arrived (ms, performance.now()): polled every few ms until `stop()`. */
+const watch = (view: Session) => {
+  const seen: { at: number; frame: Painted }[] = [];
+  let from = view.output().length;
+  const timer = setInterval(() => {
+    for (const frame of view.frames(from)) {
+      seen.push({ at: performance.now(), frame });
+      from = frame.end;
+    }
+  }, 5);
+  return { seen, stop: () => clearInterval(timer) };
+};
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** How many processes the fakes have logged so far. */
+const logged = () => readFileSync(fixture.pids, "utf8").split("\n").filter(Boolean).length;
+/** Waits until every source has answered and nothing more is being started: the fakes' log still for `ms`. */
+const settled = async (view: Session, ms = 700) => {
+  await view.frame(0, (f) => !f.text.includes("loading…"));
+  let count = logged();
+  let since = performance.now();
+  await until("the collectors to go quiet", () => {
+    if (logged() !== count) [count, since] = [logged(), performance.now()];
+    return performance.now() - since >= ms ? true : undefined;
+  });
+};
+
+test("the first paint comes at once, saying the queue is loading while it hangs", instant, async () => {
+  hang(fixture, "sandcastle");
+  const t0 = performance.now();
+  const view = await open({ args: ["30"] });
+  const first = await view.frame();
+  const took = performance.now() - t0;
+  assert.match(first.text, /queue: loading…/);
+  assert.match(first.text, /fixture/, "the project's frame");
+  // 500 ms asked; the view's own start (node and its imports) is in this figure, and a loaded runner is slower.
+  assert.ok(took < 1500, `first paint ${Math.round(took)} ms after the view started`);
+  await release(fixture);
+  const full = await view.frame(first.end, (f) => !f.text.includes("queue: loading…"), 15_000);
+  assert.ok(full.end > first.end);
+});
+
+test("a drag of the pane ends in one repaint, at the final size, soon after the last resize", instant, async () => {
+  const view = await open({ args: ["30"], cols: 100 });
+  await settled(view);
+  const frames = watch(view);
+  let last = 0;
+  for (const cols of [90, 80, 70]) {
+    if (last) await pause(40);
+    view.resize(40, cols);
+    last = performance.now();
+  }
+  try {
+    const final = await until("the repaint at 70 columns", () => frames.seen.find((f) => widthOf(f.frame) === 70));
+    const took = final.at - last;
+    // 300 ms asked: the pane is still for 150 ms, then a paint from the snapshot.
+    assert.ok(took < 600, `repainted ${Math.round(took)} ms after the last resize`);
+    await pause(300);
+    const widths = frames.seen.map((f) => widthOf(f.frame));
+    assert.deepEqual([...new Set(widths)], [70], `frames painted during and after the drag: ${widths.join(", ")}`);
+  } finally {
+    frames.stop();
+  }
+});
+
+test("a tick redraws every second, on time, while docker and the queue hang", instant, async () => {
+  hang(fixture, "docker");
+  hang(fixture, "sandcastle");
+  // Collecting every second too: the record, git and the pool are asked again while docker and the queue hang.
+  const view = await open({ args: ["1"] });
+  await view.frame(0, (f) => f.text.includes("queue: loading…"));
+  await pause(1500);
+  const frames = watch(view);
+  await pause(4300);
+  frames.stop();
+  assert.ok(view.frames().every((f) => f.text.includes("queue: loading…")), "the queue answered: it was meant to hang");
+  const at = frames.seen.map((f) => f.at);
+  const gaps = at.slice(1).map((t, i) => Math.round(t - at[i]!));
+  assert.ok(at.length >= 4, `${at.length} paints in 4.3 s: ${gaps.join(", ")} ms apart`);
+  // Within 200 ms of time: each tick a second after the one before.
+  for (const gap of gaps) assert.ok(gap >= 800 && gap <= 1200, `ticks ${gaps.join(", ")} ms apart`);
+});
+
+test("a tick and a resize repaint start no docker, gh, git or sandcastle", instant, async () => {
+  // The interval is 30 s: once the collectors have answered, nothing is due to collect while this runs.
+  const view = await open({ args: ["30"], cols: 100 });
+  await settled(view);
+  const before = logged();
+  const frames = watch(view);
+  await pause(2200);
+  view.resize(40, 80);
+  await until("the repaint at 80 columns", () => frames.seen.find((f) => widthOf(f.frame) === 80));
+  frames.stop();
+  assert.ok(frames.seen.length >= 3, `${frames.seen.length} paints: two ticks and the resize's were expected`);
+  const after = readFileSync(fixture.pids, "utf8").split("\n").filter(Boolean).slice(before);
+  assert.deepEqual(after, [], "processes started by a tick or a resize");
+});
+
+for (const exit of EXITS) {
+  test(`${exit.name} with docker and the queue mid-refresh leaves nothing running`, instant, async () => {
+    hang(fixture, "docker");
+    hang(fixture, "sandcastle");
+    const view = await open({ env: exit.popup ? { SANDCASTLE_STATUS_KEYS: "1" } : {} });
+    await view.frame();
+    await until("docker and the queue in flight", () => {
+      const names = started(fixture).map((p) => p.name);
+      return names.includes("docker") && names.includes("sandcastle") ? true : undefined;
+    });
+    exit.act(view);
+    const ended = await view.ended(exit.name, 10_000);
+    assert.ok(exit.status.includes(ended.status), `ended ${ended.status}, expected ${exit.status.join(" or ")}`);
+    assert.deepEqual(await orphans(fixture), [], "processes the view started are still running");
+  });
+}
