@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
+import { impl } from "./status-run.ts";
 
 // `pane get` of the old status pane (pOld) answers with $FAKE_OLD_TAB, $FAKE_OLD_TERM and $FAKE_OLD_WS, of
 // the run's own pane (p1) with its tab tMine; `pane process-info` of pOld with $FAKE_FG until a
@@ -56,10 +57,13 @@ process.setMaxListeners(40);
 // IN_HERDR is read when the module loads, so the environment comes first.
 const { openSandboxView, viewRecord, STATUS_COMMAND } = await import("../src/herdr.ts");
 
+// The view in the old pane as Herdr sees it: status.sh, or the TypeScript view status.sh `exec`s under the switch
+// (test/herdr-status-pane.test.ts reads the whole of both off a running view).
+const VIEW = impl() === "ts" ? "node --no-maglev /kit/src/status-view.ts 3" : "bash /kit/status.sh 3";
 // `adopted: null` leaves the key out of the record.
 type Setup = { tab?: string; term?: string; workspace?: string; fg?: string; stuck?: boolean; adopted?: boolean | null; recordTab?: string };
 /** Opens a view over a previous run's record (own tab tOld, status pane pOld in term_old, a sandbox pane pSandbox); returns herdr's calls and the new record. */
-const open = ({ tab = "tPerson", term = "term_old", workspace = "w1", fg = "bash /kit/status.sh 3", stuck = false, adopted = false, recordTab = "tOld" }: Setup = {}) => {
+const open = ({ tab = "tPerson", term = "term_old", workspace = "w1", fg = VIEW, stuck = false, adopted = false, recordTab = "tOld" }: Setup = {}) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-herdr-reuse-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   writeFileSync(viewRecord(root), JSON.stringify({ tab: recordTab, ...(adopted === null ? {} : { adopted }), status: "pOld", terminal_id: "term_old", panes: ["pSandbox"] }));

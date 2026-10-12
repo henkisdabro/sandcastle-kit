@@ -68,7 +68,10 @@ export const STATUS_COMMAND = statusCommand();
 export const statusPaneRecord = (project: Project) => join(project.root, ".sandcastle/logs/status-pane");
 type Foreground = { cmdline: string }[];
 const foreground = (pane: string) => herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as Foreground;
-const showsStatus = (processes: Foreground) => processes.some((p) => p.cmdline.includes("status.sh"));
+// The status view by its command line: `bash .../status.sh 10`, or the TypeScript view status.sh hands it to
+// (`node ... src/status-view.ts 10`, exec'd in its place). Pane reuse, the dead tab and the restart all go by it.
+const STATUS_VIEW_FILES = ["status.sh", "status-view.ts"];
+const showsStatus = (processes: Foreground) => processes.some((p) => STATUS_VIEW_FILES.some((file) => p.cmdline.includes(file)));
 export const runsStatus = (pane: string) => showsStatus(foreground(pane));
 
 // A pane's foreground is a bare shell: one process, a known shell's name, and at most the flags
@@ -114,13 +117,13 @@ type Pane = { tab_id?: string; terminal_id?: string };
 const paneOf = (pane: string) => herdrJson(["pane", "get", pane]).result.pane as Pane;
 // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
 const inRecordedTab = (view: View, pane: Pane) => pane.tab_id === view.tab;
-// A person quit the view (Ctrl-C: status.sh's INT trap marks `quit`) and the pane is still the
+// A person quit the view (Ctrl-C: the status view marks `quit` on INT) and the pane is still the
 // terminal the kit last started it in. Herdr keeps a pane's terminal_id through anything run in it
 // and gives it a new one on each server restart, which a pane id cannot tell (Herdr reuses those).
 // Without it the tab bar typed the view back into that shell every tick, onto anything half-typed.
 // A record with no terminal_id (an older kit's) cannot tell, and acts as before.
 const quitHere = (view: View, pane: Pane) => !!view.quit && !!view.terminal_id && pane.terminal_id === view.terminal_id;
-// Whole or not at all: status.sh's trap and the tab bar read it at any moment.
+// Whole or not at all: the status view and the tab bar read it at any moment.
 const writeView = (root: string, view: View) => {
   const file = viewRecord(root);
   const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
@@ -501,7 +504,7 @@ export const openSandboxView = (
       const processes = foreground(previous.status);
       if (bareShell(processes)) return pane;
       if (!showsStatus(processes) && !showsReport(processes)) return undefined;
-      // Ctrl-C makes status.sh mark the record `quit` when it names the pane (a person quitting the
+      // Ctrl-C makes the status view mark the record `quit` when it names the pane (a person quitting the
       // view). The record names no status pane while the view is stopped, so nothing is marked and
       // the tab bar leaves the pane alone; the new record is written once the pane is a shell.
       const { status: _, quit: __, ...rest } = previous;
@@ -609,7 +612,7 @@ export const openSandboxView = (
   let saved = false;
   let statusGone = false;
   const save = () => {
-    // Others write the record while the run lives: status.sh marks the view quit, and the tab bar
+    // Others write the record while the run lives: the status view marks the view quit, and the tab bar
     // records a restarted view's terminal. A rewrite here (a pane closing, the run's exit) keeps both,
     // or a quit view would be typed into once the run ended. The first save replaces an earlier run's.
     let kept: View = { terminal_id: terminal };
@@ -621,7 +624,7 @@ export const openSandboxView = (
         /* gone or half-written: what this run knows */
       }
     }
-    // Through `writeView`: status.sh's trap and the tab bar read the record at any moment, and a
+    // Through `writeView`: the status view and the tab bar read the record at any moment, and a
     // plain write shows them a truncated one.
     // A status pane that is gone is no longer recorded: the tab bar would type the view into whatever
     // Herdr gave its id to, or find it moved to a tab that is not the run's.

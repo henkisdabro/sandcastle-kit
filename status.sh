@@ -18,10 +18,11 @@
 # visible characters, never bytes: padding a string that already holds escape
 # codes, or one holding a multi-byte glyph, is what used to skew the columns.
 set -uo pipefail
-# The TypeScript view (src/status-view.ts, ADR 0003) draws the one-off frame when the test switch asks for
-# it, with the same arguments, environment and exit codes: a frame of `status 0`, or of any interval with
-# no terminal on stdout, as below. It needs no jq, so the hand-off comes before the check for it.
-if [ "${SANDCASTLE_TEST_STATUS_IMPL:-}" = ts ] && { [ "${1:-10}" = 0 ] || { [ ! -t 1 ] && [ -z "${STATUS_FRAMES:-}" ]; }; }; then
+# The TypeScript view (src/status-view.ts, ADR 0003) is the whole view when the test switch asks for it, with
+# the same arguments, environment and exit codes: the one-off frame and the live view. `exec`, so the pane's
+# command line names status-view.ts, which Herdr looks for (src/herdr.ts). It needs no jq, so the hand-off
+# comes before the check for it.
+if [ "${SANDCASTLE_TEST_STATUS_IMPL:-}" = ts ]; then
   kit="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   exec node --no-maglev --no-concurrent-sparkplug --import "$kit/src/node-check.mjs" "$kit/src/status-view.ts" "$@"
 fi
