@@ -18,10 +18,11 @@ import { after, test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { addWorktree } = await import("../src/guard.ts");
+const { addWorktree, gitFingerprint } = await import("../src/guard.ts");
+const { createHostGit, landOne } = await import("../src/landing.ts");
 const { forgetHead, recordHead } = await import("../src/run.ts");
 const { forgetFork, ownCommits, staleBaseParents } = await import("../src/sandbox.ts");
-const { rebuildOnBase } = await import("../src/resolution.ts");
+const { rebuildOnBase, rewrittenNote } = await import("../src/resolution.ts");
 const { hostIdentity } = await import("../src/generated.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -120,6 +121,70 @@ test("a branch forked from commits a flattening rebase replaced with copies is r
   assert.equal(git(h.root, "rev-list", "--count", `${BRANCH}..main`), "0");
   for (const sha of picks) assert.notEqual(spawnSync("git", ["merge-base", "--is-ancestor", sha, BRANCH], { cwd: h.root }).status, 0, `${sha.slice(0, 7)} is back on the branch`);
   assert.deepEqual(git(h.root, "cherry", "main", BRANCH).split("\n"), [`+ ${h.tip(BRANCH)}`]);
+});
+
+test("a branch rebuilt on a rewritten base is found again when that base is rewritten once more", async () => {
+  const h = harness();
+  commit(h.root, "bad.txt", "bad\n", "a squash-landed commit");
+  const box = await h.cut();
+  git(h.root, "reset", "-q", "--hard", "HEAD~1");
+  commit(h.root, "worse.txt", "worse\n", "another squash-landed commit");
+  const worse = h.tip("main");
+  assert.equal((await rebuildOnBase(box, { root: h.root, base: "main", branch: BRANCH, identity: hostIdentity(h.root) }))?.kind, "rebuilt");
+
+  // The rebuilt branch sits on `worse`, which a second reset removes: only the fork point the rebuild recorded names it.
+  git(h.root, "reset", "-q", "--hard", "HEAD~1");
+  assert.deepEqual(staleBaseParents("main", BRANCH, h.root), [worse]);
+  assert.equal(ownCommits("main", BRANCH, h.root), 1);
+});
+
+test("a branch held on a base rewritten under its fork point is not said to have merged it alone", async () => {
+  const h = harness();
+  commit(h.root, "bad.txt", "bad\n", "a squash-landed commit");
+  const bad = h.tip("main");
+  const box = await h.cut();
+  commit(box.path, "shared.txt", "the branch's line\n", "the ticket changes shared.txt");
+  git(h.root, "reset", "-q", "--hard", "HEAD~1");
+  commit(h.root, "shared.txt", "the base's line\n", "the base changes shared.txt");
+
+  const rebuilt = await rebuildOnBase(box, { root: h.root, base: "main", branch: BRANCH, identity: hostIdentity(h.root) });
+  assert.equal(rebuilt?.kind, "held");
+  if (rebuilt?.kind !== "held") return;
+  assert.match(rewrittenNote("main", rebuilt), new RegExp(`^base rewritten under the branch - it merged or was cut from ${bad.slice(0, 7)}, which main no longer holds, and its commit [0-9a-f]{7} conflicts with main in shared.txt;`));
+});
+
+test("a branch that reaches landing forked from a commit a reset removed is not merged", async () => {
+  // The pipeline rebuilds it before its gates; this is the landing's own check, for a rewrite made after them.
+  const h = harness();
+  commit(h.root, "bad.txt", "bad\n", "a squash-landed commit");
+  await h.cut();
+  const head = h.tip(BRANCH);
+  git(h.root, "reset", "-q", "--hard", "HEAD~1");
+  const before = h.tip("main");
+  const calls: string[] = [];
+  const project = { ...h.project, land: "merge", generated: [], gates: [], setup: [] } as unknown as Parameters<typeof createHostGit>[0];
+  const landed = await landOne(
+    {
+      project,
+      tracker: { ref: (id: string) => `#${id}`, close: () => void calls.push("close"), hold: () => void calls.push("hold"), get: () => ({ body: "" }) } as unknown as import("../src/landing.ts").LandContext["tracker"],
+      base: "main",
+      gateNames: "test",
+      reports: new Map(),
+      run: { ticket: () => {} },
+      dryRun: false,
+      opener: async () => assert.fail("no sandbox was expected"),
+      withdrawal: () => undefined,
+      host: createHostGit(project, gitFingerprint(project)),
+      gate: async () => assert.fail("no gate run was expected"),
+      landed: new Map(),
+    },
+    { issue: "2", branch: BRANCH, status: "green", commits: 1, repairs: 0, head },
+  );
+  assert.equal(landed.kind, "skipped");
+  assert.match(landed.kind === "skipped" ? landed.reason : "", /^agent\/issue-2 merged or was cut from a main that has since been rewritten/);
+  assert.deepEqual(calls, []);
+  assert.equal(h.tip("main"), before);
+  assert.equal(h.has("main", "bad.txt"), false);
 });
 
 test("a base that only moved forward is no rewrite of a recorded fork point", async () => {

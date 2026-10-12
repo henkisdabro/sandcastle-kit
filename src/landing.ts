@@ -450,7 +450,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   if (sh("git", ["rev-parse", o.branch], root) !== o.head) return { kind: "skipped", reason: `${o.branch} moved after its gates passed` };
   // The pipeline re-creates a branch that merged a base since rewritten before it runs a gate (`rebuildOnBase`); one that
   // gets here was rewritten after, or the check could not run. Merging it brings back commits the base lost.
-  if (staleBaseParents(base, o.branch, root).length) return { kind: "skipped", reason: `${o.branch} merged a ${base} that has since been rewritten - the next run re-creates it on ${base}'s tip` };
+  if (staleBaseParents(base, o.branch, root).length) return { kind: "skipped", reason: `${o.branch} merged or was cut from a ${base} that has since been rewritten - the next run re-creates it on ${base}'s tip` };
   // A warning, never a hold: the Touches line is written by an agent. A tracker or git failure
   // costs the warning only.
   let overrun: string[] = [];
