@@ -1,7 +1,6 @@
-// How a test starts the status view: through the implementation switch, so one black-box test holds
-// either view to the same facts. `SANDCASTLE_TEST_STATUS_IMPL` is `bash` (status.sh, the default) or
-// `ts` (the TypeScript view, once it exists). Its name passes test/hermetic-env.ts, which scrubs
-// SANDCASTLE_* but not SANDCASTLE_TEST_*.
+// How a test starts the status view: the TypeScript view (src/status-view.ts), with the fixture clock preloaded.
+// The tests start it directly where a black-box test needs the view and nothing of `status.sh`'s wrapper;
+// test/status-wrapper.test.ts holds that `status.sh` hands every call to it.
 //
 // `statusCommand` is the one place a test names the view's entry. `drawFrame` draws one frame and
 // returns it; `startSession` (further down) starts the live view on a terminal and drives it from
@@ -11,34 +10,23 @@ import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnSyncOption
 import { chmodSync, closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { KIT, kitArgs } from "./cli-spawn.ts";
 import { fixtureEnv, type Fixture } from "./status-fixture.ts";
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-export type Impl = "bash" | "ts";
-
-/** The TypeScript view's entry: the one line the ticket that adds it sets. */
+/** The TypeScript view's entry. */
 export const TS_ENTRY = join(KIT, "src/status-view.ts");
-/** The preload that gives the TypeScript view the fixture clock (`SANDCASTLE_TEST_NOW`); the bash view gets it from the fixture's `date`. */
+/** The preload that gives the view the fixture clock (`SANDCASTLE_TEST_NOW`), so the view has no test seam. */
 const TS_CLOCK = join(KIT, "test/status-clock.ts");
 
-/** Which view the black-box status tests start. */
-export const impl = (): Impl => {
-  const chosen = process.env.SANDCASTLE_TEST_STATUS_IMPL || "bash";
-  if (chosen !== "bash" && chosen !== "ts") throw new Error(`SANDCASTLE_TEST_STATUS_IMPL is "${chosen}": bash or ts`);
-  return chosen;
-};
+/** The command that starts the view with `args` (its interval, then "all" for every row). */
+export const statusCommand = (args: string[]): { command: string; args: string[] } => ({
+  command: process.execPath,
+  args: [...kitArgs("--import", TS_CLOCK, TS_ENTRY, ...args)],
+});
 
-/** The command that starts the chosen view with `args` (its interval, then "all" for every row). */
-export const statusCommand = (args: string[]): { command: string; args: string[] } => {
-  if (impl() === "bash") return { command: process.env.STATUS_BASH || "bash", args: [join(KIT, "status.sh"), ...args] };
-  if (!existsSync(TS_ENTRY)) throw new Error(`SANDCASTLE_TEST_STATUS_IMPL=ts: the TypeScript status view (${TS_ENTRY}) does not exist yet`);
-  return { command: process.execPath, args: [...kitArgs("--import", TS_CLOCK, TS_ENTRY, ...args)] };
-};
-
-/** `spawnSync` of the chosen view with `args`: what a black-box test calls where it used to name status.sh. */
+/** `spawnSync` of the view with `args`: what a black-box test calls where it used to name status.sh. */
 export function spawnStatus(args: string[], options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string>;
 export function spawnStatus(args: string[], options: SpawnSyncOptionsWithBufferEncoding): SpawnSyncReturns<Buffer>;
 export function spawnStatus(args: string[], options: SpawnSyncOptions): SpawnSyncReturns<string | Buffer> {
@@ -46,13 +34,13 @@ export function spawnStatus(args: string[], options: SpawnSyncOptions): SpawnSyn
   return spawnSync(command, viewArgs, options);
 }
 
-/** The arguments of `script(1)` that run the chosen view with `args` on a pty: util-linux and BSD spell it differently. Give `script` no stdin (`stdio: ["ignore", ...]`): BSD refuses the socket Node passes. */
+/** The arguments of `script(1)` that run the view with `args` on a pty: util-linux and BSD spell it differently. Give `script` no stdin (`stdio: ["ignore", ...]`): BSD refuses the socket Node passes. */
 export const scriptArgs = (args: string[]): string[] => {
   const { command, args: viewArgs } = statusCommand(args);
   return process.platform === "linux" ? ["-qec", [command, ...viewArgs].map(quote).join(" "), "/dev/null"] : ["-q", "/dev/null", command, ...viewArgs];
 };
 
-/** A UTF-8 locale for the bash view's widths (Linux runners often have only C.UTF-8); none found is fine for the TypeScript one. */
+/** A UTF-8 locale for a test's own shell tools (Linux runners often have only C.UTF-8); none found is fine for the view. */
 export const utf8Locale = (): string | undefined => {
   try {
     return execFileSync("locale", ["-a"], { encoding: "utf8" }).split("\n").find((l) => /^(c|en_US)\.utf-?8$/i.test(l));
@@ -82,6 +70,14 @@ export const drawFrame = (fixture: Fixture, { cols = 80, rows = 400, env = {} }:
     timeout: 60_000,
   });
   return { frame: plain(result.stdout), raw: result.stdout, status: result.status, stderr: result.stderr, result };
+};
+
+/** The slots the view's machine lane shows in use against the limit (`3/6`), drawn with `env` (`XDG_CACHE_HOME` says whose slots). */
+export const machineSlots = (fixture: Fixture, env: Record<string, string> = {}): { sandboxes?: string; gates?: string } => {
+  const drawn = drawFrame(fixture, { cols: 200, env });
+  if (drawn.status !== 0) throw new Error(`the view ended ${drawn.status}: ${drawn.stderr}`);
+  const { run } = readFacts(drawn.raw, fixture.root);
+  return { sandboxes: run.sandboxes?.split(" ")[0], gates: run.gates?.split(" ")[0] };
 };
 
 /** The facts of `fixture`'s frame at `cols` columns. */
@@ -580,10 +576,3 @@ export const orphans = async (fixture: Fixture, ms = 5_000): Promise<string[]> =
   }
   return found.map(({ pid, name }) => `${name} ${pid}`);
 };
-
-// Run as a script, it starts the chosen view with its own arguments and ends as the view does: how
-// test/status.test.sh, a shell script, starts the view through the same switch.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { command, args } = statusCommand(process.argv.slice(2));
-  process.exitCode = spawnSync(command, args, { stdio: "inherit" }).status ?? 1;
-}

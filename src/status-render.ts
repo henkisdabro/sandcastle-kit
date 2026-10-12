@@ -5,7 +5,7 @@
 // The layout fits the pane, with no fixed breakpoints: the header is the logo and the lanes (GLOSSARY.md) - run,
 // machine, models, settings, plan - beside it while it and three of them fit, else in a row under it, and the
 // lanes that do not fit on one summary line. The table's fixed columns have set widths and give way in order in
-// a narrow pane; ACTIVITY takes the rest. status.sh's frame carries the same facts (test/status-run.ts reads both).
+// a narrow pane; ACTIVITY takes the rest.
 
 import { HINT_TEXT } from "./click-hint.ts";
 import { align, barsOf, fit, junction as rule, splitColumns, splitWeights, visibleWidth } from "./status-grid.ts";
@@ -69,7 +69,7 @@ const when = (epoch: number, now: number) => (day(epoch) === day(now) ? hhmm(epo
 /** "13:40" today, "Wed 06:00" another day, the weekday as the usage row has it. */
 const weekdayWhen = (epoch: number, now: number) => (day(epoch) === day(now) ? hhmm(epoch) : `${WEEKDAYS[local(epoch).getDay()]} ${hhmm(epoch)}`);
 
-/** An ISO time from a record as epoch seconds, read as UTC with any fraction dropped (status.sh `utc_to_epoch`); 0 when it is none. */
+/** An ISO time from a record as epoch seconds, read as UTC with any fraction dropped; 0 when it is none. */
 const utcEpoch = (s: string): number => {
   const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)/.exec(s);
   const t = m ? Date.parse(`${m[1]}Z`) : NaN;
@@ -84,7 +84,7 @@ const digits = (s: string) => /^[0-9]+$/.test(s);
  * Moves each inner bar of `widths` that lies within 4 columns of a bar of the band above (`refs`) onto it, so
  * the two meet in one ┼ rather than a near-miss like ┴┬. `mins` are the least each cell may be (one already
  * narrower keeps its width): a bar whose move would cut a cell stays, and the band still fills the window,
- * the last cell taking the remainder. status.sh `snap_w`.
+ * the last cell taking the remainder.
  */
 export const snap = (widths: number[], refs: number[], mins: number[], win: number): number[] => {
   const n = widths.length;

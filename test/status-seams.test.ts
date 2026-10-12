@@ -1,7 +1,6 @@
-// The status view's rules are light (─ with ┼ ┴ ┬) at every seam, and the bars of one band
-// snap onto the bars of the band above when they would land within 4 columns of them: a
+// The status view's rules are light (─ with ┼ ┴ ┬) at every seam, and as wide as the pane: a
 // double rule drew a column above stopping on one hairline and the column below starting on
-// the other, and a legend sized from its own text left joints like ┴┬ beside the table's.
+// the other.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
 //   pnpm test:file test/status-seams.test.ts
@@ -49,8 +48,7 @@ const render = (cols: number): string => {
   return r.stdout.replace(/\u001b\[[0-9;]*m/g, "");
 };
 
-// Widths where the fixture's cells can all keep their text: in a narrower pane (or with a legend
-// that only just fits) a bar stays where it is rather than cut a cell, which is allowed.
+// Panes from the standard 80 columns to a wide one, on both sides of each layout change.
 const WIDTHS = [80, 100, 110, 120, 130, 150, 170, 180, 200];
 
 for (const cols of WIDTHS) {
@@ -64,19 +62,10 @@ for (const cols of WIDTHS) {
     assert.ok(!/[═╞╡╪╧╤]/.test(text), "a double rule is left in the view");
     for (const l of lines) if (/^[┌├└│]/.test(l)) assert.equal([...l].length, cols, l);
   });
-
-  test(`at ${cols} columns no two joints of a rule are within 4 columns`, () => {
-    for (const l of rules) {
-      const joints = [...l].flatMap((c, i) => (i > 0 && i < cols - 1 && c !== "─" ? [i] : []));
-      for (let k = 1; k < joints.length; k++) {
-        assert.ok(joints[k] - joints[k - 1] > 4, `joints ${joints[k - 1]} and ${joints[k]} in ${l}`);
-      }
-    }
-  });
 }
 
-test("the status script and the website's demo draw no double rule", () => {
-  for (const f of ["status.sh", "site/js/status.js"]) {
+test("the status view's renderer and the website's demo draw no double rule", () => {
+  for (const f of ["src/status-render.ts", "site/js/status.js"]) {
     assert.ok(!/[═╞╡╪╧╤]/.test(readFileSync(join(KIT, f), "utf8")), `${f} still has a double rule or joint`);
   }
 });

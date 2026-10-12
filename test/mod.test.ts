@@ -13,12 +13,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { buildFixture } from "./status-fixture.ts";
+import { drawFrame, needsScript, startSession } from "./status-run.ts";
 import { DERIVED_STATES, GROUPS, isTicketState, TICKET_STATES, WORDS } from "../mod/hooks/run-record.ts";
 import { band, building, CASTLE, CASTLE_FRAMES, HELD, LEGEND, line, needing, parse, rows, RUN_COMMAND, SAND, summarise } from "../mod/hooks/run-state.ts";
 
+const { palette } = await import("../src/status-render.ts");
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8").replace(/\r\n/g, "\n");
-const status = read("status.sh");
+const statusRows = read("src", "status-rows.ts");
 
 test("every ticket state has a group, and the group table holds no other", () => {
   assert.deepEqual(Object.keys(GROUPS).sort(), [...TICKET_STATES].sort());
@@ -28,14 +32,16 @@ test("every ticket state has a group, and the group table holds no other", () =>
 });
 
 test("the words and the derived states are the status view's", () => {
+  // The view takes the words and the derived states from the module's tables, and works out each derived state itself.
+  assert.match(statusRows, /import \{[^}]*\bWORDS\b[^}]*\} from "\.\.\/mod\/hooks\/run-record\.ts"/);
   for (const [state, word] of Object.entries(WORDS)) {
     assert.ok(isTicketState(state), state);
-    assert.ok(status.includes(`${word})`) || status.includes(`"${word}"`) || status.includes(`|${word}|`), `status.sh says "${word}"`);
+    assert.ok(word.length > 0, state);
   }
   // A derived state is one the view works out, never one the record holds.
   for (const s of DERIVED_STATES) {
     assert.ok(!isTicketState(s), `${s} is a ticket state`);
-    assert.ok(status.includes(s === "left over" ? `"left over"` : s), `status.sh knows "${s}"`);
+    assert.ok(statusRows.includes(s === "left over" ? `"left over"` : s), `the status view knows "${s}"`);
   }
 });
 
@@ -47,18 +53,41 @@ const cube = (n: number) => {
 };
 const hex = (rgb: string) => "#" + rgb.split(";").map((v) => Number(v).toString(16).padStart(2, "0")).join("");
 
-test("the groups carry the status view's glyphs and colours", () => {
-  const styles = [...status.matchAll(/glyph='(.)'; colour="\$(\w+)"; prio=\d; grp="?([a-z ]+?)"?;;/g)];
-  for (const g of LEGEND) {
-    const style = styles.find((m) => m[3] === g.group);
-    assert.ok(style, `status.sh has no group "${g.group}"`);
-    assert.equal(g.glyph, style[1], `${g.group} glyph`);
-    const code = status.match(new RegExp(`^${style[2]}=\\$'\\\\e\\[38;5;(\\d+)m'`, "m"))?.[1];
-    assert.ok(code, `status.sh sets ${style[2]} as a 256-colour code`);
-    assert.equal(g.colour, cube(Number(code)), `${g.group} colour`);
-    assert.ok(status.includes(`${g.glyph} ${g.label} `), `the legend says "${g.glyph} ${g.label}"`);
+test("the groups carry the status view's glyphs and words", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-mod-view-"));
+  const fixture = buildFixture("legacy", dir);
+  try {
+    const drawn = drawFrame(fixture, { cols: 200 });
+    assert.equal(drawn.status, 0, drawn.stderr);
+    for (const g of LEGEND) assert.ok(drawn.frame.includes(`${g.glyph} ${g.label} `), `the legend says "${g.glyph} ${g.label}"`);
+  } finally {
+    fixture.stop();
   }
-  const sand = (name: string) => hex(status.match(new RegExp(`\\bsand ${name} '([\\d;]+)'`))?.[1] ?? "");
+});
+
+test("the groups and the castle carry the status view's colours", needsScript, async () => {
+  // The 256-colour palette on a terminal: the legend's colour for each group, and the castle's sand.
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-mod-colour-"));
+  const fixture = buildFixture("legacy", dir);
+  const session = await startSession(fixture, { env: { NO_COLOR: "", COLORTERM: "" } });
+  try {
+    const { raw } = await session.frame();
+    for (const g of LEGEND) {
+      const code = raw.match(new RegExp(`\\x1b\\[38;5;(\\d+)m${g.glyph.replace(/[+]/g, "\\$&")} ${g.label} `))?.[1];
+      assert.ok(code, `the legend colours "${g.glyph} ${g.label}" with a 256-colour code`);
+      assert.equal(g.colour, cube(Number(code)), `${g.group} colour`);
+    }
+    const painted = palette(true, false);
+    for (const [row, colour] of [["top", "moon"], ["mid", "dusk"], ["base", "deep"]] as const) {
+      assert.ok(raw.includes(`${painted[colour]}${CASTLE[row]}`), `the view draws the castle's ${row} as ${CASTLE[row]} in ${colour}`);
+    }
+  } finally {
+    session.close();
+    fixture.stop();
+  }
+  // The mod's sand is the view's, at 24-bit.
+  const deep = palette(true, true);
+  const sand = (key: keyof typeof deep) => hex(deep[key].match(/38;2;([\d;]+)m/)?.[1] ?? "");
   assert.deepEqual(SAND, { top: sand("moon"), mid: sand("dusk"), base: sand("deep"), name: sand("head"), stage: sand("accent"), muted: sand("mute") });
 });
 
@@ -160,12 +189,6 @@ test("the band is the castle's three rows, the run beside its walls, each row cu
   assert.deepEqual(text(base.length - 1), ["▄ ▄ ▄", mid, "██▀██  ● 2  ! 1  > 1  + 2"]);
   assert.deepEqual(text(mid.length - 1), ["▄ ▄ ▄", "█████  sandcastle  demo  landing 2/4", "██▀██  ● 2  ! 1  > 1  + 2"]);
   assert.deepEqual(text(34), ["▄ ▄ ▄", "█████  sandcastle  landing 2/4", "██▀██  ● 2  ! 1  > 1  + 2"]);
-  // The castle is the status view's own, row for row and colour for colour.
-  for (const [row, colour] of [["top", "moon"], ["mid", "dusk"], ["base", "deep"]] as const) {
-    assert.ok(status.includes(`\${${colour}}${CASTLE[row]}\${off}`), `status.sh draws the castle's ${row} as ${CASTLE[row]}`);
-    const rgb = status.match(new RegExp(`\\bsand ${colour} '([\\d;]+)'`))?.[1] ?? "";
-    assert.equal(SAND[row], hex(rgb), `the castle's ${row} is ${colour}`);
-  }
   // A frame of the build moves nothing beside it.
   for (const frame of CASTLE_FRAMES) assert.deepEqual(text(34, frame).map((r) => r.slice(5)), text(34).map((r) => r.slice(5)));
 });

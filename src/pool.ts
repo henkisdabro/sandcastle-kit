@@ -67,7 +67,7 @@ export type PoolName = "sandboxes" | "gates";
 
 // Under live-runs.ts's KIT_CACHE, so an empty XDG_CACHE_HOME is unset here too, not a relative path.
 export const DIR = join(KIT_CACHE, "slots");
-// A subdirectory, so status.sh's `<pool>-*.lock` glob and `usage` never see an entry.
+// A subdirectory, so the status view's slot count and `usage` never see an entry.
 const WAITS = join(DIR, "waits");
 const RUNS = join(DIR, "runs");
 
@@ -173,7 +173,7 @@ const WEDGED_MS = 10_000;
  * with) if taken, `owner` if a live process of the kit holds it, neither if it is busy for
  * a moment (being written or taken over) - try again later.
  *
- * The content is "<pid> <token> <label>": the pid first, which status.sh reads;
+ * The content is "<pid> <token> <label>": the pid first, which the status view reads;
  * the token, so a release never removes a lock someone else took since. A lock
  * whose owner is gone (`holderRunning`: its pid is dead, or is some other process
  * now) is taken over under `<file>.takeover`, and only if it still
@@ -839,7 +839,7 @@ let extras = 0;
  * (`<pool>-extra-<run>-<n>.lock`, the content a slot has), taken at once and never waited for. It is
  * for a sandbox started inside a slot the caller already holds - the mid-run base check - which
  * would deadlock a pool of one if it waited, and was otherwise counted nowhere: other runs saw one
- * sandbox fewer than were alive. `usage()`, `liveSlots` and status.sh's `<pool>-*.lock` glob count
+ * sandbox fewer than were alive. `usage()`, `liveSlots` and the status view's slot count count
  * it; `tryAcquire` takes only numbered slots, so it blocks none. Accepted while it lives: `usage()`
  * can read 7/6, and as `members()` counts it in this run's `held`, this run's other tickets may wait
  * for their share. The share arithmetic stays as it is - hiding the slot from it would hide it from
@@ -865,7 +865,7 @@ export const withExtraSlot = async <T>(pool: PoolName, label: string, fn: () => 
   }
 };
 
-/** "sandboxes 3/6 · gates 1/2" - live slots only; read by status.sh too. */
+/** "sandboxes 3/6 · gates 1/2" - live slots only; the status view counts them the same way. */
 export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool).length}/${limit(pool)}`).join(" · ");
 
 /** One live run's demand, share and cap, as `sandcastle cap` shows them. */

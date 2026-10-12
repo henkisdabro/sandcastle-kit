@@ -1,6 +1,6 @@
 // The status view when `sandcastle queue` cannot be read: a signed-out gh or a
-// stale token must not look like an empty queue, and a view without a working
-// jq must say what to install rather than show nothing. A made-up project, a
+// stale token must not look like an empty queue, and a machine without a working
+// jq draws the view all the same. A made-up project, a
 // fake `sandcastle` and a `docker` that finds nothing; no Docker, no network.
 //
 //   pnpm test:file test/status-queue.test.ts
@@ -92,13 +92,13 @@ test("escape codes in the failure message cannot reach the terminal", () => {
   assert.doesNotMatch(frame, /\u0007/);
 });
 
-test("a jq that does not run stops the view with what to install", () => {
-  // On PATH but not running: what a broken install looks like.
+test("a jq that does not run changes nothing: the view reads its records itself", () => {
+  // On PATH but not running: what a broken install looks like, or a machine with none.
   const shadow = join(TMP, "nojq");
   mkdirSync(shadow);
   script(join(shadow, "jq"), "#!/bin/sh\nexit 127\n");
   const { frame, status } = render("101", {}, shadow);
-  assert.equal(status, 1);
-  assert.match(frame, /status needs jq \(apt install jq \/ brew install jq\)/);
-  assert.doesNotMatch(frame, /^│ state /m);
+  assert.equal(status, 0);
+  assert.match(frame, /#101/);
+  assert.doesNotMatch(frame, /needs jq/);
 });

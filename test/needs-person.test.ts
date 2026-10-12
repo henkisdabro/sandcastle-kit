@@ -1,14 +1,12 @@
 // A partly-done ticket whose remainder only a person can do is not re-run by a drain: the agent's
 // explicit `<unmet who="person">` marker says so, and a note written without it is read by its words
 // ("needs a deploy", "access I don't have", a file "agents may not edit"). A plain unfinished
-// criterion stays re-runnable. The words are grepped by status.sh too, so both readers are held to
-// the same phrases. No repo, Docker, model or network.
+// criterion stays re-runnable. No repo, Docker, model or network.
 //
 //   pnpm test:file test/needs-person.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -70,14 +68,4 @@ test("a marked line is not re-run by the autonomy loop, a plain one is", () => {
   assert.deepEqual(partialRerunnable(facts(unmetOf('<unmet who="person">the retry path is not covered</unmet>')!)), []);
   assert.deepEqual(partialRerunnable(facts(unmetOf("<unmet>the retry path is not covered</unmet>")!)), ["1"]);
   assert.match(remainderNote("needs a person: x"), /needs a person.*hold label/);
-});
-
-test("status.sh greps the same phrases as needsDecision", () => {
-  const sh = readFileSync(join(import.meta.dirname, "..", "status.sh"), "utf8");
-  const pattern = sh.match(/grep -Eiq '(\(\^\|\[\^\[:alnum:\]_\]\)\(decisions[^']*)'/)?.[1];
-  assert.ok(pattern, "status.sh's person pattern was not found");
-  for (const phrase of [...PERSON_PHRASES, ...ROUTINE, "needs a person: x"]) {
-    const found: { status: number | null } = spawnSync("grep", ["-Eiq", pattern], { input: phrase, stdio: ["pipe", "ignore", "ignore"] });
-    assert.equal(found.status === 0, needsDecision(phrase), phrase);
-  }
 });

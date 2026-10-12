@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
-import { spawnStatus } from "./status-run.ts";
+import { readFacts, spawnStatus } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-eta-"));
 const live = kitLikeProcess();
@@ -74,7 +74,7 @@ const frame = (): string[] => {
 };
 const line = (lines: string[], re: RegExp) => lines.find((l) => re.test(l)) ?? "(missing)";
 // The parts the free-slot and ETA maths draw.
-const figures = (lines: string[]) => [line(lines, /^│ +#2 +│/), line(lines, /^│ +#3 +│/), line(lines, /\bends +~/)];
+const figures = (lines: string[]) => [line(lines, /^│ +#2 +│/), line(lines, /^│ +#3 +│/), lines.join("\n").match(/\bends ~\d\d:\d\d/)?.[0] ?? "(missing)"];
 
 test("a settings group's concurrency leaves the free-slot and ETA figures as the top-level value draws them", () => {
   record();
@@ -88,9 +88,9 @@ test("a settings group's concurrency leaves the free-slot and ETA figures as the
     record({ autonomy: 0, turn: 1, cap: 1, repair: 1, concurrency: 6, asked: 8 });
     withGroup = frame();
   }
-  assert.match(line(withGroup, /^│ settings /), /concurrency 6 \(asked 8\)/);
+  assert.ok(readFacts(withGroup.join("\n"), REPO).settings?.some((i) => /concurrency 6 \(asked 8\)/.test(i)), "the settings show the asked concurrency");
   assert.match(figures(before)[0], /next to start/);
   assert.match(figures(before)[1], /1 ahead of it/);
-  assert.match(figures(before)[2], /ends +~\d\d:\d\d/);
+  assert.match(figures(before)[2], /ends ~\d\d:\d\d/);
   assert.deepEqual(figures(withGroup), figures(before));
 });

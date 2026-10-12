@@ -73,7 +73,7 @@ export const touchesOverrun = (root: string, base: string, head: string, body: s
 };
 
 // The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
-// `mergedEarlier` and status.sh's `requeued` find a landed branch by it. The committer is
+// `mergedEarlier` and the status view's requeue note find a landed branch by it. The committer is
 // the agent's, the author the operator's (see AGENT_COMMITTER).
 // --no-verify: a pre-commit hook re-running what the gates covered only adds a way for a
 // green branch to fail to land. (Hooks are off for the whole host process anyway - see guard.ts.)
@@ -89,7 +89,7 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
   // Throws on a conflict or a refused merge, as the merge does, leaving the unmerged files for the caller.
   sh("git", ["merge", "--squash", "--no-verify", head], root, AGENT_COMMITTER);
   // --allow-empty: a green branch whose change is already on the base still gets its commit, so
-  // `mergedEarlier` and status.sh find the ticket as landed.
+  // `mergedEarlier` and the status view find the ticket as landed.
   return sh(
     "git",
     [
@@ -115,10 +115,10 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
 // - the closing summary's "Agent branches with unmerged work", report.ts (`git cherry`): not listed.
 // - the log archive, `archiveFinishedLogs` in run.ts: a deleted branch counts as finished, so its
 //   log is archived - correct.
-// - status.sh `requeued`: a subject `--grep` on the base - works unchanged.
-// - status.sh section 3 (logs the record does not hold): a missing branch whose subject is on the
+// - the status view's requeue note: a subject `--grep` on the base - works unchanged.
+// - the status view's rows for logs the record does not hold: a missing branch whose subject is on the
 //   base reads `merged`, not `no branch` (a "part of" subject, `mergeSubject`, counts too).
-// - status.sh `merged_list` (`git branch --merged`) and the `git cherry` case: only reached when
+// - the status view's merged list (`git branch --merged`) and the `git cherry` case: only reached when
 //   the branch exists - unaffected.
 // A squash leaves no MERGE_HEAD, so `git merge --abort` refuses it; `git reset --merge` undoes the
 // staged squash and keeps unrelated local changes.

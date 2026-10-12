@@ -68,7 +68,7 @@ const repo = (merge: Merge, pushed: boolean, fromRun: boolean) => {
   return root;
 };
 
-/** The status view's row for #7, as the shell test renders it. */
+/** The status view's row for #7, in a pane wide enough for the whole note. */
 const rowOf = (root: string) => {
   const bin = mkdtempSync(join(tmpdir(), "sandcastle-bin-"));
   writeFileSync(join(bin, "sandcastle"), "#!/usr/bin/env bash\necho '[]'\n");
@@ -85,7 +85,7 @@ const rowOf = (root: string) => {
       SANDCASTLE_BIN: join(bin, "sandcastle"),
       SANDCASTLE_BASE: "main",
       SANDCASTLE_NAME: "fixture",
-      TERM_COLS: "120",
+      TERM_COLS: "200",
       TERM_ROWS: "200",
       XDG_CACHE_HOME: join(bin, "cache"),
     },

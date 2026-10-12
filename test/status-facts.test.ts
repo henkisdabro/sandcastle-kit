@@ -1,8 +1,6 @@
-// The harness any implementation of the status view is held to: the implementation switch, and the fact
-// reader that compares two frames of one fixture without their layout. A frame hides facts - a column
+// The harness the status view is held to: the fact reader that compares two frames of one fixture without their layout. A frame hides facts - a column
 // that gave way in a narrow pane, a note cut with `…` - and those compare as unknown, so the same
-// fixture drawn at 80, 120, 200 and 330 columns reads as the same facts. Run against whichever view
-// SANDCASTLE_TEST_STATUS_IMPL names. No Docker, no network, no model calls.
+// fixture drawn at 80, 120, 200 and 330 columns reads as the same facts. No Docker, no network, no model calls.
 //
 //   pnpm test:file test/status-facts.test.ts
 
@@ -13,9 +11,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { GROUPS, TICKET_STATES } from "../mod/hooks/run-record.ts";
 import { KIT, runNode } from "./cli-spawn.ts";
-import { scrubs } from "./hermetic-env.ts";
 import { buildFixture, NOW, type Fixture, type FixtureKind } from "./status-fixture.ts";
-import { agree, compareFacts, drawFrame, factsAt, impl, statusCommand, type Facts } from "./status-run.ts";
+import { agree, compareFacts, drawFrame, factsAt, type Facts } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-facts-"));
 const fixtures = Object.fromEntries((["live", "legacy", "ended"] as FixtureKind[]).map((kind) => [kind, buildFixture(kind, join(TMP, kind))])) as Record<FixtureKind, Fixture>;
@@ -25,41 +22,6 @@ after(() => {
 });
 
 const WIDTHS = [80, 120, 200, 330];
-
-// ---------------------------------------------------------------------------
-// The switch.
-// ---------------------------------------------------------------------------
-
-/** Runs `body` with SANDCASTLE_TEST_STATUS_IMPL set to `value` (unset when undefined). */
-const withImpl = <T>(value: string | undefined, body: () => T): T => {
-  const was = process.env.SANDCASTLE_TEST_STATUS_IMPL;
-  if (value === undefined) delete process.env.SANDCASTLE_TEST_STATUS_IMPL;
-  else process.env.SANDCASTLE_TEST_STATUS_IMPL = value;
-  try {
-    return body();
-  } finally {
-    if (was === undefined) delete process.env.SANDCASTLE_TEST_STATUS_IMPL;
-    else process.env.SANDCASTLE_TEST_STATUS_IMPL = was;
-  }
-};
-
-test("the status view a test starts is status.sh unless SANDCASTLE_TEST_STATUS_IMPL says ts", () => {
-  withImpl(undefined, () => {
-    assert.equal(impl(), "bash");
-    const { args } = statusCommand(["0", "all"]);
-    assert.deepEqual([args[0]!.endsWith("/status.sh"), args.slice(1)], [true, ["0", "all"]]);
-  });
-  assert.equal(withImpl("bash", impl), "bash");
-  assert.equal(withImpl("ts", impl), "ts");
-  assert.throws(() => withImpl("zsh", impl), /SANDCASTLE_TEST_STATUS_IMPL is "zsh": bash or ts/);
-});
-
-test("the switch's name passes the hermetic test environment", () => {
-  assert.equal(scrubs("SANDCASTLE_TEST_STATUS_IMPL"), false);
-  assert.equal(scrubs("SANDCASTLE_TEST_STATUS_STRICT"), false);
-  // The status view's own names are scrubbed, as before.
-  assert.equal(scrubs("SANDCASTLE_PROJECT"), true);
-});
 
 test("the clock preload gives the TypeScript view the fixture's time, and leaves the real one without it", () => {
   const code = "console.log(JSON.stringify([Date.now(), new Date().toISOString(), new Date(0).toISOString(), new Date(2026, 0, 2).getFullYear()]))";

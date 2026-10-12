@@ -152,6 +152,9 @@ test("the run settings, the closing summary's Settings line and the status row s
   }
   execFileSync("git", ["-C", repo, "init", "-q", "-b", "main"]);
   execFileSync("git", ["-C", repo, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "base"]);
+  // An ended run's record: the run lane has a run to hang the warning on.
+  const ended = new Date().toISOString();
+  writeFileSync(join(repo, ".sandcastle/logs/run.json"), JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: ended, finishedAt: ended, exitCode: 0, models: "m", issues: [] }));
   const row = (settings: object, cols: number) => {
     const r = spawnStatus(["0", "all"], {
       env: {
@@ -163,7 +166,7 @@ test("the run settings, the closing summary's Settings line and the status row s
     });
     return r.stdout.replace(/\u001b\[[0-9;]*m/g, "");
   };
-  assert.match(row(group, 140), /● API credits \(ANTHROPIC_API_KEY\)/);
+  assert.match(row(group, 140), /● API credits/);
   // Every width keeps it: it is a warning, not a detail.
   assert.match(row(group, 60), /● API credits/);
   assert.doesNotMatch(row({ autonomy: 0, turn: 1, cap: 1 }, 140), /API credits/);

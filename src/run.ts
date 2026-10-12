@@ -651,7 +651,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
 };
 
 // ---------------------------------------------------------------------------
-// Run record - status.sh reads it for its header. `pid` tells it whether the
+// Run record - the status view reads it for its header. `pid` tells it whether the
 // run is still alive; `finishedAt` is written on a clean exit.
 // ---------------------------------------------------------------------------
 

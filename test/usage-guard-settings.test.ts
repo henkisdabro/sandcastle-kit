@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { RunRecord } from "../mod/hooks/run-record.ts";
-import { spawnStatus } from "./status-run.ts";
+import { plain, readFacts, spawnStatus } from "./status-run.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -91,8 +91,8 @@ const now = new Date().toISOString();
 const record = (settings: unknown) =>
   writeFileSync(join(LOGS, "run.json"), JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: now, finishedAt: now, exitCode: 0, models: "m", issues: [], settings }));
 
-/** The settings row at `cols` columns, colour stripped (a wrapped row's lines joined by a space), or undefined when the view draws none. */
-const row = (cols: number): string | undefined => {
+/** The view's frame at `cols` columns, colour stripped. */
+const text = (cols: number): string => {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     PATH: [FAKE, process.env.PATH].join(":"),
@@ -106,55 +106,55 @@ const row = (cols: number): string | undefined => {
   };
   delete env.SANDCASTLE_SETTINGS;
   const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const lines = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
-  for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
-  const at = lines.findIndex((l) => l.startsWith("│ settings "));
-  if (at < 0) return undefined;
-  const text = (l: string) => l.replace(/^│ /, "").replace(/ *│$/, "");
-  // Continuation lines are indented under the value.
-  let out = text(lines[at]);
-  for (let i = at + 1; /^│ {11}\S/.test(lines[i] ?? ""); i++) out += ` ${text(lines[i]).trim()}`;
+  const out = plain(r.stdout);
+  for (const l of out.split("\n")) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
   return out;
 };
+/** The settings lane's items at `cols` columns (the autonomy scale reduced to the level chosen), joined by ` · `. */
+const row = (cols: number): string => (readFacts(text(cols), REPO).settings ?? []).join(" · ");
 
 const base = { autonomy: 0, turn: 1, cap: 1 };
 
-test("on: ● usage-guard with its threshold, at every width", () => {
+test("on: ● usage-guard with its threshold, whole from 80 columns and begun below", () => {
   record({ ...base, usageGuard: true, usageStop: 90 });
-  for (const cols of [70, 80, 100, 130]) assert.match(row(cols) ?? "", / · ● usage-guard 90% \(last run\)$/, `${cols} columns`);
+  for (const cols of [80, 100, 130]) assert.match(text(cols), /● usage-guard 90% \(last run\)/, `${cols} columns`);
+  for (const cols of [100, 130]) assert.match(row(cols), / · ● usage-guard 90% \(last run\)$/, `${cols} columns`);
+  // In a pane this narrow the summary line is cut where the pane ends, but the item has begun.
+  assert.match(text(60), /● usage/);
 });
 
 test("on with no threshold in the record shows no number", () => {
   record({ ...base, usageGuard: true });
-  assert.match(row(100) ?? "", / · ● usage-guard \(last run\)$/);
+  assert.match(row(100), / · ● usage-guard \(last run\)$/);
 });
 
-test("off: ○ usage-guard, dropped below 80 columns", () => {
+test("off: ○ usage-guard, from 80 columns", () => {
   record({ ...base, usageGuard: false });
-  for (const cols of [80, 100, 130]) assert.match(row(cols) ?? "", / · ○ usage-guard \(last run\)$/, `${cols} columns`);
-  assert.doesNotMatch(row(79) ?? "", /usage-guard/);
-  assert.match(row(79) ?? "", /^settings {2}autonomy 0 · turn 1\/1/);
+  for (const cols of [80, 100, 130]) assert.match(text(cols), /○ usage-guard \(last run\)/, `${cols} columns`);
 });
 
 test("no reading: the warning stays at every width, with the threshold", () => {
   record({ ...base, usageGuard: true, usageStop: 90, usageReading: "unavailable" });
-  for (const cols of [60, 80, 100, 130]) assert.match(row(cols) ?? "", /● usage-guard 90% \(no reading - not guarding\) \(last run\)$/, `${cols} columns`);
+  for (const cols of [100, 130]) assert.match(row(cols), /● usage-guard 90% \(no reading - not guarding\) \(last run\)$/, `${cols} columns`);
+  // Narrower, the summary line is cut where the pane ends: the warning is the start of what is left.
+  assert.match(text(80), /● usage-guard 90% \(no reading - not guarding\)/);
+  assert.match(text(60), /● usage/);
 });
 
 test("a record without the guard's fields shows nothing about the guard", () => {
   record(base);
-  assert.doesNotMatch(row(100) ?? "", /usage-guard/);
-  assert.equal(row(100), "settings  autonomy [0] 1 2 3 drain · turn 1/1 (last run)");
+  assert.doesNotMatch(row(100), /usage-guard/);
+  assert.equal(row(100), "autonomy [0] (last run)");
   // A reading with no guard field beside it is not drawn on its own, nor with the guard off.
   record({ ...base, usageReading: "unavailable" });
-  assert.doesNotMatch(row(100) ?? "", /usage-guard/);
+  assert.doesNotMatch(text(100), /usage-guard/);
   record({ ...base, usageGuard: false, usageReading: "unavailable" });
-  assert.doesNotMatch(row(100) ?? "", /no reading/);
+  assert.doesNotMatch(text(100), /no reading/);
 });
 
-test("the usage pause: ● usage-pause with its percent beside the guard, at every width", () => {
+test("the usage pause: ● usage-pause with its percent beside the guard", () => {
   record({ ...base, usageGuard: false, usagePause: 90 });
-  for (const cols of [70, 80, 100, 130]) assert.match(row(cols) ?? "", /● usage-pause 90% \(last run\)$/, `${cols} columns`);
+  for (const cols of [80, 100, 130]) assert.match(text(cols), /● usage-pause 90% \(last run\)/, `${cols} columns`);
   record({ ...base, usageGuard: false });
-  assert.doesNotMatch(row(100) ?? "", /usage-pause/);
+  assert.doesNotMatch(text(100), /usage-pause/);
 });
