@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { retryOnTimeout } from "./mod-retry.ts";
 import { buildFixture } from "./status-fixture.ts";
 import { drawFrame, needsScript, startSession } from "./status-run.ts";
 import { DERIVED_STATES, GROUPS, isTicketState, TICKET_STATES, WORDS } from "../mod/hooks/run-record.ts";
@@ -270,7 +271,10 @@ test("the mod validates, and calls only what the README says", { skip }, () => {
 });
 
 test("the mod's own tests pass", { skip }, (t) => {
-  const r = claude(["plugin", "test", "mod"]);
+  let r = claude(["plugin", "test", "mod"]);
+  // The mod's tests answer to fakes and a fake clock, so a test that only ran out of the harness's own
+  // time (5 s) on a starved machine is run once more; an assertion failure never is (test/mod-retry.ts).
+  if (r.status !== 0 && retryOnTimeout(r.stdout + r.stderr)) r = claude(["plugin", "test", "mod"]);
   // Claude Code can turn mods off for a machine from its side; nothing here can turn them on.
   if (/hooks modules are turned off/.test(r.stdout + r.stderr)) return t.skip("Claude Code has mods turned off here");
   assert.equal(r.status, 0, r.stdout + r.stderr);

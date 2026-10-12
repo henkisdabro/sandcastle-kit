@@ -39,7 +39,7 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
+import { estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
@@ -2654,11 +2654,12 @@ export const burndown = async (
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
   const others = otherRuns();
   const split = others.length ? splitAtStart(workers, others) : undefined;
-  for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, others.map((m) => {
+  const neighbours = others.map((m) => {
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
-  }), !DRY_RUN, project.name, project.root)) console.log(line);
+  });
+  for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, neighbours, !DRY_RUN, project.name, project.root)) console.log(line);
   // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
   const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
@@ -2671,7 +2672,7 @@ export const burndown = async (
   const rough = estimate(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
-    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
+    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
   );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
