@@ -54,7 +54,7 @@ export type ContainerFact = { cpu: string; mem: string; hot: boolean };
 /** One queued ticket, as `sandcastle queue --json` lists it. */
 export type QueueFact = { id: string; updated?: number; blockedOn: string[] };
 
-/** The run settings a settings row draws from, and whose they are: the live run's, the next run's, or the last run's. */
+/** The run settings the SETTINGS lane draws from, and whose they are: the live run's, the next run's, or the last run's. */
 export type SettingsFact = { from: "live" | "next run" | "last run"; settings: Record<string, unknown> | undefined };
 
 /** The sources a snapshot is read from, one collector each (the plan's usage is a field of the run record). */

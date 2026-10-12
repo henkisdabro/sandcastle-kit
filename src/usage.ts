@@ -39,7 +39,7 @@ export const parseUsageStop = (value: string | undefined) => {
 };
 
 // Read only when the check is on: a bad USAGE_STOP must not break `sandcastle doctor`, which never
-// uses it, or `status`, whose settings row leaves the next run's settings unresolved instead.
+// uses it, or `status`, whose SETTINGS lane leaves the next run's settings unresolved instead.
 const usageStopPercent = () => parseUsageStop(process.env.USAGE_STOP);
 
 /** Refuses a bad USAGE_STOP when the run starts - before the image, preflight or any spend - not at the first reading. */
