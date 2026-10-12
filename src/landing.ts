@@ -29,7 +29,7 @@ import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, sh, staleBaseParents } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
@@ -724,6 +724,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   // branch holding a commit the base lacks, where a squash's `-D` is the only delete that works.
   try {
     await host.write(() => sh("git", ["branch", squash ? "-D" : "-d", o.branch], root));
+    forgetFork(root, o.branch);
   } catch (error) {
     // Git's own words: a kept worktree holding the branch is one cause, not the only one.
     console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`);

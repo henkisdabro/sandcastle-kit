@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { MAX_OUTPUT, ownCommitList, sh, staleBaseParents } from "./sandbox.ts";
+import { MAX_OUTPUT, ownCommitList, recordFork, sh, staleBaseParents } from "./sandbox.ts";
 import { covers, type Exec, type Generated, shq } from "./generated.ts";
 
 // `merge-tree --write-tree` arrived in git 2.38.
@@ -297,6 +297,12 @@ export const rebuildOnBase = async (box: Exec, o: { root: string; base: string; 
   if (moved.exitCode !== 0) {
     await restore();
     return held(`could not move the branch onto the rebuilt commits (${lastLine(moved)})`);
+  }
+  // Now forked from the tip it sits on, or the next attempt would read the lost fork point again and rebuild it for good.
+  try {
+    recordFork(root, branch, onto);
+  } catch {
+    /* the fork point stays; the rebuilt branch no longer holds it, so it is read as no part of the branch */
   }
   return { kind: "rebuilt", was, onto, picked, dropped };
 };

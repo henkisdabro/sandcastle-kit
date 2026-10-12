@@ -47,7 +47,7 @@ import {
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
@@ -1477,6 +1477,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
           console.log(`${was} - cut again from ${base}'s tip.`);
         }
+        // Cut again, so it is forked from the base's tip now (`staleBaseParents` reads where a branch began).
+        recordFork(project.root, branch, sh("git", ["rev-parse", `refs/heads/${base}`], project.root));
       } catch (error) {
         if (error instanceof GuardStop) throw error;
         console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
