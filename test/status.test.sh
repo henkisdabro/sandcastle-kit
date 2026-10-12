@@ -20,6 +20,16 @@ LIVE=""
 cleanup() { [ -n "$LIVE" ] && kill "$LIVE" 2>/dev/null; rm -rf "$TMP"; }
 trap cleanup EXIT
 
+# The view under test: SANDCASTLE_TEST_STATUS_IMPL is bash (status.sh, the default; STATUS_BASH names its bash) or ts
+# (the TypeScript view), started as every black-box status test starts it, through test/status-run.ts.
+view() {
+  case "${SANDCASTLE_TEST_STATUS_IMPL:-bash}" in
+    bash) "${STATUS_BASH:-bash}" "$KIT/status.sh" "$@";;
+    ts) node "$KIT/test/status-run.ts" "$@";;
+    *) echo "SANDCASTLE_TEST_STATUS_IMPL is ${SANDCASTLE_TEST_STATUS_IMPL}: bash or ts" >&2; return 2;;
+  esac
+}
+
 fails=0
 # 80 is the narrow pane the view is built for; everything checked must fit it.
 COLS="${COLS:-80}"
@@ -69,7 +79,7 @@ render() {
   PATH="$FAKE:$PATH" FAKE_QUEUE="$1" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
     SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture SANDCASTLE_MODELS="implement next-model/high" \
     TERM_COLS="$COLS" TERM_ROWS="${ROWS:-200}" XDG_CACHE_HOME="$TMP/cache" \
-    "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 "${SHOW:-all}" 2>&1 | sed $'s/\e\\[[0-9;]*m//g' >"$TMP/frame"
+    view 0 "${SHOW:-all}" 2>&1 | sed $'s/\e\\[[0-9;]*m//g' >"$TMP/frame"
   # Nothing wider than the pane: the live view cuts such a line, losing its
   # end. Counted in characters (awk on macOS counts bytes).
   local l
@@ -732,7 +742,7 @@ SCENARIO="live loop, one frame"
 # row left free so the erase below the frame cannot reach it.
 PATH="$FAKE:$PATH" FAKE_QUEUE="$(printf 'checkout-%02d ' $(seq 1 12))" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
   SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture TERM_COLS="$COLS" TERM_ROWS=30 XDG_CACHE_HOME="$TMP/cache" STATUS_FRAMES=1 \
-  "${STATUS_BASH:-bash}" "$KIT/status.sh" 1 >"$TMP/live" 2>&1 </dev/null
+  view 1 >"$TMP/live" 2>&1 </dev/null
 ESC=$'\e'; erased=0; n=0; last=""
 while IFS= read -r l; do
   # Only the frame: the screen set-up and restore codes are not rows.
@@ -754,7 +764,7 @@ SCENARIO="live loop, no terminal"
 mkdir -p "$TMP/no-tty"; printf '#!/bin/sh\nexit 1\n' >"$TMP/no-tty/stty"; chmod +x "$TMP/no-tty/stty"
 env -u TERM_COLS -u TERM_ROWS PATH="$TMP/no-tty:$FAKE:$PATH" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
   SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture XDG_CACHE_HOME="$TMP/cache" STATUS_FRAMES=1 \
-  "${STATUS_BASH:-bash}" "$KIT/status.sh" 1 >"$TMP/live-notty" 2>&1 </dev/null
+  view 1 >"$TMP/live-notty" 2>&1 </dev/null
 if grep -q 'unbound variable' "$TMP/live-notty"; then echo "FAIL [$SCENARIO] $(grep -m1 'unbound variable' "$TMP/live-notty")"; fails=$((fails+1)); fi
 
 # ---------------------------------------------------------------------------
@@ -766,7 +776,7 @@ render ""; plain_rows=$(wc -l <"$TMP/frame")
 PATH="$FAKE:$PATH" FAKE_QUEUE="" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
   SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture SANDCASTLE_MODELS="implement next-model/high" \
   TERM_COLS="$COLS" TERM_ROWS=200 XDG_CACHE_HOME="$TMP/cache" SANDCASTLE_LINKS=1 \
-  "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 all >"$TMP/linked" 2>&1
+  view 0 all >"$TMP/linked" 2>&1
 grep -q $'\e]8;;file://.*/my%20repo/\.sandcastle/logs/agent-issue-[a-z0-9-]*\.log\e\\\\' "$TMP/linked" \
   || { echo "FAIL [$SCENARIO] no ticket links to its log (the space in the path as %20)"; fails=$((fails+1)); }
 sed $'s/\e]8;[^\e]*\e\\\\//g; s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
@@ -789,7 +799,7 @@ SCENARIO="click hint per modifier"
 hinted() { # SANDCASTLE_CLICK_MOD value, expected hint
   PATH="$FAKE:$PATH" FAKE_QUEUE="" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
     SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture TERM_COLS="$COLS" TERM_ROWS=200 XDG_CACHE_HOME="$TMP/cache" \
-    SANDCASTLE_LINKS=1 SANDCASTLE_CLICK_MOD="$1" "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 all >"$TMP/linked" 2>&1
+    SANDCASTLE_LINKS=1 SANDCASTLE_CLICK_MOD="$1" view 0 all >"$TMP/linked" 2>&1
   sed $'s/\e]8;[^\e]*\e\\\\//g; s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
   grep -qF "$2" "$TMP/frame" || { echo "FAIL [$SCENARIO] SANDCASTLE_CLICK_MOD=$1 does not show: $2"; fails=$((fails+1)); }
 }
@@ -808,7 +818,7 @@ SCENARIO="links off, or no plugin marker"
 linkless() { # extra env assignments
   env "$@" PATH="$FAKE:$PATH" FAKE_QUEUE="" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
     SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture TERM_COLS="$COLS" TERM_ROWS=200 XDG_CACHE_HOME="$TMP/cache" \
-    "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 all >"$TMP/linked" 2>&1
+    view 0 all >"$TMP/linked" 2>&1
   ! grep -q $'\e]8;' "$TMP/linked" || { echo "FAIL [$SCENARIO] a link with: $*"; fails=$((fails+1)); }
   sed $'s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
   hasnt 'ctrl-click'
@@ -1101,7 +1111,7 @@ if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TM
 echo "status view: all checks passed"
 # This repo's sandbox image builds macOS's bash 3.2 as bash32 (.sandcastle/Dockerfile): without
 # this second pass, an agent's gate proved bash 5 only and 3.2 breakage surfaced after landing.
-if [ -z "${STATUS_BASH:-}" ] && [ -x /usr/local/bin/bash32 ]; then
+if [ -z "${STATUS_BASH:-}" ] && [ "${SANDCASTLE_TEST_STATUS_IMPL:-bash}" = bash ] && [ -x /usr/local/bin/bash32 ]; then
   echo "status view again under bash32 (bash 3.2):"
   STATUS_BASH=/usr/local/bin/bash32 bash "$0"; exit $?
 fi

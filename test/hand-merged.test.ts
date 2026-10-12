@@ -8,11 +8,12 @@
 //   pnpm test:file test/hand-merged.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -146,7 +147,7 @@ const statusOf = (root: string, ticket: string) => {
   writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "sandcastle"), 0o755);
   chmodSync(join(bin, "docker"), 0o755);
-  const r = spawnSync("bash", [join(import.meta.dirname, "../status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     env: {

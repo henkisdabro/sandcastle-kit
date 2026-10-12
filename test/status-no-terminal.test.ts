@@ -11,8 +11,8 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-no-terminal-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 const REPO = join(TMP, "repo");
@@ -43,7 +43,7 @@ const view = (args: string[], extra: Record<string, string> = {}) => {
   };
   delete env.STATUS_FRAMES;
   Object.assign(env, extra);
-  return spawnSync("bash", [join(KIT, "status.sh"), ...args], {
+  return spawnStatus(args, {
     encoding: "utf8",
     env,
     stdio: ["ignore", "pipe", "pipe"],

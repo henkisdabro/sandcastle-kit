@@ -5,12 +5,13 @@
 //   pnpm test:file test/usage-guard-settings.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { RunRecord } from "../mod/hooks/run-record.ts";
+import { spawnStatus } from "./status-run.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -21,7 +22,6 @@ const { recordRun } = await import("../src/run.ts");
 const { OperatorError } = await import("../src/errors.ts");
 type Project = Parameters<typeof recordRun>[0];
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-usage-guard-settings-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 
@@ -105,7 +105,7 @@ const row = (cols: number): string | undefined => {
     XDG_CACHE_HOME: join(TMP, "cache"),
   };
   delete env.SANDCASTLE_SETTINGS;
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const lines = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
   for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
   const at = lines.findIndex((l) => l.startsWith("│ settings "));

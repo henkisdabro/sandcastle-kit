@@ -5,13 +5,13 @@
 //   pnpm test:file test/status-settings.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-settings-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 const REPO = join(TMP, "repo");
@@ -48,7 +48,7 @@ const frame = (cols: number, next?: string): string[] => {
   };
   delete env.SANDCASTLE_SETTINGS;
   if (next !== undefined) env.SANDCASTLE_SETTINGS = next;
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const lines = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
   for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
   return lines;

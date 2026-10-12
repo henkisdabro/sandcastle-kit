@@ -8,12 +8,13 @@
 //   pnpm test:file test/status-landing-wait.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
+import { spawnStatus } from "./status-run.ts";
 
 const { createSlotWaits } = await import("../src/burndown.ts");
 
@@ -76,7 +77,7 @@ const render = (fields: Record<string, unknown>) => {
       ...fields,
     }),
   );
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     env: {
       ...process.env,

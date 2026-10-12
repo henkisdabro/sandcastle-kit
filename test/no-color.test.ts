@@ -7,12 +7,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { type Facts, render } from "../src/report.ts";
-
-const KIT = join(dirname(fileURLToPath(import.meta.url)), "..");
+import { scriptArgs, spawnStatus } from "./status-run.ts";
 
 const facts: Facts = {
   base: "main",
@@ -79,7 +77,7 @@ const env = (extra: Record<string, string> = {}) => {
   delete e.NO_COLOR;
   return Object.assign(e, extra);
 };
-const status = (extra: Record<string, string> = {}) => spawnSync("bash", [join(KIT, "status.sh"), "0"], { encoding: "utf8", env: env(extra) });
+const status = (extra: Record<string, string> = {}) => spawnStatus(["0"], { encoding: "utf8", env: env(extra) });
 
 test("status.sh piped has no colour codes", () => {
   const r = status();
@@ -97,11 +95,9 @@ test("status.sh piped with NO_COLOR=1 has no colour codes", () => {
 // On a terminal the view is unchanged unless NO_COLOR is set. `script` gives it a pty; its
 // syntax differs between BSD (macOS) and util-linux.
 const onPty = (extra: Record<string, string> = {}) => {
-  const cmd = join(KIT, "status.sh");
-  const args = process.platform === "linux" ? ["-qec", `bash '${cmd}' 0`, "/dev/null"] : ["-q", "/dev/null", "bash", cmd, "0"];
   // No stdin: Node's default is a socket, and BSD script refuses one
   // ("tcgetattr/ioctl: Operation not supported on socket") - util-linux does not mind.
-  return spawnSync("script", args, { encoding: "utf8", env: env(extra), stdio: ["ignore", "pipe", "pipe"] });
+  return spawnSync("script", scriptArgs(["0"]), { encoding: "utf8", env: env(extra), stdio: ["ignore", "pipe", "pipe"] });
 };
 const hasScript = spawnSync("script", ["--version"], { stdio: "ignore" }).error === undefined;
 
