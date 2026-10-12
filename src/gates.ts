@@ -33,7 +33,19 @@ type Failure = { name: string; command: string; exitCode: number; output: string
 // `pressureSome`, `pressureFull`: the highest memory pressure (`avg10`, percent) read in the sandbox while this pass ran; absent at 0 or where the kernel gives none.
 // `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
 // `rewrote`: the tracked files the gates changed in the worktree, which were put back.
-export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; pressureSome?: number; pressureFull?: number; head?: string; rewrote?: string[] };
+export type GateRun = {
+  gates: Gate[];
+  failure?: Failure;
+  failures: Failure[];
+  waitMs?: number;
+  peakMib?: number;
+  pressureSome?: number;
+  pressureFull?: number;
+  head?: string;
+  rewrote?: string[];
+  /** Set when `runGates` ran the red gate again inside the same slot (`rerunOnRed`): the run that went red. This result is the re-run's, its `gates` the passes before the red gate and then the re-run's. */
+  rerunOf?: GateRun;
+};
 
 // Start and end of a gate's output: the first compiler error is at the top,
 // the test summary at the bottom, and a whole log would swamp the prompt.
@@ -54,6 +66,8 @@ export type GateProgress = {
   gate?: (index: number, name: string) => void;
   /** Each gate's output is appended here as it arrives. */
   log?: string;
+  /** The run went red and starts again from gate `name` in the same slot (`runGates`' `rerunOnRed`): the caller's section header for it. */
+  again?: (name: string) => void;
 };
 
 // One decimal under 10 s: gates average a few seconds, and "green in 0s" says
@@ -117,17 +131,14 @@ const restoreGateChanges = async (sandbox: Parameters<typeof execGate>[0], befor
 // `from` names the gate to start at, the first by default: a red gate's re-run (`PipelineContext.regate`) goes on
 // from the red one, in config order, since the gates before it already passed on this tree. The log and the
 // progress keep the configured numbering (`gate 2/3`), and a name that is no gate starts at the first.
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string) => {
+export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false) => {
   const asked = Date.now();
-  const start = Math.max(0, project.gates.findIndex((g) => g.name === from));
-  return withSlot("gates", label, async (): Promise<GateRun> => {
-    const waitMs = Date.now() - asked;
+  const startAt = (name?: string) => Math.max(0, project.gates.findIndex((g) => g.name === name));
+  const log = progress.log;
+  // One pass over the gates from `start`, in a slot the caller holds.
+  const pass = async (start: number): Promise<GateRun> => {
     const gates: Gate[] = [];
     const failures: Failure[] = [];
-    const log = progress.log;
-    // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
-    // wait reads as a gap between the section's header and its first gate.
-    if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
     const before = await dirtyPaths(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     const pressure: Pressure = {};
@@ -167,7 +178,24 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     }, pressure);
     const peakMib = await samplePeak(sandbox);
     const rewrote = await restoreGateChanges(sandbox, before);
-    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
+    return { gates, failure: failures[0], failures, ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
+  };
+  return withSlot("gates", label, async (): Promise<GateRun> => {
+    const waitMs = Date.now() - asked;
+    // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
+    // wait reads as a gap between the section's header and its first gate.
+    if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
+    const first = await pass(startAt(from));
+    const red = first.failure;
+    const redAt = red ? first.gates.findIndex((g) => g.name === red.name) : -1;
+    // The red gate's one re-run (`PipelineContext.regate`) is inside this slot: a second `withSlot` would queue behind
+    // every other run's gates again, minutes for a re-run meant to find out whether the machine was only busy. The
+    // wait is the first run's, so the re-run records none. Not after a timeout, which is never re-run or repaired.
+    if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return { ...first, waitMs };
+    progress.again?.(red.name);
+    const rerun = await pass(startAt(red.name));
+    // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
+    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs } };
   }, progress.wait, undefined, priority);
 };
 
