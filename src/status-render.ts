@@ -82,36 +82,31 @@ const digits = (s: string) => /^[0-9]+$/.test(s);
 
 /**
  * Moves each inner bar of `widths` that lies within 4 columns of a bar of the band above (`refs`) onto it, so
- * the two meet in one ┼ rather than a near-miss like ┴┬. `mins` are the least each cell may be (one already
- * narrower keeps its width): a bar whose move would cut a cell stays, and the band still fills the window,
- * the last cell taking the remainder.
+ * the two meet in one ┼ rather than a near-miss like ┴┬; a bar that cannot move onto it without cutting a cell
+ * moves away instead, to the nearest column at least 5 from every bar above. `mins` are the least each cell
+ * may be (one already narrower keeps its width), and the band still fills the window, the last cell taking the
+ * remainder.
  */
 export const snap = (widths: number[], refs: number[], mins: number[], win: number): number[] => {
   const n = widths.length;
   const mn = widths.map((w, i) => Math.min(mins[i] ?? 0, w));
   const suf: number[] = Array.from({ length: n + 1 }, () => 0);
   for (let i = n - 1; i >= 0; i--) suf[i] = suf[i + 1]! + mn[i]! + 1;
+  const clear = (q: number) => refs.every((r) => r === q || Math.abs(r - q) > 4);
   const pos: number[] = [];
   let acc = 0;
   let prev = 0;
   for (let i = 0; i < n - 1; i++) {
     acc += widths[i]! + 1;
     const p = acc;
-    let best = p;
-    let bd = 5;
-    for (const r of refs) {
-      const d = Math.abs(r - p);
-      if (d < bd) {
-        bd = d;
-        best = r;
-      }
-    }
-    // A move that cuts this cell or leaves the later ones too little stays put.
-    if (best !== p && (best - prev - 1 < mn[i]! || win - 1 - best < suf[i + 1]!)) best = p;
-    // An earlier move right may have squeezed this cell.
-    if (best < prev + 1 + mn[i]!) best = prev + 1 + mn[i]!;
-    pos.push(best);
-    prev = best;
+    // Where this bar may go: no cell cut, this one or the later ones.
+    const [lo, hi] = [prev + 1 + mn[i]!, win - 1 - suf[i + 1]!];
+    const fits = (q: number) => q >= lo && q <= hi;
+    const onto = refs.filter((r) => Math.abs(r - p) <= 4 && fits(r)).sort((a, b) => Math.abs(a - p) - Math.abs(b - p))[0];
+    let best: number | undefined = onto;
+    for (let d = 0; best === undefined && d <= win; d++) best = [p - d, p + d].find((q) => fits(q) && clear(q));
+    // Nowhere clear: it stays, unless an earlier move right squeezed this cell.
+    pos.push((prev = Math.max(best ?? p, lo)));
   }
   const out: number[] = [];
   prev = 0;
@@ -122,6 +117,9 @@ export const snap = (widths: number[], refs: number[], mins: number[], win: numb
   out.push(win - 2 - prev);
   return out;
 };
+
+/** Whether a bar of one band lies 1 to 4 columns from a bar of the other: a near-miss joint like ┴┬ in the rule between them. */
+const nearMiss = (bars: number[], refs: number[]) => bars.some((b) => refs.some((r) => b !== r && Math.abs(b - r) <= 4));
 
 /** Items joined by `sep` into as few lines of `width` cells as they fit. */
 export const wrapItems = (width: number, items: string[], sep: string): string[] => {
@@ -265,10 +263,15 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
 
   // RUN: the state and when the run started, its turn (and the estimated end), its tokens.
   const runLane = (): string[] => {
-    if (loading("record")) return [`${c.gry}○${c.off} ${c.mute}loading…${c.off}`, "", ""];
-    if (!snapshot.hasRecord) return [`${c.gry}○${c.off} ${c.mute}no run recorded yet${c.off}`, "", ""];
+    // An API key the sandboxes spend: never silent, so red, in words, beside the tokens it bills - the first lane,
+    // so it is shown at any width; the next run's too, before any run is recorded.
+    const api = s?.apiKey === true ? `${c.hot}● API credits${c.off}` : "";
+    if (loading("record")) return [`${c.gry}○${c.off} ${c.mute}loading…${c.off}`, "", api];
+    if (!snapshot.hasRecord) return [`${c.gry}○${c.off} ${c.mute}no run recorded yet${c.off}`, "", api];
     const t0 = utcEpoch(text(record.startedAt));
     const started = when(t0, now);
+    // A record with no start time says nothing of when the run started, rather than 1 January 1970.
+    const startedAt = (word: string) => (t0 ? `${dot}${c.mute}${word} ${started}${c.off}` : "");
     const stage = text(record.stage) === "running" ? "" : text(record.stage);
     const dry = record.dryRun ? "dry run" : "";
     const finished = text(record.finishedAt);
@@ -277,23 +280,20 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
     const turn = s && digits(text(s.turn)) ? `${c.mute}turn${c.off} ${c.head}${text(s.turn)}${turnCap ? `/${turnCap}` : ""}${c.off}` : "";
     let first: string;
     let second: string[] = [];
-    if (finished) first = `${c.gry}○${c.off} ${c.mute}ended (exit ${text(record.exitCode)})${c.off}${dot}${c.mute}started ${started}${c.off}`;
+    if (finished) first = `${c.gry}○${c.off} ${c.mute}ended (exit ${text(record.exitCode)})${c.off}${startedAt("started")}`;
     else if (live && typeof record.stopped === "string" && record.stopped !== "") {
       // The guard stopped the landing: what is in flight still finishes, nothing more lands - and a stop ends a
       // pause, so the lane never reads PAUSED for a run that cannot resume.
-      first = `${c.hot}●${c.off} ${c.bold}${c.hot}STOPPED${c.off} ${c.mute}landing${c.off}${dot}${c.mute}${duration(now - t0)}${c.off}${dot}${c.mute}since ${started}${c.off}`;
+      first = `${c.hot}●${c.off} ${c.bold}${c.hot}STOPPED${c.off} ${c.mute}landing${c.off}${t0 ? `${dot}${c.mute}${duration(now - t0)}${c.off}` : ""}${startedAt("since")}`;
       second = [`${c.mute}lands nothing more${c.off}`];
-    } else if (live && p) [first, second] = pausedRows(p, started);
+    } else if (live && p) [first, second] = pausedRows(p, t0 ? started : "");
     else if (live) {
       // The stage says what a run is doing before its first sandbox exists, and after its last: "landing 6/25".
-      first = `${c.ylw}● running${c.off}${dry ? ` ${c.accent}${dry}${c.off}` : ""}${dot}${c.mute}${duration(now - t0)}${c.off}${stage ? `${dot}${c.accent}${stage}${c.off}` : ""}${dot}${c.mute}since ${started}${c.off}`;
+      first = `${c.ylw}● running${c.off}${dry ? ` ${c.accent}${dry}${c.off}` : ""}${t0 ? `${dot}${c.mute}${duration(now - t0)}${c.off}` : ""}${stage ? `${dot}${c.accent}${stage}${c.off}` : ""}${startedAt("since")}`;
       const ends = runEnds(record, snapshot.tickets, now);
       if (ends !== undefined) second = [`${c.mute}ends${c.off} ${c.accent}~${hhmm(ends)}${c.off}`];
-    } else first = `${c.hot}● killed${c.off}${dot}${c.mute}no clean exit${c.off}${dot}${c.mute}started ${started}${c.off}`;
-    // An API key the sandboxes spend: never silent, so red, in words, beside the tokens it bills - the first lane,
-    // so it is shown at any width.
-    const api = s?.apiKey === true ? `${dot}${c.hot}● API credits${c.off}` : "";
-    return [first, [turn, ...second].filter(Boolean).join(dot), `${c.mute}tokens${c.off} ${text(record.tokens) || `${c.gry}-${c.off}`}${api}`];
+    } else first = `${c.hot}● killed${c.off}${dot}${c.mute}no clean exit${c.off}${startedAt("started")}`;
+    return [first, [turn, ...second].filter(Boolean).join(dot), `${c.mute}tokens${c.off} ${text(record.tokens) || `${c.gry}-${c.off}`}${api ? `${dot}${api}` : ""}`];
   };
 
   // A paused run: `PAUSED since 15:40`, and the tickets that still finish a pass or a landing. A run that paused
@@ -308,7 +308,7 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
         return `${shownId(id)}${word ? ` ${word}` : ""}`;
       })
       .join(", ");
-    const rest = list ? `${c.mute}finishing${c.off} ${c.head}${list}${c.off}` : `${c.mute}started ${began}${c.off}`;
+    const rest = list ? `${c.mute}finishing${c.off} ${c.head}${list}${c.off}` : began ? `${c.mute}started ${began}${c.off}` : "";
     const usage = p.cause === "usage" && (p.window === "fiveHour" || p.window === "week") && typeof p.percent === "number" && typeof p.resumesAt === "number";
     if (usage) {
       const percent = Math.max(Math.min(Math.floor(p.percent!), 100), 0);
@@ -473,6 +473,9 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
       })
       .join(`${c.rule} │ ${c.off}`);
 
+  // An unreadable queue is not an empty one, and neither is one still being read: said under the band.
+  const queueNote = loading("queue") ? "queue: loading…" : snapshot.queue.error ? `queue: could not read - ${snapshot.queue.error}` : "";
+
   const header = (logo: 3 | 1): { lines: string[]; band: boolean } => {
     const out: string[] = [];
     const LG = logoRows(logo);
@@ -481,10 +484,19 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
     let shown = 0;
     const beside = fits([logoNeed, ...needs.slice(0, Math.min(3, lanes.length))]);
     if (beside) {
-      // Beside the logo: the lanes that fit, in order, after it.
       shown = Math.min(3, lanes.length);
       while (shown < lanes.length && fits([logoNeed, ...needs.slice(0, shown + 1)])) shown++;
-      const widths = spread([logoNeed, ...needs.slice(0, shown)]);
+    } else while (shown < lanes.length && fits(needs.slice(0, shown + 1))) shown++;
+    // The lanes' cells, their bars snapped onto the table's. The rule under the lanes meets the table's when no
+    // line comes between: a bar that still misses one by a column or few folds the last lane into the summary
+    // line, which comes between.
+    const cells = (k: number) => (beside ? [logoNeed, ...needs.slice(0, k)] : needs.slice(0, k));
+    const place = (k: number) => snap(spread(cells(k)), tbars, cells(k), WIN);
+    const meets = (k: number) => k === lanes.length && !queueNote;
+    while (shown > 1 && meets(shown) && nearMiss(barsOf(place(shown)), tbars)) shown--;
+    if (beside) {
+      // Beside the logo: the lanes that fit, in order, after it.
+      const widths = place(shown);
       bars = barsOf(widths);
       out.push(titled("┌", "┐", bars, lanes.slice(0, shown).map((lane, i) => ({ x: bars[i]!, name: lane.name }))));
       const logoAt = logo === 3 ? LG : ["", LG[0]!, ""];
@@ -493,9 +505,8 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
       // The logo on a band of its own, the lanes that fit in a row beneath it.
       out.push(junction("┌", "┐", [], []));
       for (const l of LG) out.push(line([WIN - 2], [l], ["c"]));
-      while (shown < lanes.length && fits(needs.slice(0, shown + 1))) shown++;
       if (shown > 0) {
-        const widths = spread(needs.slice(0, shown));
+        const widths = place(shown);
         bars = barsOf(widths);
         out.push(titled("├", "┤", bars, lanes.slice(0, shown).map((lane, i) => ({ x: i === 0 ? 0 : bars[i - 1]!, name: lane.name }))));
         for (let i = 0; i < 3; i++) out.push(line(widths, lanes.slice(0, shown).map((lane) => lane.rows[i] ?? ""), lanes.map(() => "l")));
@@ -507,8 +518,6 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
       out.push(line(one, [summary(lanes.slice(shown))], ["l"]));
       bars = [];
     }
-    // An unreadable queue is not an empty one, and neither is one still being read: say so, under the band.
-    const queueNote = loading("queue") ? "queue: loading…" : snapshot.queue.error ? `queue: could not read - ${snapshot.queue.error}` : "";
     if (queueNote) {
       out.push(junction("├", "┤", bars, []));
       out.push(line(one, [`${c.mute}${queueNote}${c.off}`], ["l"]));
@@ -537,26 +546,26 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   const NOTE: string[] = [];
   // The view reads git, not the agents' notes: the closing summary counts a merged ticket left open under "needs you".
   if (table.partly > 0) NOTE.push(`${c.gry}${table.partly} merged, partly done (ticket open)${c.off}`, `${c.gry}the closing summary counts it under needs you${c.off}`);
-  NOTE.push(`${c.gry}ready = gates green, waits for the landing worker${c.off}`, `${c.gry}time = in state, ~ roughly what it usually has left; once finished, start to end${c.off}`, `${c.gry}red time = past twice the usual${c.off}`);
+  NOTE.push(`${c.gry}ready = gates green, waits for the landing worker${c.off}`, `${c.gry}time = in state, ~ what it usually has left; once finished, start to end${c.off}`, `${c.gry}red time = past twice the usual${c.off}`);
   if (has("TOKENS")) NOTE.push(`${c.gry}tokens = in, % of it from cache (amber under ${CACHE_AMBER}%), out${c.off}`);
   if (has("CPU/MEM")) NOTE.push(`${c.gry}CPU in cores of ${snapshot.cpus}${c.off}`);
   if (snapshot.links) NOTE.push(`${c.gry}${HINT_TEXT[snapshot.clickMod === "ctrl" || snapshot.clickMod === "cmd" ? snapshot.clickMod : "fallback"]}${c.off}`);
   // Cells as wide as their text needs: every item on one row from 130 columns where they fit (halved until they
-  // do), else rows of four, or of two where four do not fit.
+  // do), else rows of four, or of two where four do not fit. The legend's bars snap onto the table's, so the seam
+  // between them has no near-miss joints; a row whose bars cannot is halved too.
   let per = cols < 130 ? 4 : LEG.length;
-  let LWT: number[];
+  let lw: number[];
   for (;;) {
-    LWT = [];
+    const LWT: number[] = [];
     for (let col = 0; col < per; col++) {
       let w = 0;
       for (let r = col; r < LEG.length; r += per) w = Math.max(w, visibleWidth(LEG[r]!));
       LWT.push(w + 4);
     }
-    if (per <= 2 || LWT.reduce((a, b) => a + b, 0) + per + 1 <= WIN) break;
+    lw = snap(splitColumns(WIN, LWT), tbars, LWT, WIN);
+    if (per <= 2 || (LWT.reduce((a, b) => a + b, 0) + per + 1 <= WIN && !nearMiss(barsOf(lw), tbars))) break;
     per = Math.floor((per + 1) / 2);
   }
-  // The legend's bars snap onto the table's, so the seam between them has no near-miss joints.
-  const lw = snap(splitColumns(WIN, LWT), tbars, LWT, WIN);
   const lbars = barsOf(lw);
   const footer: string[] = [];
   for (let r = 0; r < LEG.length; r += per) footer.push(line(lw, LEG.slice(r, r + per), lw.map(() => "c")));

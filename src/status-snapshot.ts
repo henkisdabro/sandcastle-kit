@@ -15,7 +15,7 @@
 // kit wrote in another shape empties only itself.
 
 import { spawn } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isKit, liveness } from "../mod/hooks/run-live.ts";
@@ -156,11 +156,29 @@ export const latestPhaseLog = (logs: LogFact[], id: string): LogFact | undefined
 /** The newest log of any kind of a ticket: what its link opens. */
 export const latestLog = (logs: LogFact[], id: string): LogFact | undefined => newestLogs(logs, [`agent-issue-${id}-*-${id}.log`])[0];
 
+// Text from a log, the run record or the tracker reaches the terminal inside a frame: an escape sequence in it
+// could set the window title, write the clipboard (OSC 52) or clear the screen, and any control character moves
+// the cursor mid-frame. Whole sequences go first, so no `[2J` is left behind; then every other control.
+// oxlint-disable-next-line no-control-regex -- the escape byte is what the pattern removes
+const SEQUENCES = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-_])?/g;
+// oxlint-disable-next-line no-control-regex -- the control characters are what the pattern removes
+const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
+
+/** `s` with no escape sequence or control character left: a tab or line break is a space. */
+export const plainText = (s: string): string => s.replace(SEQUENCES, "").replace(/[\t\n\r]/g, " ").replace(CONTROLS, "");
+
+/** Every string in a value read from a file, keys too, as plain text. */
+const plainAll = (v: unknown): unknown =>
+  typeof v === "string" ? plainText(v) : Array.isArray(v) ? v.map(plainAll) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [plainText(k), plainAll(x)])) : v;
+
 const FRAMING = /^(Agent|Run|Capturing|Collecting|Syncing|Context)/;
 
 /** The last line of a log that says something, made readable: the raw line is agent transcript, not a status. */
 export const activityOf = (text: string): string => {
-  const lines = text.split("\n").filter((l) => !/^\s*$/.test(l) && !FRAMING.test(l));
+  const lines = text
+    .split("\n")
+    .map(plainText)
+    .filter((l) => !/^\s*$/.test(l) && !FRAMING.test(l));
   const last = lines.at(-1);
   if (last === undefined) return "";
   const said = last
@@ -231,6 +249,9 @@ export const freeSlots = (record: RunRecord, tickets: Record<string, TicketRecor
 
 type Ran = { status: number | null; stdout: string; stderr: string };
 
+/** How long a command given up has to end on TERM before its process group is killed. */
+const KILL_AFTER_MS = 2000;
+
 /**
  * Runs a command in a process group of its own and answers what it printed; a command that cannot start answers
  * status null, as spawnSync does. When `signal` aborts, the whole group is ended (a command it waits on too) and
@@ -242,12 +263,26 @@ const run = (command: string, args: string[], signal: AbortSignal, { cwd, env }:
     const child = spawn(command, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    const abort = () => {
+    const end = (name: NodeJS.Signals) => {
       try {
-        if (child.pid) process.kill(-child.pid, "SIGTERM");
+        if (child.pid) process.kill(-child.pid, name);
       } catch {
         // already gone
       }
+    };
+    const abort = () => {
+      end("SIGTERM");
+      // A command that ignores TERM would keep its pipes open, and a one-off frame waiting on them, past the
+      // deadline: its group is killed a moment later, or as soon as it exits (what it started goes with it).
+      // Its output is not wanted any more, so nothing of it but the kill keeps the process alive.
+      const kill = setTimeout(() => end("SIGKILL"), KILL_AFTER_MS);
+      child.once("exit", () => {
+        clearTimeout(kill);
+        end("SIGKILL");
+      });
+      child.stdout!.destroy();
+      child.stderr!.destroy();
+      child.unref();
       fail(signal.reason);
     };
     signal.addEventListener("abort", abort, { once: true });
@@ -302,19 +337,21 @@ export type DockerPart = Pick<Snapshot, "containers" | "cpus">;
 /** The machine pool's slots in use. */
 export type PoolPart = Snapshot["pool"];
 
-// The end of a log is what a row shows; a log can be megabytes of transcript.
+// The end of a log is what a row shows; a log can be megabytes of transcript, so only its end is read.
 const TAIL_BYTES = 64 * 1024;
-const readTail = async (file: string): Promise<string | undefined> => {
+export const readTail = async (file: string): Promise<string | undefined> => {
   try {
-    const text = await readFile(file);
-    return text.subarray(Math.max(0, text.length - TAIL_BYTES)).toString("utf8");
+    const { size } = await stat(file);
+    const chunks: Buffer[] = [];
+    for await (const chunk of createReadStream(file, { start: Math.max(0, size - TAIL_BYTES) })) chunks.push(chunk as Buffer);
+    return Buffer.concat(chunks).toString("utf8");
   } catch {
     return undefined;
   }
 };
 
 const readOutcomes = async (file: string): Promise<Record<string, OutcomeFact>> => {
-  const raw = await readJson(file);
+  const raw = plainAll(await readJson(file));
   if (!isObject(raw)) return {};
   const text = (v: unknown) => (v === undefined || v === null || v === false ? "" : typeof v === "string" ? v : JSON.stringify(v));
   return Object.fromEntries(
@@ -336,13 +373,7 @@ const readRunOutput = async (file: string): Promise<string[]> => {
     .split("\n")
     .filter((l) => !/^\s*$/.test(l))
     .slice(-3)
-    .map((l) =>
-      l
-        .replace(/\r/g, "")
-        .replace(/\t/g, " ")
-        // oxlint-disable-next-line no-control-regex -- the escape byte is what the pattern removes
-        .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ""),
-    );
+    .map((l) => plainText(l.replace(/\r/g, "")));
 };
 
 /** The tickets a live run records, and those only the logs name (inferred): which branches git is asked about. */
@@ -357,7 +388,7 @@ export const readRecord = async (dir: string, env: NodeJS.ProcessEnv, signal: Ab
   const logsDir = join(dir, "logs");
   const recordFile = join(logsDir, "run.json");
   const hasRecord = await exists(recordFile);
-  const raw = hasRecord ? await readJson(recordFile) : undefined;
+  const raw = hasRecord ? plainAll(await readJson(recordFile)) : undefined;
   const record = (isObject(raw) ? raw : {}) as RunRecord;
   const tickets = readTickets(raw);
   const pid = typeof record.pid === "number" && Number.isInteger(record.pid) && record.pid > 0 ? record.pid : undefined;
@@ -366,7 +397,7 @@ export const readRecord = async (dir: string, env: NodeJS.ProcessEnv, signal: Ab
 
   let logs: LogFact[] = [];
   try {
-    const names = (await readdir(logsDir)).filter((n) => n.startsWith("agent-issue-") && n.endsWith(".log"));
+    const names = (await readdir(logsDir)).filter((n) => n.startsWith("agent-issue-") && n.endsWith(".log") && plainText(n) === n);
     logs = (
       await Promise.all(
         names.map(async (name) => {
@@ -384,7 +415,7 @@ export const readRecord = async (dir: string, env: NodeJS.ProcessEnv, signal: Ab
 
   let worktrees: string[] = [];
   try {
-    worktrees = (await readdir(join(dir, "worktrees"))).filter((n) => n.startsWith("agent-issue-")).map((n) => n.slice("agent-issue-".length));
+    worktrees = (await readdir(join(dir, "worktrees"))).filter((n) => n.startsWith("agent-issue-") && plainText(n) === n).map((n) => n.slice("agent-issue-".length));
   } catch {
     // none
   }
@@ -588,14 +619,13 @@ export const readPool = async (env: NodeJS.ProcessEnv, signal: AbortSignal): Pro
 export const readQueue = async (env: NodeJS.ProcessEnv, dir: string, signal: AbortSignal): Promise<QueueFact[]> => {
   const r = await run(env.SANDCASTLE_BIN || "sandcastle", ["queue", "--json"], signal, { cwd: dir, env });
   if (r.status !== 0) {
-    // The first line that says something; control characters out, so an escape code cannot move the cursor mid-frame.
-    // oxlint-disable-next-line no-control-regex -- the control characters are what the pattern removes
-    const said = r.stderr.replace(/[\x00-\x08\x0b-\x1f]/g, "").split("\n").find((l) => /\S/.test(l));
+    // The first line that says something, as plain text.
+    const said = r.stderr.split("\n").map(plainText).find((l) => /\S/.test(l));
     throw new Error(said || "sandcastle queue failed");
   }
   let list: unknown;
   try {
-    list = JSON.parse(r.stdout);
+    list = plainAll(JSON.parse(r.stdout));
   } catch {
     list = undefined;
   }
@@ -699,7 +729,7 @@ export const createCollector = <T>({ read, deadline, onChange }: { read: (signal
 /** How long each source's refresh may take before it is given up: the queue asks a tracker over the network. */
 export const DEADLINES: Record<SourceName, number> = { record: 10_000, git: 30_000, docker: 30_000, queue: 60_000, pool: 10_000 };
 
-/** The queue is read at most once a minute, unless the run record changed (a run starting or ending changes the queue). */
+/** The queue is read at most once a minute, unless the run record's run or stage changed (a run starting, landing or ending changes the queue). */
 export const QUEUE_CACHE_MS = 60_000;
 
 export type Readings = {
@@ -717,7 +747,7 @@ export type Sources = {
   answered: () => boolean;
   /**
    * Refreshes every source not already refreshing: the record and then git (which asks about the record's
-   * tickets), Docker and the pool at once, and the queue when its minute is up or the record changed since.
+   * tickets), Docker and the pool at once, and the queue when its minute is up or the record's run or stage changed since.
    */
   refresh: () => Promise<void>;
   /** Gives up every refresh in flight, ending what each started; nothing starts after. */
@@ -732,24 +762,26 @@ export const createSources = (dir: string, env: NodeJS.ProcessEnv, onChange?: ()
   const queue = createCollector({ read: (signal) => readQueue(env, dir, signal), deadline: DEADLINES.queue, onChange });
   const pool = createCollector({ read: (signal) => readPool(env, signal), deadline: DEADLINES.pool, onChange });
   const all = { record, git: gitSource, docker, queue, pool };
-  // The run record's change time, as the queue cache keys on it: a run rewrites it when it starts and
-  // when it exits, having closed what it landed.
-  const recordTime = () => {
+  // What the queue cache keys on besides its minute: the run record's run and where it stands. A run rewrites the
+  // record every few seconds while it works, but starts, lands (its stage) and exits, having closed what it
+  // landed, far less often - only those change the queue.
+  const recordState = () => {
     try {
-      return statSync(join(dir, "logs/run.json")).mtimeMs;
+      const r = JSON.parse(readFileSync(join(dir, "logs/run.json"), "utf8")) as Record<string, unknown>;
+      return JSON.stringify([r.startedAt, r.finishedAt, r.stage, r.pid]);
     } catch {
-      return 0;
+      return "";
     }
   };
   let queuedAt: number | undefined;
-  let queuedFor = 0;
+  let queuedFor = "";
   return {
     readings: () => ({ record: record.reading, git: gitSource.reading, docker: docker.reading, queue: queue.reading, pool: pool.reading }),
     answered: () => Object.values(all).every((c) => c.reading.status !== "loading"),
     refresh: () => {
       const waits = [record.refresh().then(() => gitSource.refresh()), docker.refresh(), pool.refresh()];
       const t = performance.now();
-      const changed = recordTime();
+      const changed = recordState();
       if (!queue.busy && (queuedAt === undefined || t - queuedAt >= QUEUE_CACHE_MS || changed !== queuedFor)) {
         [queuedAt, queuedFor] = [t, changed];
         waits.push(queue.refresh());

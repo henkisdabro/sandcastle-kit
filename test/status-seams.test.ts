@@ -1,7 +1,9 @@
 // The status view's rules are light (─ with ┼ ┴ ┬) at every seam, and as wide as the pane: a
 // double rule drew a column above stopping on one hairline and the column below starting on
-// the other.
-// A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
+// the other. The bars of one band meet the bars of the band above in one ┼ or stay at least
+// 5 columns from them: a near-miss like ┴─┬ reads as a broken grid (#722).
+// A made-up project, the status fixtures' live, legacy and ended runs, and fake `sandcastle` and
+// `docker`; no Docker, no network.
 //
 //   pnpm test:file test/status-seams.test.ts
 
@@ -11,7 +13,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { spawnStatus } from "./status-run.ts";
+import { buildFixture, type FixtureKind } from "./status-fixture.ts";
+import { drawFrame, spawnStatus } from "./status-run.ts";
 
 const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-seams-"));
@@ -51,16 +54,42 @@ const render = (cols: number): string => {
 // Panes from the standard 80 columns to a wide one, on both sides of each layout change.
 const WIDTHS = [80, 100, 110, 120, 130, 150, 170, 180, 200];
 
+/** The joints of each rule (a lane's title in it included) that lie 1 to 4 columns from the one before. */
+const nearMisses = (text: string, cols: number): string[] =>
+  text
+    .split("\n")
+    .filter((l) => /^[┌├└][─┬┴┼ A-Z]+[┐┤┘]$/.test(l))
+    .flatMap((l) => {
+      const joints = [...l].flatMap((c, i) => (i > 0 && i < cols - 1 && /[┬┴┼]/.test(c) ? [i] : []));
+      return joints.flatMap((j, k) => (k > 0 && j - joints[k - 1]! <= 4 ? [`joints ${joints[k - 1]} and ${j} in ${l}`] : []));
+    });
+
 for (const cols of WIDTHS) {
   const text = render(cols);
   const lines = text.split("\n").filter((l) => l !== "");
   const rules = lines.filter((l) => /^[┌├└][─┬┴┼]+[┐┤┘]$/.test(l));
+
+  test(`at ${cols} columns no two joints of a rule are within 4 columns`, () => {
+    assert.deepEqual(nearMisses(text, cols), []);
+  });
 
   test(`at ${cols} columns every rule is light and as wide as the pane`, () => {
     assert.ok(rules.length >= 5, `only ${rules.length} rules in the view`);
     // No heavy rule or double joint anywhere in the view.
     assert.ok(!/[═╞╡╪╧╤]/.test(text), "a double rule is left in the view");
     for (const l of lines) if (/^[┌├└│]/.test(l)) assert.equal([...l].length, cols, l);
+  });
+}
+
+// The fixtures fill every lane and every legend group, at the common widths and at each side of the layout's changes.
+for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
+  test(`the ${kind} run's frame has no near-miss joints at the common widths`, () => {
+    const fixture = buildFixture(kind, join(TMP, kind));
+    try {
+      for (const cols of [72, 80, 83, 100, 110, 120, 132, 135, 148, 154, 160, 165, 200, 210, 240]) assert.deepEqual(nearMisses(drawFrame(fixture, { cols }).frame, cols), [], `${cols} columns`);
+    } finally {
+      fixture.stop();
+    }
   });
 }
 

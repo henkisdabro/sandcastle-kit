@@ -114,3 +114,9 @@ test("idle with no record at all draws no settings, and the next run's settings 
   assert.deepEqual(items(100), []);
   assert.deepEqual(items(100, JSON.stringify(group)), ["next run: autonomy 3"]);
 });
+
+test("idle with no record, the next run spending an API key is said in red in the run lane at any width", () => {
+  rmSync(join(LOGS, "run.json"), { force: true });
+  for (const cols of [60, 80, 100, 200]) assert.equal(frame(cols, JSON.stringify({ ...group, apiKey: true })).run.api, "API credits", `${cols} columns`);
+  assert.equal(frame(100, JSON.stringify(group)).run.api, undefined);
+});

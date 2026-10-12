@@ -123,11 +123,12 @@ const expectedColumns = (cols: number): [string, number][] => {
 // The lanes' widths, padding included, from their widest rows: RUN 33 ("● running · 2h00m · since 11:00"), MACHINE
 // 19 ("sandboxes ██░ 2/3"), MODELS 24 ("impl   sonnet-5-5/high"), SETTINGS 32 ("○ cross-review · ○ usage-guard"),
 // PLAN 43 (its week row, under the provider's name); the logo 51. Beside the logo, with the bars: three lanes from
-// 132 columns, four from 165, all five from 209. Under it: RUN from 35, MACHINE from 55, MODELS from 80, SETTINGS
-// from 113.
+// 132 columns, four from 165, all five from 209 - but at 209 and 210 the last lane's bar would land a few columns
+// from one of the table's with no spare column to move it, a near-miss joint (#722), so PLAN folds until 211. Under
+// it: RUN from 35, MACHINE from 55, MODELS from 80, SETTINGS from 113.
 const ORDER = ["RUN", "MACHINE", "MODELS", "SETTINGS", "PLAN"];
 const expectedLanes = (cols: number) => {
-  const placed = cols >= 209 ? 5 : cols >= 165 ? 4 : cols >= 132 ? 3 : cols >= 113 ? 4 : cols >= 80 ? 3 : 2;
+  const placed = cols >= 211 ? 5 : cols >= 165 ? 4 : cols >= 132 ? 3 : cols >= 113 ? 4 : cols >= 80 ? 3 : 2;
   return { beside: cols >= 132 ? ORDER.slice(0, placed) : [], beneath: cols >= 132 ? [] : ORDER.slice(0, placed), folded: ORDER.slice(placed) };
 };
 
@@ -275,5 +276,23 @@ test("the run lane says a pause, a usage pause, a stopped landing and an API key
     // An API key the sandboxes spend is red in the first lane, so no pane is too narrow for it.
     const api = at({}, cols, { from: "live", settings: { ...SNAPSHOT.settings!.settings, apiKey: true } }).run;
     assert.equal(api.api, "API credits", `${cols} columns`);
+  }
+});
+
+test("a record with no start time says nothing of when the run started, never 1 January 1970", () => {
+  const { startedAt: _, ...rest } = SNAPSHOT.record;
+  for (const record of [rest, { ...rest, finishedAt: "2026-10-12T12:00:00Z", exitCode: 0 }, { ...rest, paused: { since: NOW - 60, finishing: [] } }]) {
+    const frame = draw(200, 400, { snapshot: { ...SNAPSHOT, record } }).join("\n");
+    assert.doesNotMatch(frame, /01 Jan|1970|since\s*$|started\s*$/m, frame);
+    assert.doesNotMatch(frame, /(since|started) \d\d Jan/, frame);
+  }
+});
+
+test("the legend's notes are whole at every width from 80 columns", () => {
+  for (const cols of WIDTHS.filter((n) => n >= 80)) {
+    const frame = draw(cols, 400, { showAll: true });
+    const notes = frame.slice(frame.findLastIndex((l) => /^├[─┴]+┤$/.test(l)) + 1, -1);
+    assert.ok(notes.some((l) => l.includes("time = in state")), `${cols} columns: ${notes.join("\n")}`);
+    for (const l of notes) assert.ok(!l.includes("…"), `${cols} columns: a note is cut: ${l}`);
   }
 });

@@ -98,7 +98,7 @@ const cells = (id: string) => lineOf(frame, id).split("│").map((c) => c.trim()
 test("the table's third column is headed TIME, and the legend says what it counts", () => {
   assert.match(frame, /^│ +TICKET +│ +STATE +│ +TIME +│ +DIFF +│/m);
   assert.doesNotMatch(frame, /\bAGE\b/);
-  assert.match(frame, /time = in state, ~ roughly what it usually has left; once finished, start to end/);
+  assert.match(frame, /time = in state, ~ what it usually has left; once finished, start to end/);
   assert.match(frame, /red time = past twice the usual/);
 });
 

@@ -7,11 +7,11 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, utimesSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { createCollector, createSources, snapshotOf } from "../src/status-snapshot.ts";
+import { createCollector, createSources, readQueue, snapshotOf } from "../src/status-snapshot.ts";
 import { buildFixture, fixtureEnv, hang, release, type Fixture } from "./status-fixture.ts";
 import { orphans, started, statusCommand, until } from "./status-run.ts";
 
@@ -182,18 +182,56 @@ test("every source answers, and the snapshot says each is current", async () => 
   assert.ok(Object.values(snapshot.branches).some((b) => b.exists), "the branches");
 });
 
-test("the queue is asked once a minute, and again as soon as the run record changes", async () => {
+/** Rewrites the fixture's run record with `change` applied to it, a moment later. */
+const rewrite = (dir: string, change: (record: Record<string, unknown>) => void) => {
+  const file = join(dir, "logs/run.json");
+  const record = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  change(record);
+  writeFileSync(file, JSON.stringify(record));
+  const later = new Date(Date.now() + 5_000);
+  utimesSync(file, later, later);
+};
+
+test("the queue is asked once a minute, and again as soon as the run record's run or stage changes", async () => {
   const { env, dir, calls } = project("queue-minute");
   const sources = createSources(dir, env);
   await sources.refresh();
   await sources.refresh();
   assert.equal(calls("sandcastle"), 1, "the queue was asked again within its minute");
-  // A run rewrites its record when it starts and when it ends, having closed what it landed.
-  const later = new Date(Date.now() + 5_000);
-  utimesSync(join(dir, "logs/run.json"), later, later);
+  // A working run rewrites its record every few seconds: its tickets' progress is no reason to ask the tracker.
+  rewrite(dir, (r) => (r.tokens = "99M in / 1M out"));
   await sources.refresh();
-  assert.equal(calls("sandcastle"), 2, "the queue was not asked again after the run record changed");
-  assert.ok(calls("docker") >= 3, "docker is sampled on every refresh");
+  assert.equal(calls("sandcastle"), 1, "the queue was asked again for a record rewritten with the same run and stage");
+  // A run lands (its stage), and ends having closed what it landed.
+  rewrite(dir, (r) => (r.stage = "landing 1/2"));
+  await sources.refresh();
+  assert.equal(calls("sandcastle"), 2, "the queue was not asked again after the run's stage changed");
+  rewrite(dir, (r) => (r.finishedAt = "2026-10-10T12:00:00Z"));
+  await sources.refresh();
+  assert.equal(calls("sandcastle"), 3, "the queue was not asked again after the run ended");
+  assert.ok(calls("docker") >= 5, "docker is sampled on every refresh");
+});
+
+test("a command given up that ignores TERM is killed with its group a moment later", async () => {
+  const { fixture, env } = project("ignores-term");
+  const pidFile = join(fixture.root, "queue.pid");
+  const fake = join(fixture.root, "stubborn-queue");
+  writeFileSync(fake, `#!/bin/sh\ntrap '' TERM\necho $$ >"${pidFile}"\nexec sleep 60\n`);
+  chmodSync(fake, 0o755);
+  const controller = new AbortController();
+  const read = readQueue({ ...env, SANDCASTLE_BIN: fake }, fixture.root, controller.signal).catch(() => "given up");
+  const pid = await until("the queue command to start", () => (existsSync(pidFile) && readFileSync(pidFile, "utf8").trim() ? Number(readFileSync(pidFile, "utf8")) : undefined));
+  controller.abort(new Error("deadline"));
+  assert.equal(await read, "given up");
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  await until("the command that ignores TERM to be killed", () => (alive() ? undefined : true), 5_000);
 });
 
 test("a source that fails after a good reading keeps it in the snapshot, marked stale", async () => {
@@ -204,8 +242,7 @@ test("a source that fails after a good reading keeps it in the snapshot, marked 
   // Docker stops answering, and so does the tracker.
   delete env.FAKE_DOCKER;
   env.FAKE_QUEUE_FAIL = "gh: not signed in";
-  const later = new Date(Date.now() + 5_000);
-  utimesSync(join(dir, "logs/run.json"), later, later);
+  rewrite(dir, (r) => (r.stage = "landing 1/2"));
   await sources.refresh();
   const snapshot = snapshotOf(dir, sources.readings(), { env });
   assert.equal(snapshot.sources?.docker, "stale");

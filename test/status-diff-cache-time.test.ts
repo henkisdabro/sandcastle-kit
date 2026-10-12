@@ -226,7 +226,7 @@ test("a TOKENS cell wider than its 12 cells loses the space before out, then the
 
 test("the legend explains ~ and the cache share, and no longer COMMITS", () => {
   const frame = frameOf([base], { cols: 200 });
-  assert.match(frame, /time = in state, ~ roughly what it usually has left; once finished, start to end/);
+  assert.match(frame, /time = in state, ~ what it usually has left; once finished, start to end/);
   assert.match(frame, /tokens = in, % of it from cache \(amber under 70%\), out/);
   assert.doesNotMatch(frame, /commits/i);
 });

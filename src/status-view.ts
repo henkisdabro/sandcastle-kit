@@ -24,6 +24,7 @@ import { join, resolve } from "node:path";
 import { isatty } from "node:tty";
 import { fit, visibleWidth } from "./status-grid.ts";
 import { palette, renderFrame } from "./status-render.ts";
+import { keysOf } from "./status-keys.ts";
 import { ticketRows } from "./status-rows.ts";
 import { createSources, readSnapshot, sandcastleDir, snapshotOf } from "./status-snapshot.ts";
 
@@ -118,7 +119,6 @@ const inForeground = (): boolean => {
   return !pgid || !tpgid || pgid === tpgid;
 };
 
-const ESC = 0x1b;
 const CTRL_C = 0x03;
 /** What a live view writes to give the terminal back: alternate scroll and line wrap on, the cursor shown, the main screen. */
 const LEAVE = "\x1b[?1007h\x1b[?7h\x1b[?25h\x1b[?1049l";
@@ -184,7 +184,9 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
     }
     painted = true;
     // Cursor home, the frame, then erase below it: one write, so a refresh replaces the screen and is never seen row by row.
-    out(`\x1b[H${body}\x1b[J`);
+    // A write that fails is the terminal gone without a hangup (EIO, EPIPE): ended as a hangup ends it, or the view
+    // would keep collecting for nobody.
+    if (!out(`\x1b[H${body}\x1b[J`)) return finish(129);
     // The frames the tests count are whole ones: drawn once every source has answered.
     if (framesLeft !== undefined && sources.answered() && --framesLeft <= 0) finish(0);
   };
@@ -275,21 +277,24 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
   });
 
   if (reading) {
+    // A sequence a read ended inside, completed by the next read or, after a moment with none, the Esc key alone.
+    let held = "";
     process.stdin.on("data", (bytes: Buffer) => {
       if (done) return;
       if (bytes.includes(CTRL_C)) return interrupt();
       if (!keys) return;
-      // An arrow key is Esc and more, sent at once, and must not close the popup; Esc alone has nothing after it.
-      if (timers.esc) {
-        clearTimeout(timers.esc);
-        timers.esc = undefined;
-        return paint();
-      }
-      if (bytes[0] === 0x71 || bytes[0] === 0x51) return finish(0);
-      if (bytes.length === 1 && bytes[0] === ESC) {
-        timers.esc = setTimeout(() => finish(0), 50);
-        return;
-      }
+      clearTimeout(timers.esc);
+      timers.esc = undefined;
+      const typed = keysOf(held + bytes.toString("latin1"));
+      held = typed.rest;
+      // q, or Esc: an arrow key is Esc and more, sent at once, and must not close the popup.
+      if (typed.keys.some((k) => k === "q" || k === "Q" || k === "\x1b")) return finish(0);
+      if (held)
+        timers.esc = setTimeout(() => {
+          if (held === "\x1b") return finish(0);
+          held = "";
+        }, 50);
+      if (!typed.keys.length) return;
       // Any other key redraws now and asks the sources again.
       void sources.refresh();
       paint();
@@ -329,7 +334,10 @@ const main = async (): Promise<number | undefined> => {
   }
   const snapshot = await readSnapshot(dir, { env, terminal });
   const colours = palette(!env.NO_COLOR && terminal, env.COLORTERM === "truecolor" || env.COLORTERM === "24bit");
-  process.stdout.write(renderFrame(snapshot, ticketRows(snapshot), { ...paneSize(env), showAll, colours }));
+  const size = paneSize(env);
+  const frame = renderFrame(snapshot, ticketRows(snapshot), { ...size, showAll, colours });
+  // The frame has a least width; in a narrower pane the terminal would wrap each line onto the next. A pipe gets it whole.
+  process.stdout.write(terminal ? frame.replace(/\n$/, "").split("\n").map((l) => fit(l, size.cols)).join("\n") + "\n" : frame);
   return 0;
 };
 
