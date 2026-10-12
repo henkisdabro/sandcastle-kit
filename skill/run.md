@@ -216,6 +216,8 @@ This continues SKILL.md: run its "Before every action" first.
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       A `Memory pressure: high` line (a sandbox's `full` memory pressure reached 5% during a gate pass)
       says the VM ran short of memory at that pool size: relay it with the pass it names and its fix.
+      A `Large context:` line names a ticket with an agent pass whose largest turn held over 150,000
+      tokens of context: relay it with the pass and the peak it names.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.

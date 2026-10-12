@@ -152,17 +152,21 @@ export type TicketRecord = {
   tokens?: string;
   /** Input tokens served from the cache, of the ticket's passes so far (the same passes as `tokens`): the status view shows its share of the input. Absent in an older record. */
   cacheRead?: number;
+  /** The largest context one turn of the ticket's passes held (input + cache write + cache read tokens of one assistant message), by the pass that held it (`implement`, `review`, `repair`): the closing summary flags a pass over `PEAK_CONTEXT_WARN`. Absent in an older record and for a Codex pass. */
+  peakContext?: Record<string, number>;
   minutes?: number;
   /** Test ids a red gate named. */
   failing?: string[];
   /**
    * Tests (or, when the output named none, the gate) that went red and then green with no commit between, each once: likely
-   * flaky. Two sources: a gate that went red on one run and green on a re-run (the record keeps only the final red's
+   * flaky. Two sources: a gate that went red on one run and green on its first re-run (the record keeps only the final red's
    * `failing`, so this is where the red-then-green is kept), and the tests a repair pass judged flaky (its
    * `<verdict>outside-branch</verdict>` line) when it committed nothing. The closing summary lists each test once with the
    * tickets it hit.
    */
   flaky?: string[];
+  /** Test ids that went red on one run of a gate and green on a later one (the ticket gate's re-runs), whatever became of the ticket. */
+  flaked?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];
   /** The ticket's second attempt after a conflict (at landing, or found before its review or gates) or a red at landing ("requeued after conflict before review with #3"); null once that attempt is not going to run. */

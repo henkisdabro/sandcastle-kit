@@ -9,6 +9,7 @@ import { blockerProblems, blockerResolver, openBlockers, refLabel, refsOf } from
 import { protectedAmong, protectedWarning } from "./guard.ts";
 import { expandTouches, isGlob, missingTouches, namedAsNew, parseTouches, unmergeableFiles } from "./touches.ts";
 import { refOf, type Tracker } from "./tracker.ts";
+import { SIZE_WORDS, sizeOf } from "./run.ts";
 
 /** A ticket declaring more files than this is likely to meet others at landing. */
 export const WIDE_FILES = 10;
@@ -96,6 +97,12 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   const real = edges.filter((e) => !overlapping.includes(e));
 
   const wide = queued.filter((t) => (files.get(t.id)?.length ?? 0) > WIDE_FILES);
+  // The estimate's own size rule (`sizeOf`), over the same figures it reads: the `Touches:` line's path count as written (globs unexpanded) and the body's length.
+  const large = queued.flatMap((t) => {
+    const paths = parseTouches(t.body ?? "").length;
+    const chars = (t.body ?? "").length;
+    return sizeOf(paths, chars) === "large" ? [{ id: t.id, paths, chars }] : [];
+  });
   const hot = [...declaredBy].filter(([, by]) => by.length >= HOT_TICKETS);
   const twice = [...declaredBy].filter(([, by]) => by.length >= 2);
   const hard = new Set(unmergeableFiles(project.root, project.baseBranch, twice.map(([f]) => f), project.generated ?? []));
@@ -142,6 +149,8 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
     for (const o of outside) out.push(`    ${o}`);
   }
   out.push(wide.length ? `  wide tickets (more than ${WIDE_FILES} declared files): ${wide.map((t) => `${refOf(t.id)} (${files.get(t.id)!.length})`).join(", ")}` : `  wide tickets (more than ${WIDE_FILES} declared files): none`);
+  out.push(large.length ? `  consider splitting (large by the estimate's size rule: ${SIZE_WORDS.large}):` : `  consider splitting (large by the estimate's size rule): none`);
+  for (const l of large) out.push(`    ${refOf(l.id)}: ${l.paths} Touches path(s), body of ${l.chars.toLocaleString("en-US")} characters`);
   out.push(hot.length ? `  hot files (declared by ${HOT_TICKETS}+ tickets):` : `  hot files (declared by ${HOT_TICKETS}+ tickets): none`);
   for (const [f, by] of hot) out.push(`    ${f}: ${names(by)}`);
   out.push(shared.length ? "  unmergeable files declared by 2+ tickets (git cannot merge them line by line):" : "  unmergeable files declared by 2+ tickets: none");
