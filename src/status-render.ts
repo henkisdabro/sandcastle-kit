@@ -194,8 +194,10 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   const rep = (ch: string, n: number) => ch.repeat(Math.max(n, 0));
   const dot = `${c.rule} · ${c.off}`;
 
-  // The table's columns, fitted to what they hold. TICKET fits the longest id shown.
-  const longest = Math.max(0, ...table.rows.map((r) => visibleWidth(r.shown)));
+  // The collapsing view draws no row for a ticket outside the live run: one line at the foot counts them.
+  const listed = !showAll && table.later.ids.length > 0 ? table.rows.filter((r) => r.state !== "later") : table.rows;
+  // The table's columns, fitted to what they hold. TICKET fits the longest id shown, not a later run's slug.
+  const longest = Math.max(0, ...listed.map((r) => visibleWidth(r.shown)));
   const COLS = tableColumns(cols, longest);
   const TW = COLS.map((col) => col.width);
   const has = (name: Column) => COLS.some((col) => col.name === name);
@@ -556,13 +558,8 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   const sep = junction("├", "┤", tbars, tbars);
   let up = tbars;
   let footHidden = "";
-  let laterLine = "";
-  let shown = table.rows;
-  if (!showAll && table.later.ids.length > 0) {
-    // The collapsing view draws no row for a ticket outside the live run: one line at the foot counts them.
-    shown = table.rows.filter((r) => r.state !== "later");
-    laterLine = `${table.later.ids.length} for a later run (${idRange(table.later.ids)})${table.later.blocked > 0 ? `, ${table.later.blocked} blocked` : ""}`;
-  }
+  const shown = listed;
+  const laterLine = listed !== table.rows ? `${table.later.ids.length} for a later run (${idRange(table.later.ids)})${table.later.blocked > 0 ? `, ${table.later.blocked} blocked` : ""}` : "";
   if (shown.length === 0) {
     // A project whose merged tickets' logs were archived has had runs; the run cell says how the last one ended.
     const cells: string[] = [];
