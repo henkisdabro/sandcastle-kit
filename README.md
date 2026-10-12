@@ -69,7 +69,7 @@ need you. You review and push what you like, land a branch you fixed or requeue 
 note, and repeat.
 
 **Do I need anyone else's tools?** No, but one is recommended. The kit needs only Docker, Node, pnpm,
-git, jq and, for GitHub tickets, the `gh` CLI. It also supports the workflow from
+git and, for GitHub tickets, the `gh` CLI. It also supports the workflow from
 **[Matt Pocock's skills](https://github.com/mattpocock/skills)** - the same author as Sandcastle,
 which this kit is built on - and we recommend installing them: `/grill-with-docs`, `/to-spec`
 and `/to-tickets` are a good way to turn an idea into tickets an unattended agent can finish, and
@@ -99,7 +99,7 @@ New to GitHub or to agents? These are the only terms you need.
 
 ## ⚡ Quick start
 
-**You need:** macOS or Linux, Node 22.18+, pnpm, git, jq, `ps` (procps, on Linux), the GitHub CLI signed in (`gh auth login`;
+**You need:** macOS or Linux, Node 22.18+, pnpm, git, `ps` (procps, on Linux), the GitHub CLI signed in (`gh auth login`;
 skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) on macOS ([Podman](https://podman.io) is untested there),
 rootful [Docker Engine](https://docs.docker.com/engine/install/) on Linux, run as a normal user in the docker group
 (rootless Docker and Podman on Linux are not supported yet).
@@ -606,7 +606,7 @@ would, the run stops before any image, sandbox or model call and asks, in red:
 `SANDCASTLE_API_KEY=1`), which is the yes; the refusal names the flag and the other way out:
 removing the key. A run that goes ahead says so in red on its start line (`API credits: this run
 bills API credits - the sandboxes spend ANTHROPIC_API_KEY from <file>`, naming an OAuth token beside
-it as ignored), in the status view's settings row (`● API credits`) and on the closing summary's
+it as ignored), in the status view's RUN lane (`● API credits`) and on the closing summary's
 `Settings:` line. `sandcastle preflight` and `sandcastle lean --measure`, which call the model too,
 ask the same, and take `--api-key` as well. Red only on a terminal and without `NO_COLOR`; the words
 say it either way.
@@ -620,7 +620,7 @@ shares: it keeps taking free slots until it ends`); the run still starts. Nothin
 split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share less the
 slot kept for landing (from a share of 2; a dry run keeps none), not the machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log`. A run that shares its project's name with another (a second checkout, say) is named with its folder (`site (site-review)`), or its pid (`site (pid 4242)`) where the folder is unknown or alike.
 
-**While it runs.** The status view opens first, before the slow checks, and its run cell names the
+**While it runs.** The status view opens first, before the slow checks, and its RUN lane names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
 cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a heartbeat line
 every five minutes while anything is in flight - tickets working (a gates step says when it waits for a gates slot, and counts its time from the first gate), landings (a landing says when it waits for a sandbox slot, and counts its time from the slot), and sent-back tickets waiting to resolve a conflict; it also says when the run has waited for a sandbox slot longer than a typical issue takes (the wait is the run's, not a ticket's: a pipeline takes its slot first, then the ticket first in line) - and the status view flags a sandbox whose log has been quiet
@@ -636,53 +636,55 @@ To hold a live run without losing work - the machine, the allowance or a quiet m
 carries on ([Pausing a run](#-pausing-a-run)); `sandcastle stop` still ends the run.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees
-with the run. Under the run band, one full-width **settings** row shows the run's settings:
-`settings  autonomy 0 1 2 [3] drain · turn 2/3` - the autonomy level lit and bracketed, the
-others greyed, and the turn out of the level's cap (level 1 asks after every turn, so it has no
-cap: `turn 2`). Below 100 columns only the active level stays (`autonomy 3 · turn 2/3`). Then the
-repair attempts a ticket gets after a red gate (`repair 1`; with `repair.attempts: 0` it is a
-greyed `○ repair`, which drops below 80 columns) and the run's concurrency after the machine-wide
-sandbox cap (`concurrency 4`, or `concurrency 6 (asked 8)` when the cap clamped what
-`--concurrency`, `CONCURRENCY` or the config asked for).
-Cross-review is on the row too: `● cross-review gpt-6-astra high` when it runs, and a greyed
-`○ cross-review` when it is off (dropped below 80 columns); the models cell then holds only models. With
-Codex signed in to a ChatGPT plan, cross-review also adds a `codex` line to the **usage** row (below). A live
-run's row comes from its record; between runs `sandcastle status` shows what the next run would use,
-prefixed `next run:` (so it is not read as the ended run's recorded settings), and a bare `status.sh` falls back to the last run's record, marked
-`(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
-and draws no row.
+with the run. Its header is the logo and the **lanes** beside it: RUN (the stage, `turn 2/3` - the turn
+out of the level's cap, none for level 1, which asks after every turn: `turn 2` - and the tokens spent),
+MACHINE (the pool's sandboxes and gates), MODELS (each pass's model, and the repair attempts a ticket gets
+after a red gate: `repair 1`, or a greyed `○ repair` with `repair.attempts: 0`), SETTINGS and, for a
+subscription, PLAN. The lanes sit beside the logo while it and three of them fit, else in a row under it,
+and the ones that do not fit go onto one summary line, cut with `…` where the pane ends.
 
-The row also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (its stop
-threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off, which drops below 80 columns.
+SETTINGS shows the autonomy level bracketed (`autonomy [3]`), the run's concurrency after the machine-wide
+sandbox cap (`concurrency 4`, or `concurrency 6 (asked 8)` when the cap clamped what `--concurrency`,
+`CONCURRENCY` or the config asked for), and cross-review: `● cross-review gpt-6-astra high` when it runs,
+a greyed `○ cross-review` when it is off; the MODELS lane then holds only models. With Codex signed in to a
+ChatGPT plan, cross-review also adds a `codex` line to the **plan** lane (below). A live run's lanes come
+from its record; between runs `sandcastle status` shows what the next run would use, prefixed `next run:`
+(so it is not read as the ended run's recorded settings), and with nothing passed falls back to the last
+run's record, marked `(last run)`. The view shows only what the record holds: a record from an older kit
+has no settings, and draws none.
+
+SETTINGS also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (its stop
+threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off.
 When the guard cannot get a reading (a 403 turns it off for the run, a rate limit, an expired
-Claude Code login or no token at all leaves it without one for now, and with an API key it does not apply) the row says so in the warning colour:
+Claude Code login or no token at all leaves it without one for now, and with an API key it does not apply) the view says so in the warning colour:
 `● usage-guard 90% (no reading - not guarding)`. A run with `USAGE_PAUSE` set shows
 `● usage-pause 90%`, the percent at which it pauses itself. A run whose sandboxes spend `ANTHROPIC_API_KEY`
-adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
-lines rather than cut anything off.
+adds a red `● API credits` to the RUN lane, at any width.
 
-The ticket table's columns are TICKET, STATE, TIME (a working ticket's time in its state, red at twice the usual; a finished ticket's whole length, start to end, kept from its first start if the run put it back and ran it again, and after the run from its record; `-` while queued or blocked), COMMITS,
-**CPU/MEM** and **TOKENS**, then ACTIVITY. CPU/MEM is the ticket's sandbox now - `1.0c/2.1G`, CPU in cores
+The ticket table's columns are TICKET, STATE, TIME (a working ticket's time in its state, red at twice the usual, with `~4m` beside it - roughly what the step usually has left; a finished ticket's whole length, start to end, kept from its first start if the run put it back and ran it again, and after the run from its record; `-` while queued or blocked), **DIFF**,
+**CPU/MEM** and **TOKENS**, then ACTIVITY. DIFF is the lines the ticket's branch adds and removes against
+the base - `+96 −1159` - and a `-` when it has no branch. CPU/MEM is the ticket's sandbox now - `1.0c/2.1G`, CPU in cores
 and memory, the CPU half red when the sandbox takes most of the machine's cores, a greyed `-`
-when the ticket has no container. TOKENS is what the ticket has cost so far - `3.1M/42k`, **in** over
-**out** - summed over its finished passes and the one running now. In counts what the closing summary's
-`in` does, cache reads and writes included, so the column adds up to the header's `tokens` row; out is the
-output. The legend line under the table says so (`tokens = in/out, cache included`). The run adds the
+when the ticket has no container. TOKENS is what the ticket has cost so far - `3.1M 94% 27k`, **in**, the
+share of it served from the prompt cache (amber under 70%) and **out** - summed over its finished passes and the one running now. In counts what the closing summary's
+`in` does, cache reads and writes included, so the column adds up to the RUN lane's `tokens`; out is the
+output. The legend under the table says so (`tokens = in, % of it from cache (amber under 70%), out`). The run adds the
 running pass's usage to the ticket's `tokens` in `logs/run.json` as it reads that pass's agent log, on the
 usage row's 15-second tick, so a pass shows its cost while it works and the view only reads the record; a
 Codex cross-review pass has no figure until it ends. A ticket that has not run a pass yet shows a greyed
-`-`. From 100 columns both columns show; from 80 to 99 only TOKENS, the figure a person watching the
-plan's allowance needs; below 80 neither, and ACTIVITY takes the room.
+`-`. The fixed columns have set widths and give way, in the order CPU/MEM, DIFF, TOKENS, as the pane narrows,
+so ACTIVITY keeps room for its notes: from 120 columns all show, from 92 to 105 only TOKENS, the figure a person
+watching the plan's allowance needs, and below 92 none.
 
 **The plan's usage.** A run does not have to guess how close it is to the plan's allowance. While
 the sandboxes spend a subscription (`CLAUDE_CODE_OAUTH_TOKEN`, no `ANTHROPIC_API_KEY`) and at least
-one of implement, review and repair runs on a Claude model, a **usage** row under the settings shows
+one of implement, review and repair runs on a Claude model, a **plan** lane in the header shows
 both windows of the plan - the 5-hour one and the week - with each one's bar, percentage and reset
 time, and how long ago the reading was:
-`usage  claude  5h ▓░░░░░░░░░ 14% · resets 18:10   week ▓▓▓▓▓▓▓▓▓░ 93% · resets Wed 06:00   (2m ago)`.
+`claude 5h ▓░░░░ 14% · resets 18:10 · week ▓▓▓▓▓ 93% · resets Wed 06:00 · (2m ago)`.
 A window is in the normal colour below 75%, amber from 75% and red from 90%; a reading older than
 15 minutes (no agent has reported since) is greyed, its age beside it. Until the first agent reports
-the row says `usage  claude  waiting for the first agent's reading`. The numbers cost no request: Claude
+the lane is left out. The numbers cost no request: Claude
 Code's output in every sandbox carries `rate_limit_event` lines (about three a pass) with the
 windows' utilisation and reset times, and the run reads what each agent's raw stream
 (`.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl`) gained every 15 seconds, keeps the newest
@@ -692,15 +694,15 @@ on the closing summary. It is the plan's own account of itself, so it needs no s
 credential and is independent of the usage guard (`USAGE_CHECK`), which asks the plan's endpoint
 before each ticket and can stop the queue - though once an agent has reported, the guard reads
 the same numbers while the newest is under 10 minutes old, and makes no request. `USAGE_PAUSE`
-([Pausing a run](#-pausing-a-run)) acts on them too. With an API key there is no plan to show: no row, and
-the settings row says `API credits`. A record from an older kit, or a run with no Claude model, has no `usage` and draws no row.
+([Pausing a run](#-pausing-a-run)) acts on them too. With an API key there is no plan to show: no lane, and
+the RUN lane says `API credits`. A record from an older kit, or a run with no Claude model, has no `usage` and draws no lane.
 Between runs, `sandcastle usage` prints the same reading from the record, or asks the endpoint once when none is fresh.
 
 **Codex's usage, with cross-review.** With `CROSS_REVIEW=1` and Codex signed in with a ChatGPT plan
 (`~/.codex/auth.json`'s ChatGPT sign-in, not an API key, and no `CODEX_API_KEY` in the sandboxes'
-environment), the usage row draws Codex's plan on a line of its own under Claude's, in the same form:
-`codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets 18:10   week ▓▓░░░░░░░░ 16% · resets Wed 06:00   (2m ago)`, and
-`codex   waiting for the first cross-review's reading` until the first cross-review pass has ended.
+environment), the plan lane draws Codex's plan on a line of its own beside Claude's, in the same form:
+`codex 5h ▓▓▓▓▓ 100% · resets 18:10 · week ▓░░░░ 16% · resets Wed 06:00 · (2m ago)`, and
+leaves it out until the first cross-review pass has ended.
 A run that spends no Claude plan (an `ANTHROPIC_API_KEY`) still shows the `codex` line; a run without
 cross-review, or with Codex on an API key, has none. The 5-hour and the weekly window are told apart by
 their length (300 and 10080 minutes), not by Codex's `primary` and `secondary`. `codex exec --json`
@@ -816,9 +818,8 @@ that is not paused, says so and changes nothing. They write and remove a control
 `.sandcastle/.run/paused`, which names the run it was asked of (a file a dead run left behind pauses
 no later one) and which the run reads at each juncture and every second.
 
-While paused, the status view's run cell reads `PAUSED since 15:40 - finishing #12 review, #14
-landing`, then `PAUSED since 15:40` once nothing is in flight (a narrow pane puts the tickets
-finishing on the cell's second row); a ticket parked between two phases shows as `paused`, with the
+While paused, the status view's RUN lane reads `PAUSED since 15:40`, with `finishing #12 review, #14
+landing` on the next row while anything is in flight; a ticket parked between two phases shows as `paused`, with the
 phase it resumes at in its note. The Herdr sidebar and tab bar say `paused` in place of the working
 count, and the Claude Code mod treats a paused run as live: no "the run ended" prompt.
 `sandcastle wait` keeps waiting through a pause, and `sandcastle stop` works while paused. A run
@@ -839,7 +840,7 @@ mid-pass, and the week's allowance is the person's own too. With `USAGE_PAUSE=90
 5-hour or the weekly window of a provider it uses reaches that percent, and **resumes by itself a
 minute after that window's reset** - a pause of days costs nothing, and the keep-awake helper ends
 as for any pause with nothing in flight. It reads the agents' own readings, the numbers of the
-status view's usage row, so it needs no request and no credential, and it does nothing for a run
+status view's plan lane, so it needs no request and no credential, and it does nothing for a run
 that shows no plan usage (an API key): the start line says either way - `Usage pause: at 90%,
 resumes at the window's reset`. With both windows over the threshold it waits for the one that
 resets later. The same pause covers the limit itself: an agent that hits it anyway (the log ends
@@ -850,8 +851,7 @@ model's own cap) - the limit stops the queue as it does without the setting.
 
 The pause is the one `sandcastle pause` makes, with its cause on record - `paused: { since,
 cause: "usage", provider, window, percent, resumesAt }` in `logs/run.json` - so the status view's
-run cell reads `PAUSED - weekly usage 95%, resumes Wed 06:01` (a narrow pane puts `resumes` on
-the cell's second row), and the run prints it. A person stays in charge of it: `sandcastle resume`
+RUN lane reads `PAUSED - weekly usage 95%` over `resumes Wed 06:01`, and the run prints it. A person stays in charge of it: `sandcastle resume`
 resumes earlier, and the run then does not pause again for the windows that are over the threshold
 at that moment until they reset (a reading is not an order to stop a person who said go on); and
 `sandcastle pause` during a usage pause takes it over - it stays until `sandcastle resume`, however
@@ -1808,7 +1808,6 @@ is refused with a reminder to start the runtime, and one that gives no answer wi
 | `docker did not answer within 10 s - is the runtime running?` when a run starts | The container runtime's daemon is hung or still starting (seen with OrbStack after a heavy run). A run asks `docker info` once at its start and stops on no answer, where it used to wait minutes in silence. Restart the runtime, check `docker info` answers in that shell, then run again. |
 | `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`, macOS), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
 | `found Podman`, `found rootless Docker` or `not root` shows `FIX` | Linux needs rootful Docker Engine, with `docker` its own CLI on its socket (`docker context ls`, DOCKER_HOST); Podman and rootless Docker there are not supported yet (#359). Run sandcastle as a normal user in the docker group, never as root or with sudo. |
-| `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
 | Live runs show as ended in the status view on Linux, or `ps (status view)` shows `FIX` | Install procps (`apt install procps` or `dnf install procps-ng`); the status view checks each run's process with `ps`. |
 | `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
 | `opt  triage labels mapped in docs/agents/triage-labels.md but missing on GitHub` | Advisory: run the `gh label create` command doctor prints, or leave it - `/sandcastle queue` creates a label before it first applies it. |
