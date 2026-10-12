@@ -50,7 +50,7 @@ function codePointWidth(cp: number, ch: string): number {
 function graphemeWidth(g: string): number {
   let w = 0;
   for (const ch of g) w = Math.max(w, codePointWidth(ch.codePointAt(0) as number, ch));
-  if (w === 1 && g.includes("️") && PICTOGRAPH.test(g)) return 2;
+  if (w === 1 && g.includes("\u{fe0f}") && PICTOGRAPH.test(g)) return 2;
   return w;
 }
 

@@ -86,13 +86,13 @@ test("visibleWidth: wide characters count two, combining characters none", () =>
   assert.equal(visibleWidth("ＡＢ"), 4);
   assert.equal(visibleWidth("🚀"), 2);
   assert.equal(visibleWidth("✅ ok"), 5);
-  assert.equal(visibleWidth("é"), 1);
-  assert.equal(visibleWidth("café"), 4);
+  assert.equal(visibleWidth("e\u0301"), 1);
+  assert.equal(visibleWidth("cafe\u0301"), 4);
   assert.equal(visibleWidth("👍🏽"), 2);
-  assert.equal(visibleWidth("👨‍👩‍👧"), 2);
+  assert.equal(visibleWidth("👨\u200d👩\u200d👧"), 2);
   assert.equal(visibleWidth("🇸🇪"), 2);
-  assert.equal(visibleWidth("❤️"), 2);
-  assert.equal(visibleWidth("a​b"), 2);
+  assert.equal(visibleWidth("❤\u{fe0f}"), 2);
+  assert.equal(visibleWidth("a\u200bb"), 2);
 });
 
 test("visibleWidth: box drawing, blocks and the ellipsis count one each", () => {
@@ -125,7 +125,7 @@ test("fit: never splits a wide character or drops the mark that belongs to the l
   assert.equal(fit("日本語日本語", 7), "日本語…");
   assert.equal(fit("日本語日本語", 6), "日本…");
   assert.equal(visibleWidth(fit("日本語日本語", 6)), 5);
-  assert.equal(fit("café au lait", 5), "café…");
+  assert.equal(fit("cafe\u0301 au lait", 5), "cafe\u0301…");
   assert.equal(fit("ab🚀cd", 3), "ab…");
   assert.equal(fit("ab🚀cd", 4), "ab…");
   assert.equal(fit("ab🚀cd", 5), "ab🚀…");
