@@ -9,6 +9,71 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **The status view's table shows a DIFF column** (lines added and removed on the ticket's branch)
+  in place of COMMITS, the share of input served from cache in TOKENS (`2.5M 94% 27k`, amber below
+  70%), and roughly what a step usually has left beside its time (`6m ~4m`).
+
+### Changed
+
+- **The status view is drawn by TypeScript everywhere**, and `status.sh` only starts it. Its new
+  layout puts the RUN, MACHINE and MODELS lanes beside the logo and fits its columns to every
+  width; it redraws at once on every tick and resize without waiting for Docker, git or the
+  queue, shows `queue: loading…` until the queue answers, and keeps each source's last reading if a
+  refresh fails. **`jq` is no longer a prerequisite**, and `sandcastle doctor` no longer checks for it.
+- **The website's demo draws with the status view's own renderer**, so it shows the current layout
+  and stays in step with the view (`pnpm site:renderer` copies the renderer to the site); the
+  README's `status.gif` is re-recorded from it.
+- **Beside another live run, the start estimate says it prices this run's share at the start**
+  ("at this run's share now, N at a time; shorter as <project> finishes"), instead of reading as
+  the load the whole run keeps.
+- **A run's start, estimate and wait lines say only what applies**: the note on the slot kept for
+  landing mentions other runs only when one is live, the estimate names the one bound that sets its
+  time, and "waiting for a machine-wide sandboxes slot" is printed again only when its reason
+  changes or 15 minutes have passed, not once per wait.
+- **Agent prompts waste fewer turns and words.** Implementers read long files in parts instead of
+  whole again; a pass that only resolves a merge no longer reports criteria it never re-examined;
+  reviewers run the full suite once, after their last code commit; a repair that commits nothing
+  skips the full-suite rerun, ends with `<promise>COMPLETE</promise>`, and is told how to post its
+  ticket comment; every pass keeps its final message to about 20 lines; and the shell notes warn
+  that long `grep` repeats fail as too complex.
+
+### Fixed
+
+- **A carried branch cut from a base commit that a later reset or flattening rebase removed** is
+  now rebuilt on the new base tip instead of landing the lost commits back as its own work, even
+  when it never merged the base. The kit records the base tip each agent branch is cut from in
+  `.sandcastle/logs/forks.json`; branches made earlier keep the merge-commit detection.
+- **The status view no longer flags every cold gates run as "3x over"** when a phase has fast and
+  slow kinds of run: a step's usual time is now the 75th percentile of its recent runs, not the
+  median. The README also suggests mounting a build cache so warm and cold gates runs converge.
+- **A branch cut again from the base's tip is no longer reported as left on the old tree** when its
+  fork record cannot be written.
+- **The status view no longer passes escape sequences or control characters** from agent logs,
+  the run record or the tracker to the terminal, where an agent's output could set the clipboard or
+  the window title, or clear the screen.
+- **The status view asks the tracker for the queue once a minute**, or when a run starts or ends,
+  not on nearly every refresh while a run rewrites its record.
+- The status view: a live view whose terminal is gone ends instead of collecting forever;
+  `sandcastle status 0` on a narrow terminal cuts each line to the pane instead of wrapping it; a
+  run record with no start time no longer shows "started 01 Jan"; a refresh that is given up kills
+  a command that ignores TERM; its rules have no near-miss joints such as `┴─┬`; the legend's time
+  note is whole at 80 columns; with no run recorded yet it still warns in red when the next run
+  will spend API credits; and in the Herdr popup a `q` typed straight after an arrow key closes it.
+- **The status view's tests start their terminal sessions on macOS**: BSD `script` refuses the
+  socket that macOS builds a FIFO on, so every one of them failed there after a 30 s wait.
+- Tests that went red under load and drove repairs that could change nothing are steadied: the
+  popup arrow-key test, the lifecycle timing bounds, the keep-warm mod tests and the wrapper test
+  that matched `jq` inside a random temp-dir name.
+
+### Upgrading
+
+- **Close and reopen any status view or Herdr popup that was open while you updated**: an open
+  view keeps the old code until it is reopened.
+- **`jq` is no longer needed by the kit** on the host; it stays in the sandbox image, where the
+  git guard uses it.
+
 ## [0.14.0] - 2026-10-10
 
 ### Added
