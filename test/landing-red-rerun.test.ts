@@ -199,3 +199,26 @@ test("burndown hands the landing gate its re-run and keeps what the ticket gates
   assert.match(source, /if \(!priority\) rememberFailed\(failedBefore, id, gated\);/);
   assert.match(source, /^    failedBefore,$/m);
 });
+
+test("the requeue the schedule tells, the outcome and the tracker comment of a red seen before name no ticket and say so", async () => {
+  const { createSchedule } = await import("../src/schedule.ts");
+  const { describe } = await import("../src/ledger.ts");
+  const seenRed: Landed = { kind: "red", with: [], gates: ["test"], failing: ["t.test.ts"], seen: true };
+  const told: { kind: string; again?: unknown }[] = [];
+  await createSchedule<{ id: string }, { issue: string }, string, string>({ tickets: [{ id: "2" }] }).run({
+    workers: 1,
+    attempt: async (t) => ({ kind: "green", green: { issue: t.id } }),
+    land: async () => seenRed,
+    host: { check: async () => {}, failed: undefined },
+    tell: (c) => void told.push(c),
+  });
+  const again = told.find((c) => c.kind === "requeued")?.again as { kind: "red"; with: string[]; seen?: true };
+  assert.equal(again.seen, true);
+  assert.equal(requeuedLine(again.kind, again.with, again), "requeued after red as seen on the branch before (gate test; failing t.test.ts)");
+  const green = { issue: "2", branch: "agent/issue-2", status: "green" as const, commits: 1, repairs: 0, head: "abc1234" };
+  const said = describe({ kind: "landing", green, landed: seenRed, attempts: 1 }, { base: "main", gateNames: "test" });
+  assert.equal(said.record?.note, "red as seen on the branch before (gate test; failing t.test.ts)");
+  assert.equal(said.outcome?.text, "red when merged, as seen on the branch before (gate test; failing t.test.ts)");
+  assert.match(said.tracker?.text ?? "", /already failing on this branch's own ticket gates in this run, so no landed ticket is named\./);
+  assert.doesNotMatch(said.tracker?.text ?? "", /on the merged tree/);
+});
