@@ -6,12 +6,13 @@
 //   pnpm test:file test/landing-gate-timing.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
+import { spawnStatus } from "./status-run.ts";
 
 // Importing run.ts must not touch the real slots.
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -177,7 +178,7 @@ const ends = () => {
     XDG_CACHE_HOME: join(TMP, "cache"),
   };
   delete env.SANDCASTLE_SETTINGS;
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(import.meta.dirname, "..", "status.sh"), "0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const text = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n").find((l) => /\bends +~/.test(l)) ?? "";
   const m = /ends +~(\d\d):(\d\d)/.exec(text);
   assert.ok(m, `no ends line in: ${r.stdout}`);

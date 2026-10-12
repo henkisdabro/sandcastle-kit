@@ -5,12 +5,13 @@
 //   pnpm test:file test/run-settings-concurrency-eta.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
+import { spawnStatus } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-eta-"));
 const live = kitLikeProcess();
@@ -68,7 +69,7 @@ const frame = (): string[] => {
     XDG_CACHE_HOME: join(TMP, "cache"),
   };
   delete env.SANDCASTLE_SETTINGS;
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(import.meta.dirname, "..", "status.sh"), "0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   return r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
 };
 const line = (lines: string[], re: RegExp) => lines.find((l) => re.test(l)) ?? "(missing)";

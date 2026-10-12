@@ -5,7 +5,7 @@
 //   pnpm test:file test/raw-log.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +14,8 @@ import type { Project } from "../src/config.ts";
 import { quietly } from "./quiet.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 import { agentLog, agentLogging, archiveFinishedLogs, logOwner, rawLog } from "../src/run.ts";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-raw-log-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 
@@ -84,7 +84,7 @@ const view = (project: Project) => {
     writeFileSync(join(fake, name), body);
     chmodSync(join(fake, name), 0o755);
   }
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     env: {
       ...process.env,

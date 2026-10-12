@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
+import { scriptArgs } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-usage-"));
 const live = kitLikeProcess();
 after(() => {
@@ -50,8 +50,6 @@ const record = (five: number, week: number, age: number) =>
 
 /** The view's one frame on a pty at 160 columns (the row on one line), with the colour it has. 256 colours: no COLORTERM, so each colour is `ESC[38;5;Nm`. */
 const frame = (extra: Record<string, string> = {}) => {
-  const cmd = join(KIT, "status.sh");
-  const args = process.platform === "linux" ? ["-qec", `bash '${cmd}' 0`, "/dev/null"] : ["-q", "/dev/null", "bash", cmd, "0"];
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${FAKE}:${process.env.PATH}`,
@@ -68,7 +66,7 @@ const frame = (extra: Record<string, string> = {}) => {
   delete env.NO_COLOR;
   Object.assign(env, extra);
   // No stdin: BSD `script` refuses the socket Node passes by default.
-  const r = spawnSync("script", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
+  const r = spawnSync("script", scriptArgs(["0"]), { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
   return r.stdout;
 };
 const hasScript = spawnSync("script", ["--version"], { stdio: "ignore" }).error === undefined;

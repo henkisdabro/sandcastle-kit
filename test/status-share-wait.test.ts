@@ -8,14 +8,14 @@
 //   pnpm test:file test/status-share-wait.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const COLS = 100;
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-share-"));
 const REPO = join(TMP, "my repo");
@@ -74,7 +74,7 @@ const render = (fields: Record<string, unknown>, notes: Record<string, string> =
       ...fields,
     }),
   );
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     env: {
       ...process.env,
