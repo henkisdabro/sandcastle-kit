@@ -1501,15 +1501,20 @@ export const runTokens = (result: unknown): Tokens | undefined => {
 export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
 /** The status view's run line has no room for the cached share. */
 export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
+/**
+ * A ticket's tokens as its run record entry holds them: the `tokens` text an older reader shows, unchanged, and the
+ * cache-read input count beside it, which the status view's TOKENS column turns into the share served from cache.
+ */
+export const ticketTokens = (t: Tokens) => ({ tokens: tokenBrief(t), cacheRead: t.cacheRead });
 
 /**
  * What the usage watch calls with a ticket's running pass's tokens so far: the ticket's `tokens` in the run record
  * becomes what its finished passes spent (`spent`, the run's own count of the results' figures) plus that live figure.
  * A pass that has ended is in `spent` and no longer live (`UsageWatch.settle`), so it is never in both.
  */
-export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: { tokens: string }): void }, spent: Map<string, Tokens>) =>
+export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: ReturnType<typeof ticketTokens>): void }, spent: Map<string, Tokens>) =>
   (issue: string, live: Tokens) => {
-    if (!run.finished) run.ticket(issue, { tokens: tokenBrief(addTokens(spent.get(issue) ?? NO_TOKENS, live)) });
+    if (!run.finished) run.ticket(issue, ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)));
   };
 
 // ---------------------------------------------------------------------------

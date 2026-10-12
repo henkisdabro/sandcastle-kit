@@ -42,7 +42,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -2815,7 +2815,7 @@ export const burndown = async (
       if (tokens) {
         spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
         run.update({ tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) });
-        if (issue) run.ticket(issue, { tokens: tokenBrief(spent.get(issue)!) });
+        if (issue) run.ticket(issue, ticketTokens(spent.get(issue)!));
       }
       return result;
     } finally {
@@ -3298,7 +3298,7 @@ export const burndown = async (
         run.ticket(issue.id, {
           commits: value.commits,
           minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
-          ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
+          ...(tokens ? ticketTokens(tokens) : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),

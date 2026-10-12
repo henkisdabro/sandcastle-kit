@@ -140,7 +140,7 @@ export const wrapItems = (width: number, items: string[], sep: string): string[]
 };
 
 /** A column of the ticket table. */
-type Column = "TICKET" | "STATE" | "TIME" | "COMMITS" | "CPU/MEM" | "TOKENS" | "ACTIVITY";
+type Column = "TICKET" | "STATE" | "TIME" | "DIFF" | "CPU/MEM" | "TOKENS" | "ACTIVITY";
 
 // ACTIVITY is where the notes are: below this width it would cut most of them. STATE at its narrowest keeps its
 // glyph and a short word ("! uncommitt…").
@@ -148,7 +148,9 @@ const ACTIVITY_MIN = 40;
 const STATE_MIN = 11;
 const STATE_WIDTH = 15;
 // The order the fixed columns give way in when ACTIVITY would fall under its minimum.
-const GIVE_WAY: Column[] = ["CPU/MEM", "COMMITS", "TOKENS"];
+// A cache share under this is amber: a prompt cache that is not holding costs more than the table says.
+const CACHE_AMBER = 70;
+const GIVE_WAY: Column[] = ["CPU/MEM", "DIFF", "TOKENS"];
 
 /**
  * The table's columns and their widths, padding included, in a pane `cols` wide whose longest ticket id shown is
@@ -158,10 +160,10 @@ const tableColumns = (cols: number, longest: number): { name: Column; width: num
   const fixed: { name: Column; width: number }[] = [
     { name: "TICKET", width: Math.min(Math.max(longest + 2, 8), 16) },
     { name: "STATE", width: STATE_WIDTH },
-    { name: "TIME", width: 7 },
-    { name: "COMMITS", width: 9 },
+    { name: "TIME", width: 9 },
+    { name: "DIFF", width: 13 },
     { name: "CPU/MEM", width: 13 },
-    { name: "TOKENS", width: 11 },
+    { name: "TOKENS", width: 14 },
   ];
   // The bars: one more than the columns, ACTIVITY included.
   const rest = () => cols - fixed.reduce((a, f) => a + f.width, 0) - (fixed.length + 2);
@@ -217,9 +219,18 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
       }
       if (name === "STATE") return `${paint(r.tone)}${r.glyph} ${r.state}${c.off}`;
       if (name === "TIME") return `${paint(r.timeTone)}${r.time}${c.off}`;
-      if (name === "COMMITS") return `${r.commits === "-" ? c.gry : c.head}${r.commits}${c.off}`;
+      if (name === "DIFF") {
+        const m = /^(\+\S+) (\u2212\S+)$/.exec(r.diff);
+        return m ? `${c.grn}${m[1]}${c.off} ${c.hot}${m[2]}${c.off}` : `${c.gry}${r.diff}${c.off}`;
+      }
       if (name === "CPU/MEM") return r.cpu ? `${r.cpu.hot ? c.hot : c.head}${r.cpu.cpu}${c.off}${c.head}/${r.cpu.mem}${c.off}` : `${c.gry}-${c.off}`;
-      if (name === "TOKENS") return r.tokens ? `${c.head}${r.tokens}${c.off}` : `${c.gry}-${c.off}`;
+      if (name === "TOKENS") {
+        if (!r.tokens) return `${c.gry}-${c.off}`;
+        // In, the share of it served from cache (amber under 70%), out: `2.5M 94% 27k`. A record without the count shows in/out.
+        const [input, output] = r.tokens.split("/");
+        if (r.cache === undefined || input === undefined || output === undefined) return `${c.head}${r.tokens}${c.off}`;
+        return `${c.head}${input}${c.off} ${r.cache < CACHE_AMBER ? c.ylw : c.head}${r.cache}%${c.off} ${c.head}${output}${c.off}`;
+      }
       return `${paint(r.noteTone)}${r.note}${c.off}`;
     });
 
@@ -519,8 +530,8 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   const NOTE: string[] = [];
   // The view reads git, not the agents' notes: the closing summary counts a merged ticket left open under "needs you".
   if (table.partly > 0) NOTE.push(`${c.gry}${table.partly} merged, partly done (ticket open)${c.off}`, `${c.gry}the closing summary counts it under needs you${c.off}`);
-  NOTE.push(`${c.gry}ready = gates green, waits for the landing worker${c.off}`, `${c.gry}time = in state; once finished, start to end${c.off}`, `${c.gry}red time = past twice the usual${c.off}`);
-  if (has("TOKENS")) NOTE.push(`${c.gry}tokens = in/out, cache included${c.off}`);
+  NOTE.push(`${c.gry}ready = gates green, waits for the landing worker${c.off}`, `${c.gry}time = in state, ~ roughly what it usually has left; once finished, start to end${c.off}`, `${c.gry}red time = past twice the usual${c.off}`);
+  if (has("TOKENS")) NOTE.push(`${c.gry}tokens = in, % of it from cache (amber under ${CACHE_AMBER}%), out${c.off}`);
   if (has("CPU/MEM")) NOTE.push(`${c.gry}CPU in cores of ${snapshot.cpus}${c.off}`);
   if (snapshot.links) NOTE.push(`${c.gry}${HINT_TEXT[snapshot.clickMod === "ctrl" || snapshot.clickMod === "cmd" ? snapshot.clickMod : "fallback"]}${c.off}`);
   // Cells as wide as their text needs: every item on one row from 130 columns where they fit (halved until they
