@@ -3,8 +3,8 @@
 // `ts` (the TypeScript view, once it exists). Its name passes test/hermetic-env.ts, which scrubs
 // SANDCASTLE_* but not SANDCASTLE_TEST_*.
 //
-// `statusCommand` is the one place a test names the view's entry. `runStatus` draws one frame and
-// returns it; `statusSession` (further down) starts the live view on a terminal and drives it from
+// `statusCommand` is the one place a test names the view's entry. `drawFrame` draws one frame and
+// returns it; `startSession` (further down) starts the live view on a terminal and drives it from
 // outside, as a person or Herdr would.
 
 import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnSyncOptions, type SpawnSyncOptionsWithBufferEncoding, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "node:child_process";
@@ -361,7 +361,7 @@ export const startSession = async (fixture: Fixture, { args = ["30"], env = {}, 
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-status-session-"));
   const [ctl, input] = ["ctl", "in"].map((n) => join(dir, n));
   for (const fifo of [ctl!, input!]) execFileSync("mkfifo", [fifo]);
-  const files = { pid: join(dir, "pid"), status: join(dir, "status"), before: join(dir, "before"), after: join(dir, "after") };
+  const files = { wrapper: join(dir, "wrapper.pid"), pid: join(dir, "pid"), status: join(dir, "status"), before: join(dir, "before"), after: join(dir, "after") };
   const { command, args: commandArgs } = statusCommand(args);
   writeFileSync(join(dir, "view.sh"), `#!/bin/sh\necho $$ >${quote(files.pid)}\nexec ${[command, ...commandArgs].map(quote).join(" ")}\n`);
   // The helper answers the FIFO's commands inside the pty. INT is caught (not ignored, which the view would inherit): Ctrl-C
@@ -369,6 +369,7 @@ export const startSession = async (fixture: Fixture, { args = ["30"], env = {}, 
   writeFileSync(
     join(dir, "wrapper.sh"),
     `#!/bin/sh
+echo $$ >${quote(files.wrapper)}
 stty rows ${rows} cols ${cols} </dev/tty
 stty -g </dev/tty >${quote(files.before)}
 ( while read -r verb a b; do
@@ -403,8 +404,12 @@ kill $helper 2>/dev/null
     if (closed) return;
     closed = true;
     sessions.delete(close);
-    const pid = existsSync(files.pid) ? Number(readFileSync(files.pid, "utf8")) : 0;
-    if (pid) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    // The wrapper first: once its view is gone it writes the status and the terminal's state into `dir`, which a
+    // removal running at that moment then finds not empty.
+    for (const file of [files.wrapper, files.pid]) {
+      const pid = existsSync(file) ? Number(readFileSync(file, "utf8")) : 0;
+      if (pid) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
     child.kill("SIGKILL");
     for (const fd of [inFd, ctlFd]) try { closeSync(fd); } catch { /* closed */ }
     rmSync(dir, { recursive: true, force: true });
