@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, flakyOf, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -39,7 +39,7 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
+import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
@@ -1096,6 +1096,9 @@ export const heartbeatLine = (o: {
 export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "landing") => void, now: () => number = Date.now) => {
   const open = new Map<object, { since: number; why?: "share" | "landing" }>();
   let told: "share" | "landing" | undefined;
+  // The time with at least one wait open, closed waits summed: workers wait side by side, and their sum is not time the run lost.
+  let waitedTotal = 0;
+  let waitedSince = 0;
   const tell = () => {
     const whys = [...open.values()].map((w) => w.why);
     const waitsFor = whys.includes("share") ? "share" : whys.includes("landing") ? "landing" : undefined;
@@ -1106,6 +1109,7 @@ export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "lan
   return {
     begin() {
       const key = {};
+      if (!open.size) waitedSince = now();
       open.set(key, { since: now() });
       return {
         onWait(why: WaitReason) {
@@ -1115,10 +1119,14 @@ export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "lan
           tell();
         },
         end() {
-          open.delete(key);
+          if (open.delete(key) && !open.size) waitedTotal += now() - waitedSince;
           tell();
         },
       };
+    },
+    /** Milliseconds with a wait open so far, the one still open counted up to now. */
+    get waitedMs(): number {
+      return waitedTotal + (open.size ? now() - waitedSince : 0);
     },
     get since(): number | undefined {
       const all = [...open.values()].map((w) => w.since);
@@ -1401,6 +1409,8 @@ export const createPipeline = (ctx: PipelineContext) => {
   const landed = ctx.landed ?? new Map<string, { files: string[]; commit: string }>();
   const base = project.baseBranch;
   const ref = tracker.ref;
+  // Each ticket's tests that went red and then green on a re-run, kept across its attempts: a ticket's record takes the whole set.
+  const flaky = new Map<string, Set<string>>();
   /**
    * The records of a kit worktree the host is about to run git in, held to git's own (`assertWorktreeRecords`). A
    * failure is the ticket's `tampered`, which stops the run as a failed `.git` check does, and is thrown.
@@ -2231,7 +2241,14 @@ export const createPipeline = (ctx: PipelineContext) => {
         const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, first.name));
         // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
         gated = { ...rerun, gates: [...gated.gates.slice(0, redAt), ...rerun.gates] };
-        if (!gated.failure) console.log(`${ref(issue.id)}: ${first.name} red, then green on a re-run - a flake, no repair pass`);
+        if (!gated.failure) {
+          console.log(`${ref(issue.id)}: ${first.name} red, then green on a re-run - a flake, no repair pass`);
+          // The record keeps only a final red's tests, so the ticket would read `test=pass` with no trace of this.
+          const found = flaky.get(issue.id) ?? new Set<string>();
+          for (const id of flakyOf(first)) found.add(id);
+          flaky.set(issue.id, found);
+          run.ticket(issue.id, { flaky: [...found] });
+        }
       }
       let preRepair = sh("git", ["rev-parse", branch], project.root);
       const seen = new Set<string>();
@@ -2735,15 +2752,25 @@ export const burndown = async (
   // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
   // until the scheduler tells its own demand, for the base gates that come first.
   joinPool(project.name, CONCURRENCY, 1);
+  // The time held below the slots it asked for by another live run, and the time a worker waited for a sandbox slot
+  // (set once `slotWaits` exists): the closing summary names both when the run took far longer than its estimate.
+  const shared = createSharedMeter();
+  let sandboxWaitedMs = () => 0;
+  const lostTimes = (): RunRecord => {
+    const sharedMs = shared.ms();
+    const sandboxWaitMs = Math.round(sandboxWaitedMs());
+    return { ...(sharedMs > 0 ? { sharedMs } : {}), ...(sandboxWaitMs > 0 ? { sandboxWaitMs } : {}) };
+  };
   // The ticket slots the run could use, over the time its tickets work at full demand: the record keeps their mean, not the start's share, which moves.
   const load = createLoadMeter(slots);
   run.finishWith(() => {
     const concurrency = load.mean();
-    return { concurrency, load: { concurrency, tickets: candidates.length } };
+    return { concurrency, load: { concurrency, tickets: candidates.length }, ...lostTimes() };
   });
   // The run record's live values (not settings): what the run wants and its share of the pool now.
   // The share moves as other runs begin and end, so it is read again as well as on a demand change.
   let shown: { demand: number; share: number; cap?: number } = { demand: -1, share: -1 };
+  let shownLost: RunRecord = {};
   const poolValues = () => {
     // A finished record is the next turn's to replace: a timer writing to it would undo that.
     if (run.finished) return clearInterval(poolWatch);
@@ -2754,6 +2781,13 @@ export const burndown = async (
     // Counted only while the run asks for all the slots its startable tickets can use: the base gates (one slot) and the tail
     // where the last tickets finish are bound by demand, and would pull the figure down to what the run asked for, not what it ran at.
     load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN), mine.demand >= Math.min(CONCURRENCY, issues.length));
+    shared.sample(sharedBelowAsk(mine, otherRuns().length));
+    // The live figures of a run that is not finished yet (a killed run never writes the end's): rewritten as they grow, so a partial summary has them.
+    const lost = lostTimes();
+    if (lost.sharedMs !== shownLost.sharedMs || lost.sandboxWaitMs !== shownLost.sandboxWaitMs) {
+      shownLost = lost;
+      run.update(lost);
+    }
     if (mine.demand === shown.demand && mine.share === shown.share && mine.cap === shown.cap) return;
     // `cap` is set by `sandcastle cap` from outside: a lifted one is written as absent, which drops it from the record.
     shown = { demand: mine.demand, share: mine.share, cap: mine.cap };
@@ -3019,6 +3053,7 @@ export const burndown = async (
       /* the record's note only: a throw here would end the wait it describes */
     }
   });
+  sandboxWaitedMs = () => slotWaits.waitedMs;
   // A run is silent for as long as its agents are, which for a review can be
   // half an hour. One line every five minutes says it is alive and where, and says when the run
   // has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.

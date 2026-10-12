@@ -497,6 +497,34 @@ export const myShare = (): { demand: number; share: number; held: number; cap?: 
 export const otherRuns = (): Member[] => members().filter((m) => m.run !== RUN_ID && (m.held > 0 || m.demand > 0));
 
 /**
+ * Whether a run is held below what it asked for by another run: another live run holds or wants sandbox slots and the
+ * run's share is under its demand. A cap of the run's own (`sandcastle cap`) with no other run live is not it.
+ */
+export const sharedBelowAsk = (mine: { demand: number; share: number }, others: number) => others > 0 && mine.share < mine.demand;
+
+/**
+ * The time a run spent held below what it asked for by another run (`sharedBelowAsk`), as the run record's `sharedMs`:
+ * `sample` tells whether it is so from now on, `ms` is the time so far. The meter is told at every look at the pool, so
+ * the time between two looks counts as the state the first one saw.
+ */
+export const createSharedMeter = (now: () => number = Date.now) => {
+  let at = now();
+  let sharing = false;
+  let total = 0;
+  return {
+    sample(shared: boolean) {
+      const t = now();
+      if (sharing) total += t - at;
+      at = t;
+      sharing = shared;
+    },
+    ms() {
+      return Math.round(total + (sharing ? now() - at : 0));
+    },
+  };
+};
+
+/**
  * What a run that wants `demand` slots would get if it joined now beside `others`: its share of
  * the sandbox limit (the same split every run works out from the same files) and how many slots
  * are free this moment, which it can take without waiting for any run to finish a ticket.

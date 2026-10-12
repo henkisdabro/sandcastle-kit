@@ -155,6 +155,12 @@ export type TicketRecord = {
   minutes?: number;
   /** Test ids a red gate named. */
   failing?: string[];
+  /**
+   * Tests (or, when the output named none, the gate) that went red on one gate run and green on a later one with no
+   * commit between, each once: likely flaky. The record keeps only the final red's `failing`, so this is where the
+   * red-then-green is kept; the closing summary lists each test once with the tickets it hit.
+   */
+  flaky?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];
   /** The ticket's second attempt after a conflict (at landing, or found before its review or gates) or a red at landing ("requeued after conflict before review with #3"); null once that attempt is not going to run. */
@@ -295,6 +301,17 @@ export type RunRecord = {
    * none was printed (no history to price from). The figures are the line's, unrounded: milliseconds and tokens.
    */
   estimate?: RunEstimate;
+  /**
+   * Milliseconds the run spent with another run live in the pool while its share was below the slots it asked for
+   * (`share` under `demand`), summed as the run goes: the closing summary names it as a cause of a run that took far
+   * longer than its estimate. Absent until there is some.
+   */
+  sharedMs?: number;
+  /**
+   * Milliseconds in which at least one of the run's workers was waiting for a sandbox slot (the union, not the sum over
+   * workers), written as the run goes and at its end. Absent until there is some.
+   */
+  sandboxWaitMs?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
   /**
