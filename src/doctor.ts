@@ -307,15 +307,16 @@ export const isProjectRoot = (repoRoot: string | undefined, kit = KIT): repoRoot
 
 /**
  * The warn block for the runs live on this machine, or none: a run keeps its code loaded but reads
- * `prompts/` as each ticket starts, `container/` as each sandbox opens and `status.sh` as the view
- * redraws, so a pull of the kit under it changes what its later tickets get. A run that ended with
- * its Herdr tab still to be told is parked for the plugin, as the tab bar does, never dropped.
+ * `prompts/` as each ticket starts, `container/` as each sandbox opens and starts each status view from
+ * `status.sh` and `src/status-*.ts`, so a pull of the kit under it changes what its later tickets get.
+ * A run that ended with its Herdr tab still to be told is parked for the plugin, as the tab bar does,
+ * never dropped.
  */
 export const liveRunLines = (dir = RUNS_DIR, probe?: Probe): string[] => {
   const runs = liveRuns(dir, probe, tabAwaitsReport);
   if (!runs.length) return [];
   return [
-    `warn ${runs.length} sandcastle run${runs.length === 1 ? " is" : "s are"} live on this machine, and a live run reads the kit's \`prompts/\`, \`container/\` and \`status.sh\` from disk`,
+    `warn ${runs.length} sandcastle run${runs.length === 1 ? " is" : "s are"} live on this machine, and a live run reads the kit's \`prompts/\` and \`container/\` from disk and starts each status view from \`status.sh\` and \`src/status-*.ts\``,
     "       -> Wait for them to finish before pulling the kit (`sandcastle wait` in each project): a pull changes what their later tickets are built from.",
     ...runs.map((r) => `       - ${r.root}${r.pid ? ` (pid ${r.pid})` : ""}`),
   ];
@@ -402,7 +403,6 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   // name and a hostname address.
   const identity = ["user.name", "user.email"].filter((k) => !run("git", ["config", k], repoRoot));
   check(!identity.length, "git identity (user.name, user.email)", identity.map((k) => `\`git config --global ${k} ${k === "user.name" ? '"Your Name"' : "you@example.com"}\``).join(", then "));
-  check(!!run("jq", ["--version"]), "jq (status view)", mac ? "`brew install jq`" : "Install jq: `sudo apt install jq` or `sudo dnf install jq`.");
   // The status view trusts a run's pid only with its command (`ps -p <pid> -o command=`): a bare pid
   // may be some other process by now. Slim Linux images ship no procps, and there every live run
   // read as ended. macOS always has a ps that takes these flags.

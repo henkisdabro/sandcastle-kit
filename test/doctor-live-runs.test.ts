@@ -1,6 +1,6 @@
 // `sandcastle doctor` names the runs live on the machine, with a note to wait for them before
-// pulling the kit: a live run reads prompts/, container/ and status.sh from disk. The runs come
-// from the live-runs directory under XDG_CACHE_HOME; a run is a record whose pid is a process
+// pulling the kit: a live run reads prompts/ and container/ from disk and starts each status view from
+// status.sh and src/status-*.ts. The runs come from the live-runs directory under XDG_CACHE_HOME; a run is a record whose pid is a process
 // whose command line holds the kit's entry. Doctor runs as a child against a temp cache; no Docker.
 //
 //   pnpm test:file test/doctor-live-runs.test.ts
@@ -57,7 +57,7 @@ test("doctor warns of a live run on the machine, names its project and says to w
   try {
     const { root } = register(cache, live.pid);
     const out = doctor(cache);
-    assert.match(out, /^warn 1 sandcastle run is live on this machine, and a live run reads the kit's `prompts\/`, `container\/` and `status\.sh` from disk$/m, out);
+    assert.match(out, /^warn 1 sandcastle run is live on this machine, and a live run reads the kit's `prompts\/` and `container\/` from disk and starts each status view from `status\.sh` and `src\/status-\*\.ts`$/m, out);
     assert.match(out, /-> Wait for them to finish before pulling the kit/, out);
     assert.ok(out.includes(`       - ${root} (pid ${live.pid})`), out);
     assert.doesNotMatch(out, /^FIX .*live on this machine/m, "a warning, not a failed check");
