@@ -42,8 +42,8 @@ export type BranchFact = {
   onBase: boolean;
   /** Every commit has an equal patch on the base (a rebased landing); asked only of a branch with commits that the view infers. */
   equalPatches?: boolean;
-  /** The kit's merge of the ticket on the base, newest first: when, its subject, and the commits it landed (a squash is one). */
-  landing?: { at: number; subject: string; commits?: number };
+  /** The kit's merge of the ticket on the base, newest first: when, and its subject. */
+  landing?: { at: number; subject: string };
   /** For a branch on the base: its merge (or its tip) is on origin's base too, so the push happened. */
   pushed?: boolean;
 };
@@ -458,15 +458,7 @@ const readBranches = async (dir: string, env: NodeJS.ProcessEnv, base: string, i
     }
     const shown = shownId(id);
     const landing = landings.find((l) => l.message.includes(`Merge agent/issue-${id} (closes ${shown})`) || l.message.includes(`Merge agent/issue-${id} (part of ${shown})`));
-    if (landing) {
-      let commits: number | undefined;
-      if (landing.parents.length >= 2) {
-        // --no-merges, as the kit counts a branch's own commits: a base merge or a resolution is not one.
-        const n = await git(dir, env, ["rev-list", "--count", "--no-merges", `${landing.parents[0]}..${landing.parents[1]}`, ...landing.parents.slice(2)], signal);
-        if (n !== undefined && /^\d+$/.test(n.trim())) commits = Number(n.trim());
-      } else if (landing.parents.length === 1) commits = 1;
-      fact.landing = { at: landing.at, subject: landing.subject, ...(commits !== undefined ? { commits } : {}) };
-    }
+    if (landing) fact.landing = { at: landing.at, subject: landing.subject };
     // A branch on the base, merged by hand: the merge that took its tip in (or the tip itself, for a fast-forward)
     // being on origin's base says the push happened. No fetch here - no network.
     if (fact.onBase && originBase) {

@@ -150,7 +150,7 @@ test("an ended run's partly-done landing that needs a person says so, and is cou
     record: { startedAt: STARTED, finishedAt: "2027-01-15T07:00:00Z" },
     tickets: { "402": { state: "merged", since: NOW - 3000, started: NOW - 3600, unmet: "needs a decision from the maintainer" } },
     logs: [{ name: "agent-issue-402-impl-402.log", mtime: NOW - 3800 }],
-    branches: { "402": { exists: false, onBase: false, landing: { at: NOW - 3000, subject: "Merge agent/issue-402 (part of #402)", commits: 1 } } },
+    branches: { "402": { exists: false, onBase: false, landing: { at: NOW - 3000, subject: "Merge agent/issue-402 (part of #402)" } } },
   });
   const { rows, partly } = ticketRows(s);
   assert.deepEqual([row(rows, "402").state, row(rows, "402").note, row(rows, "402").diff, row(rows, "402").time], ["merged", "partly done - needs a person", "-", "10m"]);

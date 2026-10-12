@@ -212,7 +212,7 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   // The rows' cells.
   const paint = (tone: Tone) => c[tone];
   const cellsOf = (r: Row): string[] =>
-    COLS.map(({ name }) => {
+    COLS.map(({ name, width }) => {
       if (name === "TICKET") {
         const id = `${c.bold}${c.wht}${r.shown}${c.off}`;
         return r.link ? `\x1b]8;;file://${r.link}\x1b\\${id}\x1b]8;;\x1b\\` : id;
@@ -229,7 +229,14 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
         // In, the share of it served from cache (amber under 70%), out: `2.5M 94% 27k`. A record without the count shows in/out.
         const [input, output] = r.tokens.split("/");
         if (r.cache === undefined || input === undefined || output === undefined) return `${c.head}${r.tokens}${c.off}`;
-        return `${c.head}${input}${c.off} ${r.cache < CACHE_AMBER ? c.ylw : c.head}${r.cache}%${c.off} ${c.head}${output}${c.off}`;
+        // A ticket past 10M in (`12.3M 94% 85k`) is wider than the cell, whose cut would end in `8…`: the space before
+        // out goes, then the share, so no figure is ever cut.
+        const share = `${r.cache}%`;
+        for (const gap of [" ", ""]) {
+          if (input.length + 1 + share.length + gap.length + output.length > width - 2) continue;
+          return `${c.head}${input}${c.off} ${r.cache < CACHE_AMBER ? c.ylw : c.head}${share}${c.off}${gap}${c.head}${output}${c.off}`;
+        }
+        return `${c.head}${r.tokens}${c.off}`;
       }
       return `${paint(r.noteTone)}${r.note}${c.off}`;
     });

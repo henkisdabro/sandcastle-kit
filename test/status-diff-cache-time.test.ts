@@ -115,7 +115,7 @@ test("DIFF is the lines added and removed on the ticket's branch, and - without 
   assert.equal(diff({ "12": { exists: false, onBase: false } }), "-", "a branch that is gone");
   assert.equal(diff({ "12": { exists: true, onBase: false } }), "-", "a branch git could not read");
   // A merged ticket's branch is deleted at landing: no branch, so -.
-  const merged = rowOf(snapshot({ "12": { state: "merged", since: NOW - 60, started: NOW - 600 } }, { branches: { "12": { exists: false, onBase: false, landing: { at: NOW - 60, subject: "Merge agent/issue-12 (closes #12)", commits: 2 } } } }));
+  const merged = rowOf(snapshot({ "12": { state: "merged", since: NOW - 60, started: NOW - 600 } }, { branches: { "12": { exists: false, onBase: false, landing: { at: NOW - 60, subject: "Merge agent/issue-12 (closes #12)" } } } }));
   assert.equal(merged.diff, "-");
 });
 
@@ -211,6 +211,18 @@ test("the cache share is amber under 70% and the tokens' own colour from 70%", (
   assert.ok(!share(94).includes(painted.ylw + "94%"), "94% is not");
   // DIFF: added green, removed red; the dash grey.
   assert.ok(share(94).includes(`${painted.grn}+96${painted.off} ${painted.hot}−1159${painted.off}`));
+});
+
+test("a TOKENS cell wider than its 12 cells loses the space before out, then the share, and never cuts a figure", () => {
+  const tokens = (t: string, cache = 94) => cellsOf(frameOf([{ ...base, tokens: t, cache }]))[6];
+  assert.equal(tokens("940k/27k"), "940k 94% 27k");
+  assert.equal(tokens("12.3M/85k"), "12.3M 94%85k");
+  assert.equal(tokens("28.4M/343k"), "28.4M/343k");
+  assert.equal(tokens("2.5M/27k", 100), "2.5M 100%27k");
+  // The share keeps its amber with the space gone.
+  const painted = palette(true, false);
+  const line = frameOf([{ ...base, tokens: "12.3M/85k", cache: 40 }], { colour: true }).split("\n").find((l) => unpainted(l).includes("#12 "))!;
+  assert.ok(line.includes(`${painted.ylw}40%${painted.off}${painted.head}85k`), line);
 });
 
 test("the legend explains ~ and the cache share, and no longer COMMITS", () => {
