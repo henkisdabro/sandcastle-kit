@@ -30,9 +30,9 @@ test("the resolver's finishing and commit steps no longer ask for every gate", (
   assert.match(p, /typecheck gate and the covering tests pass and the merge is committed/);
 });
 
-test("the reviewer runs the full suite once, and only if its own commits changed code", () => {
+test("the reviewer runs the full suite once, after its last code commit, and only if its own commits changed code", () => {
   const p = read("review.md");
-  assert.match(p, /Run the full suite once, and only if your own commits changed code; after docs-only commits .*, none\./);
+  assert.match(p, /Run the full suite once, after your last commit that changed code, and only if your own commits changed code; after docs-only commits .*, none\./);
 });
 
 test("the implementer names the spec it followed when a comment on the ticket amends it", () => {

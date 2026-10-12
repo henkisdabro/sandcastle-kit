@@ -22,7 +22,7 @@ another agent's change. To run a test without your change, `git diff HEAD -- <fi
 timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
 of its own, never chained after the test, so a hang or a move to the background cannot leave the
 worktree without your change. Never `pgrep -f` or `pkill -f` a pattern that also appears in your
-own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. If git ever tells you this
+own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. A long repeat in a `grep` pattern (`.{200}`, `.\{200\}`) fails as too complex: cut a long line with `cut -c`, `awk`, or `grep -o` and a short pattern. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
@@ -43,12 +43,15 @@ Files where that merge conflicts (empty when none): !`git diff --name-only --dif
 the orchestrator merges this branch into `{{TARGET_BRANCH}}` when you finish, and an unresolved
 conflict leaves all of your work unmerged, run after run. Keep both sides' changes (theirs is
 merged work, not yours to undo), run the typecheck gate and the tests that cover the conflicted files,
-then `git commit --no-edit`.
+then `git commit --no-edit`. If resolving it is all this pass does, write no `<unmet>` line for a
+criterion you did not re-examine on the merged branch: an earlier pass's state is unknown to you.
 
 # Before you write anything
 
 Read the repo's agent instructions (`CLAUDE.md`, `AGENTS.md`, whichever exist) and the files the
-ticket names. The project rules below say what else to read.
+ticket names. The project rules below say what else to read. Read a long file in parts: find the
+lines with `grep -n`, then read that range (`sed -n 'A,Bp'`, or Read with an offset and a limit). A
+file you have read stays in your context, so never read it whole again.
 
 # Rules
 
@@ -142,6 +145,9 @@ are green. You cannot talk your way past them, so do not report success you have
 observed.
 
 # Finishing
+
+Keep your final message short, about 20 lines beside the tagged lines below: what you did and what
+you observed. Never paste whole files, logs or rendered output into it.
 
 **If you completed the ticket:** make sure the typecheck gate and the tests covering your change pass,
 make sure everything is committed, then output `<promise>COMPLETE</promise>`.

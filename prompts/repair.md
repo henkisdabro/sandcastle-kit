@@ -15,7 +15,7 @@ without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD -- 
 Give that test run a time limit (the test runner's timeout option, or `timeout`): without the change
 it may hang. Run `git apply /tmp/p` as a command of its own, never chained after the test, so a hang
 or a move to the background cannot leave the worktree without your change. Never `pgrep -f` or
-`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command.
+`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. A long repeat in a `grep` pattern (`.{200}`, `.\{200\}`) fails as too complex: cut a long line with `cut -c`, `awk`, or `grep -o` and a short pattern.
 
 # The ticket
 
@@ -45,7 +45,7 @@ see the whole set, and fix all of them.
   weaken a test, an assertion or a guard to make the gate pass, and never change the gate's
   configuration.
 - **Stay inside the ticket.** If the failure comes from code this branch did not touch and cannot be
-  fixed without scope creep, commit nothing and say so {{KIT_SAY}}.
+  fixed without scope creep, commit nothing, say so and output `<promise>COMPLETE</promise>` (see "Finishing").
   That includes a failure that also fails on `{{TARGET_BRANCH}}` (check against an export of it,
   `git archive {{TARGET_BRANCH}} | tar -x -C <temp dir>`; the guard refuses `git worktree add`):
   it is not this branch's, so it gets no commit. Several branches fixing one test, each its own way,
@@ -68,7 +68,7 @@ see the whole set, and fix all of them.
 
 # Gates
 
-Run all of these in the repo root and make them pass - the orchestrator re-runs them after you exit:
+After a commit, run all of these in the repo root and make them pass - the orchestrator re-runs them after you exit:
 
 ```
 {{KIT_GATES}}
@@ -87,6 +87,13 @@ available here.
 
 # Finishing
 
-Run `{{GATE_COMMAND}}` exactly as written, then the other gates, and quote the last lines of each
-result {{KIT_SAY}}. A run of a few test files is not the gate: say plainly if you did not run the
-full command. Make sure everything is committed, then output `<promise>COMPLETE</promise>`.
+**If you committed a fix:** run `{{GATE_COMMAND}}` exactly as written, then the other gates. A run of
+a few test files is not the gate: say plainly if you did not run the full command. Make sure
+everything is committed.
+
+**If you committed nothing:** do not re-run the full suite; the run you made to find every failure is
+your evidence.
+
+Either way, report {{KIT_SAY}}: the last lines of each gate result, or why the failure is not this
+branch's. Keep your final message short, about 20 lines beside the tagged lines; never paste whole
+files or logs into it. Then output `<promise>COMPLETE</promise>`.

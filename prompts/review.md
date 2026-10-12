@@ -20,7 +20,7 @@ another agent's change. To run a test without the branch's change (it is committ
 timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
 of its own, never chained after the test, so a hang or a move to the background cannot leave the
 worktree without your change. Never `pgrep -f` or `pkill -f` a pattern that also appears in your
-own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. If git ever tells you this
+own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. A long repeat in a `grep` pattern (`.{200}`, `.\{200\}`) fails as too complex: cut a long line with `cut -c`, `awk`, or `grep -o` and a short pattern. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
@@ -116,9 +116,9 @@ to time it.
 
 The orchestrator runs every one of them on this branch as soon as you finish, and a red gate gets a
 repair pass. So run the tests and checks that cover what you are looking at or changing, as often as
-you need. Run the full suite once, and only if your own commits changed code; after docs-only
-commits (prose in a README, a doc or a comment), none. A full gate run of your own adds nothing when
-you commit nothing.
+you need. Run the full suite once, after your last commit that changed code, and only if your own
+commits changed code; after docs-only commits (prose in a README, a doc or a comment), none. A full
+gate run of your own adds nothing when you commit nothing.
 
 A long command that is not a gate - a download, an install, a build - also runs in the foreground
 with the tool's longest timeout, never in the background. If one is in the background anyway, wait for
@@ -127,6 +127,9 @@ where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is bloc
 available here.
 
 # Finishing
+
+Keep your final message short, about 20 lines beside the tagged lines below: what you found and what
+you changed. Never paste whole files, logs or rendered output into it.
 
 **If no gate exercises this change** - its effect shows only in a browser, in a generated file
 the gates do not rebuild, in a rendered document or image, in a dependency from outside the registry
