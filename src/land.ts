@@ -18,7 +18,7 @@ import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { gatesLog, markLog, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
 
@@ -338,6 +338,7 @@ export const landTicket = async (
       let kept = "";
       try {
         sh("git", ["branch", squash ? "-D" : "-d", branch], project.root);
+        forgetFork(project.root, branch);
       } catch (error) {
         kept = ` ${branch} could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`;
       }

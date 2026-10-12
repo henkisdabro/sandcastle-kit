@@ -62,7 +62,7 @@ read a module's section there before changing it.
 | `src/touches.ts` | The `Touches:` line of a ticket body, and `unmergeableFiles`; a scheduling hint, never a guard |
 | `src/lint.ts` | `lintQueue()`: the queue's shape for `sandcastle queue --lint`; read-only advice |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review (and the readout its command prints for the plan usage row) |
-| `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks, `ownCommits` and `staleBaseParents` (the old base a rewrite left in a carried branch's history), the CPU limit by kind of sandbox (`sandboxCpus`: a ticket's, or gate-only); `KIT`, the kit's own directory |
+| `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks, `ownCommits` and `staleBaseParents` (the old base a rewrite left in a carried branch's history, read from its merge commits and from the fork point `recordFork` keeps), the CPU limit by kind of sandbox (`sandboxCpus`: a ticket's, or gate-only); `KIT`, the kit's own directory |
 | `src/claude-tools.ts` | The kit's one list of Claude Code's built-in tool names (`CLAUDE_CODE_TOOLS`), `managedDenied()` (the managed settings' deny list) and `nearestTool`: what `config.ts` checks a `lean.keep` `tool:<Name>` entry against |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement; `hooksPathOutside`: a `core.hooksPath` no sandbox has (absolute or outside the project), which doctor, `lean` and the base check (`hooksPathWarning`, `src/gates.ts`) flag |

@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { MAX_OUTPUT, ownCommitList, sh, staleBaseParents } from "./sandbox.ts";
+import { MAX_OUTPUT, ownCommitList, recordFork, sh, staleBaseParents } from "./sandbox.ts";
 import { covers, type Exec, type Generated, shq } from "./generated.ts";
 
 // `merge-tree --write-tree` arrived in git 2.38.
@@ -298,9 +298,16 @@ export const rebuildOnBase = async (box: Exec, o: { root: string; base: string; 
     await restore();
     return held(`could not move the branch onto the rebuilt commits (${lastLine(moved)})`);
   }
+  // Now forked from the tip it sits on: the old fork point is no part of the rebuilt branch and finds nothing, so a later
+  // rewrite of this tip is found only through the new record.
+  try {
+    recordFork(root, branch, onto);
+  } catch {
+    /* the merge-commit detector alone for a later rewrite, as for a branch made before the record */
+  }
   return { kind: "rebuilt", was, onto, picked, dropped };
 };
 
 /** The note on a ticket held because its branch could not be rebuilt on a rewritten base: the run record and the tracker comment share it. */
 export const rewrittenNote = (base: string, held: Extract<Rebuilt, { kind: "held" }>): string =>
-  `${REWRITTEN_NOTE_START} - it merged ${held.merged.join(", ")}, which ${base} no longer holds, and ${held.why}; the branch is left as it was (${held.was.slice(0, 7)})`;
+  `${REWRITTEN_NOTE_START} - it merged or was cut from ${held.merged.join(", ")}, which ${base} no longer holds, and ${held.why}; the branch is left as it was (${held.was.slice(0, 7)})`;

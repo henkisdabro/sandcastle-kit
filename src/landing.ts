@@ -29,7 +29,7 @@ import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, sh, staleBaseParents } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
@@ -450,7 +450,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   if (sh("git", ["rev-parse", o.branch], root) !== o.head) return { kind: "skipped", reason: `${o.branch} moved after its gates passed` };
   // The pipeline re-creates a branch that merged a base since rewritten before it runs a gate (`rebuildOnBase`); one that
   // gets here was rewritten after, or the check could not run. Merging it brings back commits the base lost.
-  if (staleBaseParents(base, o.branch, root).length) return { kind: "skipped", reason: `${o.branch} merged a ${base} that has since been rewritten - the next run re-creates it on ${base}'s tip` };
+  if (staleBaseParents(base, o.branch, root).length) return { kind: "skipped", reason: `${o.branch} merged or was cut from a ${base} that has since been rewritten - the next run re-creates it on ${base}'s tip` };
   // A warning, never a hold: the Touches line is written by an agent. A tracker or git failure
   // costs the warning only.
   let overrun: string[] = [];
@@ -724,6 +724,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   // branch holding a commit the base lacks, where a squash's `-D` is the only delete that works.
   try {
     await host.write(() => sh("git", ["branch", squash ? "-D" : "-d", o.branch], root));
+    forgetFork(root, o.branch);
   } catch (error) {
     // Git's own words: a kept worktree holding the branch is one cause, not the only one.
     console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`);
