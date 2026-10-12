@@ -196,7 +196,7 @@ test("openSandboxView's rewrite replaces the record whole, so a reader never see
 });
 
 // ---------------------------------------------------------------------------
-// status.sh's traps.
+// The status view's signal handling.
 // ---------------------------------------------------------------------------
 
 // The view runs on a pty and is signalled from outside once its first frame is drawn, as Ctrl-C or Herdr would.

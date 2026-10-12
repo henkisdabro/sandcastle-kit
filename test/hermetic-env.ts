@@ -26,7 +26,7 @@
 //    broken `disableHostGitGc` from test/landing-queue.test.ts.)
 //  - Names the code reads as a setting or a credential are removed: HERDR_*, TMUX*, SANDCASTLE_* (but not
 //    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests and which are the tests' own switches, such as
-//    SANDCASTLE_TEST_STATUS_IMPL, the status view a black-box test starts: test/status-run.ts) and the names in `SCRUBBED` below. A test that
+//    SANDCASTLE_TEST_NOW, the fixture clock: test/status-clock.ts) and the names in `SCRUBBED` below. A test that
 //    needs one sets it itself. test/hermetic-env.test.ts fails when `src/` reads a name that is neither
 //    scrubbed nor on its short keep list, so a new setting cannot leak in later.
 //

@@ -2,8 +2,7 @@
 // painted frame and then does what a person or Herdr would - types keys, sends Ctrl-C as a byte, resizes the
 // pane, sends INT, TERM or HUP to the view's pid - and checks what the view did: the frame it painted, the
 // status it ended with, the terminal it left, the processes it left running. No fake `sleep`, which only
-// the bash loop would ever run: these hold any implementation of the view, chosen with
-// SANDCASTLE_TEST_STATUS_IMPL (test/status-run.ts). No Docker, no network, no model calls.
+// the old bash loop ever ran. No Docker, no network, no model calls.
 //
 //   pnpm test:file test/status-lifecycle.test.ts
 
@@ -13,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
 import { buildFixture, hang, release } from "./status-fixture.ts";
-import { impl, needsScript, orphans, settledTty, started, startSession, until, type Painted, type Session } from "./status-run.ts";
+import { needsScript, orphans, settledTty, started, startSession, until, type Painted, type Session } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-lifecycle-"));
 // An older orchestrator's live run: a few rows, one sandbox container, so a frame is quick and the view calls docker, git and sandcastle.
@@ -35,10 +34,6 @@ const open = async (options: Parameters<typeof startSession>[1] = {}) => {
 const widthOf = (frame: { text: string }) => [...frame.text.split("\n")[0]!].length;
 /** The sequences a live view writes to leave the alternate screen and give the terminal back. */
 const LEFT = ["\x1b[?1007h", "\x1b[?7h", "\x1b[?25h", "\x1b[?1049l"];
-
-// Strictly held only for a view that stops what it started: the bash view's traps wait out a command in
-// flight, so there the checks are kept for SANDCASTLE_TEST_STATUS_STRICT=1, which shows them failing.
-const inFlight = { skip: impl() === "bash" && !process.env.SANDCASTLE_TEST_STATUS_STRICT ? "status.sh waits out a command in flight (SANDCASTLE_TEST_STATUS_STRICT=1 runs this anyway)" : false as const };
 
 // ---------------------------------------------------------------------------
 // The first frame and the terminal while the view runs.
@@ -120,7 +115,7 @@ test("a Ctrl-C byte stops a view with a command in flight, and leaves nothing ru
 });
 
 for (const [name, status] of [["INT", [130]], ["TERM", [130]], ["HUP", [129, 130]]] as const) {
-  test(`${name} stops a view with a command in flight, and leaves nothing running`, { skip: inFlight.skip || needsScript.skip }, async () => {
+  test(`${name} stops a view with a command in flight, and leaves nothing running`, needsScript, async () => {
     // Sent to the view alone, as `kill` or Herdr does: the command in flight is not signalled by the terminal.
     hang(fixture, "docker");
     const view = await open();
@@ -187,8 +182,6 @@ test("a resize that lands while a frame is being drawn is not lost", needsScript
 // room for a loaded CI machine; the numbers each test saw are in its failure message.
 // ---------------------------------------------------------------------------
 
-// The bash loop reads every source for each frame: no tick, no debounce. These hold the TypeScript view.
-const instant = { skip: impl() === "bash" ? "status.sh reads every source for each frame" : needsScript.skip };
 
 /** Every frame painted from now on, with when it arrived (ms, performance.now()): polled every few ms until `stop()`. */
 const watch = (view: Session) => {
@@ -216,7 +209,7 @@ const settled = async (view: Session, ms = 700) => {
   });
 };
 
-test("the first paint comes at once, saying the queue is loading while it hangs", instant, async () => {
+test("the first paint comes at once, saying the queue is loading while it hangs", needsScript, async () => {
   hang(fixture, "sandcastle");
   const t0 = performance.now();
   const view = await open({ args: ["30"] });
@@ -231,7 +224,7 @@ test("the first paint comes at once, saying the queue is loading while it hangs"
   assert.ok(full.end > first.end);
 });
 
-test("a drag of the pane ends in one repaint, at the final size, soon after the last resize", instant, async () => {
+test("a drag of the pane ends in one repaint, at the final size, soon after the last resize", needsScript, async () => {
   const view = await open({ args: ["30"], cols: 100 });
   await settled(view);
   const frames = watch(view);
@@ -254,7 +247,7 @@ test("a drag of the pane ends in one repaint, at the final size, soon after the 
   }
 });
 
-test("a tick redraws every second, on time, while docker and the queue hang", instant, async () => {
+test("a tick redraws every second, on time, while docker and the queue hang", needsScript, async () => {
   hang(fixture, "docker");
   hang(fixture, "sandcastle");
   // Collecting every second too: the record, git and the pool are asked again while docker and the queue hang.
@@ -272,7 +265,7 @@ test("a tick redraws every second, on time, while docker and the queue hang", in
   for (const gap of gaps) assert.ok(gap >= 800 && gap <= 1200, `ticks ${gaps.join(", ")} ms apart`);
 });
 
-test("a tick and a resize repaint start no docker, gh, git or sandcastle", instant, async () => {
+test("a tick and a resize repaint start no docker, gh, git or sandcastle", needsScript, async () => {
   // The interval is 30 s: once the collectors have answered, nothing is due to collect while this runs.
   const view = await open({ args: ["30"], cols: 100 });
   await settled(view);
@@ -288,7 +281,7 @@ test("a tick and a resize repaint start no docker, gh, git or sandcastle", insta
 });
 
 for (const exit of EXITS) {
-  test(`${exit.name} with docker and the queue mid-refresh leaves nothing running`, instant, async () => {
+  test(`${exit.name} with docker and the queue mid-refresh leaves nothing running`, needsScript, async () => {
     hang(fixture, "docker");
     hang(fixture, "sandcastle");
     const view = await open({ env: exit.popup ? { SANDCASTLE_STATUS_KEYS: "1" } : {} });

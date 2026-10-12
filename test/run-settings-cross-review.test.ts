@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { spawnStatus } from "./status-run.ts";
+import { readFacts, spawnStatus } from "./status-run.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -59,8 +59,11 @@ const frame = (cols: number, next?: string): string[] => {
   for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
   return lines;
 };
-/** The settings row's text between the bars, trimmed, or undefined when the view draws none. */
-const row = (lines: string[]) => lines.find((l) => l.startsWith("│ settings "))?.replace(/^│ /, "").replace(/ *│$/, "");
+/** The settings lane's items (the autonomy scale reduced to the level chosen), joined by ` · `, or undefined when the view draws none. */
+const row = (lines: string[]) => {
+  const items = readFacts(lines.join("\n"), REPO).settings ?? [];
+  return items.length ? items.join(" · ") : undefined;
+};
 
 
 const resolve = (env: Record<string, string | undefined>) => resolveSettings({ env, project: {}, machine: {} }).crossReview;
@@ -92,37 +95,35 @@ const WITH = `${MODELS} · cross-review gpt-6-astra/high`;
 /** The view's lines whose text holds `word`, trimmed of the frame. */
 const lines = (all: string[], word: string) => all.filter((l) => l.includes(word));
 
-test("on: the row shows model and effort, and the models cell holds only models", () => {
+test("on: the settings show model and effort, and the models cell holds only models", () => {
   record({ models: WITH, settings: { autonomy: 0, turn: 1, cap: 1, crossReview: true, crossReviewModel: "gpt-6-astra", crossReviewEffort: "high" } });
-  assert.equal(row(frame(80)), "settings  autonomy 0 · turn 1/1 · ● cross-review gpt-6-astra high (last run)");
-  assert.equal(row(frame(100)), "settings  autonomy [0] 1 2 3 drain · turn 1/1 · ● cross-review gpt-6-astra high (last run)");
-  for (const cols of [80, 100, 200]) assert.equal(lines(frame(cols), "cross-review").length, 1, `${cols} columns: shown once`);
-  // Wide, the models cell is its own column and shows every model: here, only the two.
+  for (const cols of [100, 200]) assert.equal(row(frame(cols)), "autonomy 0 · ● cross-review gpt-6-astra high (last run)", `${cols} columns`);
+  for (const cols of [100, 200]) assert.equal(lines(frame(cols), "cross-review").length, 1, `${cols} columns: shown once`);
+  // Wide, the models cell is its own lane and shows every model: here, only the two.
   const wide = frame(200);
-  assert.ok(wide.some((l) => l.includes("review    claude-opus-5-5/high")), "the models stay");
-  assert.ok(!wide.some((l) => /cross-review ?gpt-6-astra\/high/.test(l)), "the models cell has no cross-review");
+  assert.ok(wide.some((l) => l.includes("review opus-5-5/high")), "the models stay");
+  assert.ok(!wide.some((l) => /cross-review ?gpt-6-astra\/high/.test(l) && l.includes("review opus")), "the models cell has no cross-review");
 });
 
-test("off: the row shows ○ cross-review from 80 columns and drops it below", () => {
+test("off: the settings show ○ cross-review, and nothing of it below 80 columns", () => {
   record({ models: MODELS, settings: { autonomy: 0, turn: 1, cap: 1, crossReview: false } });
-  assert.equal(row(frame(100)), "settings  autonomy [0] 1 2 3 drain · turn 1/1 · ○ cross-review (last run)");
-  assert.equal(row(frame(80)), "settings  autonomy 0 · turn 1/1 · ○ cross-review (last run)");
-  assert.equal(row(frame(79)), "settings  autonomy 0 · turn 1/1 (last run)");
+  for (const cols of [100, 200]) assert.equal(row(frame(cols)), "autonomy 0 · ○ cross-review (last run)", `${cols} columns`);
+  assert.ok(!frame(79).some((l) => l.includes("cross-review")), "nothing of it below 80 columns");
 });
 
 test("an old record keeps its models string as written, and draws no cross-review item", () => {
   record({ models: WITH, settings: { autonomy: 0, turn: 1, cap: 1 } });
   const has = (all: string[]) => all.some((l) => /cross-review ?gpt-6-astra\/high/.test(l));
-  assert.equal(row(frame(100)), "settings  autonomy [0] 1 2 3 drain · turn 1/1 (last run)");
+  assert.equal(row(frame(200)), "autonomy [0] (last run)");
   assert.ok(has(frame(200)), "the models cell still holds it");
   record({ models: WITH });
   assert.ok(has(frame(200)));
 });
 
-test("idle: the next run's setting, passed by `sandcastle status`, gives the row item", () => {
+test("idle: the next run's setting, passed by `sandcastle status`, gives the item", () => {
   record({ models: MODELS, settings: { autonomy: 0, turn: 1, cap: 1, crossReview: false } });
   const next = JSON.stringify({ autonomy: 0, turn: 1, cap: 1, crossReview: true, crossReviewModel: "other-model", crossReviewEffort: "xhigh" });
-  assert.match(row(frame(100, next)) ?? "", /^settings {2}next run: .*· ● cross-review other-model xhigh$/);
+  assert.match(row(frame(100, next)) ?? "", /^next run: autonomy 0 · ● cross-review other-model xhigh$/);
 });
 
 test("a model or effort that is not plain text is never drawn", () => {

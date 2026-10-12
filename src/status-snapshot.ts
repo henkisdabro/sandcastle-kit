@@ -8,11 +8,11 @@
 // its last good reading when one fails or is given up, marked stale; a result that comes after its deadline is
 // dropped. The plan's usage is a field of the run record, so it comes with the record. Every command runs in a
 // process group of its own, ended with the refresh that started it: a collector given up or stopped leaves
-// nothing running. The queue is a child process, as status.sh runs it: the tracker and blocker code is
+// nothing running. The queue is a child process: the tracker and blocker code is
 // synchronous and is never imported into the view (ADR 0003).
 //
 // The record is a file in a repository, so each field is read on its own and checked: one a newer or older
-// kit wrote in another shape empties only itself, as status.sh's one-jq read does.
+// kit wrote in another shape empties only itself.
 
 import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
@@ -54,7 +54,7 @@ export type ContainerFact = { cpu: string; mem: string; hot: boolean };
 /** One queued ticket, as `sandcastle queue --json` lists it. */
 export type QueueFact = { id: string; updated?: number; blockedOn: string[] };
 
-/** The run settings a settings row draws from, and whose they are: the live run's, the next run's, or the last run's. */
+/** The run settings the SETTINGS lane draws from, and whose they are: the live run's, the next run's, or the last run's. */
 export type SettingsFact = { from: "live" | "next run" | "last run"; settings: Record<string, unknown> | undefined };
 
 /** The sources a snapshot is read from, one collector each (the plan's usage is a field of the run record). */
@@ -66,7 +66,7 @@ export type SourceStatus = "loading" | "current" | "stale" | "unavailable";
 export type Snapshot = {
   /** Epoch seconds the snapshot was read at: every age in the frame is measured from it. */
   now: number;
-  /** The project root, and its `.sandcastle` directory as status.sh's `$PWD` (links point into it). */
+  /** The project root, and its `.sandcastle` directory (links point into it). */
   root: string;
   dir: string;
   name: string;
@@ -123,7 +123,7 @@ export const versionOrder = (a: string, b: string): number => {
 
 // A log is agent-issue-<id>-<phase>-<id>.log: the id appears twice, and the repeat tells a ticket called
 // "code-review-01" from the phase "review". A hand-suffixed branch's log (agent-issue-12-closeout-impl-12)
-// falls back to the first phase word. status.sh `log_ids`.
+// falls back to the first phase word.
 const PHASE_REPEAT = /^-(impl|resolve|review-codex|review|repair|gates)-/;
 /** The ticket id of a log's file name, or undefined when it is not an agent log. */
 export const logTicket = (name: string): string | undefined => {
@@ -158,7 +158,7 @@ export const latestLog = (logs: LogFact[], id: string): LogFact | undefined => n
 
 const FRAMING = /^(Agent|Run|Capturing|Collecting|Syncing|Context)/;
 
-/** The last line of a log that says something, made readable: the raw line is agent transcript, not a status. status.sh `log_activity`. */
+/** The last line of a log that says something, made readable: the raw line is agent transcript, not a status. */
 export const activityOf = (text: string): string => {
   const lines = text.split("\n").filter((l) => !/^\s*$/.test(l) && !FRAMING.test(l));
   const last = lines.at(-1);
@@ -180,7 +180,7 @@ export const activityOf = (text: string): string => {
 
 /**
  * Whether a log ends saying the plan's allowance is spent. A `! error` or `! exit N` line quotes a failed
- * tool's output, which can say "usage limit" too, so it is skipped. status.sh `log_says_limit`.
+ * tool's output, which can say "usage limit" too, so it is skipped.
  */
 export const saysLimit = (text: string): boolean => {
   const lines = text.split("\n");
@@ -199,7 +199,7 @@ export const whole = (v: unknown): number | undefined => {
 const WORKING: readonly string[] = ["setup", "implement", "resolve", "review", "cross-review", "gates", "repair"];
 
 /**
- * When a live run ends, as status.sh's header says it: the queued tickets at a typical issue's length each,
+ * When a live run ends, as the header says it: the queued tickets at a typical issue's length each,
  * the working ones at what is left of theirs (a minute at least), over the sandboxes the run uses at once; and
  * no earlier than the tickets not yet landed times a ticket's usual landing gates. Only while the run is
  * running and has a typical issue.
@@ -732,7 +732,7 @@ export const createSources = (dir: string, env: NodeJS.ProcessEnv, onChange?: ()
   const queue = createCollector({ read: (signal) => readQueue(env, dir, signal), deadline: DEADLINES.queue, onChange });
   const pool = createCollector({ read: (signal) => readPool(env, signal), deadline: DEADLINES.pool, onChange });
   const all = { record, git: gitSource, docker, queue, pool };
-  // The run record's change time, as status.sh's queue cache keys on it: a run rewrites it when it starts and
+  // The run record's change time, as the queue cache keys on it: a run rewrites it when it starts and
   // when it exits, having closed what it landed.
   const recordTime = () => {
     try {

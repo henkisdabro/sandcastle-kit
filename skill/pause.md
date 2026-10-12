@@ -30,13 +30,13 @@ how to resume.
    - `The run (pid <n>) paused itself at <time> for its plan's usage (...). The pause is yours now:
      ...` - the run had paused itself for `USAGE_PAUSE` and would have resumed after the window's
      reset; the user's pause now holds it until `sandcastle resume`. Say both, and go on to step 2.
-2. Run `sandcastle status 0`. The run reads the pause within a second or two; if the run cell does
+2. Run `sandcastle status 0`. The run reads the pause within a second or two; if the RUN lane does
    not read `PAUSED since <time>` yet, run it again before telling the user it is paused.
 3. Tell the user, in a few lines:
-   - **What is still finishing.** The run cell names it (`PAUSED since 15:40 - finishing #12
+   - **What is still finishing.** The RUN lane names it (`PAUSED since 15:40` over `finishing #12
      review, #14 landing`): a pass already running finishes, then its sandbox closes. Each ticket
      parked between two phases reads `paused`, its note naming the phase it resumes at. When the
-     cell reads only `PAUSED since 15:40`, nothing is in flight: the run holds no sandbox slot and
+     lane reads only `PAUSED since 15:40`, nothing is in flight: the run holds no sandbox slot and
      the machine may sleep.
    - **Green branches keep landing.** Gates and landings are no agent passes, so a ticket whose
      pass has ended still gates, and a green branch still lands.
@@ -54,7 +54,7 @@ how to resume.
    - **How to resume.** Ask for it in plain words ("carry on", "resume the run"), or run
      `sandcastle resume`. A pause the user takes has no timer: "until tomorrow" means the run stays
      paused until someone resumes it, so say that, and offer to resume when the user comes back. A
-     pause the run took for its plan's usage (`USAGE_PAUSE`, the run cell naming the window) resumes
+     pause the run took for its plan's usage (`USAGE_PAUSE`, the RUN lane naming the window) resumes
      by itself a minute after that window's reset, unless the user pauses it too.
 
 ## resume - carry a paused run on
@@ -69,7 +69,7 @@ resume).
      SKILL.md's "Costs" asks for.
    - `The run (pid <n>) is not paused.` - nothing changed; say so.
    - `Resuming the run (pid <n>, paused since <time>): ...` - go on to step 2.
-2. Run `sandcastle status 0` and confirm the run cell no longer reads `PAUSED` and the parked
+2. Run `sandcastle status 0` and confirm the RUN lane no longer reads `PAUSED` and the parked
    tickets have left `paused` for a working state. The run reads the resume within a second or two:
    run it again before saying it did not take. Tell the user the run is going again, and that its
    end is heard as run.md's step 3 arranged (the mod's prompt, or `sandcastle wait`).

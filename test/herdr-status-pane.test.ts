@@ -1,9 +1,9 @@
 // Herdr finds the status view in a pane by the pane's command line: the run's pane reuse (Ctrl-C, then wait for
 // a shell), a dead run's tab (a pane still showing the view gets no report) and the restart (a pane still showing
-// it is left alone) all go by it. Whichever view status.sh runs - its own, or the TypeScript one it `exec`s when
-// the switch says ts - is the command line Herdr sees. Here the real view runs on a pty, started through
-// status.sh, and a fake `herdr` answers `pane process-info` with that process's command line from `ps` and
-// `pane send-keys ... ctrl+c` with an INT to it, as the terminal would. No Herdr, no Docker, no network.
+// it is left alone) all go by it. The view status.sh `exec`s (the TypeScript one) is the command line Herdr sees.
+// Here the real view runs on a pty, started through status.sh, and a fake `herdr` answers `pane process-info` with
+// that process's command line from `ps` and `pane send-keys ... ctrl+c` with an INT to it, as the terminal would.
+// No Herdr, no Docker, no network.
 //
 //   pnpm test:file test/herdr-status-pane.test.ts
 
@@ -49,8 +49,6 @@ Object.assign(process.env, {
   HERDR_ENV: "1",
   HERDR_PANE_ID: "p1",
   XDG_CACHE_HOME: join(TMP, "cache"),
-  // The view is started through status.sh, which picks the view itself from the switch in the view's environment.
-  SANDCASTLE_TEST_STATUS_IMPL: "bash",
 });
 delete process.env.HERDR_SOCKET_PATH;
 delete process.env.HERDR_WORKSPACE_ID;
@@ -68,34 +66,32 @@ const RECORD = { tab: "tOld", adopted: false, status: "pOld", terminal_id: "term
 const record = () => JSON.parse(readFileSync(viewRecord(fixture.root), "utf8"));
 const calls = () => readFileSync(log, "utf8").split("\n").filter(Boolean);
 
-for (const [view, file] of [["bash", "status.sh"], ["ts", "status-view.ts"]] as const) {
-  test(`the ${view} view in the status pane is seen as the view: not reported over, not restarted, stopped and reused`, needsScript, async () => {
-    writeFileSync(viewRecord(fixture.root), JSON.stringify(RECORD) + "\n");
-    writeFileSync(log, "");
-    const session = await startSession(fixture, { env: { SANDCASTLE_TEST_STATUS_IMPL: view === "ts" ? "ts" : "", HERDR_ENV: "1", HERDR_PANE_ID: "pOld" } });
-    try {
-      await session.frame();
-      process.env.FAKE_VIEW_PID = String(session.pid);
-      const command = spawnSync("ps", ["-o", "command=", "-p", String(session.pid)], { encoding: "utf8" }).stdout;
-      assert.ok(command.includes(file), `status.sh runs the ${view} view: ${command}`);
+test(`the view in the status pane is seen as the view: not reported over, not restarted, stopped and reused`, needsScript, async () => {
+  writeFileSync(viewRecord(fixture.root), JSON.stringify(RECORD) + "\n");
+  writeFileSync(log, "");
+  const session = await startSession(fixture, { env: { HERDR_ENV: "1", HERDR_PANE_ID: "pOld" } });
+  try {
+    await session.frame();
+    process.env.FAKE_VIEW_PID = String(session.pid);
+    const command = spawnSync("ps", ["-o", "command=", "-p", String(session.pid)], { encoding: "utf8" }).stdout;
+    assert.ok(command.includes("status-view.ts"), `the view runs as the TypeScript one: ${command}`);
 
-      // A dead run's tab whose pane still shows the view: no report typed, the record left for later.
-      assert.equal(tellDeadTab(fixture.root, "/the/kit"), "showing");
-      // A live run's: the view is not typed in again over itself.
-      assert.equal(restartStatusView(fixture.root, "/the/kit"), false);
-      assert.deepEqual(calls().filter((c) => c.startsWith("pane run ") || c.startsWith("pane send-keys ")), []);
+    // A dead run's tab whose pane still shows the view: no report typed, the record left for later.
+    assert.equal(tellDeadTab(fixture.root, "/the/kit"), "showing");
+    // A live run's: the view is not typed in again over itself.
+    assert.equal(restartStatusView(fixture.root, "/the/kit"), false);
+    assert.deepEqual(calls().filter((c) => c.startsWith("pane run ") || c.startsWith("pane send-keys ")), []);
 
-      // A new run reuses the pane: the view is stopped by Ctrl-C, with no quit mark, and the pane gets the new view.
-      openSandboxView({ root: fixture.root, name: "shop" } as Project, 1, (id) => `#${id}`, () => ({}));
-      const ended = await session.ended("the reuse's Ctrl-C");
-      assert.equal(ended.status, 130);
-      assert.ok(calls().includes("pane send-keys pOld ctrl+c"));
-      assert.ok(calls().includes(`pane run pOld cd '${fixture.root}' && ${STATUS_COMMAND}`), calls().join("\n"));
-      assert.ok(!calls().some((c) => c.startsWith("tab create")), "the pane was replaced, not reused");
-      assert.equal(record().status, "pOld");
-      assert.equal(record().quit, undefined, "the stopped view marked the reused pane quit");
-    } finally {
-      session.close();
-    }
-  });
-}
+    // A new run reuses the pane: the view is stopped by Ctrl-C, with no quit mark, and the pane gets the new view.
+    openSandboxView({ root: fixture.root, name: "shop" } as Project, 1, (id) => `#${id}`, () => ({}));
+    const ended = await session.ended("the reuse's Ctrl-C");
+    assert.equal(ended.status, 130);
+    assert.ok(calls().includes("pane send-keys pOld ctrl+c"));
+    assert.ok(calls().includes(`pane run pOld cd '${fixture.root}' && ${STATUS_COMMAND}`), calls().join("\n"));
+    assert.ok(!calls().some((c) => c.startsWith("tab create")), "the pane was replaced, not reused");
+    assert.equal(record().status, "pOld");
+    assert.equal(record().quit, undefined, "the stopped view marked the reused pane quit");
+  } finally {
+    session.close();
+  }
+});

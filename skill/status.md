@@ -51,26 +51,25 @@ apart). The states:
   pause`): its sandbox is closed, its branch kept, and the note names the phase it resumes at.
   `sandcastle resume` continues it in the same run.
 
-A paused run is still live, and its run cell reads `PAUSED since 15:40 - finishing #12 review, #14
-landing` (then `PAUSED since 15:40` once nothing is in flight). When the snapshot shows it, name
+A paused run is still live, and its RUN lane reads `PAUSED since 15:40`, with `finishing #12 review, #14
+landing` on the next row while anything is in flight. When the snapshot shows it, name
 the pause in what you tell the user: since when, which tickets are still finishing (green
 branches keep landing), and that `sandcastle resume` (the resume action, pause.md) carries it on.
 Do not call a paused run hung, finished or stuck.
 
-A live run whose `.git` guard tripped (the base branch moved, say) reads `STOPPED landing` in its run
-cell the moment it happens, and the run's output printed `STOPPED landing: ...` then: it finishes
+A live run whose `.git` guard tripped (the base branch moved, say) reads `STOPPED landing` in its RUN
+lane the moment it happens, and the run's output printed `STOPPED landing: ...` then: it finishes
 what is in flight and lands nothing more, and each ticket it did not start says what moved (`not
 started: main moved while sandboxes ran`). Tell the user the run is stopped, not working, and why.
 
-A live run that spends a subscription on a Claude model also has a `usage` row in the header: the
+A live run that spends a subscription on a Claude model also has a plan lane in the header: the
 plan's 5-hour and weekly windows, each with its percentage and reset time, and how long ago an agent
-last reported them (`usage  claude  5h ... 14% · resets 18:10   week ... 93% · resets Wed 06:00   (2m ago)`).
+last reported them (`claude 5h ... 14% · resets 18:10 · week ... 93% · resets Wed 06:00 · (2m ago)`).
 With no run live, `sandcastle usage` prints the same windows, read-only.
-Amber from 75% and red from 90%; grey with its age when no agent has reported for 15 minutes; `waiting
-for the first agent's reading` before the first. With cross-review on a ChatGPT-signed-in Codex, a
-second line, `codex`, shows that plan's windows the same way (`waiting for the first cross-review's
-reading` before the first pass ends). A run on an Anthropic API key has no `claude` line (its settings
-row says `API credits`: there is no plan to spend).
+Amber from 75% and red from 90%; grey with its age when no agent has reported for 15 minutes; the lane is left out before the first
+reading. With cross-review on a ChatGPT-signed-in Codex, a second line, `codex`, shows that plan's
+windows the same way (left out until the first pass ends). A run on an Anthropic API key has no
+`claude` line (its RUN lane says `API credits`: there is no plan to spend).
 
 After a run, or for a ticket outside it, the state is inferred from branches and logs: `left
 over` is a branch from an earlier run, for `sandcastle clean`. The live view fits its pane and

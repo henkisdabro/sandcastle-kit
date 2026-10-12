@@ -3,7 +3,7 @@
 // A pane cannot see that terminal: Herdr's server gives every pane TERM_PROGRAM=herdr, and any
 // terminal may attach to the long-lived server. The attached Herdr client process carries the
 // terminal's environment, and a process of the same user can read it - so `sandcastle status`
-// senses it once when it starts a view and hands status.sh one word (SANDCASTLE_CLICK_MOD). In
+// senses it once when it starts a view and hands the view one word (SANDCASTLE_CLICK_MOD). In
 // iTerm2 Ctrl-click is macOS's right-click and never reaches Herdr; Cmd-click works there.
 // Anything uncertain gets the fallback, which names both.
 
@@ -16,7 +16,7 @@ export type ClickMod = "ctrl" | "cmd" | "fallback";
 export type ClickSetting = "auto" | "ctrl" | "cmd";
 export const CLICK_SETTINGS: readonly ClickSetting[] = ["auto", "ctrl", "cmd"];
 
-// The note band's words for each; status.sh draws its own copy, which a test holds to these. Ctrl-click
+// The note band's words for each, which the status view draws. Ctrl-click
 // reaches Herdr, which opens the ticket's card; iTerm2 takes Cmd-click itself and opens the link, the raw log.
 export const HINT_TEXT: Record<ClickMod, string> = {
   ctrl: "ctrl-click a ticket for its card",

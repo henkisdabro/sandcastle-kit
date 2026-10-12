@@ -1,6 +1,6 @@
-// The terminal-width and grid helpers the status view draws with: the TypeScript counterparts of
-// status.sh's `vlen`, `fit`, `align`, `split_w`, `split_cols` and `junction`. Pure string and
-// integer functions, so the same frame can be drawn at any width and compared with the bash view.
+// The terminal-width and grid helpers the status view draws with: width in cells, cutting, aligning,
+// splitting a width and the rule between two rows of cells. Pure string and integer functions, so the
+// same frame can be drawn at any width.
 //
 // Widths are in terminal cells. Colour codes (SGR) and OSC 8 link openers and closers take none,
 // a wide (CJK, most emoji) character takes two, a combining character none, and everything else
@@ -11,7 +11,7 @@ const RESET = `${ESC}[0m`;
 // A link's opener or closer, ended by ESC \ (the URL can hold any character, an "m" too).
 const LINK_CLOSE = `${ESC}]8;;${ESC}\\`;
 
-// Same two escapes status.sh's vstrip knows: an SGR colour code and an OSC 8 link marker.
+// The two escapes that take no width: an SGR colour code and an OSC 8 link marker.
 // oxlint-disable-next-line no-control-regex -- the escape byte is what the pattern is for
 const ESCAPE = /\x1b\]8;[\s\S]*?\x1b\\|\x1b\[[0-9;]*m/y;
 

@@ -1,12 +1,11 @@
-// The status view in TypeScript (ADR 0003): `status.sh` hands every view to it when the test switch says so
-// (`SANDCASTLE_TEST_STATUS_IMPL=ts`), with the same arguments, environment and exit codes, until it takes over
-// (#707). It draws a snapshot (src/status-snapshot.ts) - its rows (src/status-rows.ts) and its frame
-// (src/status-render.ts) - in a single write.
+// The status view in TypeScript (ADR 0003): `status.sh` is a wrapper that `exec`s this file with its arguments, so
+// `sandcastle status`, `status 0` and the Herdr popup all run it. It draws a snapshot (src/status-snapshot.ts) - its
+// rows (src/status-rows.ts) and its frame (src/status-render.ts) - in a single write.
 //
 //   status-view.ts [interval] [all|collapse]
 //
 // `0`, or any interval with no terminal on stdout (and no STATUS_FRAMES), is one frame and out: every source read
-// once, each within its deadline; exit 0, or 1 when the project has no `.sandcastle`, as status.sh's. Any other
+// once, each within its deadline; exit 0, or 1 when the project has no `.sandcastle`, (the exit code `sandcastle status` hands on). Any other
 // interval is the live view on the alternate screen, until q or Esc in the Herdr popup (0), Ctrl-C or INT (130, and
 // the quit mark), TERM (130) or HUP (129). STATUS_FRAMES ends it after that many frames drawn once every source has
 // answered, for the tests.
@@ -146,7 +145,7 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
 
   // The input side too, when there is a terminal: in cooked mode the kernel echoes every key at the cursor (on the
   // frame's free bottom row) and keeps it queued for the shell once the view exits. So echo is off and input
-  // unbuffered (-icanon), and the view reads and drops what is typed. `min 1`, not status.sh's `min 0`: a read that
+  // unbuffered (-icanon), and the view reads and drops what is typed. `min 1`, not `min 0`: a read that
   // returns nothing is the end of input to Node. isig stays on: Ctrl-C at a keyboard signals the view, and a Ctrl-C
   // that arrives as a byte all the same (a terminal in raw mode) is taken as INT below.
   const foreground = inForeground();
@@ -291,7 +290,7 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
         timers.esc = setTimeout(() => finish(0), 50);
         return;
       }
-      // Any other key redraws now and asks the sources again, as status.sh's popup does.
+      // Any other key redraws now and asks the sources again.
       void sources.refresh();
       paint();
     });

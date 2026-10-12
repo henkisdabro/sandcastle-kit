@@ -5,9 +5,6 @@
 //
 //   pnpm test:file test/status-collectors.test.ts
 
-// The view these tests start is the TypeScript one: status.sh has no collectors.
-process.env.SANDCASTLE_TEST_STATUS_IMPL = "ts";
-
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, utimesSync } from "node:fs";

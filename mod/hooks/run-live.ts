@@ -4,8 +4,7 @@
 // comes round again as some other process, and a run that was SIGKILLed would read as live
 // for as long as that process lasts. Pure and importing nothing, so the mod (which cannot
 // import the kit's source) and the kit's own tests can both read it; the process check is
-// passed in. status.sh keeps its own bash version of the same rule (`test/run-live-contract.test.ts`
-// holds the two together). A paused run (`sandcastle pause`; the record's `paused`) is live by this
+// passed in (`test/run-live-contract.test.ts` holds the status view to it). A paused run (`sandcastle pause`; the record's `paused`) is live by this
 // rule, and rightly: its process runs and its record has not finished, so no view offers an end
 // prompt for it. Terms are GLOSSARY.md's.
 

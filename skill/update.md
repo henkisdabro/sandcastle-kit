@@ -15,8 +15,8 @@ Declining is not skipping: every step still runs its check, and only the asking 
 1. **The kit.** Its location is doctor's first line. If `git -C <kit> status --porcelain` shows
    local changes, stop and tell the user - never discard them. Then run `sandcastle doctor` and
    look for its `warn N sandcastle run(s) is/are live on this machine` block before pulling: a live run
-   keeps its code loaded but reads the kit's `prompts/`, `container/` and `status.sh` from disk, so
-   a pull changes what its later tickets are built from. If it lists runs, ask the user to wait for
+   keeps its code loaded but reads the kit's `prompts/` and `container/` from disk and starts each status view from
+   `status.sh` and `src/status-*.ts`, so a pull changes what its later tickets are built from. If it lists runs, ask the user to wait for
    them (`sandcastle wait` in each project) or to confirm the pull anyway, and go no further until
    they answer. Otherwise
    `git -C <kit> pull --ff-only && pnpm -C <kit> install`, then `sandcastle doctor`. This skill is
@@ -25,6 +25,10 @@ Declining is not skipping: every step still runs its check, and only the asking 
      22.18 (or has type stripping turned off in `NODE_OPTIONS`). Tell them, propose Node 24 LTS
      through whatever installed their Node (doctor's FIX names the usual ones), and go on once
      `sandcastle doctor` runs.
+   - **Open status views.** The status view is TypeScript, loaded when it starts: one open during the pull
+     (`sandcastle status` in a pane, a Herdr popup) keeps the old code, and the next redraw can show a
+     frame the new kit would not draw. Tell the user to close and reopen any they have open; a run's own
+     Herdr status pane is replaced by the next run's.
    - **`herdr-plugin`**: if doctor lists `opt  Herdr plugin and sidebar rows`, recommend the kit's Herdr plugin: run
      `sandcastle herdr configure` (outside a terminal it prints what it would add and stops), show
      the user that block, and once they agree run it again with `--yes`. It edits Herdr's own

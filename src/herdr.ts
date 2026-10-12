@@ -68,8 +68,8 @@ export const STATUS_COMMAND = statusCommand();
 export const statusPaneRecord = (project: Project) => join(project.root, ".sandcastle/logs/status-pane");
 type Foreground = { cmdline: string }[];
 const foreground = (pane: string) => herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as Foreground;
-// The status view by its command line: `bash .../status.sh 10`, or the TypeScript view status.sh hands it to
-// (`node ... src/status-view.ts 10`, exec'd in its place). Pane reuse, the dead tab and the restart all go by it.
+// The status view by its command line: `node ... src/status-view.ts 10`, which status.sh `exec`s in its place - or
+// `bash .../status.sh 10`, a pane an older kit left open. Pane reuse, the dead tab and the restart all go by it.
 const STATUS_VIEW_FILES = ["status.sh", "status-view.ts"];
 const showsStatus = (processes: Foreground) => processes.some((p) => STATUS_VIEW_FILES.some((file) => p.cmdline.includes(file)));
 export const runsStatus = (pane: string) => showsStatus(foreground(pane));
@@ -298,7 +298,7 @@ export const layoutRatios = (adopted: boolean, wide: boolean) =>
 // each time left five sandboxes at 1/2, 1/4, 1/8, 1/16, 1/16 of the column.
 export const stackRatio = (open: number, panes: number) => 1 / (panes - open + 1);
 
-// A run's tickets counted in the status view's own groups (status.sh `style_of`), so the
+// A run's tickets counted in the status view's own groups (`ticketRows`, src/status-rows.ts), so the
 // sidebar never says "needs you" about a ticket the view shows as fine, or the other way.
 // `paused` is present (true) only for a run a person has paused: the tickets still finishing are not
 // "working" then, the run is held.

@@ -1,6 +1,6 @@
 // What the mod says about a run record (.sandcastle/logs/run.json). Pure: nothing here
 // touches Claude Code, so the kit's own tests import this file and hold it to the status
-// view's vocabulary (status.sh, `style_of`). The record's types, the ticket states and the
+// view's vocabulary (src/status-rows.ts and src/status-render.ts). The record's types, the ticket states and the
 // tables from state to group and word live in run-record.ts.
 
 import { GROUPS, type Group, isTicketState, type RunRecord, sessionId, WORDS } from "./run-record.ts";

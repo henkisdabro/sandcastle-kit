@@ -3,7 +3,7 @@
 // legend shows. No process, no file: every fact it needs is in the snapshot, so any frame can be worked out in
 // a test from a built one.
 //
-// The rules are status.sh's `render`, three passes as there: the live run's tickets as its record has them,
+// The rules, in three passes: the live run's tickets as its record has them,
 // queued tickets nothing else knows, then the tickets with logs the record does not hold, whose state is
 // inferred from git, the logs and outcomes.json. A ticket state's group and word are the shared tables'
 // (mod/hooks/run-record.ts), never a copy of them; the derived states are GLOSSARY.md's.

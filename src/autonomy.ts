@@ -45,8 +45,7 @@ export const PERSON_MARK = "needs a person: ";
  * work only a person can do, so the ticket is not re-runnable. The agent's explicit marker (`PERSON_MARK`)
  * counts first; the words are the fallback for a note written without it. Read from the agent's own words, so it
  * errs towards a person looking: a false hit costs one manual `sandcastle run`, a miss costs an agent run
- * that comes back with the same question. `status.sh` greps the same alternation (`test/needs-person.test.ts`
- * holds the two together), so a change here changes it too.
+ * that comes back with the same question. The status view calls this function for its "needs a person" note, so a change here changes it too.
  */
 export const needsDecision = (unmet: string): boolean =>
   unmet.includes(PERSON_MARK) ||

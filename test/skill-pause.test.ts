@@ -21,7 +21,7 @@ const status = read("skill", "status.md");
 const run = read("skill", "run.md");
 const agents = read("AGENTS.md");
 const cli = read("src", "cli.ts");
-const statusView = read("status.sh");
+const statusView = read("src", "status-render.ts");
 
 const flat = (text: string) => text.replace(/\s+/g, " ");
 const frontmatter = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
@@ -101,13 +101,13 @@ test("pause.md quotes only lines the kit prints", () => {
     assert.ok(pause.includes(quoted), `pause.md does not quote "${quoted}"`);
     assert.ok(cli.includes(quoted), `src/cli.ts prints no "${quoted}"`);
   }
-  assert.ok(statusView.includes("PAUSED since"), "status.sh does not print PAUSED since");
+  assert.ok(statusView.includes("PAUSED since"), "the status view does not print PAUSED since");
   assert.ok(pause.includes("PAUSED since"));
 });
 
 test("status.md names the pause and how to resume it", () => {
   const text = flat(status);
-  assert.match(text, /A paused run is still live, and its run cell reads `PAUSED since 15:40/);
+  assert.match(text, /A paused run is still live, and its RUN lane reads `PAUSED since 15:40/);
   assert.match(text, /`sandcastle resume`/);
   assert.match(text, /pause\.md/);
 });

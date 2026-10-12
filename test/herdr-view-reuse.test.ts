@@ -2,8 +2,8 @@
 // it, instead of opening a tab at the end of the tab bar: the same terminal (Herdr reuses pane ids
 // across a restart), this run's workspace, and running the old status view, the plugin's report or a
 // bare shell. A person's command in it, a new terminal or another workspace means a new tab, as
-// before. Stopping the old view must not leave the `quit` mark status.sh's INT trap writes when the
-// record names the pane: the fake `herdr` runs that trap's own jq on the record at the Ctrl-C. A
+// before. Stopping the old view must not leave the `quit` mark the status view's INT handling writes when the
+// record names the pane: the fake `herdr` writes that mark itself to the record at the Ctrl-C. A
 // fake `herdr` on PATH; no Herdr.
 //
 //   pnpm test:file test/herdr-view-reuse.test.ts
@@ -14,12 +14,11 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { impl } from "./status-run.ts";
 
 // `pane get` of the old status pane (pOld) answers with $FAKE_OLD_TAB, $FAKE_OLD_TERM and $FAKE_OLD_WS, of
 // the run's own pane (p1) with its tab tMine; `pane process-info` of pOld with $FAKE_FG until a
-// `pane send-keys` reached it (then a bare shell, unless $FAKE_STUCK). The send-keys runs status.sh's
-// mark_quit jq on $FAKE_RECORD, as the view's INT trap does. Plain bash 3.2.
+// `pane send-keys` reached it (then a bare shell, unless $FAKE_STUCK). The send-keys marks
+// $FAKE_RECORD quit, as the view's INT handling does. Plain bash 3.2.
 const FAKE = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case "$1 $2" in
@@ -33,9 +32,8 @@ case "$1 $2" in
     printf '{"result":{"process_info":{"foreground_processes":[{"cmdline":"%s"}]}}}\\n' "$fg" ;;
   "pane send-keys")
     : > "$FAKE_LOG.stopped"
-    tmp="$FAKE_RECORD.quit"
-    jq -c --arg pane "$3" 'select(.status == $pane) | .quit = true' "$FAKE_RECORD" > "$tmp" 2>/dev/null && [ -s "$tmp" ] && mv -f "$tmp" "$FAKE_RECORD"
-    rm -f "$tmp"; cp "$FAKE_RECORD" "$FAKE_LOG.after-stop"; printf '%s\\n' '{}' ;;
+    node -e 'const fs = require("fs"); const r = JSON.parse(fs.readFileSync(process.env.FAKE_RECORD, "utf8")); if (r.status === process.argv[1]) { r.quit = true; fs.writeFileSync(process.env.FAKE_RECORD, JSON.stringify(r) + "\\n"); }' "$3"
+    cp "$FAKE_RECORD" "$FAKE_LOG.after-stop"; printf '%s\\n' '{}' ;;
   "tab get") printf '%s\\n' '{"result":{"tab":{"pane_count":2,"label":"work"}}}' ;;
   "tab create") printf '%s\\n' '{"result":{"tab":{"tab_id":"tCreated","workspace_id":"w1"},"root_pane":{"pane_id":"pCreated"}}}' ;;
   *) printf '%s\\n' '{}' ;;
@@ -57,9 +55,9 @@ process.setMaxListeners(40);
 // IN_HERDR is read when the module loads, so the environment comes first.
 const { openSandboxView, viewRecord, STATUS_COMMAND } = await import("../src/herdr.ts");
 
-// The view in the old pane as Herdr sees it: status.sh, or the TypeScript view status.sh `exec`s under the switch
-// (test/herdr-status-pane.test.ts reads the whole of both off a running view).
-const VIEW = impl() === "ts" ? "node --no-maglev /kit/src/status-view.ts 3" : "bash /kit/status.sh 3";
+// The view in the old pane as Herdr sees it: the TypeScript view status.sh `exec`s (test/herdr-status-pane.test.ts
+// reads the whole of it off a running view).
+const VIEW = "node --no-maglev /kit/src/status-view.ts 3";
 // `adopted: null` leaves the key out of the record.
 type Setup = { tab?: string; term?: string; workspace?: string; fg?: string; stuck?: boolean; adopted?: boolean | null; recordTab?: string };
 /** Opens a view over a previous run's record (own tab tOld, status pane pOld in term_old, a sandbox pane pSandbox); returns herdr's calls and the new record. */

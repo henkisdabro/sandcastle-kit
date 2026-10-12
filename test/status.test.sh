@@ -9,8 +9,8 @@
 # for earlier runs claimed it.
 #
 #   bash test/status.test.sh
-#   STATUS_BASH=/bin/bash COLS=200 bash test/status.test.sh   # macOS's bash 3.2, a wide pane
-#   COLS=180 bash test/status.test.sh   # the wide header's first band (170 and up); `pnpm test` runs it too
+#   STATUS_BASH=/bin/bash COLS=200 bash test/status.test.sh   # status.sh under macOS's bash 3.2, a wide pane
+#   COLS=180 bash test/status.test.sh   # the wide layout, lanes beside the logo; `pnpm test` runs it too
 set -uo pipefail
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
 # A UTF-8 locale, so widths count characters: Linux runners often have only C.UTF-8.
@@ -20,15 +20,9 @@ LIVE=""
 cleanup() { [ -n "$LIVE" ] && kill "$LIVE" 2>/dev/null; rm -rf "$TMP"; }
 trap cleanup EXIT
 
-# The view under test: SANDCASTLE_TEST_STATUS_IMPL is bash (status.sh, the default; STATUS_BASH names its bash) or ts
-# (the TypeScript view), started as every black-box status test starts it, through test/status-run.ts.
-view() {
-  case "${SANDCASTLE_TEST_STATUS_IMPL:-bash}" in
-    bash) "${STATUS_BASH:-bash}" "$KIT/status.sh" "$@";;
-    ts) node "$KIT/test/status-run.ts" "$@";;
-    *) echo "SANDCASTLE_TEST_STATUS_IMPL is ${SANDCASTLE_TEST_STATUS_IMPL}: bash or ts" >&2; return 2;;
-  esac
-}
+# The view under test, started as `sandcastle status` starts it: through status.sh, with the bash this file runs
+# under (STATUS_BASH names another), and the fixture clock (SANDCASTLE_TEST_NOW) preloaded.
+view() { NODE_OPTIONS="--import=$KIT/test/status-clock.ts" "${STATUS_BASH:-bash}" "$KIT/status.sh" "$@"; }
 
 fails=0
 # 80 is the narrow pane the view is built for; everything checked must fit it.
@@ -77,7 +71,7 @@ log() { printf '%s\n' "$3" >"$L/agent-issue-$1-$2-$1.log"; }
 
 render() {
   PATH="$FAKE:$PATH" FAKE_QUEUE="$1" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
-    SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture SANDCASTLE_MODELS="implement next-model/high" \
+    SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture SANDCASTLE_MODELS="implement next-model/high" SANDCASTLE_TEST_NOW="${FAKE_NOW:-}" \
     TERM_COLS="$COLS" TERM_ROWS="${ROWS:-200}" XDG_CACHE_HOME="$TMP/cache" \
     view 0 "${SHOW:-all}" 2>&1 | sed $'s/\e\\[[0-9;]*m//g' >"$TMP/frame"
   # Nothing wider than the pane: the live view cuts such a line, losing its
@@ -145,7 +139,8 @@ render "101 102 103 104 105 106 107 108 109 110 120"
 has '^│ +TICKET +│ +STATE +│'
 hasnt 'ISSUE'
 # A live run's settings come from its record: no (next run) or (last run) mark, whatever the pane's width.
-has '^│ settings +autonomy (0 1 \[2\] 3 drain|2) · turn 2/2 +│'
+has 'autonomy (0 1 \[2\] 3 drain|\[2\])'
+has 'turn 2/2'
 hasnt '\((next|last) run\)'
 row '#101' impl 'Bash|\$ pnpm test'
 row '#102' gates '3x over, usually 1m'
@@ -164,7 +159,7 @@ for c in 'working 2' 'ready to land 1' 'needs you 3' 'queued 2' 'blocked 1' 'mer
 has 'later 1 +│'
 hasnt 'not in this run'
 has 'landing 2/4'
-has 'implement +live-model/high'
+has 'impl +live-model/high'
 hasnt 'on its earlier branch'
 
 SCENARIO="live run, agents working"
@@ -172,8 +167,8 @@ SCENARIO="live run, agents working"
 # they go green, so the header never says when a landing phase "lands".
 sed -i.bak 's/"stage": "landing 2\/4"/"stage": "running"/' "$L/run.json"
 render "101 102 103 104 105 106 107 108 109 110 120"
-has 'state +running · [0-9]+m +│'
-has 'ends +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
+has '● running · [0-9]+m · since [0-9:]+'
+has 'ends ~[0-9]{2}:[0-9]{2}'
 hasnt 'lands +~'
 has 'tokens +1.2M in / 30k out +│'
 
@@ -326,7 +321,7 @@ has 'PAUSED since ([0-9]{2} [A-Za-z]{3} )?[0-9]{2}:[0-9]{2}'
 sed -i.bak 's/"paused": {[^}]*},/"paused": "yes",/' "$L/run.json"
 render "120 121 122 123"
 hasnt 'PAUSED'
-has 'state +running'
+has '● running'
 # Not paused any more: the live row is back, with the queued ticket next in line.
 sed -i.bak 's/"paused": "yes",//' "$L/run.json"
 render "120 121 122 123"
@@ -348,27 +343,26 @@ cat >"$L/run.json" <<EOF
   } }
 EOF
 render "120 121"
-has 'state +STOPPED landing · '
-has 'since +[0-9:]+ · lands nothing more'
+has '● STOPPED landing · [0-9]+m · since [0-9:]+'
+has 'lands nothing more'
 hasnt 'running · '
 # A stop that arrives while the run is paused wakes its parked tickets: the cell reads STOPPED, never PAUSED.
 sed -i.bak "s/\"stopped\": /\"paused\": { \"since\": $((now - 300)), \"finishing\": [] }, \"stopped\": /" "$L/run.json"
 render "120 121"
-has 'state +STOPPED landing · '
+has '● STOPPED landing · '
 hasnt 'PAUSED'
 sed -i.bak 's/"paused": {[^}]*}, //' "$L/run.json"
 # A record whose `stopped` is empty stops nothing.
 sed -i.bak 's/"stopped": "[^"]*",/"stopped": "",/' "$L/run.json"
 render "120 121"
 hasnt 'STOPPED +landing'
-has 'state +running'
+has '● running'
 
 # ---------------------------------------------------------------------------
 SCENARIO="run paused for plan usage"
 # USAGE_PAUSE: the run paused itself when a window reached the threshold. The cell names the cause and when it
-# resumes in place of when it paused: `PAUSED - weekly usage 95%, resumes Wed 06:01`, with the tickets still
-# finishing on the row below. A pane too narrow for that keeps the cause on the first row and moves the
-# resume time to the second. Two days ahead is never today, so the reset's weekday is drawn.
+# resumes in place of when it paused: `PAUSED - weekly usage 95%` over `resumes Wed 06:01`, with the tickets still
+# finishing beside the resume time. Two days ahead is never today, so the reset's weekday is drawn.
 resumes_at=$((now + 172800))
 back=$(date -d "@$resumes_at" '+%a %H:%M' 2>/dev/null || date -r "$resumes_at" '+%a %H:%M')
 usage_paused() { # window percent provider finishing-json
@@ -392,26 +386,30 @@ row '#123' queued 'waits for the resume'
 # A wide pane has room for the whole line, and the tickets finishing take the row below it.
 COLS_WAS="$COLS"; COLS=160
 render "120 121 123"
-has "PAUSED - weekly usage 95%, resumes $back"
+has 'PAUSED - weekly usage 95%'
+has "resumes $back"
 has 'finishing +#120 review, #121 landing'
 hasnt 'PAUSED since'
 # Nothing in flight: the row below says when the run started, as an unpaused run's does.
 usage_paused week 95 claude '[]'
 render "120 121 123"
-has "PAUSED - weekly usage 95%, resumes $back"
+has 'PAUSED - weekly usage 95%'
+has "resumes $back"
 hasnt 'finishing'
 # The 5-hour window, and Codex's windows, are named; a reset later today shows the time alone.
 usage_paused fiveHour 93 claude '[]'
 render "120 121 123"
-has "PAUSED - 5-hour usage 93%, resumes $back"
+has 'PAUSED - 5-hour usage 93%'
+has "resumes $back"
 usage_paused week 100 codex '[]'
 render "120 121 123"
-has "PAUSED - Codex weekly usage 100%, resumes $back"
+has 'PAUSED - Codex weekly usage 100%'
+has "resumes $back"
 COLS=80
-# At 80 columns the longest wording does not fit its row, so it keeps only what it can: usage and its percent.
+# At 80 columns the cause keeps its row and the resume time takes the next one.
 usage_paused week 100 codex '[]'
 render "120 121 123"
-has 'PAUSED - usage 100%'
+has 'PAUSED - Codex weekly usage 100%'
 has "resumes +$back"
 # A record whose cause is not stated with numbers is read as a person's pause, never as a blank or broken cell.
 sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
@@ -425,19 +423,9 @@ SCENARIO="pause ten minutes old, the clock at 00:05"
 # The pause the scenarios above draw is made at now - 600: within ten minutes after midnight that is
 # yesterday, and the cell then gives its date (`PAUSED since 08 Oct 23:55`). The same two records, a
 # person's pause and a usage pause whose percent is no number, are drawn under a `date` that says it is
-# 00:05, so the date prefix is held at any hour of the day and not only by a run that starts after midnight.
-# The clock is tomorrow's 00:05, not today's: then the real `date +%F` names another day than the shim's,
-# and both checks below fail if status.sh ever reads the real clock.
-mkdir -p "$TMP/clock"
-cat >"$TMP/clock/date" <<'EOF'
-#!/bin/sh
-# Only a bare "+format" asks for the time now: the clock is FAKE_NOW then, and the real date is run otherwise.
-if [ "$#" = 1 ] && [ "${1#+}" != "$1" ]; then
-  if [ "$1" = "+%s" ]; then echo "$FAKE_NOW"; else "$REAL_DATE" -d "@$FAKE_NOW" "$1" 2>/dev/null || "$REAL_DATE" -r "$FAKE_NOW" "$1"; fi
-else exec "$REAL_DATE" "$@"; fi
-EOF
-chmod +x "$TMP/clock/date"
-REAL_DATE="$(command -v date)"
+# 00:05 (the view's test clock, SANDCASTLE_TEST_NOW), so the date prefix is held at any hour of the day and not
+# only by a run that starts after midnight. The clock is tomorrow's 00:05, not today's: then both checks below
+# fail if the view ever reads the real clock.
 # Tomorrow is found from today's noon, so a daylight-saving change tonight cannot keep it today.
 noon=$(date -d "$(date +%F) 12:00:00" +%s 2>/dev/null || date -j -f '%Y-%m-%d %H:%M:%S' "$(date +%F) 12:00:00" +%s)
 tomorrow=$(date -d "@$((noon + 86400))" +%F 2>/dev/null || date -r "$((noon + 86400))" +%F)
@@ -445,14 +433,14 @@ midnight_now=$(date -d "$tomorrow 00:05:00" +%s 2>/dev/null || date -j -f '%Y-%m
 since_was="$since_at"; since_at=$((midnight_now - 600))
 usage_paused week 100 codex '[]'
 sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
-PATH="$TMP/clock:$PATH" REAL_DATE="$REAL_DATE" FAKE_NOW="$midnight_now" render "120 121 123"
+FAKE_NOW="$midnight_now" render "120 121 123"
 has 'PAUSED since [0-9]{2} [A-Za-z]{3} 23:55'
 hasnt 'usage'
 # A pause made after midnight, four minutes ago, gives the time alone.
 since_at=$((midnight_now - 240))
 usage_paused week 100 codex '[]'
 sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
-PATH="$TMP/clock:$PATH" REAL_DATE="$REAL_DATE" FAKE_NOW="$midnight_now" render "120 121 123"
+FAKE_NOW="$midnight_now" render "120 121 123"
 has 'PAUSED since 00:01'
 hasnt 'PAUSED since [0-9]{2} [A-Za-z]{3}'
 since_at="$since_was"
@@ -504,7 +492,7 @@ row '#107' queued 'next to start'
 row '#110' merged
 hasnt 'ahead of it'
 # No landing phase to wait for: the estimate is when the run ends.
-has 'ends +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
+has 'ends ~[0-9]{2}:[0-9]{2}'
 hasnt 'lands +~'
 
 # ---------------------------------------------------------------------------
@@ -604,9 +592,6 @@ render ""
 row '#104' 'gate red' 'pytest=FA'
 row '#109' conflict
 row '#110' merged
-# Its commits are what it landed, not the 0 its merged branch has left over the base.
-has '^│ +#110 +│ . merged +│[^│]+│ +1 +│'
-has 'tokens = in/out, cache included'
 row '#111' withdrawn
 row '#112' held 'needs a human: hand'
 row '#113' uncommitted
@@ -615,13 +600,12 @@ row '#115' 'gate red' 'red again'
 row '#116' 'gate red' 'test red with'
 row '#117' held 'needs a human'
 row '#118' merged 'partly done, ticket'
-has '^│ +#118 +│ . merged +│[^│]+│ +1 +│'
 git_ branch -q -D agent/issue-112 agent/issue-113 agent/issue-114 agent/issue-115 agent/issue-116 agent/issue-117 # only this scenario's
 # An older kit's entry carries no kind: its line is shown, and no state is taken from it.
 row '#103' 'left over' 'earlier run: gate'
-has 'next run.*implement +next-model/high|implement +next-model/high.*next run'
+has 'impl +next-model/high \(next run\)'
 hasnt 'old-model'
-# Below 80 columns the TOKENS column goes, and the legend line explaining it with it.
+# Below 92 columns the TOKENS column goes, and the legend line explaining it with it.
 COLS_WAS="$COLS"; COLS=60; render ""
 hasnt 'CPU in cores'
 hasnt 'tokens = in/out'
@@ -636,14 +620,14 @@ cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
   "issues": ["101"], "tickets": { "101": { "state": "implement", "since": $now, "started": $now } } }
 EOF
-# CPU and memory share one column, from 100 columns.
+# CPU and memory share one column, from 120 columns.
 COLS_WAS="$COLS"; COLS=120
 FAKE_DOCKER="$REPO" render "101"
 row '#101' impl
 has '^│ +#101 .*│ +1\.5c/276M +│'
 has 'CPU/MEM'
 has 'CPU in cores'
-has 'time = in state; once finished, start to end'
+has 'time = in state, ~ roughly what it usually has left; once finished, start to end'
 has 'red time = past twice the usual'
 # A GiB figure under 10 keeps its decimal.
 FAKE_STATS='sandcastle-c1|100.00%|2.1GiB / 11.73GiB' FAKE_DOCKER="$REPO" render "101"
@@ -672,32 +656,41 @@ cat >"$L/run.json" <<EOF
     "134": { "state": "implement", "since": $now, "started": $now, "tokens": "plenty" } } }
 EOF
 COLS_WAS="$COLS"
-# 100 columns and up: both columns.
+# 120 columns and up: every fixed column. DIFF is the commits' lines added and removed, the ticket's own work.
 COLS=120; render "131 132 133 134"
-has '^│ +TICKET +│ +STATE +│ +TIME +│ +COMMITS +│ +CPU/MEM +│ +TOKENS +│ +ACTIVITY +│'
-has '^│ +#131 .*│ +- +│ +3\.1M/42k +│'
-has '^│ +#132 .*│ +- +│ +980k/1\.2M +│'
+has '^│ +TICKET +│ +STATE +│ +TIME +│ +DIFF +│ +CPU/MEM +│ +TOKENS +│ +ACTIVITY +│'
+has '^│ +#131 .*│ +\+1 .0 +│ +- +│ +3\.1M/42k +│'
+has '^│ +#132 .*│ +\+1 .0 +│ +- +│ +980k/1\.2M +│'
 has '^│ +#133 .*│ +- +│ +- +│'
 has '^│ +#134 .*│ +- +│ +- +│'
 # The legend says what the figure counts.
-has 'tokens = in/out, cache included'
+has 'tokens = in, % of it from cache \(amber under 70%\), out'
 has 'CPU in cores'
-# 80 to 99: TOKENS alone, which is what a person watching the plan's allowance needs.
-for COLS in 80 90 99; do
+# 106 to 119: CPU/MEM has given way, DIFF and TOKENS stay.
+for COLS in 106 119; do
   render "131 132 133 134"
-  has '^│ +TICKET +│ +STATE +│ +TIME +│ +COMMITS +│ +TOKENS +│ +ACTIVITY +│'
+  has '^│ +TICKET +│ +STATE +│ +TIME +│ +DIFF +│ +TOKENS +│ +ACTIVITY +│'
   hasnt 'CPU/MEM'
+  hasnt 'CPU in cores'
+done
+# 92 to 105: TOKENS alone, which is what a person watching the plan's allowance needs.
+for COLS in 92 99 105; do
+  render "131 132 133 134"
+  has '^│ +TICKET +│ +STATE +│ +TIME +│ +TOKENS +│ +ACTIVITY +│'
+  hasnt 'CPU/MEM'
+  hasnt 'DIFF'
   hasnt 'CPU in cores'
   has '^│ +#131 .*│ +3\.1M/42k +│'
   has '^│ +#132 .*│ +980k/1\.2M +│'
-  has 'tokens = in/out, cache included'
+  has 'tokens = in, % of it from cache'
 done
-# Below 80: neither, and no legend for them.
-COLS=70; render "131 132 133 134"
-has '^│ +TICKET +│ +STATE +│ +TIME +│ +COMMITS +│ +ACTIVITY +│'
+# Below 92: none of them, and no legend for them.
+COLS=91; render "131 132 133 134"
+has '^│ +TICKET +│ +STATE +│ +TIME +│ +ACTIVITY +│'
 hasnt 'TOKENS'
 hasnt 'CPU/MEM'
-hasnt 'tokens = in/out'
+hasnt 'DIFF'
+hasnt 'tokens = in'
 row '#131' impl
 # Once the run has ended its rows come from git and the logs, but each ticket's tokens are still the record's.
 cat >"$L/run.json" <<EOF
@@ -705,7 +698,7 @@ cat >"$L/run.json" <<EOF
   "issues": ["131","132"], "tickets": { "131": { "state": "merged", "tokens": "3.1M in / 42k out" }, "132": { "state": "merged" } } }
 EOF
 COLS=120; render ""
-has '^│ +#131 .*│ +- +│ +3\.1M/42k +│'
+has '^│ +#131 .*│ +3\.1M/42k +│'
 has '^│ +#132 .*│ +- +│ +- +│'
 COLS="$COLS_WAS"
 
@@ -939,16 +932,19 @@ rm -rf "$S"
 SCENARIO="short pane, one-row header"
 # The logo folds to one row in a short pane. A castle cut down to its battlements
 # read as a broken logo, so the fold draws no castle: the wordmark alone.
+# (An 80-column pane: a wider one has the lanes beside the logo, which needs its three rows.)
+COLS_WAS="$COLS"; COLS=80
 SHOW=collapse ROWS=12 render "101 102 103"
 has '^│ +sandcastle-kit  fixture'
 hasnt '▄|█'
 SHOW=collapse ROWS=40 render "101 102 103"
 has 's a n d c a s t l e'
 has '█████'
+COLS="$COLS_WAS"
 
 # ---------------------------------------------------------------------------
-# The usage scenarios' lines are written for an 80-column pane, where a row wraps its windows; a
-# wider COLS from the caller (full-check runs this file at 200) would draw them on one line.
+# The usage scenarios draw the plan at an 80-column pane unless a render names its own width: a wider COLS from
+# the caller (full-check runs this file at 200) would lay the lanes out differently.
 COLS_WAS="$COLS"; COLS=80
 # The readings' ages ("2m ago") count from `now`, set when this file started minutes ago: a slow
 # machine drew "3m ago". Each usage scenario takes `now` afresh before it builds its readings.
@@ -957,7 +953,7 @@ SCENARIO="live run, the plan's usage"
 # The newest reading across the agents' own rate-limit events is the record's `usage` (src/usage.ts):
 # both windows with a bar, the percentage and the reset time, and the reading's age. Only a live run
 # that spends a subscription has one. Colours are the pty test's (test/status-usage.test.ts); here, each band's text.
-# A bar is ten cells, a tenth for each ten percent rounded: 14% fills one, 93% nine.
+# A bar is five cells, a fifth for each twenty percent rounded: 14% fills one, 93% all five.
 r5=$((now + 7200)); rw=$((now + 3 * 86400))
 at5=$(date -d "@$r5" +%H:%M 2>/dev/null || date -r "$r5" +%H:%M)
 atw=$(date -d "@$rw" '+%a %H:%M' 2>/dev/null || date -r "$rw" '+%a %H:%M')
@@ -974,49 +970,48 @@ EOF
 }
 usage_record 14 93 120
 render "105"
-# At 80 columns the row wraps whole items: the provider and the 5-hour window, then the week and the age.
-has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5 +│"
-has "^│ +week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
+# At 80 columns the plan's line is cut where the pane ends; the 5-hour window is whole.
+has "plan +claude +5h ▓░░░░ +14% · resets $at5 · week ▓▓▓▓▓ +93% · resets"
 COLS=160 render "105"
-has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5   week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
+has "plan +claude +5h ▓░░░░ +14% · resets $at5 · week ▓▓▓▓▓ +93% · resets $atw · \\(2m ago\\)"
 # Amber from 75%, red from 90%, a full week: the bars follow the percentage (colours: the pty test).
 usage_record 75 80 300
 COLS=160 render "105"
-has "^│ usage +claude  5h ▓▓▓▓▓▓▓▓░░ 75% · resets $at5   week ▓▓▓▓▓▓▓▓░░ 80% · resets $atw   \\(5m ago\\) +│"
+has "plan +claude +5h ▓▓▓▓░ +75% · resets $at5 · week ▓▓▓▓░ +80% · resets $atw · \\(5m ago\\)"
 usage_record 90 100 300
 COLS=160 render "105"
-has "^│ usage +claude  5h ▓▓▓▓▓▓▓▓▓░ 90% · resets $at5   week ▓▓▓▓▓▓▓▓▓▓ 100% · resets $atw   \\(5m ago\\) +│"
+has "plan +claude +5h ▓▓▓▓▓ +90% · resets $at5 · week ▓▓▓▓▓ +100% · resets $atw · \\(5m ago\\)"
 # A reading older than 15 minutes shows its age (and is greyed: the pty test).
 usage_record 14 93 1200
 COLS=160 render "105"
-has "week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(20m ago\\) +│"
-# A percentage past 100 stops at 100; a record with a window that is no number waits for a reading instead.
+has "week ▓▓▓▓▓ +93% · resets $atw · \\(20m ago\\)"
+# A percentage past 100 stops at 100; a record with a window that is no number draws no line (the view has nothing to show).
 usage_record 14 250 30
 COLS=160 render "105"
-has "week ▓▓▓▓▓▓▓▓▓▓ 100% · resets"
+has "week ▓▓▓▓▓ +100% · resets"
 sed -i.bak 's/"percent": 14/"percent": "lots"/' "$L/run.json"
 COLS=160 render "105"
-has '^│ usage +claude  waiting for the first agent.s reading +│'
+hasnt 'plan +claude'
 hasnt '5h ▓'
 
 SCENARIO="live run, no usage to show"
-# Before the first agent's reading the row says it waits (the run is watching for one) ...
+# Before the first agent's reading the view has no line for the plan (it is left out, never a placeholder) ...
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
   "issues": ["105"], "usage": { "provider": "claude" },
   "tickets": { "105": { "state": "queued", "order": 5, "since": $now } } }
 EOF
 render "105"
-has '^│ usage +claude  waiting for the first agent.s reading +│'
-# ... a record without `usage` (an API-key run, a run on no Claude model, an older kit's) draws no row ...
+hasnt 'plan +claude'
+# ... a record without `usage` (an API-key run, a run on no Claude model, an older kit's) draws no line ...
 sed -i.bak 's/"usage": { "provider": "claude" },//' "$L/run.json"
 render "105"
-hasnt '^│ usage '
+hasnt 'plan +claude'
 # ... and neither does one whose settings say the run bills API credits, whatever `usage` holds ...
 usage_record 14 93 120 '{ "autonomy": 0, "apiKey": true }'
 render "105"
-has '^│ settings .*API credits'
-hasnt '^│ usage |5h ▓'
+has 'API credits'
+hasnt 'plan +claude|5h ▓'
 # ... nor a usage that is not an object, or names another provider, nor a run that has ended.
 for u in '"claude"' '[1]' '{ "provider": "other", "windows": 1 }'; do
   cat >"$L/run.json" <<EOF
@@ -1025,18 +1020,18 @@ for u in '"claude"' '[1]' '{ "provider": "other", "windows": 1 }'; do
   "tickets": { "105": { "state": "queued", "order": 5, "since": $now } } }
 EOF
   render "105"
-  hasnt '^│ usage |5h ▓|waiting for the first'
+  hasnt 'plan +(claude|codex)|5h ▓|waiting for the first'
 done
 usage_record 14 93 120
 sed -i.bak "s/\"stage\": \"running\",/\"stage\": \"running\", \"finishedAt\": \"$started\", \"exitCode\": 0,/" "$L/run.json"
 render "105"
-hasnt '^│ usage |5h ▓|waiting for the first'
+hasnt 'plan +(claude|codex)|5h ▓|waiting for the first'
 
 # ---------------------------------------------------------------------------
 SCENARIO="live run, Claude's and Codex's plan usage"
 # With cross-review on a ChatGPT plan the record's `usage` is a list with an entry for each provider, and the
-# row draws each on a line of its own, the names one width so the bars start in one column. Codex's
-# numbers are its `rate_limits` of the ticket: the 5-hour window spent, the week 16%.
+# plan lane has a line for each provider, window after window. Codex's numbers are its `rate_limits` of the
+# ticket: the 5-hour window spent, the week 16%. Wide panes, so no line is cut.
 count() { # pattern lines
   local n; n=$(grep -cE "$1" "$TMP/frame")
   [ "$n" -eq "$2" ] || { echo "FAIL [$SCENARIO] $n line(s) match /$1/, want $2"; fails=$((fails+1)); }
@@ -1057,55 +1052,53 @@ reading() { # provider percent5 percentWeek age-seconds
 now=$(date +%s)
 claude_reading=$(reading claude 14 93 120); codex_reading=$(reading codex 100 16 120)
 usage_list "[$claude_reading, $codex_reading]"
-COLS=160 render "105"
-has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5   week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
-has "^│ +codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets $at5   week ▓▓░░░░░░░░ 16% · resets $atw   \\(2m ago\\) +│"
-count '^│ usage ' 1
-count 'week ▓' 2
-# At 80 columns each provider's line wraps whole items, the second one's under the first's.
+COLS=240 render "105"
+has "claude +5h +▓░░░░ +14% · resets $at5 · week +▓▓▓▓▓ +93% · resets $atw · \\(2m ago\\)"
+has "codex +5h +▓▓▓▓▓ +100% · resets $at5 · week +▓░░░░ +16% · resets $atw · \\(2m ago\\)"
+count 'week +▓' 2
+# At 80 columns the plan's line is cut where the pane ends; Claude's first window is whole.
 render "105"
-has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5 +│"
-has "^│ +week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
-has "^│ +codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets $at5 +│"
-has "^│ +week ▓▓░░░░░░░░ 16% · resets $atw   \\(2m ago\\) +│"
+has "plan +claude +5h +▓░░░░ +14% · resets $at5"
 # Each line has its own age: Codex's reading is from the last cross-review pass, Claude's from the latest agent.
 usage_list "[$claude_reading, $(reading codex 100 16 1200)]"
-COLS=160 render "105"
-has "^│ usage +claude  5h .*\\(2m ago\\) +│"
-has "^│ +codex   5h .*\\(20m ago\\) +│"
+COLS=240 render "105"
+has "claude +5h .*\\(2m ago\\)"
+has "codex +5h .*\\(20m ago\\)"
 # A record with only Claude draws one line, as a list or as the object an older kit wrote ...
 usage_list "[$claude_reading]"
-COLS=160 render "105"
-count 'week ▓' 1
+COLS=240 render "105"
+count 'week +▓' 1
 hasnt 'codex'
 usage_list "$claude_reading"
-COLS=160 render "105"
-count 'week ▓' 1
+COLS=240 render "105"
+count 'week +▓' 1
 hasnt 'codex'
-# ... and each provider waits for its own first reading, Codex's coming from the cross-review pass.
+# ... and a provider with no reading yet has no line, Codex's coming from the cross-review pass.
 usage_list "[$claude_reading, { \"provider\": \"codex\" }]"
-COLS=160 render "105"
-has '^│ usage +claude  5h '
-has "^│ +codex   waiting for the first cross-review.s reading +│"
+COLS=240 render "105"
+has 'claude +5h '
+hasnt 'codex'
 usage_list '[{ "provider": "claude" }, { "provider": "codex" }]'
-COLS=160 render "105"
-has "^│ usage +claude  waiting for the first agent.s reading +│"
-has "^│ +codex   waiting for the first cross-review.s reading +│"
+COLS=240 render "105"
+hasnt '(claude|codex) +5h|5h +▓'
 # A run on an Anthropic API key has no Claude line, whatever the record holds, but cross-review's Codex plan is another account's ...
 usage_list "[$claude_reading, $codex_reading]" '{ "autonomy": 0, "apiKey": true }'
-COLS=160 render "105"
-has '^│ settings .*API credits'
-hasnt 'claude  5h'
-has "^│ usage +codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets $at5   week ▓▓░░░░░░░░ 16% · resets $atw   \\(2m ago\\) +│"
+COLS=240 render "105"
+has 'API credits'
+hasnt 'claude +5h'
+# (one provider alone has a row for each window)
+has "codex +5h +▓▓▓▓▓ +100% · resets $at5"
+has "week +▓░░░░ +16% · resets $atw"
+has '\(2m ago\)'
 # ... and a run whose settings say cross-review is off has no Codex line, whatever the record holds.
 usage_list "[$claude_reading, $codex_reading]" '{ "autonomy": 0, "crossReview": false }'
-COLS=160 render "105"
-has '^│ usage +claude  5h '
+COLS=240 render "105"
+has 'claude +5h '
 hasnt 'codex'
 # An entry that is not an object, or names a provider the view does not know, draws nothing.
 usage_list "[$claude_reading, 3, \"codex\", { \"provider\": \"other\", \"windows\": 1 }]"
-COLS=160 render "105"
-count 'week ▓' 1
+COLS=240 render "105"
+count 'week +▓' 1
 hasnt 'codex|other'
 COLS="$COLS_WAS"
 
@@ -1113,7 +1106,7 @@ if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TM
 echo "status view: all checks passed"
 # This repo's sandbox image builds macOS's bash 3.2 as bash32 (.sandcastle/Dockerfile): without
 # this second pass, an agent's gate proved bash 5 only and 3.2 breakage surfaced after landing.
-if [ -z "${STATUS_BASH:-}" ] && [ "${SANDCASTLE_TEST_STATUS_IMPL:-bash}" = bash ] && [ -x /usr/local/bin/bash32 ]; then
+if [ -z "${STATUS_BASH:-}" ] && [ "${BASH_VERSINFO[0]}" -ge 4 ] && [ -x /usr/local/bin/bash32 ]; then
   echo "status view again under bash32 (bash 3.2):"
-  STATUS_BASH=/usr/local/bin/bash32 bash "$0"; exit $?
+  STATUS_BASH=/usr/local/bin/bash32 /usr/local/bin/bash32 "$0"; exit $?
 fi

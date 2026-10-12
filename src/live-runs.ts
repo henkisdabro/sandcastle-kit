@@ -22,8 +22,7 @@ export const awaitingDir = (runsDir = RUNS_DIR) => join(dirname(runsDir), "await
 // A tab not told within this many days of its run's end never will be: its server is gone, or the
 // tab was closed while the status view ran. Without an end its file stayed for good.
 export const AWAIT_REPORT_DAYS = 7;
-// Left by `sandcastle herdr configure` while the plugin is linked, and read by status.sh (at
-// this path, in shell) to know that a Ctrl-click on a ticket will open its card.
+// Left by `sandcastle herdr configure` while the plugin is linked, and read by the status view to know that a Ctrl-click on a ticket will open its card.
 export const PLUGIN_MARKER = join(KIT_CACHE, "herdr-plugin-linked");
 
 /**
@@ -31,7 +30,7 @@ export const PLUGIN_MARKER = join(KIT_CACHE, "herdr-plugin-linked");
  * undefined when there is none. A signal of 0 says whether the process exists without waking
  * it (EPERM: it exists, another user's); `ps` then says what it is, so a pid that came round
  * as some other process is told from the run. `-p` and `-o command=` are what BSD `ps` (macOS)
- * and procps-ng share, the flags the mod and status.sh use too.
+ * and procps-ng share, the flags the mod and the status view use too.
  */
 export const commandOf = (pid: number): string | undefined => {
   try {

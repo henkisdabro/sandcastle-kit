@@ -6,7 +6,6 @@
 
 // The frame's times are drawn in local time: one zone, so a frame is the same on every machine.
 process.env.TZ = "UTC";
-process.env.SANDCASTLE_TEST_STATUS_IMPL = "ts";
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -1,52 +1,57 @@
-// status.sh keeps its own bash check of "is this run live" (a node start on each redraw is too
-// slow), so these tests hold it to the rule of mod/hooks/run-live.ts: the same match string, the
-// same `ps` flags as the mod, and the same answers when it is run on a live, a recycled and a
-// gone pid. No Docker, no model calls.
+// The status view judges "is this run live" by the rule of mod/hooks/run-live.ts, not by a copy: it imports the
+// module's `liveness` and `isKit`, reads the command line with the same `ps` call as the mod, and answers as the
+// rule does on a live, a recycled and a gone pid. No Docker, no model calls.
 //
 //   pnpm test:file test/run-live-contract.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { RUN_COMMAND } from "../mod/hooks/run-live.ts";
-import { kitLikeProcess } from "./kit-process.ts";
+import { buildFixture } from "./status-fixture.ts";
+import { drawFrame, readFacts } from "./status-run.ts";
 
 const root = join(import.meta.dirname, "..");
-const status = readFileSync(join(root, "status.sh"), "utf8");
+const snapshot = readFileSync(join(root, "src/status-snapshot.ts"), "utf8");
 const mod = readFileSync(join(root, "mod/hooks/register.tsx"), "utf8");
 
-/** status.sh's `run_alive` function, as text. */
-const runAlive = () => status.match(/^run_alive\(\) \{\n[\s\S]*?\n\}$/m)?.[0] ?? "";
-
-test("status.sh matches the same string as the module", () => {
-  assert.equal(status.match(/^RUN_COMMAND="([^"]*)"$/m)?.[1], RUN_COMMAND, "status.sh's RUN_COMMAND drifted from mod/hooks/run-live.ts");
-  assert.ok(runAlive().includes('*"$RUN_COMMAND"*'), "run_alive matches the command line against RUN_COMMAND");
+test("the status view takes the rule from the module and keeps no copy of its match string", () => {
+  assert.match(snapshot, /import \{[^}]*\bisKit\b[^}]*\bliveness\b[^}]*\} from "\.\.\/mod\/hooks\/run-live\.ts"/);
+  assert.ok(!snapshot.includes(JSON.stringify(RUN_COMMAND)), `src/status-snapshot.ts spells out ${RUN_COMMAND}`);
 });
 
-test("status.sh and the mod read the command line with the same ps call", () => {
-  assert.ok(runAlive().includes('ps -p "$1" -o command='), "run_alive reads `ps -p <pid> -o command=`");
+test("the status view and the mod read the command line with the same ps call", () => {
+  assert.ok(snapshot.includes('["-p", String(pid), "-o", "command="]'), "the view's ps call");
   assert.ok(mod.includes('["ps", "-p", String(pid), "-o", "command="]'), "the mod's ps call");
 });
 
-test("no run's pid is judged by `kill -0` alone in status.sh", () => {
-  // The slot locks (load_pool) are not runs: `slot_alive` falls back to a signal of 0 when `ps` cannot answer.
-  const outsidePool = status.replace(/^load_pool\(\) \{[\s\S]*?\n\}$/m, "");
-  assert.doesNotMatch(outsidePool, /kill -0 "\$pid"/);
+const TMP = mkdtempSync(join(tmpdir(), "sandcastle-run-live-"));
+const fixture = buildFixture("live", TMP);
+after(() => {
+  fixture.stop();
+  rmSync(TMP, { recursive: true, force: true });
 });
 
-/** What status.sh's `run_alive` says about a pid, by running the function itself. */
-const shellSays = (pid: number) => spawnSync("bash", ["-c", `${status.match(/^RUN_COMMAND=.*$/m)?.[0]}\n${runAlive()}\nrun_alive ${pid}`], { stdio: ["ignore", "pipe", "pipe"] }).status === 0;
-
-test("run_alive: the kit's process is live; a stranger, and a gone pid, are not", () => {
-  const kit = kitLikeProcess();
+/** The run state the view's header shows once the record names `pid` as the run's process. */
+const stateOf = (pid: number) => {
+  const record = join(fixture.root, ".sandcastle/logs/run.json");
+  const original = readFileSync(record, "utf8");
+  writeFileSync(record, JSON.stringify({ ...JSON.parse(original), pid }));
   try {
-    assert.equal(shellSays(kit.pid), true);
-    assert.equal(shellSays(process.pid), false, "a live process that is not the kit: a recycled pid");
-    const gone = spawnSync("true").pid!;
-    assert.equal(shellSays(gone), false);
+    const drawn = drawFrame(fixture, { cols: 200 });
+    assert.equal(drawn.status, 0, drawn.stderr);
+    return readFacts(drawn.raw, fixture.root).run.state;
   } finally {
-    kit.kill();
+    writeFileSync(record, original);
   }
+};
+
+test("the view shows the kit's process as running; a stranger holding the pid, and a gone pid, as killed", () => {
+  const recorded = JSON.parse(readFileSync(join(fixture.root, ".sandcastle/logs/run.json"), "utf8")).pid;
+  assert.match(stateOf(recorded), /^running/);
+  assert.match(stateOf(process.pid), /^killed/, "a live process that is not the kit: a recycled pid");
+  assert.match(stateOf(spawnSync("true").pid!), /^killed/);
 });

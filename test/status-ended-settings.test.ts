@@ -1,4 +1,4 @@
-// An ended run's status view: the settings row is the next run's, so the whole row is prefixed
+// An ended run's status view: the settings are the next run's, so the whole lane is prefixed
 // `next run:` and never reads as the settings the closing summary recorded for the run that ended.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { spawnStatus } from "./status-run.ts";
+import { plain, readFacts, spawnStatus } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-ended-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -35,6 +35,7 @@ writeFileSync(
   JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: now, finishedAt: now, exitCode: 0, models: "m", issues: [], settings: { autonomy: "drain", turn: 1, cap: 20 } }),
 );
 
+/** The settings lane's items (the autonomy scale reduced to the level chosen) at `cols` columns. */
 const frame = (cols: number, next?: string): string[] => {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
@@ -50,40 +51,29 @@ const frame = (cols: number, next?: string): string[] => {
   delete env.SANDCASTLE_SETTINGS;
   if (next !== undefined) env.SANDCASTLE_SETTINGS = next;
   const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const lines = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
-  for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
-  return lines;
+  for (const l of plain(r.stdout).split("\n")) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
+  return readFacts(r.stdout, REPO).settings ?? [];
 };
-// The settings row and the lines it wrapped onto, which carry no label: up to the cell's border.
-const settingsLines = (lines: string[]) => {
-  const at = lines.findIndex((l) => l.startsWith("│ settings "));
-  if (at < 0) return [];
-  const end = lines.findIndex((l, i) => i > at && !/^│ {11}\S/.test(l));
-  return lines.slice(at, end < 0 ? undefined : end);
-};
-
-test("an ended run's row for the next run is prefixed, with no mark at its end", () => {
+test("an ended run's settings for the next run are prefixed, with no mark at their end", () => {
   const next = JSON.stringify({ autonomy: 0, turn: 1, cap: 1 });
   for (const cols of [60, 80, 100, 140]) {
-    const rows = settingsLines(frame(cols, next));
-    assert.equal(rows.length, 1, `${cols} columns`);
-    assert.match(rows[0], /^│ settings {2}next run: autonomy /, `${cols} columns`);
-    assert.doesNotMatch(rows[0], /\((next|last) run\)/, `${cols} columns`);
+    const items = frame(cols, next);
+    assert.equal(items.length, 1, `${cols} columns`);
+    assert.match(items[0]!, /^next run: autonomy /, `${cols} columns`);
+    assert.doesNotMatch(items[0]!, /\((next|last) run\)/, `${cols} columns`);
   }
 });
 
-test("a row wrapped over several lines carries the prefix once, on the first", () => {
-  const rows = settingsLines(frame(80, JSON.stringify({ autonomy: 0, turn: 1, cap: 1, repair: 2, concurrency: 4, crossReview: true, crossReviewModel: "gpt-6-astra", crossReviewEffort: "high", usageGuard: true, usageStop: 90 })));
-  assert.ok(rows.length > 1, `the row did not wrap:\n${rows.join("\n")}`);
-  assert.match(rows[0], /^│ settings {2}next run: /);
-  assert.match(rows.at(-1) ?? "", /usage-guard 90%/);
-  const text = rows.join("\n");
-  assert.equal(text.match(/next run:/g)?.length, 1);
+test("settings spread over several rows carry the prefix once, on the first", () => {
+  const items = frame(240, JSON.stringify({ autonomy: 0, turn: 1, cap: 1, repair: 2, concurrency: 4, crossReview: true, crossReviewModel: "gpt-6-astra", crossReviewEffort: "high", usageGuard: true, usageStop: 90 }));
+  assert.match(items[0] ?? "", /^next run: /);
+  assert.match(items.at(-1) ?? "", /usage-guard 90%/);
+  assert.equal(items.join("\n").match(/next run:/g)?.length, 1);
 });
 
 test("the ended run's own recorded settings keep the suffix mark, never the prefix", () => {
-  const rows = settingsLines(frame(100));
-  assert.equal(rows.length, 1);
-  assert.match(rows[0], /\[drain\].*\(last run\)/);
-  assert.doesNotMatch(rows[0], /next run:/);
+  const items = frame(100);
+  assert.equal(items.length, 1);
+  assert.match(items[0]!, /drain.*\(last run\)/);
+  assert.doesNotMatch(items[0]!, /next run:/);
 });
