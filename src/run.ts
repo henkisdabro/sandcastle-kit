@@ -947,6 +947,9 @@ const SIZE_WORDS = { small: `1-${SMALL_PATHS} Touches paths`, large: `${SMALL_PA
  * added to it, as they run before every ticket and after the last; the image check and preflight are not.
  * `from N ticket(s)` is how many history tickets priced the run's, not how many the window holds. A line that does not parse is skipped.
  *
+ * `detail.beside` names the live runs this run's start share is split with: the line then says `at this run's share now`
+ * and that it is shorter as they finish, since `slots` is the share of the first minutes and widens. Without it (a run alone) the line is as before.
+ *
  * `models` is the implement model of each ticket in the run (its `model:` label, else the default):
  * each is estimated from the history of tickets that model implemented, as an Opus ticket takes
  * several times a Sonnet one. A history ticket's model is the one on its implement or repair
@@ -988,7 +991,7 @@ const SIZE_WORDS = { small: `1-${SMALL_PATHS} Touches paths`, large: `${SMALL_PA
  * a row on the one worker, whatever the slots, so they count with or without `gateSlots`.
  */
 export const estimate = (
-  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[] } = {},
+  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[]; beside?: string[] } = {},
 ): string | undefined => {
   let text: string;
   try {
@@ -1229,10 +1232,14 @@ export const estimate = (
     larger ? ` ${larger} ticket(s) are larger (${SIZE_WORDS.large}) than most of the window's, with too little history of their size, so it may be low.` : "",
     byLoad ? "" : ` No history at ${slots} at a time (gate times are from runs of any load), so it may be low.`,
   ].join("");
+  // Beside another live run `slots` is the share the run has at its start, which widens as that run's tickets finish: the line says so,
+  // or it read as the load the whole run keeps (the start lines above it tell the widening).
+  const share = detail.beside?.length ? `, at this run's share now, ${slots} at a time` : `, ${slots} at a time`;
+  const shorter = detail.beside?.length ? `; shorter as ${detail.beside.join(" and ")} finish${detail.beside.length === 1 ? "es" : ""}` : "";
   return (
     `Estimate (rough, from ${pricedFrom.size} ticket(s) in the last 3 runs): ` +
     `about ${span(sum((p) => p.mid.inTokens), sum((p) => p.high.inTokens), k)} tokens in / ${span(sum((p) => p.mid.out), sum((p) => p.high.out), k)} out ` +
-    `and ${span(bound(midMs) + midSteps, bound(highMs) + highSteps, clock)} for ${tickets} ticket(s)${split}, ${slots} at a time${sequence}${gateBound}.${low}`
+    `and ${span(bound(midMs) + midSteps, bound(highMs) + highSteps, clock)} for ${tickets} ticket(s)${split}${share}${sequence}${gateBound}${shorter}.${low}`
   );
 };
 

@@ -66,5 +66,5 @@ test("a run predating shares is named the same way", () => {
 test("burndown() hands startLines each run's root and pid and this run's own name", () => {
   const src = readFileSync(join(import.meta.dirname, "..", "src", "burndown.ts"), "utf8");
   assert.match(src, /root: found\?\.root, pid: m\.pid/);
-  assert.match(src, /\}\), !DRY_RUN, project\.name, project\.root\)\) console\.log\(line\)/);
+  assert.match(src, /, neighbours, !DRY_RUN, project\.name, project\.root\)\) console\.log\(line\)/);
 });

@@ -529,6 +529,35 @@ const approx = (seconds: number) => {
 };
 
 /**
+ * How each live run is named in the start lines and the estimate's note: the project name, told apart from this run
+ * (`self`) and from another listed run of the same name by the last component of its root, else its pid. The doc of
+ * `startLines` has the rules.
+ */
+export const neighbourNames = (others: Neighbour[], self?: string, selfRoot?: string): ((n: Neighbour) => string) => {
+  const shared = (n: Neighbour) => !!n.project && (n.project === self || others.some((o) => o !== n && o.project === n.project));
+  const folder = (n: Neighbour) => (n.root ? basename(n.root) : undefined);
+  // A neighbour in `/b/site` seen from `/a/site` is not told apart from this run by its folder.
+  const selfDir = selfRoot ? basename(selfRoot) : undefined;
+  return (n) => {
+    if (!n.project) return "another project";
+    if (!shared(n)) return n.project;
+    const dir = folder(n);
+    if (dir && !(n.project === self && dir === selfDir) && !others.some((o) => o !== n && shared(o) && o.project === n.project && folder(o) === dir)) return `${n.project} (${dir})`;
+    return n.pid === undefined ? n.project : `${n.project} (pid ${n.pid})`;
+  };
+};
+
+/**
+ * The runs the start estimate's share is waiting on: those holding slots (the ones whose tickets finishing widens this
+ * run's share), else every other live run. Named as the start lines name them.
+ */
+export const estimateBeside = (others: Neighbour[], self?: string, selfRoot?: string): string[] => {
+  const name = neighbourNames(others, self, selfRoot);
+  const holders = others.filter((n) => n.held > 0);
+  return (holders.length ? holders : others).map(name);
+};
+
+/**
  * The start lines of a run that begins while others are live: who they are, what each holds and
  * wants, this run's share (and, from 2, the slot of it kept for landing) and, when no slot is free, when the first is likely. A run from an older
  * kit gets a line of its own - it takes no share on trust, and the run still starts. No other run:
@@ -540,17 +569,7 @@ const approx = (seconds: number) => {
  * (or this run's, `selfRoot`) has the same last component. A name nothing shares is printed as it is.
  */
 export const startLines = (split: { share: number; free: number }, others: Neighbour[], landing = true, self?: string, selfRoot?: string): string[] => {
-  const shared = (n: Neighbour) => !!n.project && (n.project === self || others.some((o) => o !== n && o.project === n.project));
-  const folder = (n: Neighbour) => (n.root ? basename(n.root) : undefined);
-  // A neighbour in `/b/site` seen from `/a/site` is not told apart from this run by its folder.
-  const selfDir = selfRoot ? basename(selfRoot) : undefined;
-  const name = (n: Neighbour) => {
-    if (!n.project) return "another project";
-    if (!shared(n)) return n.project;
-    const dir = folder(n);
-    if (dir && !(n.project === self && dir === selfDir) && !others.some((o) => o !== n && shared(o) && o.project === n.project && folder(o) === dir)) return `${n.project} (${dir})`;
-    return n.pid === undefined ? n.project : `${n.project} (pid ${n.pid})`;
-  };
+  const name = neighbourNames(others, self, selfRoot);
   const lines: string[] = [];
   const aware = others.filter((n) => n.registered);
   if (aware.length) {

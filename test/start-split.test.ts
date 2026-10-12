@@ -9,7 +9,7 @@
 //   pnpm test:file test/start-split.test.ts
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
@@ -18,7 +18,7 @@ import { kitLikeProcess } from "./kit-process.ts";
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = cache;
 process.env.SANDCASTLE_MAX_SANDBOXES = "6";
-const { estimateSlots, otherRuns, recordOfRun, splitAtStart, startLines } = await import("../src/pool.ts");
+const { estimateBeside, estimateSlots, otherRuns, recordOfRun, splitAtStart, startLines } = await import("../src/pool.ts");
 const { estimate, firstSlotWait } = await import("../src/run.ts");
 type Project = Parameters<typeof estimate>[0];
 type Neighbour = Parameters<typeof startLines>[1][number];
@@ -190,4 +190,51 @@ test("the estimate's divisor is the share when another run is live, and the mach
   assert.match(shared!, /for 6 ticket\(s\), 2 at a time/);
   assert.match(alone!, /\b20m for/, "one round of 20 minutes");
   assert.match(shared!, /\b1h 00m for/, "three rounds of 20 minutes");
+});
+
+// ---------------------------------------------------------------------------
+// The estimate beside another live run prices the share the run has at its start, and says so.
+// ---------------------------------------------------------------------------
+
+const priced = () => {
+  const root = mkdtempSync(join(tmpdir(), "sandcastle-estimate-split-"));
+  mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
+  const line = (issue: number, phase: string, ms: number) => JSON.stringify({ project: "fixture", run: "r1", issue: String(issue), phase, ms, tokens: { input: 1_000_000, cacheWrite: 0, cacheRead: 0, output: 10_000 } });
+  writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), [1, 2, 3].map((i) => line(i, "implement", 10 * 60_000)).join("\n") + "\n");
+  return { root, name: "fixture" } as Project;
+};
+// The history's "No history at N at a time" note varies with the fixture's load, not with what is under test.
+const bare = (text: string | undefined) => text?.replace(/ No history at .*$/, "");
+
+test("a start beside another live run says the estimate prices this run's share now, and that it is shorter as the other finishes", () => {
+  const p = priced();
+  const beside = estimateBeside([other({ held: 5 })], "fixture");
+  assert.deepEqual(beside, ["webshop"]);
+  assert.match(bare(estimate(p, 3, 1, 0, undefined, { beside }))!, /for 3 ticket\(s\), at this run's share now, 1 at a time; shorter as webshop finishes\.$/);
+});
+
+test("two other runs are both named, and the plural verb agrees", () => {
+  const beside = estimateBeside([other({ held: 3 }), other({ project: "web", held: 3 })], "fixture");
+  assert.match(bare(estimate(priced(), 3, 1, 0, undefined, { beside }))!, /, at this run's share now, 1 at a time; shorter as webshop and web finish\.$/);
+});
+
+test("a run that holds nothing is not named while another holds slots; with none holding, all are", () => {
+  assert.deepEqual(estimateBeside([other({ held: 0, demand: 2 }), other({ project: "web", held: 3 })], "fixture"), ["web"]);
+  assert.deepEqual(estimateBeside([other({ held: 0, demand: 2 })], "fixture"), ["webshop"]);
+});
+
+test("a same-named other project is told apart as the start line tells it", () => {
+  assert.deepEqual(estimateBeside([other({ project: "fixture", root: join(tmpdir(), "elsewhere", "fixture-two"), pid: 4242 })], "fixture", join(tmpdir(), "here", "fixture")), ["fixture (fixture-two)"]);
+});
+
+test("a start alone prints none of the new words", () => {
+  const text = estimate(priced(), 3, 3)!;
+  assert.match(bare(text)!, /for 3 ticket\(s\), 3 at a time\.$/);
+  assert.doesNotMatch(text, /share now|shorter as/);
+  assert.doesNotMatch(estimate(priced(), 3, 3, 0, undefined, { beside: [] })!, /share now|shorter as/);
+});
+
+test("the start of a run passes the estimate its neighbours only when the slots are split", () => {
+  const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
+  assert.match(source, /beside: split \? estimateBeside\(neighbours, project\.name, project\.root\) : undefined/);
 });
