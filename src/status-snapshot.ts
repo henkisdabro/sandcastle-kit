@@ -481,7 +481,8 @@ export const readGit = async (dir: string, env: NodeJS.ProcessEnv, part: RecordP
   return { base, branches, unpushed };
 };
 
-// docker reports CPU against one core, so 1399% is ~14 cores: shown as cores against the host's. Asked once.
+// docker reports CPU against one core, so 1399% is ~14 cores: shown as cores against the host's. Asked once, and
+// kept apart from docker's answer: a docker that is not running or hangs leaves the host's cores known.
 let cores: number | undefined;
 const hostCpus = async (env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<number> => {
   if (cores) return cores;
@@ -502,8 +503,12 @@ export const readDocker = async (dir: string, env: NodeJS.ProcessEnv, signal: Ab
     if (r.status !== 0) throw new Error(`docker ${args[0]} failed`);
     return r.stdout;
   };
-  const [cpus, ps] = await Promise.all([hostCpus(env, signal), docker(["ps", "-q", "--filter", "name=sandcastle-"])]);
-  const ids = ps.split("\n").filter(Boolean);
+  // The cores are asked to the end even when docker fails, so the snapshot of a failed reading has them too.
+  const [counted, listed] = await Promise.allSettled([hostCpus(env, signal), docker(["ps", "-q", "--filter", "name=sandcastle-"])]);
+  if (counted.status === "rejected") throw counted.reason;
+  if (listed.status === "rejected") throw listed.reason;
+  const cpus = counted.value;
+  const ids = listed.value.split("\n").filter(Boolean);
   if (!ids.length) return { containers: {}, cpus };
   const owner = new Map<string, string>();
   const prefix = `${dir}/worktrees/agent-issue-`;
@@ -764,7 +769,7 @@ const NO_RECORD: RecordPart = { hasRecord: false, record: {} as RunRecord, ticke
 export const snapshotOf = (dir: string, readings: Readings, { env = process.env, terminal = false, now = Math.floor(Date.now() / 1000) }: { env?: NodeJS.ProcessEnv; terminal?: boolean; now?: number } = {}): Snapshot => {
   const { hasRecord, record, tickets, live, outcomes, logs, tails, worktrees, runOutput } = readings.record.value ?? NO_RECORD;
   const { base, branches, unpushed } = readings.git.value ?? { base: env.SANDCASTLE_BASE || "", branches: {}, unpushed: 0 };
-  const { containers, cpus } = readings.docker.value ?? { containers: {}, cpus: 1 };
+  const { containers, cpus } = readings.docker.value ?? { containers: {}, cpus: cores ?? 1 };
   const pool = readings.pool.value ?? { sandboxes: { used: 0, limit: env.SANDCASTLE_MAX_SANDBOXES || "6" }, gates: { used: 0, limit: env.SANDCASTLE_MAX_GATES || "2" } };
   const queue = { tickets: readings.queue.value ?? [], ...(readings.queue.error ? { error: readings.queue.error } : {}) };
 

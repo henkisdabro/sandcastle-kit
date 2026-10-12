@@ -160,6 +160,18 @@ const project = (name: string): { fixture: Fixture; env: NodeJS.ProcessEnv; dir:
   return { fixture, env, dir: join(fixture.root, ".sandcastle"), calls };
 };
 
+// First of the project's tests: no earlier one has read the host's cores in this process.
+test("docker failing still leaves the host's cores in the snapshot, as status.sh counts them", async () => {
+  const { env, dir } = project("no-docker");
+  delete env.FAKE_DOCKER;
+  const sources = createSources(dir, env);
+  await sources.refresh();
+  const snapshot = snapshotOf(dir, sources.readings(), { env });
+  assert.equal(snapshot.sources?.docker, "unavailable");
+  // The fixture's nproc says 8; the CPU column's note reads "CPU in cores of" this.
+  assert.equal(snapshot.cpus, 8);
+});
+
 test("every source answers, and the snapshot says each is current", async () => {
   const { env, dir } = project("current");
   const sources = createSources(dir, env);
