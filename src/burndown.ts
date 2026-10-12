@@ -42,7 +42,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -2872,7 +2872,9 @@ export const burndown = async (
     } finally {
       // The pass is over, and its result carries its own figure (in `spent` above, with nothing in between that a
       // tick could interleave with): what its log showed stops counting as live. A pass that threw has none, and nothing of it is kept.
-      if (issue) usageWatch?.settle(issue);
+      // Its largest turn's context (`peakContext`) goes to the timings line and the ticket's record, even when the pass threw.
+      const peakContext = issue ? usageWatch?.settle(issue) : undefined;
+      if (issue && peakContext) run.ticket(issue, { peakContext: peakContexts(run.tickets()[issue]?.peakContext, phase, peakContext) });
       active.delete(issue);
       const m = model?.();
       const line = {
@@ -2882,6 +2884,7 @@ export const burndown = async (
         ...(touchPaths.has(issue) ? { touches: touchPaths.get(issue) } : {}),
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
+        ...(peakContext ? { peakContext } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
         ...(peakMib ? { peakMib } : {}),
         ...pressureFields(pressure),

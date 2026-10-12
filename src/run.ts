@@ -1527,6 +1527,13 @@ export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRe
 export const ticketTokens = (t: Tokens) => ({ tokens: tokenBrief(t), cacheRead: t.cacheRead });
 
 /**
+ * A ticket's `peakContext` after a pass: the largest context of one turn in each kind of pass (`implement`, `review`,
+ * `repair`), the larger of what the record holds and the pass that just ended, so a second repair pass cannot lower it.
+ */
+export const peakContexts = (held: Record<string, number> | undefined, phase: string, peak: number): Record<string, number> =>
+  ({ ...held, [phase]: Math.max(held?.[phase] ?? 0, peak) });
+
+/**
  * What the usage watch calls with a ticket's running pass's tokens so far: the ticket's `tokens` in the run record
  * becomes what its finished passes spent (`spent`, the run's own count of the results' figures) plus that live figure.
  * A pass that has ended is in `spent` and no longer live (`UsageWatch.settle`), so it is never in both.
