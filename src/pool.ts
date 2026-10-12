@@ -41,7 +41,9 @@
 // A landing's slot is handed on, not freed, when the run has another landing queued behind it (`withSlot`'s `onward`,
 // `handOff`): the freed slot would go to the longest wait across runs, and the queued landing would wait for another run.
 // Beside another run, a run's ticket pipelines (`keep`) leave the last slot of its share, at 2 or more, to its
-// landings (`keptForLanding`).
+// landings (`keptForLanding`). While none of its landings waits, that slot counts as the run's own in the share
+// sums (`heldWithKept`), so another run at or above its share may take it rather than yield to a run that cannot;
+// the run's landing then takes the next slot freed, ahead of the other run's tickets.
 // The gates pool has no shares.
 //
 // A cap (`sandcastle cap`) is a person's limit on one run's share, in that run's registration, so it
@@ -596,6 +598,19 @@ const olderWait = (pool: PoolName, mine: Wait, ms: Member[], seen: Seen) =>
   );
 
 /**
+ * What another run holds for the share sums, counting the slot it keeps for landing as held while no landing of
+ * its waits: a run of share 2 or more beside this one holds its tickets to share - 1 (`keptForLanding`), and with
+ * no wait entry of its own - a landing's wait is in the waits directory, a ticket's kept back is not - the kept slot
+ * is idle. Counted as the owner's, it does not make the owner "below its share", so this run, at or above its own,
+ * may take the idle slot instead of yielding to a run that cannot use it. The owner's landing, once it waits, makes
+ * the run below its share again, and this run takes no further slot (none is taken back from a running ticket).
+ */
+const heldWithKept = (m: Member, pool: PoolName, seen: Seen) => {
+  if (m.share < 2 || m.held < m.share - 1 || m.held >= m.share) return m.held;
+  return waits(pool, seen).some((w) => w.run === m.run) ? m.held : m.held + 1;
+};
+
+/**
  * This run is at or above its share of the sandbox pool and another run below its share wants a
  * slot: a registered run below its share does (its demand is what it will ask for next, so a run
  * between two of its tickets is not mistaken for one that wants nothing), and so does any other
@@ -609,7 +624,7 @@ const overShare = (pool: PoolName, ms: Member[], seen: Seen) => {
   // A cap is a limit whether or not another run wants the slot. Held, not share: a demand below the
   // cap leaves the share below it too, and a run with no rival takes slots past its share.
   if (me?.cap !== undefined && me.held >= me.cap) return true;
-  if (ms.some((m) => m.run !== RUN_ID && m.registered && m.held < m.share)) return true;
+  if (ms.some((m) => m.run !== RUN_ID && m.registered && heldWithKept(m, pool, seen) < m.share)) return true;
   return waits(pool, seen).some((w) => w.run !== RUN_ID && !ms.find((m) => m.run === w.run)?.registered);
 };
 

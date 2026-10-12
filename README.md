@@ -1709,6 +1709,8 @@ fills up, and when a run ends the others grow back. A landing comes out of the r
 and still goes before a new ticket within it: while the share is 2 or more, the run's tickets hold
 one slot fewer than the share, which is kept for landing (a run alone keeps one of the machine's
 slots the same way); at a share of 1 the slot is a ticket's, and a landing waits for it to free.
+While no landing of the run waits, another run at or above its own share may use the kept slot, so
+it does not sit idle; the run's landing then takes the next slot that frees.
 Gate slots have no shares: they go to the longest wait.
 The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
 Herdr tab bar shows each live run's share, and while the run waits for a slot its share holds back, the
