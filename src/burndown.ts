@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -100,6 +100,8 @@ type Outcome = {
   gates: Gate[];
   /** Test ids the last red gate named. */
   failing?: string[];
+  /** Test ids that went red on one run of a gate and green on a later one: a flake the re-runs ruled out. */
+  flaked?: string[];
   /** Its branch had work from an earlier run: landing takes it first. */
   carried?: boolean;
   /** Repaired green, but the review of the repair failed: held, never merged unreviewed. */
@@ -2246,16 +2248,37 @@ export const createPipeline = (ctx: PipelineContext) => {
       // this runs before the loop, and only once.
       const first = gated.failure;
       const redAt = first ? gated.gates.findIndex((g) => g.name === first.name) : -1;
+      // The red runs of the gate so far, before the one `gated` holds: the first red, then a red re-run's.
+      const earlier: Failure[] = [];
       if (gated.rerunOf) {
         // The gate port ran the re-run inside the slot of the run that went red (`rerunOnRed`).
+        if (gated.rerunOf.failure) earlier.push(gated.rerunOf.failure);
         if (!gated.failure) console.log(`${ref(issue.id)}: ${gated.rerunOf.failure?.name ?? "a gate"} red, then green on a re-run - a flake, no repair pass`);
       } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
         const again = ctx.regate;
         const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, first.name));
+        earlier.push(first);
         // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
         gated = { ...rerun, gates: [...gated.gates.slice(0, redAt), ...rerun.gates] };
         if (!gated.failure) console.log(`${ref(issue.id)}: ${first.name} red, then green on a re-run - a flake, no repair pass`);
       }
+      // A re-run that went red on tests the first red did not name is another flake, not a failure to repair: the gate
+      // runs a third time. Red again, on any tests, goes to repair with all three runs' tests named; unreadable test
+      // ids (a lint or type gate) keep the re-run's result as it was.
+      let threeRuns: { red: Failure; note: string } | undefined;
+      const second = gated.failure;
+      if (ctx.regate && second && earlier.length === 1 && second.exitCode !== 124 && disjointReds(earlier[0], second)) {
+        const again = ctx.regate;
+        const secondAt = gated.gates.findIndex((g) => g.name === second.name);
+        console.log(`${ref(issue.id)}: ${second.name} red on different tests from the first red - a flake each time, gating once more with no repair pass`);
+        const third = await timed(issue.id, "gates", () => again(sandbox, issue.id, second.name));
+        earlier.push(second);
+        gated = { ...third, gates: [...gated.gates.slice(0, Math.max(0, secondAt)), ...third.gates] };
+        if (!gated.failure) console.log(`${ref(issue.id)}: ${second.name} red twice on different tests, then green on a third run - a flake, no repair pass`);
+        else threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
+      }
+      // Kept on the ticket's record whatever follows (a repair may still fail): these went red and then green.
+      const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure) : [];
       let preRepair = sh("git", ["rev-parse", branch], project.root);
       const seen = new Set<string>();
       // The failures this ticket has already waited a fix for: a second wait on one would never end the loop's own repair.
@@ -2357,7 +2380,8 @@ export const createPipeline = (ctx: PipelineContext) => {
               ...promptArgs,
               GATE_NAME: failure.name,
               GATE_COMMAND: failure.command,
-              GATE_OUTPUT: fence(failure.output),
+              // Only for the third run's own red: a later one is what a repair or a merged fix left, not a flake.
+              GATE_OUTPUT: (failure === threeRuns?.red ? threeRuns.note : "") + fence(failure.output),
             }),
             maxIterations: project.repair.maxIterations ?? 4,
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
@@ -2462,6 +2486,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         ...(outside && { outside }),
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
+        ...(flaked.length ? { flaked } : {}),
         head,
         carried,
         unreviewed,
@@ -3365,6 +3390,7 @@ export const burndown = async (
           minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
           ...(tokens ? ticketTokens(tokens) : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
+          ...(value.flaked?.length ? { flaked: value.flaked } : {}),
           ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),
