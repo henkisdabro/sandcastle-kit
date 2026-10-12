@@ -47,8 +47,8 @@
     pre.append(probe);
     const ch = probe.getBoundingClientRect().width / 100;
     probe.remove();
-    // 60 columns is the narrowest the view's renderer is drawn at.
-    return Math.max(60, Math.floor(pre.clientWidth / ch));
+    // 44 columns still fits a 360px phone; the box hides what overflows it, so a wider floor would cut its right edge.
+    return Math.max(44, Math.floor(pre.clientWidth / ch));
   }
 
   // Each row is drawn where it now belongs, then started from where it was and

@@ -47,12 +47,25 @@ test("the page loads the renderer's copy before the demo", () => {
   assert.ok(order.indexOf("status-render.js") >= 0 && order.indexOf("status-render.js") < order.indexOf("status.js"), order.join(", "));
 });
 
+test("the README's GIF recorder loads the renderer's copy before the demo too", () => {
+  const script = readFileSync(join(KIT, "docs/img/record-gifs.sh"), "utf8");
+  const order = [...script.matchAll(/<script src="[^"]*site\/js\/([\w-]+\.js)"/g)].map((m) => m[1]);
+  assert.ok(order.indexOf("status-render.js") >= 0 && order.indexOf("status-render.js") < order.indexOf("status.js"), order.join(", "));
+});
+
 test("the demo keeps no port of the bash grid", () => {
   const demo = site("status.js");
   for (const gone of ["splitW", "snapW", "cellsLine", "function junction", "function align"]) assert.ok(!demo.includes(gone), `${gone} is still in site/js/status.js`);
 });
 
-const WIDTHS = [60, 80, 100, 120, 150, 180, 220];
+// The narrowest is the floor site/js/main.js measures the pane to.
+const FLOOR = Number(/Math\.max\((\d+), Math\.floor\(pre\.clientWidth/.exec(site("main.js"))?.[1]);
+const WIDTHS = [FLOOR, 50, 60, 80, 100, 120, 150, 180, 220];
+
+test("the demo's narrowest width fits a 360px phone", () => {
+  // 9.5px Monaspace (site.css's smallest) is 5.7px a column; a 360px screen less its two 16px gutters holds 57.
+  assert.ok(FLOOR > 0 && FLOOR <= 57, `site/js/main.js draws the demo at ${FLOOR} columns at the narrowest`);
+});
 const MINUTES = [0, 2, 8, 13, 22, 28, 31];
 
 test("the demo draws the frames the view draws, for its sample run at every width it offers", () => {
