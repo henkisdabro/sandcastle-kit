@@ -47,7 +47,8 @@
     pre.append(probe);
     const ch = probe.getBoundingClientRect().width / 100;
     probe.remove();
-    return Math.max(44, Math.floor(pre.clientWidth / ch));
+    // 60 columns is the narrowest the view's renderer is drawn at.
+    return Math.max(60, Math.floor(pre.clientWidth / ch));
   }
 
   // Each row is drawn where it now belongs, then started from where it was and
@@ -90,7 +91,7 @@
       drawn = now;
     } else if (now - drawn > 250) {
       const clock = pre.querySelector('.c-clock');
-      if (clock) clock.textContent = clockAt(minute, cols);
+      if (clock) clock.textContent = clockAt(minute);
       drawn = now;
     }
     raf = requestAnimationFrame(tick);

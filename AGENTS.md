@@ -113,7 +113,7 @@ read a module's section there before changing it.
 | `docs/img/` | The README's pictures. GitHub plays no SVG animation in a README, so the moving ones are GIFs, rebuilt by `record-gifs.sh` there; the castle's colours are the status view's |
 | `docs/releasing.md` | Version bumps, the tag and the release notes' shape |
 | `test/full-check.sh` | Every check below on this machine, in a Linux container and the outbound scan of the commits not yet on `origin/main`, all legs side by side; the suite runs as `test/shard.ts`'s shards through `test/run-shards.sh`, their count from `test/shard-count.sh` (the cores shared between the passes at once) |
-| `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step |
+| `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step. `site/js/status-render.js` is generated from the status view's renderer by `scripts/site-renderer.mjs` (`pnpm site:renderer`): rerun it and commit the output after changing `src/status-grid.ts` or `src/status-render.ts` (`test/site-renderer-copy.test.ts` fails otherwise) |
 | `CHANGELOG.md` | Keep a Changelog; each release's **Upgrading** notes are what `/sandcastle update` acts on |
 
 `@ai-hero/sandcastle` is a dependency, not vendored, with a pnpm patch (`patches/`; why, in

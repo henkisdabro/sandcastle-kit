@@ -331,7 +331,7 @@ Verifying a change to it needs Claude Code 2.1.287 or newer on PATH: `pnpm test`
 
 ## `site/`
 
-The project website on GitHub Pages: static HTML, CSS and plain scripts (not modules, so it also opens from disk), no build step. `js/status.js` ports the status view's grid to play a made-up run; `js/sand.js` draws the castle, dunes and grains. `.github/workflows/pages.yml` deploys it
+The project website on GitHub Pages: static HTML, CSS and plain scripts (not modules, so it also opens from disk), no build step. `js/status.js` plays a made-up run: it hands `js/status-render.js` the snapshot and rows the view would read, and turns the frame it draws into coloured text; `js/sand.js` draws the castle, dunes and grains. `js/status-render.js` is not written by hand: `scripts/site-renderer.mjs` (`pnpm site:renderer`) strips the types from `src/status-grid.ts` and `src/status-render.ts` with Node's own type stripping, adds the few declarations the renderer imports from modules that need Node (named in the script's `EXTERNALS`) and commits the result, so the demo draws the view's own frames with no build in the deploy. A change to either source file needs `pnpm site:renderer` run and its output committed; `test/site-renderer-copy.test.ts` fails when the copy differs from what the script writes, and holds the demo's frames to the view's at the widths it offers. A new import in the renderer fails the script until `EXTERNALS` names it. `.github/workflows/pages.yml` deploys it
 
 `scripts/version.mjs` synchronises the current release fields from `package.json`: the Herdr
 manifest, site's footer and software metadata, and README release and minimum Node badges.
