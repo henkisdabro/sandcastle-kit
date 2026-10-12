@@ -70,7 +70,11 @@ const opener = (root: string): Ctx["opener"] => async (branch) => {
 const GREEN: GateRun = { gates: [{ name: "test", pass: true }], failures: [] };
 const failure = { name: "test", command: "test", exitCode: 1, output: "FAIL: a.txt and b.txt cannot both exist" };
 const RED: GateRun = { gates: [{ name: "lint", pass: true }, { name: "test", pass: false }], failure, failures: [failure] };
-const together: Ctx["gate"] = async (box) => ((await box.exec("test -e a.txt && test -e b.txt")).exitCode === 0 ? RED : GREEN);
+// A re-run starts at the red gate (`how.from`), as the real port's does: the landing runs a red gate once more.
+const together: Ctx["gate"] = async (box, _id, how) => {
+  const run = (await box.exec("test -e a.txt && test -e b.txt")).exitCode === 0 ? RED : GREEN;
+  return how?.from ? { ...run, gates: run.gates.slice(Math.max(0, run.gates.findIndex((g) => g.name === how.from))) } : run;
+};
 
 const harness = (root: string) => {
   const project = { root, name: "fixture", baseBranch: "main", land: "merge", generated: [], gates: [], setup: [] } as unknown as Project;

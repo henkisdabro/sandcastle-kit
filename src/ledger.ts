@@ -142,7 +142,7 @@ export const partlyDoneComment = (
 export const notLandedComment = (
   report: string | undefined,
   conflict: { branch: string; base: string; files: string[]; with: string[] } | undefined,
-  red?: { branch: string; base: string; with: string[]; gates: string[]; failing?: string[] },
+  red?: { branch: string; base: string; with: string[]; gates: string[]; failing?: string[]; seen?: boolean },
 ): string | undefined => {
   if (red) {
     return (
@@ -150,7 +150,9 @@ export const notLandedComment = (
       (red.failing?.length ? `Failing: ${red.failing.join(", ")}. ` : "") +
       (red.with.length
         ? `Landed on \`${red.base}\` since this branch forked, changing a file it also changed: ${red.with.map(refOf).join(", ")}. `
-        : "Red on the merged tree: no ticket landed since this branch forked changed a file it changed. ") +
+        : red.seen
+          ? "Every failing test was already failing on this branch's own ticket gates in this run, so no landed ticket is named. "
+          : "Red on the merged tree: no ticket landed since this branch forked changed a file it changed. ") +
       `Nothing was merged. The next run merges \`${red.base}\` into the branch and tries again.` +
       (report === undefined ? "" : `\n\nWhat the agents reported:\n\n${report}`)
     );
@@ -250,9 +252,9 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
             note: e.again ? againNoteOf(landed, e.again.kind) : redNote(landed),
             ...(landed.failing?.length ? { failing: landed.failing } : {}),
           },
-          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed, e.again.kind) : `red when merged${landed.with.length ? ` with ${refs}` : ""}${redDetail(landed)}` },
+          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed, e.again.kind) : `red when merged${landed.with.length ? ` with ${refs}` : landed.seen ? ", as seen on the branch before" : ""}${redDetail(landed)}` },
           view: { word: "red when merged", landed: false },
-          tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates, failing: landed.failing })),
+          tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates, failing: landed.failing, seen: landed.seen })),
         };
       }
       case "held": {
