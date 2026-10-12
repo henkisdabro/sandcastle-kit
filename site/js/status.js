@@ -1,107 +1,15 @@
-// The live status window: status.sh's grid (split_w, junction, cells_line and
-// the legend band) ported line for line, playing a scripted overnight run.
-// Drawn as text rather than canvas, so it stays sharp at any zoom, can be
-// selected, and reflows by dropping columns the way the real view does.
+// The live status window: the status view's own renderer (status-render.js, the TypeScript renderer with its
+// types stripped by scripts/site-renderer.mjs) drawing a scripted overnight run. This file makes up the run
+// and hands the renderer what the view would read - a snapshot and a table of rows - then turns the ANSI
+// frame it draws into text with coloured spans. Drawn as text rather than canvas, so it stays sharp at any
+// zoom and can be selected; the columns drop out the way the real view's do.
 
-// A line is a list of [text, colour] segments; the colours are the status
-// view's own variable names, styled in site.css as .c-<name>.
+// A line is a list of [text, colour] segments; the colours are the status view's own variable names,
+// styled in site.css as .c-<name>.
 (function () {
   'use strict';
 
-const len = (segs) => segs.reduce((n, [t]) => n + t.length, 0);
-const pad = (n) => [' '.repeat(Math.max(0, n)), ''];
-
-function align(segs, w, al = 'l') {
-  if (w <= 0) return [];
-  const n = len(segs);
-  if (n > w) {
-    // Cut to the width with an ellipsis, as fit() does in status.sh.
-    const out = [];
-    let left = w - 1;
-    for (const [t, c] of segs) {
-      if (left <= 0) break;
-      out.push([t.slice(0, left), c]);
-      left -= t.length;
-    }
-    out.push(['…', segs[segs.length - 1][1]]);
-    return out;
-  }
-  if (al === 'r') return [pad(w - n), ...segs];
-  if (al === 'c') {
-    const l = (w - n) >> 1;
-    return [pad(l), ...segs, pad(w - n - l)];
-  }
-  return [...segs, pad(w - n)];
-}
-
-// $1 columns split by weights, the remainder spread by cumulative rounding.
-function splitW(total, weights) {
-  const sum = weights.reduce((a, b) => a + b, 0);
-  let cum = 0;
-  let prev = 0;
-  return weights.map((w) => {
-    cum += w;
-    const at = Math.floor((total * cum * 2 + sum) / (sum * 2));
-    const width = at - prev;
-    prev = at;
-    return width;
-  });
-}
-
-const bars = (ow) => {
-  const out = [];
-  let p = 0;
-  for (let i = 0; i < ow.length - 1; i++) out.push((p += ow[i] + 1));
-  return out;
-};
-
-// status.sh's snap_w: each inner bar of ow within 4 columns of a bar above (ref) moves onto it,
-// so the two meet in one ┼ rather than a near-miss like ┴┬. A cell is never cut below min (one
-// already narrower keeps its width): that bar stays, and the last cell takes the remainder.
-function snapW(win, ow, ref, min) {
-  const n = ow.length;
-  const mn = ow.map((w, i) => Math.min(min[i] ?? 0, w));
-  const suf = Array(n + 1).fill(0);
-  for (let i = n - 1; i >= 0; i--) suf[i] = suf[i + 1] + mn[i] + 1;
-  const pos = [];
-  let prev = 0;
-  let acc = 0;
-  for (let i = 0; i < n - 1; i++) {
-    acc += ow[i] + 1;
-    let best = acc;
-    let bd = 5;
-    for (const r of ref) {
-      const d = Math.abs(r - acc);
-      if (d < bd) {
-        bd = d;
-        best = r;
-      }
-    }
-    if (best !== acc && (best - prev - 1 < mn[i] || win - 1 - best < suf[i + 1])) best = acc;
-    // An earlier move right may have squeezed this cell.
-    best = Math.max(best, prev + 1 + mn[i]);
-    pos.push(best);
-    prev = best;
-  }
-  return [...pos, win - 1].map((p, i) => p - (i ? pos[i - 1] : 0) - 1);
-}
-
-function junction(win, l, r, fill, up = [], dn = []) {
-  const [x, y, z] = ['┼', '┴', '┬'];
-  let s = l;
-  for (let i = 1; i < win - 1; i++) {
-    const a = up.includes(i);
-    const b = dn.includes(i);
-    s += a && b ? x : a ? y : b ? z : fill;
-  }
-  return [[s + r, 'rule']];
-}
-
-function cellsLine(ow, cells, al) {
-  const out = [['│', 'rule']];
-  ow.forEach((w, i) => out.push(pad(1), ...align(cells[i] || [], w - 2, al[i]), pad(1), ['│', 'rule']));
-  return out;
-}
+const { renderFrame, ago } = window.SandcastleRender;
 
 // ---------------------------------------------------------------------------
 // The run. Times are minutes after the start; each event sets a ticket's
@@ -112,7 +20,6 @@ function cellsLine(ow, cells, al) {
 // down into the merged group while the others work; a ticket whose blocker
 // lands starts at once, in the same run.
 
-const START = 22 * 3600 + 41 * 60 + 7; // 22:41:07
 const SETUP = 'setting up its sandbox';
 const LAND = 'merging into main';
 const REVIEW = 'reviewing the diff against main';
@@ -185,7 +92,7 @@ const RUN_STAGES = [[0, 'base gates'], [2, 'agents'], [30, 'verify'], [END, 'fin
 
 const WORKING = ['setup', 'impl', 'review', 'codex', 'gates', 'repair', 'landing'];
 const NEEDS = ['gate red', 'held', 'conflict', 'crashed'];
-// glyph, colour, priority, legend group - status.sh's style_of.
+// glyph, tone, rank and group of a state word, as the table gives them (src/status-rows.ts).
 function styleOf(s) {
   if (WORKING.includes(s)) return ['●', 'ylw', 0, 'working'];
   if (NEEDS.includes(s)) return ['!', 'hot', 1, 'needs you'];
@@ -195,48 +102,42 @@ function styleOf(s) {
   if (s === 'merged') return ['+', 'grn', 5, 'merged'];
   return ['·', 'gry', 6, 'idle'];
 }
+// The state as the run record names it, where the table's word is another.
+const RECORD_STATE = { impl: 'implement', codex: 'cross-review', 'gate red': 'red' };
 
-const hhmm = (sec) => {
-  const s = ((sec % 86400) + 86400) % 86400;
-  const two = (n) => String(n).padStart(2, '0');
-  return `${two(Math.floor(s / 3600))}:${two(Math.floor(s / 60) % 60)}`;
+// The run starts at 22:41:07 local time on a made-up day, so the clock reads the same in any zone.
+const EPOCH0 = new Date(2026, 9, 11, 22, 41, 7).getTime() / 1000;
+const at = (min) => Math.floor(EPOCH0 + min * 60);
+const two = (n) => String(n).padStart(2, '0');
+const clock12 = (min, id) => {
+  const d = new Date((at(min) + ((Number(id.slice(1)) * 17) % 60)) * 1000);
+  const h = d.getHours();
+  return `${h % 12 || 12}:${two(d.getMinutes())}:${two(d.getSeconds())} ${h < 12 ? 'am' : 'pm'}`;
 };
-const hhmmss = (sec) => `${hhmm(sec)}:${String(Math.floor(sec) % 60).padStart(2, '0')}`;
-// "10:44:31 pm", the seconds varied per ticket so the lines do not all tick together.
-const clock12 = (sec, id) => {
-  const s = Math.floor(sec) + ((Number(id.slice(1)) * 17) % 60);
-  const h = Math.floor(s / 3600) % 24;
-  const two = (n) => String(n).padStart(2, '0');
-  return `${h % 12 || 12}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)} ${h < 12 ? 'am' : 'pm'}`;
-};
-const ago = (min) =>
-  min < 1 ? `${Math.max(1, Math.round(min * 60))}s` : min < 60 ? `${Math.round(min)}m` : `${Math.floor(min / 60)}h`;
 
 // Every ticket as it stands at minute t.
-function snapshot(t) {
-  const tickets = new Map();
-  for (const [at, id, state, note, commits] of EVENTS) {
-    if (at > t) break;
-    const prev = tickets.get(id);
-    tickets.set(id, {
+function tickets(t) {
+  const out = new Map();
+  for (const [when, id, state, note, commits] of EVENTS) {
+    if (when > t) break;
+    const prev = out.get(id);
+    out.set(id, {
       id, state,
-      note: note.startsWith('@') ? `[${clock12(START + at * 60, id)}] ${note.slice(1)}` : note,
-      since: prev && prev.state === state ? prev.since : at,
+      note: note.startsWith('@') ? `[${clock12(when, id)}] ${note.slice(1)}` : note,
+      since: prev && prev.state === state ? prev.since : when,
       // When it first left the queue: its tokens grow from here.
-      started: prev?.started ?? (['queued', 'blocked'].includes(state) ? undefined : at),
+      started: prev?.started ?? (['queued', 'blocked'].includes(state) ? undefined : when),
       commits: commits ?? prev?.commits ?? 0,
     });
   }
-  return tickets;
+  return out;
 }
 
-// A sandbox's CPU and memory, steady per ticket and wobbling with time.
-function load(id, state, t) {
+// What the table draws for a ticket's diff: lines added and removed on its branch, made up but steady per ticket.
+function diffOf(id, commits) {
   const n = Number(id.slice(1));
-  const wobble = Math.sin(t * 0.9 + n) * 0.5 + 0.5;
-  if (state === 'gates') return [`${(6 + wobble * 6).toFixed(1)}c`, `${(1.4 + wobble * 0.6).toFixed(1)}G`, wobble > 0.8];
-  if (WORKING.includes(state)) return [`${(0.2 + wobble * 1.4).toFixed(1)}c`, `${180 + ((n * 37) % 300) + Math.round(wobble * 40)}M`, false];
-  return ['-', '-', false];
+  if (id === '#48') return `+34 \u22121159`;
+  return `+${(n * 37) % 90 + 14 * commits} \u2212${(n * 11) % 40 + 3 * commits}`;
 }
 
 // A ticket's tokens in/out: none before its first pass, then growing with its time since it started, as the
@@ -248,182 +149,179 @@ function ticketTokens(id, state, ran) {
   return `${((0.6 + ((n * 13) % 20) / 10) * part).toFixed(1)}M/${Math.round((10 + ((n * 7) % 40)) * part)}k`;
 }
 
-function gauge(used, of) {
-  return [['█'.repeat(used), 'ylw'], ['░'.repeat(of - used), 'rule'], [` ${used}/${of}`, 'head']];
+// The run's snapshot and table at minute t, as the view reads them.
+function inputs(t) {
+  const now = at(t);
+  const stage = RUN_STAGES.filter(([when]) => when <= t).pop()[1];
+  const finished = stage === 'finished';
+  const all = [...tickets(t).values()];
+  const elapsed = Math.min(t, END);
+  const working = all.filter((r) => WORKING.includes(r.state) && r.state !== 'landing').length;
+  const gating = all.filter((r) => r.state === 'gates').length;
+  // Each landed branch adds its commits and a merge commit, and none of it is pushed.
+  const unpushed = all.filter((r) => r.state === 'merged').reduce((n, r) => n + r.commits + 1, 0);
+  const kTokens = Math.round(40 + elapsed * 19);
+
+  const rows = all
+    .map((r) => {
+      const [glyph, tone, prio, group] = styleOf(r.state);
+      const idle = ['queued', 'blocked'].includes(r.state);
+      const n = Number(r.id.slice(1));
+      // A step past twice its usual time: the age turns red, the note says what usual is.
+      // A finished row shows its whole length, first start to end; a working one, the time in its state.
+      const minutes = ['merged', ...NEEDS].includes(r.state) ? r.since - r.started : elapsed - r.since;
+      const tokens = idle ? '-' : ticketTokens(r.id, r.state, elapsed - r.started);
+      const wobble = Math.sin(t * 0.9 + n) * 0.5 + 0.5;
+      const row = {
+        id: r.id,
+        shown: r.id,
+        state: r.state,
+        glyph,
+        tone,
+        group,
+        time: idle ? '-' : ago(Math.max(0, Math.round(minutes * 60))),
+        timeTone: idle ? 'gry' : r.note.startsWith('usually') ? 'hot' : 'head',
+        diff: idle || !r.commits ? '-' : diffOf(r.id, r.commits),
+        note: r.note,
+        noteTone: NEEDS.includes(r.state) ? 'hot' : 'mute',
+        prio,
+        key: r.since,
+        apart: false,
+      };
+      if (tokens !== '-') {
+        row.tokens = tokens;
+        // Most of the input comes from the prompt cache; one ticket's cache is not holding, which turns the share amber.
+        row.cache = r.id === '#44' ? 64 : 86 + (n % 11);
+      }
+      if (r.state === 'gates') row.cpu = { cpu: `${(6 + wobble * 6).toFixed(1)}c`, mem: `${(1.4 + wobble * 0.6).toFixed(1)}G`, hot: wobble > 0.8 };
+      else if (WORKING.includes(r.state)) row.cpu = { cpu: `${(0.2 + wobble * 1.4).toFixed(1)}c`, mem: `${180 + ((n * 37) % 300) + Math.round(wobble * 40)}M`, hot: false };
+      return row;
+    })
+    .sort((a, b) => a.prio - b.prio || b.key - a.key || a.id.localeCompare(b.id));
+  const counts = { working: 0, 'needs you': 0, ready: 0, queued: 0, blocked: 0, merged: 0, later: 0, 'left over': 0, idle: 0 };
+  for (const r of rows) counts[r.group]++;
+
+  const recordTickets = {};
+  for (const r of all) {
+    recordTickets[r.id] = {
+      state: RECORD_STATE[r.state] ?? r.state,
+      since: at(r.since),
+      note: r.note,
+      commits: r.commits,
+      ...(r.started === undefined ? {} : { started: at(r.started), attemptStarted: at(r.started) }),
+    };
+  }
+  const record = {
+    startedAt: new Date(EPOCH0 * 1000).toISOString().slice(0, 19) + 'Z',
+    stage: stage === 'agents' ? 'running' : stage,
+    tokens: `${kTokens >= 1000 ? (kTokens / 1000).toFixed(1) + 'M' : kTokens + 'k'} in / ${Math.round(kTokens / 60)}k out`,
+    concurrency: 6,
+    typical: { issue: 25 * 60, 'landing gates': 60 },
+    demand: String(Math.min(6, all.filter((r) => !['merged', 'held', 'gate red'].includes(r.state)).length)),
+    share: '6',
+    tickets: recordTickets,
+    // Plan usage: both windows, read from the agents' own events a little while ago.
+    usage: [{
+      provider: 'claude',
+      at: now - 40,
+      windows: {
+        fiveHour: { percent: Math.round(22 + elapsed * 1.4), resetsAt: now + 3 * 3600 + 20 * 60 },
+        week: { percent: 41, resetsAt: at(0) + 3 * 86400 + 9 * 3600 },
+      },
+    }],
+  };
+  if (finished) {
+    record.finishedAt = new Date(at(END) * 1000).toISOString().slice(0, 19) + 'Z';
+    record.exitCode = 0;
+  }
+  const snapshot = {
+    now,
+    root: '',
+    dir: '',
+    name: 'my-app',
+    base: 'main',
+    hasRecord: true,
+    record,
+    tickets: recordTickets,
+    live: !finished,
+    outcomes: {},
+    logs: [],
+    tails: {},
+    worktrees: [],
+    branches: {},
+    containers: {},
+    cpus: 8,
+    pool: { sandboxes: { used: Math.min(working, 6), limit: '6' }, gates: { used: Math.min(gating, 2), limit: '2' } },
+    queue: { tickets: [] },
+    unpushed,
+    settings: {
+      from: finished ? 'last run' : 'live',
+      settings: { autonomy: 2, concurrency: 6, repair: 2, crossReview: false, usageGuard: true, usageStop: 90, usagePause: 90 },
+    },
+    models: 'implement claude-sonnet-5-5/high · review claude-opus-5-5/high',
+    runOutput: [],
+    links: false,
+    clickMod: 'fallback',
+  };
+  return { snapshot, table: { rows, counts, partly: 0, later: { ids: [], blocked: 0 } } };
 }
-const kv = (k, v) => [[k.padEnd(10), 'mute'], ...v];
 
 // ---------------------------------------------------------------------------
 // One frame at minute t, `cols` columns wide, as lines of segments.
 
+// The renderer paints with escape codes; these stand for its colours, so the frame can be read back into the
+// colour names the stylesheet knows.
+const NAMES = ['rule', 'mute', 'head', 'accent', 'wht', 'grn', 'ylw', 'cyn', 'blu', 'gry', 'hot', 'moon', 'dusk', 'night', 'deep', 'star'];
+const COLOURS = { bold: '\x1b[1m', off: '\x1b[0m', ...Object.fromEntries(NAMES.map((n, i) => [n, `\x1b[38;5;${100 + i}m`])) };
+
+// The frame the view would draw, as its escape codes. Every row is shown, however many.
+function ansi(t, cols) {
+  const { snapshot, table } = inputs(t);
+  return renderFrame(snapshot, table, { cols, rows: 1000000, showAll: true, colours: COLOURS });
+}
+
 function frame(t, cols, changed = new Set()) {
-  const win = cols;
   const lines = [];
-  const put = (l, key) => {
-    if (key) l.key = key;
-    lines.push(l);
-  };
-  const tickets = snapshot(t);
-  const now = START + t * 60;
-  const stage = RUN_STAGES.filter(([at]) => at <= t).pop()[1];
-  const rows = [...tickets.values()];
-  const working = rows.filter((r) => WORKING.includes(r.state) && r.state !== 'landing').length;
-  const gating = rows.filter((r) => r.state === 'gates').length;
-  // Each landed branch adds its commits and a merge commit, and none of it is pushed.
-  const ahead = rows.filter((r) => r.state === 'merged').reduce((n, r) => n + r.commits + 1, 0);
-  const unpushed = ahead ? [[` ↑${ahead} unpushed`, 'hot']] : [];
-
-  // The header: the logo, the run and the machine, the models.
-  const narrow = cols < 62;
-  const logo = narrow
-    ? [
-        [[' ▄ ▄ ▄', 'moon'], [' +  ', 'star'], ['sandcastle', 'moon b'], ['-kit', 'night']],
-        [[' █████', 'dusk'], ['    ', ''], ['my-app', 'head']],
-        [[' ██▀██', 'deep'], [' ·  ', 'star'], ['base ', 'mute'], ['main', 'accent'], ...unpushed, ['  ·  ', 'rule'], [hhmm(now), 'accent clock']],
-      ]
-    : [
-        [[' ▄ ▄ ▄', 'moon'], [' +   ', 'star'], ['s a n d c a s t l e', 'moon b'], [' - k i t', 'night'], ['  ·   +   ·', 'star']],
-        [[' █████', 'dusk'], ['     ', ''], ['my-app', 'head']],
-        [[' ██▀██', 'deep'], [' ·   ', 'star'], ['base ', 'mute'], ['main', 'accent'], ...unpushed, ['  ·  ', 'rule'], [hhmmss(now), 'accent clock']],
-      ];
-  const lw = Math.max(...logo.map(len));
-  let ow = splitW(win - 2, [1]);
-  put(junction(win, '┌', '┐', '─'));
-  for (const l of logo) put(cellsLine(ow, [align(l, lw)], ['c']));
-
-  const elapsed = Math.min(t, END);
-  const state =
-    stage === 'finished'
-      ? [['ended (exit 0)', 'mute']]
-      : [['running', 'ylw'], [` · ${ago(elapsed)}`, 'mute'], [' · ', 'rule'], [stage, 'accent']];
-  const tokens = Math.round(40 + elapsed * 19);
-  const run = [
-    kv('state', state),
-    stage === 'finished'
-      ? kv('started', [[hhmm(START), 'mute']])
-      : kv('since', [[hhmm(START), 'mute']]),
-    kv('tokens', [[`${tokens >= 1000 ? (tokens / 1000).toFixed(1) + 'M' : tokens + 'k'} in / ${Math.round(tokens / 60)}k out`, 'head']]),
-  ];
-  const mac = [
-    kv('sandboxes', gauge(Math.min(working, 6), 6)),
-    kv('gates', gauge(Math.min(gating, 2), 2)),
-    kv('waiting', [['none', 'gry']]),
-  ];
-  const models = kv('models', [['implement ', 'mute'], ['claude-sonnet-5-5/high', 'head'], [' · ', 'rule'], ['review ', 'mute'], ['claude-opus-5-5/high', 'head']]);
-
-  ow = splitW(win - 3, [1, 1]);
-  let prevBars = bars(ow);
-  put(junction(win, '├', '┤', '─', [], narrow ? [] : prevBars));
-  if (narrow) {
-    ow = splitW(win - 2, [1]);
-    for (const l of [...run, ...mac]) put(cellsLine(ow, [l], ['l']));
-    prevBars = [];
-  } else {
-    for (let i = 0; i < 3; i++) put(cellsLine(ow, [run[i], mac[i]], ['l', 'l']));
-    ow = splitW(win - 2, [1]);
-    put(junction(win, '├', '┤', '─', prevBars, []));
-    put(cellsLine(ow, [models], ['l']));
-    prevBars = [];
-  }
-
-  // The table: status.sh's minimum widths and shares, ACTIVITY takes the rest.
-  // Below 80 columns CPU/MEM and TOKENS give way to ACTIVITY; on a phone COMMITS too.
-  const wide = cols >= 100 ? 2 : cols >= 80 ? 1 : cols >= 62 ? 0 : -1;
-  // As status.sh: CPU/MEM and TOKENS from 100 columns, TOKENS alone from 80, neither below.
-  const extra = wide === 2 ? ['cpu', 'tokens'] : wide === 1 ? ['tokens'] : [];
-  // TIME's 7, as status.sh's, fits its heading and "1h12m".
-  let min = [8, 14, 7, 9, ...extra.map((c) => (c === 'cpu' ? 11 : 10))];
-  let pct = [6, 9, 5, 6, ...extra.map(() => 7)];
-  if (wide < 0) {
-    min = [8, 11, 7];
-    pct = [6, 9, 5];
-  }
-  const avail = win - min.length - 2;
-  const tw = min.map((m, i) => Math.max(m, Math.floor((avail * pct[i]) / 100)));
-  tw.push(Math.max(10, avail - tw.reduce((a, b) => a + b, 0)));
-  const tal = [...tw.map((_, i) => (i === 1 ? 'l' : 'c')).slice(0, -1), 'l'];
-  const tbars = bars(tw);
-  const heads = ['TICKET', 'STATE', 'TIME', 'COMMITS', ...extra.map((c) => (c === 'cpu' ? 'CPU/MEM' : 'TOKENS'))].slice(0, tw.length - 1);
-  put(junction(win, '├', '┤', '─', prevBars, tbars));
-  put(cellsLine(tw, [...heads, 'ACTIVITY'].map((h) => [[h, 'head b']]), tal));
-  put(junction(win, '├', '┤', '─', tbars, tbars));
-
-  const sorted = rows
-    .map((r) => ({ ...r, style: styleOf(r.state) }))
-    .sort((a, b) => a.style[2] - b.style[2] || b.since - a.since || a.id.localeCompare(b.id));
-  let prio = null;
-  for (const r of sorted) {
-    if (prio !== null && r.style[2] !== prio) put(junction(win, '├', '┤', '─', tbars, tbars));
-    prio = r.style[2];
-    const [glyph, colour] = r.style;
-    const idle = ['queued', 'blocked'].includes(r.state);
-    const [cpu, mem, hot] = load(r.id, r.state, t);
-    const stateCls = changed.has(r.id) ? `${colour} flash` : colour;
-    const cells = [
-      [[r.id, 'wht b']],
-      [[`${glyph} ${r.state}`, stateCls]],
-      // A step past twice its usual time: the age turns red, the note says what usual is.
-      // A finished row shows its whole length, first start to end; a working one, the time in its state.
-      idle ? [['-', 'gry']] : [[ago(['merged', ...NEEDS].includes(r.state) ? r.since - r.started : Math.min(t, END) - r.since), r.note.startsWith('usually') ? 'hot' : 'head']],
-      idle ? [['-', 'gry']] : [[String(r.commits), 'head']],
-      ...extra.map((c) => {
-        if (c === 'cpu') return cpu === '-' ? [['-', 'gry']] : [[cpu, hot ? 'hot' : 'head'], [`/${mem}`, 'head']];
-        const tok = ticketTokens(r.id, r.state, Math.min(t, END) - r.started);
-        return [[tok, tok === '-' ? 'gry' : 'head']];
-      }),
-    ].slice(0, tw.length - 1);
-    cells.push([[r.note, NEEDS.includes(r.state) ? 'hot' : 'mute']]);
-    put(cellsLine(tw, cells, tal), r.id);
-  }
-
-  // The legend band with each group's count, then the note.
-  const count = (g) => sorted.filter((r) => r.style[3] === g).length;
-  const legend = [
-    [['● working ', 'ylw'], [String(count('working')), 'ylw b']],
-    [['! needs you ', 'hot'], [String(count('needs you')), 'hot b']],
-    [['> ready to land ', 'cyn'], [String(count('ready')), 'cyn b']],
-    [['○ queued ', 'blu'], [String(count('queued')), 'blu b']],
-    [['~ blocked ', 'blu'], [String(count('blocked')), 'blu b']],
-    [['+ merged ', 'grn'], [String(count('merged')), 'grn b']],
-    [['- left over ', 'gry'], ['0', 'gry b']],
-    [['· idle ', 'gry'], ['0', 'gry b']],
-  ];
-  let per = cols >= 130 ? 8 : 4;
-  let lwt;
-  for (;;) {
-    lwt = [];
-    for (let c = 0; c < per; c++) {
-      let w = 0;
-      for (let r = c; r < 8; r += per) w = Math.max(w, len(legend[r]));
-      lwt.push(w + 4);
+  // oxlint-disable-next-line no-control-regex -- the escape byte is what the frame is read by
+  const code = /\x1b\[([0-9;]*)m/g;
+  for (const text of ansi(t, cols).split('\n')) {
+    if (text === '' && lines.length) break;
+    const segs = [];
+    let colour = '';
+    let bold = false;
+    let from = 0;
+    const put = (to) => {
+      if (to > from) segs.push([text.slice(from, to), [colour, bold ? 'b' : ''].filter(Boolean).join(' ')]);
+    };
+    for (const m of text.matchAll(code)) {
+      put(m.index);
+      from = m.index + m[0].length;
+      if (m[1] === '0') [colour, bold] = ['', false];
+      else if (m[1] === '1') bold = true;
+      else colour = NAMES[Number(m[1].split(';')[2]) - 100] ?? colour;
     }
-    if (per <= 2 || lwt.reduce((a, b) => a + b, 0) + per + 1 <= win) break;
-    per /= 2;
+    put(text.length);
+    // A ticket's row, by its id: it slides to its new place, and its state glows when it has just changed.
+    const key = /^│\s+(#\d+)\s/.exec(segs.map(([s]) => s).join(''))?.[1];
+    if (key) {
+      segs.key = key;
+      if (changed.has(key)) {
+        const state = segs.find(([s, c]) => c && /^[●!>○~+·] /.test(s));
+        if (state) state[1] += ' flash';
+      }
+    }
+    // The header's clock, so it can tick without redrawing the window.
+    const clock = segs.find(([s]) => /^\d\d:\d\d:\d\d$/.test(s));
+    if (clock) clock[1] += ' clock';
+    lines.push(segs);
   }
-  ow = snapW(win, splitW(win - per - 1, lwt), tbars, lwt);
-  const lbars = bars(ow);
-  put(junction(win, '├', '┤', '─', tbars, lbars));
-  for (let r = 0; r < 8; r += per) put(cellsLine(ow, legend.slice(r, r + per), Array(per).fill('c')));
-  put(junction(win, '├', '┤', '─', lbars, []));
-  // The notes joined by " · " into as few lines as they fit, as wrap_items does.
-  const notes = ['ready = gates green, waits for the landing worker', 'time = in state; once finished, start to end', 'red time = past twice the usual'];
-  if (wide >= 1) notes.push('tokens = in/out, cache included');
-  if (wide >= 2) notes.push('CPU in cores of 8');
-  const noteLines = [];
-  for (const item of notes) {
-    const lastLine = noteLines[noteLines.length - 1];
-    if (lastLine && len(lastLine) + 3 + item.length <= win - 4) lastLine.push([' · ', 'gry'], [item, 'gry']);
-    else noteLines.push([[item, 'gry']]);
-  }
-  for (const n of noteLines) put(cellsLine(splitW(win - 2, [1]), [n], ['c']));
-  put(junction(win, '└', '┘', '─'));
   return lines;
 }
 
 // Which tickets changed state between two minutes, for the flash.
 function changedBetween(a, b) {
-  const before = snapshot(a);
-  const after = snapshot(b);
+  const before = tickets(a);
+  const after = tickets(b);
   const out = new Set();
   for (const [id, r] of after) if (before.get(id)?.state !== r.state) out.add(id);
   return out;
@@ -447,8 +345,11 @@ function toHTML(lines) {
     .join('');
 }
 
-// The header's clock alone, so it can tick without redrawing the whole window.
-const clockAt = (t, cols) => (cols < 62 ? hhmm : hhmmss)(START + t * 60);
+// The header's clock alone, as the renderer writes it, so it can tick without redrawing the whole window.
+const clockAt = (t) => {
+  const d = new Date(EPOCH0 * 1000 + t * 60000);
+  return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+};
 
-window.SandcastleStatus = { frame, changedBetween, toHTML, clockAt, END };
+window.SandcastleStatus = { frame, changedBetween, toHTML, clockAt, END, inputs, ansi, colours: COLOURS };
 })();
