@@ -42,7 +42,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -2678,12 +2678,12 @@ export const burndown = async (
   // The path count of each ticket's `Touches:` line (0 with none): the estimate prices a ticket by its size, and each timings line records it for later runs.
   const touchPaths = new Map(candidates.map((i) => [i.id, parseTouches(i.body ?? "").length]));
   const chainIds = blockerChain(project, tracker, candidates);
-  const rough = estimate(
+  const rough = priceRun(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
     { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
   );
-  if (rough) console.log(rough);
+  if (rough) console.log(rough.text);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${await keepAwake()}`);
   console.log(baseIsTheRunsLine(project.baseBranch));
@@ -2721,6 +2721,8 @@ export const burndown = async (
     stage: "starting",
     concurrency: slots,
     load: { concurrency: slots, tickets: candidates.length },
+    // The line printed above, as figures: history.jsonl then holds the estimate beside what the turn took.
+    ...(rough ? { estimate: rough.figures } : {}),
     ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),
