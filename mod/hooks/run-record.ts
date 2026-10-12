@@ -152,6 +152,8 @@ export type TicketRecord = {
   tokens?: string;
   /** Input tokens served from the cache, of the ticket's passes so far (the same passes as `tokens`): the status view shows its share of the input. Absent in an older record. */
   cacheRead?: number;
+  /** The largest context one turn of the ticket's passes held (input + cache write + cache read tokens of one assistant message), by the pass that held it (`implement`, `review`, `repair`): the closing summary flags a pass over `PEAK_CONTEXT_WARN`. Absent in an older record and for a Codex pass. */
+  peakContext?: Record<string, number>;
   minutes?: number;
   /** Test ids a red gate named. */
   failing?: string[];

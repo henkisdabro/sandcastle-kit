@@ -20,7 +20,7 @@ import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHead
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { PRESSURE_WARN_FULL } from "./peaks.ts";
-import { readPlanUsages } from "./usage.ts";
+import { PEAK_CONTEXT_WARN, readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
 import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
@@ -30,6 +30,24 @@ import { OperatorError, sameExpansionFailure } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
 import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
+
+/**
+ * One line per ticket with a pass whose largest turn held more than `PEAK_CONTEXT_WARN` tokens of context (`peakContext` in
+ * its run record): the pass and the peak, in the order of the passes. Every turn of a long pass re-reads its context, so
+ * the cost of a pass that grows unchecked shows nowhere else.
+ */
+export const contextLines = (f: Pick<Facts, "tickets">): string[] => {
+  const passes = ["implement", "resolve", "review", "repair"];
+  const rank = (pass: string) => (passes.includes(pass) ? passes.indexOf(pass) : passes.length);
+  return Object.entries(f.tickets).flatMap(([id, t]) => {
+    const over = Object.entries(t.peakContext ?? {})
+      .filter(([, n]) => typeof n === "number" && n > PEAK_CONTEXT_WARN)
+      .sort(([a], [b]) => rank(a) - rank(b));
+    if (!over.length) return [];
+    const name = `${refOf(id)}${t.title ? ` ${t.title}` : ""}`;
+    return [`Large context: ${name} - ${over.map(([pass, n]) => `${pass} pass reached ${Math.round(n / 1000)}k tokens in one turn`).join(", ")} (over ${Math.round(PEAK_CONTEXT_WARN / 1000)}k): a ticket this long may be too big for one pass, so consider splitting it`];
+  });
+};
 
 /** "stopped by `sandcastle stop`", "stopped by Ctrl-C": what a run's `stoppedBy` reads as in the summary and the notify line. */
 export const stoppedByText = (by: string) => `stopped by ${by === "sandcastle stop" ? "`sandcastle stop`" : by}`;
@@ -1048,6 +1066,7 @@ export const render = (f: Facts, plain = false): string => {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
+  out.push(...contextLines(f));
   out.push(...settingsLines(f, plain));
   // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.
   if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
