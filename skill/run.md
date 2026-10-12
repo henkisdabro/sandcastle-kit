@@ -327,7 +327,8 @@ In the status view, a landing ticket holds no sandbox slot, and the RUN lane's e
   git command in that worktree: have them inspect `.git/worktrees/<name>` and the worktree's `.git`
   file first - the run removed its container and left the worktree as it was.
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
-  outside the branch: read the repair log and its ticket comment, then check that gate with
+  outside the branch (when it said so with its verdict, the ticket's note ends `the repair judged it
+  outside this branch: <tests>`): read the repair log and its ticket comment, then check that gate with
   `sandcastle gates` (once the run has ended: it refuses while one is live) before blaming the branch.
 - **"red on <base> before any agent ran"**: the run spent no allowance, and the cause is the
   image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`).

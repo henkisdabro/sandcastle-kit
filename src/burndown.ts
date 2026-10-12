@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -95,6 +95,8 @@ type Outcome = {
   /** The repair passes that committed: one that changed nothing (the repairer judged the red a flake) is `idleRepairs`. */
   repairs: number;
   idleRepairs?: number;
+  /** The last repair pass committed nothing and ended with `<verdict>outside-branch</verdict>` (`repairVerdict`): its line and the tests it judged flaky. */
+  outside?: { line: string; tests: string[] };
   gates: Gate[];
   /** Test ids the last red gate named. */
   failing?: string[];
@@ -221,6 +223,19 @@ const tags = (text: string) => {
   const report = last("report");
   const blocked = last("blocked");
   return blocked && (!report || blocked.at > report.at) ? { blocked: blocked.text } : { report: report?.text };
+};
+
+/**
+ * A repair pass that judged the red outside its branch (`<verdict>outside-branch</verdict>`, as `prompts/repair.md` asks) and
+ * the line it gave: `Flaky: a; b`, the tests it judged flaky separated by semicolons (a test title may hold a comma). The last
+ * verdict tag counts; a line is the verdict's own without the tests too.
+ */
+export const repairVerdict = (text: string): { line: string; tests: string[] } | undefined => {
+  const at = [...text.matchAll(/<verdict>\s*outside-branch\s*<\/verdict>/g)].at(-1);
+  if (!at) return undefined;
+  const line = [...text.matchAll(/^[ \t]*Flaky:[ \t]*(.+)$/gm)].map((m) => m[1].trim()).filter((l) => l && l !== "...").at(-1);
+  const tests = (line ?? "").split(";").map((t) => t.trim()).filter(Boolean);
+  return { line: line ?? "", tests };
 };
 
 // A spent plan allowance fails every issue after it the same way, each one
@@ -1290,8 +1305,13 @@ export type PipelineContext = {
   overrides: ReadonlyMap<string, Override>;
   /** Opens the ticket's sandbox on its branch: Sandcastle's `createSandbox` in a run. */
   open: (branch: string) => Promise<PipelineBox>;
-  /** One run of the project's gates in the ticket's sandbox. */
-  gate: (box: PipelineBox, id: string) => Promise<GateRun>;
+  /**
+   * One run of the project's gates in the ticket's sandbox. With `rerunOnRed` it runs a red gate again once, from that
+   * gate on, inside the same gates slot (the result is the re-run's, its `rerunOf` the run that went red): the
+   * pipeline then makes no `regate` call of its own, which would queue for a second slot. A port that ignores it is
+   * followed by `regate`.
+   */
+  gate: (box: PipelineBox, id: string, rerunOnRed?: boolean) => Promise<GateRun>;
   /**
    * The gates from the one named on (`from`) - that one, then each after it in config order - in the ticket's sandbox:
    * what an attempt's first red gets before any repair pass, in case it was only the machine being busy. A pipeline
@@ -2187,7 +2207,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             (ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
         );
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
-      } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+      } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
       // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
       // the tip looking reviewed with no gate result, and a re-run would only gate it again.
       if (gated.failure) noteHead(issue.id, branch, { red: sh("git", ["rev-parse", branch], project.root) });
@@ -2226,7 +2246,10 @@ export const createPipeline = (ctx: PipelineContext) => {
       // this runs before the loop, and only once.
       const first = gated.failure;
       const redAt = first ? gated.gates.findIndex((g) => g.name === first.name) : -1;
-      if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
+      if (gated.rerunOf) {
+        // The gate port ran the re-run inside the slot of the run that went red (`rerunOnRed`).
+        if (!gated.failure) console.log(`${ref(issue.id)}: ${gated.rerunOf.failure?.name ?? "a gate"} red, then green on a re-run - a flake, no repair pass`);
+      } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
         const again = ctx.regate;
         const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, first.name));
         // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
@@ -2242,6 +2265,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       let idle = 0;
       // Whether the pass before committed: only then is a new failure an effect of the repair worth the extra pass.
       let lastCommitted = true;
+      // The last pass committed nothing and said the red is outside the branch: one gate run, then no more passes.
+      let outside: { line: string; tests: string[] } | undefined;
       for (
         let red = gated.failure;
         red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
@@ -2317,6 +2342,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         );
         forced = false;
         const beforePass = sh("git", ["rev-parse", branch], project.root);
+        let verdict: ReturnType<typeof repairVerdict>;
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
@@ -2343,6 +2369,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           (fixedRun) => {
             const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
             if (said) addReport(issue.id, "Repair", said);
+            verdict = repairVerdict(fixedRun.stdout);
             return true;
           },
           (error) => {
@@ -2354,7 +2381,13 @@ export const createPipeline = (ctx: PipelineContext) => {
         lastCommitted = sh("git", ["rev-parse", branch], project.root) !== beforePass;
         if (!lastCommitted) idle++;
         if (!fixed) break;
+        // A tag on a pass that committed is ignored: the commits are the repair, and they are gated as ever.
+        outside = verdict && !lastCommitted ? verdict : undefined;
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        if (outside) {
+          console.log(`${ref(issue.id)}: the repair judged the red outside this branch${outside.line ? ` (${outside.line})` : ""} - one gate run, no further repair pass`);
+          break;
+        }
       }
       // Remembered across attempts and runs: a repair fixes what the gate named, often a file the ticket's
       // `Touches:` line has no reason to list, so landing leaves what only these commits changed out of its overrun.
@@ -2426,6 +2459,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         reviewCommits,
         repairs: earlierRepairs + repairs - idle,
         idleRepairs: earlierIdle + idle,
+        ...(outside && { outside }),
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
         head,
@@ -2816,8 +2850,10 @@ export const burndown = async (
     let pressure: ReturnType<typeof pressureOf>;
     let red: string[] | undefined;
     let times: ReturnType<typeof stepTimes> | undefined;
+    let ended: unknown;
     try {
       const result = await fn();
+      ended = result;
       times = stepTimes(Date.now() - since, result);
       // Only the wait inside the step is in `took`; the slot wait before it never was (see `withQueued`).
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
@@ -2854,7 +2890,8 @@ export const burndown = async (
         ...pressureFields(pressure),
         ...(red?.length ? { red } : {}),
       };
-      appendFileSync(timings, JSON.stringify(line) + "\n");
+      // A red gate's re-run inside its slot is a line of its own after the red run's (`timingLines`).
+      appendFileSync(timings, timingLines(line, ended).map((l) => JSON.stringify(l) + "\n").join(""));
     }
   };
 
@@ -2977,10 +3014,12 @@ export const burndown = async (
   // the output as it arrives - a gate run is minutes of nothing otherwise.
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
   // `from`: a red gate's re-run, which starts at that gate (`gatesIn`'s own).
-  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string) => {
+  // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false) => {
+    const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before any repair pass\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
-    if (from !== undefined) appendFileSync(gatesLog(project, id), `# run again from ${from}: the first red gate's re-run, before any repair pass\n`);
+    if (from !== undefined) appendFileSync(gatesLog(project, id), rerunNote(from));
     let gateStarted = false;
     const gated = await gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => {
@@ -3001,8 +3040,13 @@ export const burndown = async (
         gateStarted = true;
         run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` });
       },
+      // The re-run inside the slot gets the section header and note a separate run would have had.
+      again: (name) => {
+        markLog(gatesLog(project, id), runId, "ticket gates");
+        appendFileSync(gatesLog(project, id), rerunNote(name));
+      },
       log: gatesLog(project, id),
-    }, priority, from);
+    }, priority, from, rerunOnRed);
     for (const path of gated.rewrote ?? []) {
       if (gateRewrites.has(path)) continue;
       gateRewrites.add(path);
@@ -3180,7 +3224,7 @@ export const burndown = async (
     prompts,
     overrides,
     open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }), host.exclusive),
-    gate: (box, id) => runGates(box, id),
+    gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>
       timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () =>
@@ -3318,6 +3362,7 @@ export const burndown = async (
           minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
           ...(tokens ? ticketTokens(tokens) : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
+          ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
