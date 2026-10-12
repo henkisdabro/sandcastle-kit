@@ -205,19 +205,22 @@ const as = <T>(impl: "bash" | "ts", body: () => T): T => {
 };
 
 for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
-  test(`the ${kind} fixture's status 0 shows the same facts drawn by TypeScript as by status.sh at 120 columns`, () => {
+  test(`the ${kind} fixture's status 0 shows the same facts drawn by TypeScript as by status.sh at 80, 120, 200 and 330 columns`, () => {
     const fixture = fixtures[kind];
-    const draw = (impl: "bash" | "ts") => {
-      const drawn = as(impl, () => drawFrame(fixture, { cols: 120, env: { SANDCASTLE_LINKS: "1" } }));
-      assert.equal(drawn.status, 0, `${impl}: ${drawn.stderr}`);
-      return readFacts(drawn.raw, fixture.root);
-    };
-    const [bash, ts] = [draw("bash"), draw("ts")];
-    assert.ok(bash.tickets.length > 5, "the fixture shows its tickets");
-    assert.deepEqual(compareFacts(ts, bash), []);
-    // Row words, notes and order exactly: not a prefix of each other, the same.
-    const words = (f: typeof bash) => f.tickets.map((t) => [t.id, t.group, t.state, t.note]);
-    assert.deepEqual(words(ts), words(bash));
+    for (const cols of [80, 120, 200, 330]) {
+      const draw = (impl: "bash" | "ts") => {
+        const drawn = as(impl, () => drawFrame(fixture, { cols, env: { SANDCASTLE_LINKS: "1" } }));
+        assert.equal(drawn.status, 0, `${impl}: ${drawn.stderr}`);
+        return readFacts(drawn.raw, fixture.root);
+      };
+      const [bash, ts] = [draw("bash"), draw("ts")];
+      assert.ok(bash.tickets.length > 5, "the fixture shows its tickets");
+      assert.deepEqual(compareFacts(ts, bash), [], `${cols} columns`);
+      // Row words and order exactly: not a prefix of each other, the same - and the notes too where neither is cut.
+      const words = (f: typeof bash) => f.tickets.map((t) => [t.id, t.group, t.state]);
+      assert.deepEqual(words(ts), words(bash), `${cols} columns`);
+      if (cols === 330) assert.deepEqual(ts.tickets.map((t) => t.note), bash.tickets.map((t) => t.note));
+    }
   });
 }
 

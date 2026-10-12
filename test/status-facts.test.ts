@@ -116,8 +116,10 @@ test("the live fixture's inferred rows and the run's own facts are read", () => 
   assert.equal(facts.run.state, "running · 2h00m");
   assert.equal(facts.run.sandboxes, "2/6");
   assert.equal(facts.run.models, "implement sonnet-5-5/high, review opus-5-5/high");
-  assert.deepEqual(facts.settings, ["autonomy 2", "turn 1/3", "repair 2", "concurrency 3", "● cross-review gpt-5 high", "● usage-guard 95%", "● usage-pause 90%"]);
-  assert.equal(facts.usage, "claude 5h 42% · resets 15:00 week 61% · resets Tue 13:00 (1m ago)");
+  // The turn and the repair attempts are the run's facts wherever a layout shows them; the rest are its settings.
+  assert.deepEqual([facts.run.turn, facts.run.repair], ["1/3", "2"]);
+  assert.deepEqual(facts.settings, ["autonomy 2", "concurrency 3", "● cross-review gpt-5 high", "● usage-guard 95%", "● usage-pause 90%"]);
+  assert.equal(facts.usage, "claude 5h 42% resets 15:00 week 61% resets Tue 13:00 (1m ago)");
   // The footer counts the run's own 23 tickets (8 + 7 + 1 + 2 + 1 + 1 + 1 + 2), the rows outside its record apart, but for the labelled tickets outside the run, which are `later`.
   assert.deepEqual(facts.counts, { working: 8, "needs you": 7, "ready to land": 1, queued: 2, blocked: 1, merged: 1, later: 3, "left over": 1, idle: 2 });
 });
