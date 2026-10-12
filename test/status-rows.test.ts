@@ -258,6 +258,8 @@ chmodSync(join(NO_JQ, "jq"), 0o755);
 
 const throughStatusSh = (fixture: Fixture, args: string[], env: Record<string, string> = {}) => {
   const base = viewEnv(fixture, { TERM_COLS: "120", TERM_ROWS: "400", ...env });
+  // No switch means none at all, even when the suite itself runs with one: that case is status.sh's own view.
+  if (env.SANDCASTLE_TEST_STATUS_IMPL === undefined) delete base.SANDCASTLE_TEST_STATUS_IMPL;
   return spawnSync("bash", [join(KIT, "status.sh"), ...args], {
     encoding: "utf8",
     // The fixture's clock, which test/status-run.ts gives the TypeScript view it starts itself.
