@@ -97,6 +97,16 @@ export const configureTools = (keep: readonly string[] = []) => {
 };
 configureTools();
 
+// Claude Code's own range for CLAUDE_CODE_AUTO_COMPACT_WINDOW, in tokens; src/config.ts refuses a value outside it.
+export const AUTO_COMPACT_MIN = 100_000;
+export const AUTO_COMPACT_MAX = 1_000_000;
+
+let AUTO_COMPACT_WINDOW: number | undefined;
+// loadProject() calls this with the project's `autoCompactWindow`; unset passes nothing, so Claude Code's own default applies.
+export const configureAutoCompact = (window?: number) => {
+  AUTO_COMPACT_WINDOW = window;
+};
+
 /**
  * Sandcastle's claude command with `--tools '<list>'` before its closing ` -p -`. Refuses a command of
  * another shape: an unknown tool name in `--tools` is ignored silently by Claude Code, and a Sandcastle
@@ -125,7 +135,11 @@ export const withTools = (command: string, tools: readonly string[]): string => 
 // Auto memory is off and the tools are cut to TOOLS: both are fixed prompt prefix paid on every turn,
 // and a sandbox's memory directory dies with its container, so nothing it wrote would be read again.
 const claude = (model: string, effort: Effort) => {
-  const provider = claudeCode(model, { effort, captureSessions: false, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
+  const provider = claudeCode(model, { effort, captureSessions: false, env: {
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      ...(AUTO_COMPACT_WINDOW === undefined ? {} : { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(AUTO_COMPACT_WINDOW) }),
+    },
+  });
   return {
     ...provider,
     buildPrintCommand(options: Parameters<typeof provider.buildPrintCommand>[0]) {
