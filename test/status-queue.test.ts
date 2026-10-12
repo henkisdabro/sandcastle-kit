@@ -88,8 +88,9 @@ test("a long failure message is cut to the pane", () => {
 
 test("escape codes in the failure message cannot reach the terminal", () => {
   const { frame } = render("", { FAKE_QUEUE_FAIL: "bad\u001b]0;owned\u0007 token" });
-  assert.match(frame, /queue: could not read - bad\]0;owned token/);
-  assert.doesNotMatch(frame, /\u0007/);
+  // The whole sequence goes, not only its control bytes: a title left as `]0;owned` is still the injected text.
+  assert.match(frame, /queue: could not read - bad token/);
+  assert.doesNotMatch(frame, /[\u0007\u001b]|owned/);
 });
 
 test("a jq that does not run changes nothing: the view reads its records itself", () => {
