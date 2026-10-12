@@ -39,7 +39,7 @@ export const parseUsageStop = (value: string | undefined) => {
 };
 
 // Read only when the check is on: a bad USAGE_STOP must not break `sandcastle doctor`, which never
-// uses it, or `status`, whose settings row leaves the next run's settings unresolved instead.
+// uses it, or `status`, whose SETTINGS lane leaves the next run's settings unresolved instead.
 const usageStopPercent = () => parseUsageStop(process.env.USAGE_STOP);
 
 /** Refuses a bad USAGE_STOP when the run starts - before the image, preflight or any spend - not at the first reading. */
@@ -282,12 +282,12 @@ export type UsageReading = Required<PlanUsage>;
 /** A provider whose plan usage a run can show: Claude (the implement, review and repair passes) and Codex (the cross-review). */
 export type UsageProvider = PlanUsage["provider"];
 
-/** The bands the readers colour by: normal below `USAGE_AMBER` percent, amber from it, red from `USAGE_RED`. status.sh holds the same two numbers (it cannot import them). */
+/** The bands the readers colour by: normal below `USAGE_AMBER` percent, amber from it, red from `USAGE_RED`. The status view reads them from here. */
 export const USAGE_AMBER = 75;
 export const USAGE_RED = 90;
 export const usageBand = (percent: number): "normal" | "amber" | "red" => (percent >= USAGE_RED ? "red" : percent >= USAGE_AMBER ? "amber" : "normal");
 
-/** How often the run looks at its agents' logs, and the longest it goes between writes of the record. status.sh greys a reading older than `USAGE_STALE_SECONDS`. */
+/** How often the run looks at its agents' logs, and the longest it goes between writes of the record. The status view greys a reading older than `USAGE_STALE_SECONDS`. */
 export const USAGE_INTERVAL_MS = 15_000;
 export const USAGE_STALE_SECONDS = 15 * 60;
 

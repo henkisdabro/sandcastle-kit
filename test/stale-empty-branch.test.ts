@@ -189,6 +189,18 @@ test("a branch with no commits ahead of the base is at the base's tip when its s
   assert.deepEqual(h.events, ["impl", "review", "gate"]);
 });
 
+test("a fork record that cannot be written leaves the branch cut again, and says only that", async () => {
+  const h = harness({ branch: "empty" });
+  // A directory where the record's temporary file goes: the write fails, as on a full disk.
+  mkdirSync(join(h.root, ".sandcastle/logs/forks.json.tmp"), { recursive: true });
+  const mainTip = git(h.root, "rev-parse", "main");
+  const { lines } = await h.attempt();
+  assert.equal(h.opened[0].tip, mainTip, "the branch was moved all the same");
+  assert.ok(lines.includes(`#7: ${BRANCH} had no commits ahead of main and was 3 commit(s) behind it - cut again from main's tip.`), lines.join("\n"));
+  assert.ok(lines.some((l) => l.startsWith(`#7: could not record where ${BRANCH} was cut again (`)), lines.join("\n"));
+  assert.ok(!lines.some((l) => l.includes("could not be cut again")), "a moved branch is never reported as left on the old tree");
+});
+
 test("the run's .git check takes the moved branch: it was cut by the run, so nothing else touched it", async () => {
   const h = harness({ branch: "empty" });
   await h.attempt();

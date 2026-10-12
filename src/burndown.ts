@@ -39,15 +39,15 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
+import { estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
@@ -1480,6 +1480,14 @@ export const createPipeline = (ctx: PipelineContext) => {
       } catch (error) {
         if (error instanceof GuardStop) throw error;
         console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
+        return;
+      }
+      // Cut again, so it is forked from the base's tip now (`staleBaseParents` reads where a branch began). Its own try:
+      // the branch has moved, so a failed write (a full disk) must not report it as left on the old tree.
+      try {
+        recordFork(project.root, branch, sh("git", ["rev-parse", `refs/heads/${base}`], project.root));
+      } catch (error) {
+        console.log(`${ref(issue)}: could not record where ${branch} was cut again (${errorLine(error)}); a later rewrite of ${base} is found from its merges alone.`);
       }
     };
     return host.write ? host.write(cut) : cut();
@@ -2613,11 +2621,14 @@ export const burndown = async (
   // A dry run lands nothing, so it needs no sandbox slot for it.
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
+  // Another live run shares the pool: read before the header, whose note on the kept slot says only what applies to this run.
+  const others = otherRuns();
+  const split = others.length ? splitAtStart(workers, others) : undefined;
   // "up to": another project's live run can cut this run's share below it, which the split line under the
   // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
     `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, up to ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
-      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"))})` : ""),
+      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"), split?.share)})` : ""),
   );
   for (const i of candidates) {
     const o = overrides.get(i.id) ?? {};
@@ -2652,13 +2663,12 @@ export const burndown = async (
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
-  const others = otherRuns();
-  const split = others.length ? splitAtStart(workers, others) : undefined;
-  for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, others.map((m) => {
+  const neighbours = others.map((m) => {
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
-  }), !DRY_RUN, project.name, project.root)) console.log(line);
+  });
+  for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, neighbours, !DRY_RUN, project.name, project.root)) console.log(line);
   // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
   const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
@@ -2671,7 +2681,7 @@ export const burndown = async (
   const rough = estimate(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
-    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
+    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
   );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
@@ -2815,7 +2825,7 @@ export const burndown = async (
       if (tokens) {
         spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
         run.update({ tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) });
-        if (issue) run.ticket(issue, { tokens: tokenBrief(spent.get(issue)!) });
+        if (issue) run.ticket(issue, { ...ticketTokens(spent.get(issue)!) });
       }
       return result;
     } finally {
@@ -3298,7 +3308,7 @@ export const burndown = async (
         run.ticket(issue.id, {
           commits: value.commits,
           minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
-          ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
+          ...(tokens ? ticketTokens(tokens) : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),

@@ -7,13 +7,13 @@
 //   pnpm test:file test/status-ended-time.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-ended-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 const REPO = join(TMP, "repo");
@@ -61,7 +61,7 @@ writeFileSync(
 );
 
 const frame = (() => {
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     env: {

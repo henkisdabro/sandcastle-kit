@@ -1,21 +1,21 @@
 // A person who quits the status view (Ctrl-C) in the run's own status pane keeps that pane as their
-// shell: status.sh's INT trap marks the view record `quit`, and while the pane's Herdr terminal_id is
+// shell: the status view's INT trap marks the view record `quit`, and while the pane's Herdr terminal_id is
 // the one recorded, the tab bar neither types the view back in during the run nor the report after
 // it. A new terminal_id is a Herdr restart: the mark is cleared and the view comes back. A record
-// without terminal_id (an older kit's) acts as before. The fake `herdr` logs every call, and a fake
-// `sleep` sends status.sh its signal mid-loop; no Herdr, no network.
+// without terminal_id (an older kit's) acts as before. The fake `herdr` logs every call, and the live view,
+// on a pty, is sent its signal from outside once it has drawn (test/status-run.ts); no Herdr, no network.
 //
 //   pnpm test:file test/herdr-view-quit.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { KIT } from "./cli-spawn.ts";
 import { everyPidIsTheKit } from "./kit-process.ts";
+import { buildFixture } from "./status-fixture.ts";
+import { needsScript, startSession } from "./status-run.ts";
 
 // `pane get` answers with $FAKE_PANE_TAB as the pane's tab and $FAKE_TERM as its terminal,
 // `pane process-info` with $FAKE_FG as its foreground command; anything else is logged and
@@ -196,59 +196,43 @@ test("openSandboxView's rewrite replaces the record whole, so a reader never see
 });
 
 // ---------------------------------------------------------------------------
-// status.sh's traps.
+// The status view's signal handling.
 // ---------------------------------------------------------------------------
 
-const viewRepo = () => {
-  const repo = fresh("repo");
-  mkdirSync(join(repo, ".sandcastle/logs"), { recursive: true });
-  const git = (...a: string[]) => spawnSync("git", ["-C", repo, "-c", "core.hooksPath=/dev/null", ...a], { encoding: "utf8" });
-  git("init", "-q", "-b", "main");
-  git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base");
-  writeFileSync(viewRecord(repo), JSON.stringify({ ...OWN, terminal_id: "term-1" }) + "\n");
-  return repo;
-};
-const fakes = (signal: string) => {
-  const dir = fresh(`fakes-${signal}`);
-  const script = (name: string, body: string) => {
-    writeFileSync(join(dir, name), body);
-    chmodSync(join(dir, name), 0o755);
-  };
-  script("sandcastle", "#!/bin/sh\necho '[]'\n");
-  script("docker", "#!/bin/sh\nexit 1\n");
-  // The loop's only pause: the signal arrives as the view waits out its interval, as Ctrl-C would.
-  script("sleep", `#!/bin/sh\nkill -${signal} "$PPID"\nexit 0\n`);
-  return dir;
-};
-/** The live view (interval 1) in the pane `pane`, sent `signal` once its first frame is drawn. */
-const viewGets = (signal: string, env: NodeJS.ProcessEnv) => {
-  const repo = viewRepo();
-  const r = spawnSync("bash", [join(KIT, "status.sh"), "1"], {
-    encoding: "utf8",
-    // Three frames at most: a signal that never came ends the view with status 0, not a hang.
-    env: { ...process.env, PATH: `${fakes(signal)}${delimiter}${process.env.PATH}`, SANDCASTLE_PROJECT: repo, SANDCASTLE_BASE: "main", STATUS_FRAMES: "3", ...env },
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 60_000,
-  });
-  return { r, view: record(repo), repo };
+// The view runs on a pty and is signalled from outside once its first frame is drawn, as Ctrl-C or Herdr would.
+const view = buildFixture("legacy", fresh("view"));
+test.after(() => view.stop());
+/** The live view in the pane `env` names, sent `signal` once its first frame is drawn. */
+const viewGets = async (signal: NodeJS.Signals, env: Record<string, string>) => {
+  writeFileSync(viewRecord(view.root), JSON.stringify({ ...OWN, terminal_id: "term-1" }) + "\n");
+  const session = await startSession(view, { env });
+  try {
+    await session.frame();
+    session.signal(signal);
+    const ended = await session.ended(signal);
+    return { ended, record: record(view.root), files: readdirSync(join(view.root, ".sandcastle/logs")).filter((f) => f.includes("herdr-view")) };
+  } finally {
+    session.close();
+  }
 };
 
-test("status.sh: Ctrl-C (INT) in the recorded status pane marks the view quit", () => {
-  const { r, view, repo } = viewGets("INT", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t2-1" });
-  assert.equal(r.status, 130, r.stderr);
-  assert.deepEqual(view, { ...OWN, terminal_id: "term-1", quit: true });
-  assert.deepEqual(readdirSync(join(repo, ".sandcastle/logs")), ["herdr-view.json"], "no temp file is left");
+test("status view: Ctrl-C (INT) in the recorded status pane marks the view quit", needsScript, async () => {
+  const { ended, record: marked, files } = await viewGets("SIGINT", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t2-1" });
+  assert.equal(ended.status, 130);
+  assert.deepEqual(marked, { ...OWN, terminal_id: "term-1", quit: true });
+  assert.deepEqual(files, ["herdr-view.json"], "no temp file is left");
 });
 
-test("status.sh: a hangup, a TERM, another pane or no Herdr marks nothing", () => {
+test("status view: a hangup, a TERM, another pane or no Herdr marks nothing", needsScript, async () => {
   for (const [signal, env] of [
-    ["HUP", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t2-1" }],
-    ["TERM", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t2-1" }],
-    ["INT", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t9-1" }],
-    ["INT", { HERDR_ENV: "", HERDR_PANE_ID: "w1:t2-1" }],
+    ["SIGHUP", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t2-1" }],
+    ["SIGTERM", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t2-1" }],
+    ["SIGINT", { HERDR_ENV: "1", HERDR_PANE_ID: "w1:t9-1" }],
+    ["SIGINT", { HERDR_ENV: "", HERDR_PANE_ID: "w1:t2-1" }],
   ] as const) {
-    const { r, view } = viewGets(signal, env);
-    assert.ok(r.signal === "SIGHUP" || r.status === 130, `${signal}: ${r.status} ${r.signal} ${r.stderr}`);
-    assert.equal(view.quit, undefined, JSON.stringify({ signal, env }));
+    const { ended, record: marked } = await viewGets(signal, env);
+    // Bash is killed by the hangup (129); a view that traps it may end 130.
+    assert.ok(ended.status === 130 || (signal === "SIGHUP" && ended.status === 129), `${signal}: ended ${ended.status}`);
+    assert.equal(marked.quit, undefined, JSON.stringify({ signal, env }));
   }
 });

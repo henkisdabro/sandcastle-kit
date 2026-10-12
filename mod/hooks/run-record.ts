@@ -150,6 +150,8 @@ export type TicketRecord = {
   commits?: number;
   /** In and out as `tokenBrief` writes them (`3.1M in / 42k out`): the finished passes plus the one running, rewritten on the usage row's tick. */
   tokens?: string;
+  /** Input tokens served from the cache, of the ticket's passes so far (the same passes as `tokens`): the status view shows its share of the input. Absent in an older record. */
+  cacheRead?: number;
   minutes?: number;
   /** Test ids a red gate named. */
   failing?: string[];

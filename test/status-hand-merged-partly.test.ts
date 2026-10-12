@@ -5,11 +5,12 @@
 //   pnpm test:file test/status-hand-merged-partly.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
 const started = "2026-10-01T08:00:00.000Z";
 
@@ -67,14 +68,14 @@ const repo = (merge: Merge, pushed: boolean, fromRun: boolean) => {
   return root;
 };
 
-/** The status view's row for #7, as the shell test renders it. */
+/** The status view's row for #7, in a pane wide enough for the whole note. */
 const rowOf = (root: string) => {
   const bin = mkdtempSync(join(tmpdir(), "sandcastle-bin-"));
   writeFileSync(join(bin, "sandcastle"), "#!/usr/bin/env bash\necho '[]'\n");
   writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "sandcastle"), 0o755);
   chmodSync(join(bin, "docker"), 0o755);
-  const r = spawnSync("bash", [join(import.meta.dirname, "../status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     env: {
@@ -84,7 +85,7 @@ const rowOf = (root: string) => {
       SANDCASTLE_BIN: join(bin, "sandcastle"),
       SANDCASTLE_BASE: "main",
       SANDCASTLE_NAME: "fixture",
-      TERM_COLS: "120",
+      TERM_COLS: "200",
       TERM_ROWS: "200",
       XDG_CACHE_HOME: join(bin, "cache"),
     },

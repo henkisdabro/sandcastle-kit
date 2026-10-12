@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Rebuilds the README's two GIFs: status.gif (the website's status window, site/js/status.js,
-# playing its scripted night) and mod.gif (the mod's band, terminal-logo.svg). GitHub plays no SVG
-# or CSS animation in a README, so the moving pictures are GIFs, and this keeps them rebuildable
-# when status.js or the castle changes.
+# Rebuilds the README's two GIFs: status.gif (the website's status window, site/js/status.js drawn
+# by site/js/status-render.js, playing its scripted night) and mod.gif (the mod's band,
+# terminal-logo.svg). GitHub plays no SVG or CSS animation in a README, so the moving pictures are
+# GIFs, and this keeps them rebuildable when status.js, the status view's renderer or the castle
+# changes.
 #
 # What it settles, each learnt the slow way: frames are screenshots at 2x in a headless browser,
 # in Menlo (the site's font subset has no block glyphs, so the castle spilt across rows); the GIF
@@ -24,6 +25,7 @@ cat >"$tmp/status.html" <<EOF
 <link rel="stylesheet" href="file://$root/site/css/site.css">
 <style>html,body{margin:0;background:#0e1116}#w{display:inline-block;padding:14px 18px;background:#0e1116}.status{font-size:14px;background:#0e1116;font-family:Menlo,monospace;line-height:1.16}</style>
 <div id="w"><pre class="status"></pre></div>
+<script src="file://$root/site/js/status-render.js"></script>
 <script src="file://$root/site/js/status.js"></script>
 <script>const {frame,toHTML}=window.SandcastleStatus;window.show=t=>{document.querySelector('.status').innerHTML=toHTML(frame(t,100))};show(0)</script>
 EOF

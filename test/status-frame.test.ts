@@ -7,13 +7,13 @@
 //   pnpm test:file test/status-frame.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const COLS = 80;
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-frame-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -39,7 +39,8 @@ const utf8 = (() => {
 })();
 
 const render = (locale: string): Buffer => {
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
+    encoding: "buffer",
     env: {
       ...process.env,
       LC_ALL: locale,

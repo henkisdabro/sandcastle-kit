@@ -651,7 +651,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
 };
 
 // ---------------------------------------------------------------------------
-// Run record - status.sh reads it for its header. `pid` tells it whether the
+// Run record - the status view reads it for its header. `pid` tells it whether the
 // run is still alive; `finishedAt` is written on a clean exit.
 // ---------------------------------------------------------------------------
 
@@ -798,7 +798,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
 // ---------------------------------------------------------------------------
 // Typical times - how long each step of an issue usually takes in this
 // project, from earlier runs' timings. The status view marks a step running
-// at twice its usual time (and says so in words at three times), and estimates when landing starts: a run that is
+// at twice its usual time - the 75th percentile of the step, so a phase with a fast and a slow kind of run is judged by the slow one (and says so in words at three times), and estimates when landing starts: a run that is
 // busy but healthy and one that is stuck looked the same for an hour.
 // ---------------------------------------------------------------------------
 
@@ -834,7 +834,7 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
 };
 
 /**
- * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
+ * Seconds per step (the 75th percentile of the window's steps of a phase), and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
  * `LANDING_GATES` is one ticket's landing gates summed, the median over the window's tickets that landed (a fast-forward,
  * with no gate, counts 0; a held, red or conflicted ticket, or one from before landings were timed, is no landing), and
  * absent when the window has no landing.
@@ -867,7 +867,9 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
     byIssue.set(key, (byIssue.get(key) ?? 0) + l.ms!);
   }
   const out: Record<string, number> = {};
-  for (const [phase, ms] of byPhase) out[phase] = Math.round(median(ms)! / 1000);
+  // A phase can have two kinds of run (gates on a warm build cache, on a cold one): its median is the fast kind, and
+  // every slow run then reads as stuck. The 75th percentile judges it against the slow kind.
+  for (const [phase, ms] of byPhase) out[phase] = Math.round(percentile(ms, USUAL)! / 1000);
   const issue = median([...byIssue.values(), ...extra]);
   if (issue !== undefined) out.issue = Math.round(issue / 1000);
   if (landing.size) {
@@ -916,6 +918,8 @@ export const isCarried = (root: string, base: string, id: string): boolean => {
 /** The nearest-rank percentile, `p` in (0, 1]; the median above takes the middle one, this the one a fraction `p` of the list is at or below. */
 const percentile = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length, Math.max(1, Math.ceil(xs.length * p))) - 1];
 const HIGH = 0.8;
+/** The percentile of a phase's recent steps that `typicalTimes` calls its usual time. */
+const USUAL = 0.75;
 /** A history run is of a similar load when its concurrency is within this many of the run's; at least `LOAD_RUNS` of them price the gate times. */
 const LOAD_BAND = 1;
 const LOAD_RUNS = 2;
@@ -942,6 +946,9 @@ const SIZE_WORDS = { small: `1-${SMALL_PATHS} Touches paths`, large: `${SMALL_PA
  * landed. The base gates and verify (the `base gates` and `verify` lines of the window's runs) are
  * added to it, as they run before every ticket and after the last; the image check and preflight are not.
  * `from N ticket(s)` is how many history tickets priced the run's, not how many the window holds. A line that does not parse is skipped.
+ *
+ * `detail.beside` names the live runs this run's start share is split with: the line then says `at this run's share now`
+ * and that it is shorter as they finish, since `slots` is the share of the first minutes and widens. Without it (a run alone) the line is as before.
  *
  * `models` is the implement model of each ticket in the run (its `model:` label, else the default):
  * each is estimated from the history of tickets that model implemented, as an Opus ticket takes
@@ -984,7 +991,7 @@ const SIZE_WORDS = { small: `1-${SMALL_PATHS} Touches paths`, large: `${SMALL_PA
  * a row on the one worker, whatever the slots, so they count with or without `gateSlots`.
  */
 export const estimate = (
-  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[] } = {},
+  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[]; beside?: string[] } = {},
 ): string | undefined => {
   let text: string;
   try {
@@ -1202,12 +1209,13 @@ export const estimate = (
   const split = carriedCount || remainderCount
     ? ` (${[carriedCount ? `${carriedCount} carried` : "", remainderCount ? `${remainderCount} remainder` : "", `${tickets - carriedCount - remainderCount} fresh`].filter(Boolean).join(", ")})`
     : "";
-  const sequence = chain > 1 && highMs.chained > highMs.serial ? ` (${chain} tickets in sequence)` : "";
   // At a tie too: the tickets' figure ends with a landing of its own, so landings in a row as long as it still set the time.
   const landBound = highMs.landed > 0 && highMs.landed >= Math.max(highMs.serial, highMs.chained, highMs.gated);
   const gateBound = landBound
     ? " (landing gates, one after another, set the time)"
     : highMs.gated > Math.max(highMs.serial, highMs.chained, highMs.landed) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
+  // One bound sets the time, so one label: the chain is named only when neither the gates nor the landings outlast it.
+  const sequence = chain > 1 && highMs.chained > highMs.serial && !gateBound ? ` (${chain} tickets in sequence)` : "";
   const sized = [...sizing.values()].filter((v) => v.from > 0);
   const off = [...sizing.values()].filter((v) => v.from === 0 && v.window !== undefined && v.window !== v.size);
   const smaller = off.filter((v) => v.size === "small").length;
@@ -1225,10 +1233,14 @@ export const estimate = (
     larger ? ` ${larger} ticket(s) are larger (${SIZE_WORDS.large}) than most of the window's, with too little history of their size, so it may be low.` : "",
     byLoad ? "" : ` No history at ${slots} at a time (gate times are from runs of any load), so it may be low.`,
   ].join("");
+  // Beside another live run `slots` is the share the run has at its start, which widens as that run's tickets finish: the line says so,
+  // or it read as the load the whole run keeps (the start lines above it tell the widening).
+  const share = detail.beside?.length ? `, at this run's share now, ${slots} at a time` : `, ${slots} at a time`;
+  const shorter = detail.beside?.length ? `; shorter as ${detail.beside.join(" and ")} finish${detail.beside.length === 1 ? "es" : ""}` : "";
   return (
     `Estimate (rough, from ${pricedFrom.size} ticket(s) in the last 3 runs): ` +
     `about ${span(sum((p) => p.mid.inTokens), sum((p) => p.high.inTokens), k)} tokens in / ${span(sum((p) => p.mid.out), sum((p) => p.high.out), k)} out ` +
-    `and ${span(bound(midMs) + midSteps, bound(highMs) + highSteps, clock)} for ${tickets} ticket(s)${split}, ${slots} at a time${sequence}${gateBound}.${low}`
+    `and ${span(bound(midMs) + midSteps, bound(highMs) + highSteps, clock)} for ${tickets} ticket(s)${split}${share}${sequence}${gateBound}${shorter}.${low}`
   );
 };
 
@@ -1497,15 +1509,20 @@ export const runTokens = (result: unknown): Tokens | undefined => {
 export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
 /** The status view's run line has no room for the cached share. */
 export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
+/**
+ * A ticket's tokens as its run record entry holds them: the `tokens` text an older reader shows, unchanged, and the
+ * cache-read input count beside it, which the status view's TOKENS column turns into the share served from cache.
+ */
+export const ticketTokens = (t: Tokens) => ({ tokens: tokenBrief(t), cacheRead: t.cacheRead });
 
 /**
  * What the usage watch calls with a ticket's running pass's tokens so far: the ticket's `tokens` in the run record
  * becomes what its finished passes spent (`spent`, the run's own count of the results' figures) plus that live figure.
  * A pass that has ended is in `spent` and no longer live (`UsageWatch.settle`), so it is never in both.
  */
-export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: { tokens: string }): void }, spent: Map<string, Tokens>) =>
+export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: ReturnType<typeof ticketTokens>): void }, spent: Map<string, Tokens>) =>
   (issue: string, live: Tokens) => {
-    if (!run.finished) run.ticket(issue, { tokens: tokenBrief(addTokens(spent.get(issue) ?? NO_TOKENS, live)) });
+    if (!run.finished) run.ticket(issue, { ...ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)) });
   };
 
 // ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, sh, staleBaseParents } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
@@ -73,7 +73,7 @@ export const touchesOverrun = (root: string, base: string, head: string, body: s
 };
 
 // The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
-// `mergedEarlier` and status.sh's `requeued` find a landed branch by it. The committer is
+// `mergedEarlier` and the status view's requeue note find a landed branch by it. The committer is
 // the agent's, the author the operator's (see AGENT_COMMITTER).
 // --no-verify: a pre-commit hook re-running what the gates covered only adds a way for a
 // green branch to fail to land. (Hooks are off for the whole host process anyway - see guard.ts.)
@@ -89,7 +89,7 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
   // Throws on a conflict or a refused merge, as the merge does, leaving the unmerged files for the caller.
   sh("git", ["merge", "--squash", "--no-verify", head], root, AGENT_COMMITTER);
   // --allow-empty: a green branch whose change is already on the base still gets its commit, so
-  // `mergedEarlier` and status.sh find the ticket as landed.
+  // `mergedEarlier` and the status view find the ticket as landed.
   return sh(
     "git",
     [
@@ -115,10 +115,10 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
 // - the closing summary's "Agent branches with unmerged work", report.ts (`git cherry`): not listed.
 // - the log archive, `archiveFinishedLogs` in run.ts: a deleted branch counts as finished, so its
 //   log is archived - correct.
-// - status.sh `requeued`: a subject `--grep` on the base - works unchanged.
-// - status.sh section 3 (logs the record does not hold): a missing branch whose subject is on the
+// - the status view's requeue note: a subject `--grep` on the base - works unchanged.
+// - the status view's rows for logs the record does not hold: a missing branch whose subject is on the
 //   base reads `merged`, not `no branch` (a "part of" subject, `mergeSubject`, counts too).
-// - status.sh `merged_list` (`git branch --merged`) and the `git cherry` case: only reached when
+// - the status view's merged list (`git branch --merged`) and the `git cherry` case: only reached when
 //   the branch exists - unaffected.
 // A squash leaves no MERGE_HEAD, so `git merge --abort` refuses it; `git reset --merge` undoes the
 // staged squash and keeps unrelated local changes.
@@ -450,7 +450,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   if (sh("git", ["rev-parse", o.branch], root) !== o.head) return { kind: "skipped", reason: `${o.branch} moved after its gates passed` };
   // The pipeline re-creates a branch that merged a base since rewritten before it runs a gate (`rebuildOnBase`); one that
   // gets here was rewritten after, or the check could not run. Merging it brings back commits the base lost.
-  if (staleBaseParents(base, o.branch, root).length) return { kind: "skipped", reason: `${o.branch} merged a ${base} that has since been rewritten - the next run re-creates it on ${base}'s tip` };
+  if (staleBaseParents(base, o.branch, root).length) return { kind: "skipped", reason: `${o.branch} merged or was cut from a ${base} that has since been rewritten - the next run re-creates it on ${base}'s tip` };
   // A warning, never a hold: the Touches line is written by an agent. A tracker or git failure
   // costs the warning only.
   let overrun: string[] = [];
@@ -724,6 +724,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   // branch holding a commit the base lacks, where a squash's `-D` is the only delete that works.
   try {
     await host.write(() => sh("git", ["branch", squash ? "-D" : "-d", o.branch], root));
+    forgetFork(root, o.branch);
   } catch (error) {
     // Git's own words: a kept worktree holding the branch is one cause, not the only one.
     console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`);
@@ -758,10 +759,14 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
  * the run's worker count. Beside another run it is one of the run's share, while the share is 2 or more: the pool
  * holds the run's ticket pipelines to share - 1 at each lease (`leaseSlot`'s `keep`). At a share of 1 the run's one
  * slot is a ticket's, and a landing goes first when a slot frees (`slotTurn`); a ticket already running is never
- * taken back (ADR 0001).
+ * taken back (ADR 0001). `share` is the run's share at its start beside another run, none when it is alone: only the
+ * clause that applies is said, as every clause at once read as though another run were live.
  */
-export const landingSlotNote = (pool: number) =>
-  `one of the ${pool} machine-wide sandbox slots is kept for landing - beside another run, one of this run's share while it is 2 or more, and at a share of 1 a landing goes first when a slot frees`;
+export const landingSlotNote = (pool: number, share?: number) => {
+  const kept = `one of the ${pool} machine-wide sandbox slots is kept for landing`;
+  if (share === undefined) return kept;
+  return share >= 2 ? `${kept} - beside another run, one of this run's share of ${share}` : `${kept} - beside another run, at this run's share of 1, a landing goes first when a slot frees`;
+};
 
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */
 export type Waiting = Landable & { carried?: boolean };

@@ -1,7 +1,8 @@
 // A ticket waiting for a machine-wide slot says why once when the wait starts, and again only after a
 // further 15 minutes: with a second run live the reason flips between "share" and "slots", and one wait
 // printed about 30 lines in two hours. `onWait` still fires at every change of reason, since the run's
-// "waits for its share" note follows it.
+// "waits for its share" note follows it. Nor is a line said again that the same label said last, from another
+// wait: each worker's next ticket is a wait of its own under one label.
 //
 // This process is one run and the other is a file (test/pool-sim.ts); the clock the pool reads is ours.
 //
@@ -61,4 +62,20 @@ test("a wait whose reason flips prints one line, then one more after 15 minutes 
 
   await flip("slots");
   assert.equal(lines().length, 2, "the interval starts again from the last line");
+});
+
+test("waits under one label for the same reason print one line: each worker's next ticket is a wait of its own", async () => {
+  joinPool("alpha", 6, 6);
+  other("beta", { demand: 6, held: 3 });
+  setHeld(RUN_ID, 3);
+  const first = ticket("alpha next ticket");
+  await until(() => first.why.length === 1, "the first wait's reason");
+  const second = ticket("alpha next ticket");
+  await until(() => second.why.length === 1, "the second wait's reason");
+  await looks();
+  assert.equal(lines().length, 1, "the same line again says nothing new");
+  assert.match(lines()[0]!, /alpha next ticket: waiting for a machine-wide sandboxes slot \(6 in use\)/);
+  const third = ticket("alpha #7");
+  await until(() => third.why.length === 1, "a wait under another label");
+  assert.equal(lines().length, 2, "another label says its own line");
 });

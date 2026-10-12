@@ -6,13 +6,13 @@
 //   pnpm test:file test/status-no-terminal.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus, statusCommand } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-no-terminal-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 const REPO = join(TMP, "repo");
@@ -43,7 +43,7 @@ const view = (args: string[], extra: Record<string, string> = {}) => {
   };
   delete env.STATUS_FRAMES;
   Object.assign(env, extra);
-  return spawnSync("bash", [join(KIT, "status.sh"), ...args], {
+  return spawnStatus(args, {
     encoding: "utf8",
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -65,4 +65,19 @@ test("status piped with STATUS_FRAMES set still runs the loop", () => {
   const r = view(["1"], { STATUS_FRAMES: "1" });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes(ALT_SCREEN), "the loop did not run");
+});
+
+test("a live view whose output is gone without a hangup ends as a hangup ends it", async () => {
+  // The loop with no end of its own; its reader closes after the first frame, so the next write fails (EPIPE).
+  const { command, args } = statusCommand(["1"]);
+  const env: Record<string, string | undefined> = { ...process.env, PATH: `${FAKE}:${process.env.PATH}`, SANDCASTLE_PROJECT: REPO, SANDCASTLE_BASE: "main", STATUS_FRAMES: "100000" };
+  const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "ignore"] });
+  const ended = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+  child.stdout.once("data", () => child.stdout.destroy());
+  const limit = setTimeout(() => child.kill("SIGKILL"), 20_000);
+  try {
+    assert.equal(await ended, 129, "the view kept running for a terminal that is gone");
+  } finally {
+    clearTimeout(limit);
+  }
 });

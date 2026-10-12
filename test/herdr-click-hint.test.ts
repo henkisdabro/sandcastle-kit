@@ -6,14 +6,14 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { runKit } from "./cli-spawn.ts";
+import { buildFixture } from "./status-fixture.ts";
+import { drawFrame } from "./status-run.ts";
 
-const KIT = fileURLToPath(new URL("..", import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), "sandcastle-click-hint-"));
 // src/ reads XDG_CONFIG_HOME when it is imported: never the machine's own config.json.
 process.env.XDG_CONFIG_HOME = temp();
@@ -165,10 +165,16 @@ test("herdrSettingProblem accepts clickHint alone, with auto, ctrl or cmd", () =
   assert.match(herdrSettingProblem("cmd") ?? "", /not an object/);
 });
 
-test("status.sh draws the same three texts", () => {
-  const sh = readFileSync(join(KIT, "status.sh"), "utf8");
-  for (const [mod, text] of Object.entries(HINT_TEXT)) {
-    assert.ok(sh.includes(`${mod === "fallback" ? "*" : mod}) CLICK_HINT="${text}"`), `${mod}: ${text}`);
+test("the status view draws each of the three texts for the modifier it is handed", () => {
+  const fixture = buildFixture("legacy", temp());
+  try {
+    for (const [mod, text] of Object.entries(HINT_TEXT)) {
+      const drawn = drawFrame(fixture, { cols: 200, env: { SANDCASTLE_LINKS: "1", SANDCASTLE_CLICK_MOD: mod === "fallback" ? "" : mod } });
+      assert.equal(drawn.status, 0, drawn.stderr);
+      assert.ok(drawn.frame.includes(text), `${mod}: ${text}`);
+    }
+  } finally {
+    fixture.stop();
   }
 });
 

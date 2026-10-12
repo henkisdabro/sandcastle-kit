@@ -6,13 +6,13 @@
 //   pnpm test:file test/status-slow-step.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const COLS = 84;
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-slow-"));
 const REPO = join(TMP, "my repo");
@@ -66,7 +66,7 @@ writeFileSync(
 );
 
 const frame = (() => {
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     env: {
       ...process.env,

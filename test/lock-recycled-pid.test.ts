@@ -2,7 +2,7 @@
 // (its command line holds the kit's entry), not just a pid that exists. A killed run's pid
 // comes round as some other process, and its lock would otherwise be held for as long as that
 // lasts. When `ps` cannot say what a pid is, the lock is kept: a live run must never look gone.
-// status.sh's slot count follows the same rule. No Docker, no model calls.
+// The status view's slot count follows the same rule. No Docker, no model calls.
 //
 //   pnpm test:file test/lock-recycled-pid.test.ts
 
@@ -11,9 +11,11 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { runNode } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
+import { buildFixture } from "./status-fixture.ts";
+import { machineSlots } from "./status-run.ts";
 
 // Importing pool.ts must not touch the real slots.
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -23,6 +25,11 @@ const { holderRunning, takeLock, usage } = await import("../src/pool.ts");
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-lock-"));
 const deadPid = () => spawnSync("true").pid!;
 const slots = join(cache, "sandcastle-kit", "slots");
+
+// What the status view's machine lane says of the pool, drawn against this test's cache.
+const viewFixture = buildFixture("legacy", join(dir, "view"));
+after(() => viewFixture.stop());
+const viewSlots = (env: Record<string, string> = {}) => machineSlots(viewFixture, { ...env, XDG_CACHE_HOME: cache });
 
 test("a lock held by a process that is not the kit (a recycled pid) is taken over", () => {
   const file = join(dir, "recycled.lock");
@@ -80,28 +87,21 @@ test("slots: a recycled pid is not a used slot, a process of the kit is", () => 
     writeFileSync(join(slots, "sandboxes-1.lock"), `${process.pid} token b\n`);
     writeFileSync(join(slots, "gates-0.lock"), `${deadPid()} token c\n`);
     assert.match(usage(), /^sandboxes 1\/\d+ · gates 0\/\d+$/);
-    const shell = spawnSync("bash", ["-c", `eval "$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p;/^load_pool() {/,/^}/p' status.sh)"; load_pool; echo "$USED_sandboxes $USED_gates"`], {
-      cwd: join(import.meta.dirname, ".."),
-      env: { ...process.env, XDG_CACHE_HOME: cache },
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    assert.equal(shell.stdout.trim(), "1 0", shell.stderr);
+    // The status view counts the same slots: the kit's process and nothing else.
+    assert.deepEqual(viewSlots(), { sandboxes: "1/6", gates: "0/2" });
   } finally {
     kit.kill();
   }
 });
 
-test("status.sh slot_alive: ps that cannot answer keeps a live owner", () => {
+test("the status view counts a slot whose owner ps cannot name, and not one that is gone", () => {
   const bin = mkdtempSync(join(tmpdir(), "sandcastle-noPs-"));
   writeFileSync(join(bin, "ps"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "ps"), 0o755);
-  const run = (pid: number) =>
-    spawnSync("bash", ["-c", `eval "$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p' status.sh)"; slot_alive ${pid}`], {
-      cwd: join(import.meta.dirname, ".."),
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-      stdio: ["ignore", "pipe", "pipe"],
-    }).status;
-  assert.equal(run(process.pid), 0, "exists, ps silent: counted");
-  assert.notEqual(run(deadPid()), 0, "gone: not counted");
+  mkdirSync(slots, { recursive: true });
+  writeFileSync(join(slots, "sandboxes-0.lock"), `${process.pid} token a\n`);
+  writeFileSync(join(slots, "sandboxes-1.lock"), `${deadPid()} token b\n`);
+  writeFileSync(join(slots, "gates-0.lock"), `${deadPid()} token c\n`);
+  const env = { PATH: `${bin}:${process.env.PATH}` };
+  assert.deepEqual(viewSlots(env), { sandboxes: "1/6", gates: "0/2" }, "exists, ps silent: counted; gone: not counted");
 });

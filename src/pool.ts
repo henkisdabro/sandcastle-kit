@@ -67,7 +67,7 @@ export type PoolName = "sandboxes" | "gates";
 
 // Under live-runs.ts's KIT_CACHE, so an empty XDG_CACHE_HOME is unset here too, not a relative path.
 export const DIR = join(KIT_CACHE, "slots");
-// A subdirectory, so status.sh's `<pool>-*.lock` glob and `usage` never see an entry.
+// A subdirectory, so the status view's slot count and `usage` never see an entry.
 const WAITS = join(DIR, "waits");
 const RUNS = join(DIR, "runs");
 
@@ -173,7 +173,7 @@ const WEDGED_MS = 10_000;
  * with) if taken, `owner` if a live process of the kit holds it, neither if it is busy for
  * a moment (being written or taken over) - try again later.
  *
- * The content is "<pid> <token> <label>": the pid first, which status.sh reads;
+ * The content is "<pid> <token> <label>": the pid first, which the status view reads;
  * the token, so a release never removes a lock someone else took since. A lock
  * whose owner is gone (`holderRunning`: its pid is dead, or is some other process
  * now) is taken over under `<file>.takeover`, and only if it still
@@ -529,6 +529,35 @@ const approx = (seconds: number) => {
 };
 
 /**
+ * How each live run is named in the start lines and the estimate's note: the project name, told apart from this run
+ * (`self`) and from another listed run of the same name by the last component of its root, else its pid. The doc of
+ * `startLines` has the rules.
+ */
+export const neighbourNames = (others: Neighbour[], self?: string, selfRoot?: string): ((n: Neighbour) => string) => {
+  const shared = (n: Neighbour) => !!n.project && (n.project === self || others.some((o) => o !== n && o.project === n.project));
+  const folder = (n: Neighbour) => (n.root ? basename(n.root) : undefined);
+  // A neighbour in `/b/site` seen from `/a/site` is not told apart from this run by its folder.
+  const selfDir = selfRoot ? basename(selfRoot) : undefined;
+  return (n) => {
+    if (!n.project) return "another project";
+    if (!shared(n)) return n.project;
+    const dir = folder(n);
+    if (dir && !(n.project === self && dir === selfDir) && !others.some((o) => o !== n && shared(o) && o.project === n.project && folder(o) === dir)) return `${n.project} (${dir})`;
+    return n.pid === undefined ? n.project : `${n.project} (pid ${n.pid})`;
+  };
+};
+
+/**
+ * The runs the start estimate's share is waiting on: those holding slots (the ones whose tickets finishing widens this
+ * run's share), else every other live run. Named as the start lines name them.
+ */
+export const estimateBeside = (others: Neighbour[], self?: string, selfRoot?: string): string[] => {
+  const name = neighbourNames(others, self, selfRoot);
+  const holders = others.filter((n) => n.held > 0);
+  return (holders.length ? holders : others).map(name);
+};
+
+/**
  * The start lines of a run that begins while others are live: who they are, what each holds and
  * wants, this run's share (and, from 2, the slot of it kept for landing) and, when no slot is free, when the first is likely. A run from an older
  * kit gets a line of its own - it takes no share on trust, and the run still starts. No other run:
@@ -540,17 +569,7 @@ const approx = (seconds: number) => {
  * (or this run's, `selfRoot`) has the same last component. A name nothing shares is printed as it is.
  */
 export const startLines = (split: { share: number; free: number }, others: Neighbour[], landing = true, self?: string, selfRoot?: string): string[] => {
-  const shared = (n: Neighbour) => !!n.project && (n.project === self || others.some((o) => o !== n && o.project === n.project));
-  const folder = (n: Neighbour) => (n.root ? basename(n.root) : undefined);
-  // A neighbour in `/b/site` seen from `/a/site` is not told apart from this run by its folder.
-  const selfDir = selfRoot ? basename(selfRoot) : undefined;
-  const name = (n: Neighbour) => {
-    if (!n.project) return "another project";
-    if (!shared(n)) return n.project;
-    const dir = folder(n);
-    if (dir && !(n.project === self && dir === selfDir) && !others.some((o) => o !== n && shared(o) && o.project === n.project && folder(o) === dir)) return `${n.project} (${dir})`;
-    return n.pid === undefined ? n.project : `${n.project} (pid ${n.pid})`;
-  };
+  const name = neighbourNames(others, self, selfRoot);
   const lines: string[] = [];
   const aware = others.filter((n) => n.registered);
   if (aware.length) {
@@ -712,6 +731,13 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
 const REPRINT_MS = 15 * 60_000;
 
 /**
+ * The last wait line said for each label, across waits, and when: each pipeline worker's next ticket is a wait of its
+ * own under one label, so a run whose workers waited in turn said the same line about 30 times. The same line is said
+ * again only after REPRINT_MS, which still shows a long wait is alive.
+ */
+const lastWaitLine = new Map<string, { line: string; at: number }>();
+
+/**
  * Why a wait waits: every slot is taken, this run is at its share while another run waits below its own (or at its
  * cap), or the last slot of the run's share is kept for a landing (`keptForLanding`).
  */
@@ -778,8 +804,9 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
     for (let why = attempt(); !slot; why = attempt()) {
       if (giveUp?.()) return undefined;
       // The line is said when the wait starts and again after REPRINT_MS, not at every change of reason:
-      // with a second run live the reason alternates and one wait printed about 30 lines. `onWait` still
-      // fires at each change, since the run's note of waiting for its share follows it.
+      // with a second run live the reason alternates and one wait printed about 30 lines. Either time it is
+      // said only when it differs from the label's last or that one is REPRINT_MS old (`lastWaitLine`). `onWait` still fires at each
+      // change, since the run's note of waiting for its share follows it.
       if (yielded !== "earlier" && (printedAt === undefined || clock() - printedAt >= REPRINT_MS)) {
         printedAt = clock();
         const me = why === "share" || why === "landing" ? myShare() : undefined;
@@ -788,7 +815,12 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
           : yielded === "run" ? "another run has waited longer"
           : yielded === "priority" ? "a landing, base or verify gate of this run goes first"
           : `${limit(pool)} in use`;
-        console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${reason})`);
+        const line = `  ${label}: waiting for a machine-wide ${pool} slot (${reason})`;
+        const last = lastWaitLine.get(label);
+        if (last?.line !== line || printedAt - last.at >= REPRINT_MS) {
+          console.log(line);
+          lastWaitLine.set(label, { line, at: printedAt });
+        }
       }
       if (why !== told) {
         told = why;
@@ -839,7 +871,7 @@ let extras = 0;
  * (`<pool>-extra-<run>-<n>.lock`, the content a slot has), taken at once and never waited for. It is
  * for a sandbox started inside a slot the caller already holds - the mid-run base check - which
  * would deadlock a pool of one if it waited, and was otherwise counted nowhere: other runs saw one
- * sandbox fewer than were alive. `usage()`, `liveSlots` and status.sh's `<pool>-*.lock` glob count
+ * sandbox fewer than were alive. `usage()`, `liveSlots` and the status view's slot count count
  * it; `tryAcquire` takes only numbered slots, so it blocks none. Accepted while it lives: `usage()`
  * can read 7/6, and as `members()` counts it in this run's `held`, this run's other tickets may wait
  * for their share. The share arithmetic stays as it is - hiding the slot from it would hide it from
@@ -865,7 +897,7 @@ export const withExtraSlot = async <T>(pool: PoolName, label: string, fn: () => 
   }
 };
 
-/** "sandboxes 3/6 · gates 1/2" - live slots only; read by status.sh too. */
+/** "sandboxes 3/6 · gates 1/2" - live slots only; the status view counts them the same way. */
 export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool).length}/${limit(pool)}`).join(" · ");
 
 /** One live run's demand, share and cap, as `sandcastle cap` shows them. */

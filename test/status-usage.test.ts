@@ -1,7 +1,7 @@
-// The status view's plan-usage row on a terminal: the bar and the percentage take the band's colour -
+// The status view's plan usage on a terminal: the bar and the percentage take the band's colour -
 // the normal one below 75%, amber from 75%, red from 90% - go grey once the reading is older than 15
 // minutes, and carry no colour at all under NO_COLOR. Run on a pty from `script`, as the view's other colour
-// checks are (test/no-color.test.ts); the row's text, in each band, is test/status.test.sh's. No Docker, no network.
+// checks are (test/no-color.test.ts); the text, in each band, is test/status.test.sh's. No Docker, no network.
 //
 //   pnpm test:file test/status-usage.test.ts
 
@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
+import { scriptArgs } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-usage-"));
 const live = kitLikeProcess();
 after(() => {
@@ -50,8 +50,6 @@ const record = (five: number, week: number, age: number) =>
 
 /** The view's one frame on a pty at 160 columns (the row on one line), with the colour it has. 256 colours: no COLORTERM, so each colour is `ESC[38;5;Nm`. */
 const frame = (extra: Record<string, string> = {}) => {
-  const cmd = join(KIT, "status.sh");
-  const args = process.platform === "linux" ? ["-qec", `bash '${cmd}' 0`, "/dev/null"] : ["-q", "/dev/null", "bash", cmd, "0"];
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${FAKE}:${process.env.PATH}`,
@@ -68,19 +66,19 @@ const frame = (extra: Record<string, string> = {}) => {
   delete env.NO_COLOR;
   Object.assign(env, extra);
   // No stdin: BSD `script` refuses the socket Node passes by default.
-  const r = spawnSync("script", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
+  const r = spawnSync("script", scriptArgs(["0"]), { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
   return r.stdout;
 };
 const hasScript = spawnSync("script", ["--version"], { stdio: "ignore" }).error === undefined;
 const skip = hasScript ? false : "script(1) is not installed";
 
-// The view's own colours (status.sh): amber is 221 and red 203; the normal numbers are dry sand (180) and a stale reading damp sand (95).
+// The view's own colours (src/status-render.ts): amber is 221 and red 203; the normal numbers are dry sand (180) and a stale reading damp sand (95).
 const AMBER = "\u001b[38;5;221m";
 const RED = "\u001b[38;5;203m";
 const NORMAL = "\u001b[38;5;180m";
 const GREY = "\u001b[38;5;95m";
 /** The colour code the pty shows a window's percentage in (`14%`), or undefined when it is not drawn as a whole. */
-const coloured = (out: string, text: string) => out.match(new RegExp(`(\\u001b\\[38;5;\\d+m)${text}\\u001b\\[0m`))?.[1];
+const coloured = (out: string, text: string) => out.match(new RegExp(`(\\u001b\\[38;5;\\d+m) *${text}\\u001b\\[0m`))?.[1];
 
 test("each window is coloured by its own band: normal below 75%, amber from 75%, red from 90%", { skip }, () => {
   record(14, 93, 120);
@@ -112,6 +110,6 @@ test("a reading older than 15 minutes is grey, whatever its band, with its age b
 test("NO_COLOR leaves the row's words and no colour", { skip }, () => {
   record(14, 93, 120);
   const out = frame({ NO_COLOR: "1" });
-  assert.ok(out.includes("5h ▓░░░░░░░░░ 14%") && out.includes("93%"), "the row is still drawn");
+  assert.ok(/5h +▓░░░░ +14%/.test(out) && out.includes("93%"), "the row is still drawn");
   assert.ok(!out.includes("\u001b[38;5;"), "colour despite NO_COLOR");
 });

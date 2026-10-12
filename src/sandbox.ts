@@ -3,7 +3,7 @@
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,12 +78,67 @@ export const AGENT_COMMITTER = {
  * branch's own work, and landing the branch brings it back: duplicates of what landed, or a commit
  * someone removed on purpose. A parent is an ancestor of the base exactly when it is not in
  * `base..branch`, so one `rev-list` answers for every merge. `git cherry` cannot: a commit a reset
- * dropped has no copy on the base and reads as the branch's own. Empty for a base that only moved forward.
+ * dropped has no copy on the base and reads as the branch's own. A branch that never merged the base is read through
+ * the fork point the kit recorded when it cut it (`recordFork`). Empty for a base that only moved forward.
  */
 export const staleBaseParents = (base: string, branch: string, cwd?: string): string[] => {
   const commits = sh("git", ["rev-list", "--parents", `${base}..${branch}`], cwd).split("\n").filter(Boolean).map((l) => l.split(" "));
   const unmerged = new Set(commits.map(([sha]) => sha));
-  return [...new Set(commits.flatMap(([, , ...joined]) => joined).filter((parent) => unmerged.has(parent)))];
+  const merged = commits.flatMap(([, , ...joined]) => joined).filter((parent) => unmerged.has(parent));
+  // A branch that never merged the base has no merge to read the old base from: the base tip it was cut from, recorded
+  // when the kit made the branch, is one the base lost when it is no longer an ancestor of the base. `base..branch`
+  // holds it only then, and only while the branch does too: a branch rebuilt by hand or cut again has dropped it.
+  const fork = forkPoint(branch, cwd);
+  const lost = fork && unmerged.has(fork) ? [fork] : [];
+  return [...new Set([...merged, ...lost])];
+};
+
+const forksFile = (root: string) => join(root, ".sandcastle/logs/forks.json");
+
+const readForks = (root: string): Record<string, string> => {
+  try {
+    const all = JSON.parse(readFileSync(forksFile(root), "utf8"));
+    return all && typeof all === "object" && !Array.isArray(all) ? all : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeForks = (root: string, all: Record<string, string>) => {
+  const file = forksFile(root);
+  mkdirSync(dirname(file), { recursive: true });
+  // Written whole and renamed into place, as the heads record is: a half-written file read as no record costs the detector its input.
+  writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
+  renameSync(`${file}.tmp`, file);
+};
+
+/**
+ * Records the base tip `branch` was cut from, in `.sandcastle/logs/forks.json` by branch name. Kept when the ticket's head
+ * record is dropped (`forgetHead` is about the work's verdict, not where the branch began) and removed with the branch
+ * (`forgetFork`). A branch made before the record existed has none and keeps the merge-commit detector alone.
+ */
+export const recordFork = (root: string, branch: string, tip: string): void => {
+  const all = readForks(root);
+  all[branch] = tip;
+  writeForks(root, all);
+};
+
+/** Drops a branch's fork point once the branch is deleted; never throws, the record only costs a later run a stale entry. */
+export const forgetFork = (root: string, branch: string): void => {
+  try {
+    const all = readForks(root);
+    if (!(branch in all)) return;
+    delete all[branch];
+    writeForks(root, all);
+  } catch {
+    /* the entry stays; a branch cut again under the name replaces it */
+  }
+};
+
+/** The recorded fork point of `branch`, if the record holds a full object name; whether the branch still holds it is `staleBaseParents`' to check. */
+const forkPoint = (branch: string, cwd?: string): string | undefined => {
+  const recorded = readForks(cwd ?? process.cwd())[branch];
+  return typeof recorded === "string" && /^[0-9a-f]{40,64}$/.test(recorded) ? recorded : undefined;
 };
 
 /** The revisions of a branch's own commits: since the base, and not the old base a rewrite left reachable (`staleBaseParents`). */
@@ -436,6 +491,7 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
     const finished = branchFinished(project, branch);
     if (finished || all) {
       sh("git", ["branch", "-D", branch], cwd);
+      forgetFork(project.root, branch);
       deleted.push({ branch, unmerged: !finished });
     } else {
       kept.push({ branch, ahead: Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], cwd)) });

@@ -47,6 +47,7 @@
     pre.append(probe);
     const ch = probe.getBoundingClientRect().width / 100;
     probe.remove();
+    // 44 columns still fits a 360px phone; the box hides what overflows it, so a wider floor would cut its right edge.
     return Math.max(44, Math.floor(pre.clientWidth / ch));
   }
 
@@ -90,7 +91,7 @@
       drawn = now;
     } else if (now - drawn > 250) {
       const clock = pre.querySelector('.c-clock');
-      if (clock) clock.textContent = clockAt(minute, cols);
+      if (clock) clock.textContent = clockAt(minute);
       drawn = now;
     }
     raf = requestAnimationFrame(tick);

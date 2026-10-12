@@ -5,11 +5,12 @@
 //   pnpm test:file test/run-settings-repair-concurrency.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { readFacts, spawnStatus } from "./status-run.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -92,40 +93,48 @@ const frame = (cols: number, next?: string): string[] => {
   };
   delete env.SANDCASTLE_SETTINGS;
   if (next !== undefined) env.SANDCASTLE_SETTINGS = next;
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(import.meta.dirname, "..", "status.sh"), "0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const lines = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
   for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
   return lines;
 };
-const row = (lines: string[]) => lines.find((l) => l.startsWith("│ settings "))?.replace(/^│ /, "").replace(/ *│$/, "");
+/** The facts of the frame: the settings lane's items, and the repair attempts and turn the run's lanes show. */
+const facts = (lines: string[]) => readFacts(lines.join("\n"), REPO);
 
-test("the row shows repair attempts and an unclamped concurrency with no (asked)", () => {
+test("the lanes show repair attempts and an unclamped concurrency with no (asked)", () => {
   record({ settings: { autonomy: 0, turn: 1, cap: 1, repair: 1, concurrency: 4, asked: 4 } });
-  assert.equal(row(frame(100)), "settings  autonomy [0] 1 2 3 drain · turn 1/1 · repair 1 · concurrency 4 (last run)");
-  assert.equal(row(frame(80)), "settings  autonomy 0 · turn 1/1 · repair 1 · concurrency 4 (last run)");
+  for (const cols of [80, 100, 200]) {
+    const f = facts(frame(cols));
+    assert.deepEqual([f.settings, f.run.repair], [["autonomy 0", "concurrency 4 (last run)"], "1"], `${cols} columns`);
+  }
   // A record from before `asked` has the effective value only.
   record({ settings: { repair: 2, concurrency: 3 } });
-  assert.equal(row(frame(100)), "settings  repair 2 · concurrency 3 (last run)");
+  const f = facts(frame(100));
+  assert.deepEqual([f.settings, f.run.repair], [["concurrency 3 (last run)"], "2"]);
 });
 
 test("a clamped concurrency shows the value asked for", () => {
   record({ settings: { repair: 1, concurrency: 6, asked: 8 } });
-  assert.equal(row(frame(100)), "settings  repair 1 · concurrency 6 (asked 8) (last run)");
+  assert.deepEqual(facts(frame(100)).settings, ["concurrency 6 (asked 8) (last run)"]);
 });
 
-test("repair 0 is a greyed ○ repair, and it drops below 80 columns", () => {
+test("repair 0 is a greyed ○ repair in the models lane", () => {
   record({ settings: { repair: 0, concurrency: 4, asked: 4 } });
-  assert.equal(row(frame(100)), "settings  ○ repair · concurrency 4 (last run)");
-  assert.equal(row(frame(80)), "settings  ○ repair · concurrency 4 (last run)");
-  assert.equal(row(frame(79)), "settings  concurrency 4 (last run)");
+  for (const cols of [79, 100]) {
+    const f = facts(frame(cols));
+    assert.equal(f.run.repair, "○ repair", `${cols} columns`);
+  }
+  assert.deepEqual(facts(frame(100)).settings, ["concurrency 4 (last run)"]);
 });
 
 test("idle: the next run's repair and concurrency come from the settings passed in", () => {
   record({ settings: { repair: 1, concurrency: 4, asked: 4 } });
-  assert.equal(row(frame(100, JSON.stringify({ repair: 0, concurrency: 5, asked: 8 }))), "settings  next run: ○ repair · concurrency 5 (asked 8)");
+  const f = facts(frame(100, JSON.stringify({ repair: 0, concurrency: 5, asked: 8 })));
+  assert.deepEqual([f.settings, f.run.repair], [["next run: concurrency 5 (asked 8)"], "○ repair"]);
 });
 
 test("a field the record lacks, or holds as junk, is not drawn", () => {
   record({ settings: { turn: 1, repair: "x", concurrency: -1, asked: 4 } });
-  assert.equal(row(frame(100)), "settings  turn 1 (last run)");
+  const f = facts(frame(100));
+  assert.deepEqual([f.settings, f.run.repair, f.run.turn], [[], undefined, "1"]);
 });

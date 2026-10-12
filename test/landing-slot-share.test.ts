@@ -24,10 +24,12 @@ const myWaits = () => {
 };
 
 test("the start line says a slot is kept for landing, of this run's share beside another run while that is 2 or more", () => {
-  const note = landingSlotNote(3);
+  // Alone, nothing of another run: the clauses for a share read as though one were live.
+  assert.equal(landingSlotNote(3), "one of the 3 machine-wide sandbox slots is kept for landing");
+  assert.equal(landingSlotNote(3, 2), "one of the 3 machine-wide sandbox slots is kept for landing - beside another run, one of this run's share of 2");
   assert.equal(
-    note,
-    "one of the 3 machine-wide sandbox slots is kept for landing - beside another run, one of this run's share while it is 2 or more, and at a share of 1 a landing goes first when a slot frees",
+    landingSlotNote(3, 1),
+    "one of the 3 machine-wide sandbox slots is kept for landing - beside another run, at this run's share of 1, a landing goes first when a slot frees",
   );
   // The count it leaves is the pool's one less (never fewer than one worker).
   assert.equal(pipelineWorkers(5, 20, 3, true), 2);

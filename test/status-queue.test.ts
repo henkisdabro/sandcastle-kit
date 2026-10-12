@@ -1,18 +1,18 @@
 // The status view when `sandcastle queue` cannot be read: a signed-out gh or a
-// stale token must not look like an empty queue, and a view without a working
-// jq must say what to install rather than show nothing. A made-up project, a
+// stale token must not look like an empty queue, and a machine without a working
+// jq draws the view all the same. A made-up project, a
 // fake `sandcastle` and a `docker` that finds nothing; no Docker, no network.
 //
 //   pnpm test:file test/status-queue.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const COLS = 80;
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-queue-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -46,7 +46,7 @@ const utf8 = (() => {
 })();
 
 const render = (queue: string, env: Record<string, string> = {}, shadow?: string) => {
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -88,17 +88,18 @@ test("a long failure message is cut to the pane", () => {
 
 test("escape codes in the failure message cannot reach the terminal", () => {
   const { frame } = render("", { FAKE_QUEUE_FAIL: "bad\u001b]0;owned\u0007 token" });
-  assert.match(frame, /queue: could not read - bad\]0;owned token/);
-  assert.doesNotMatch(frame, /\u0007/);
+  // The whole sequence goes, not only its control bytes: a title left as `]0;owned` is still the injected text.
+  assert.match(frame, /queue: could not read - bad token/);
+  assert.doesNotMatch(frame, /[\u0007\u001b]|owned/);
 });
 
-test("a jq that does not run stops the view with what to install", () => {
-  // On PATH but not running: what a broken install looks like.
+test("a jq that does not run changes nothing: the view reads its records itself", () => {
+  // On PATH but not running: what a broken install looks like, or a machine with none.
   const shadow = join(TMP, "nojq");
   mkdirSync(shadow);
   script(join(shadow, "jq"), "#!/bin/sh\nexit 127\n");
   const { frame, status } = render("101", {}, shadow);
-  assert.equal(status, 1);
-  assert.match(frame, /status needs jq \(apt install jq \/ brew install jq\)/);
-  assert.doesNotMatch(frame, /^│ state /m);
+  assert.equal(status, 0);
+  assert.match(frame, /#101/);
+  assert.doesNotMatch(frame, /needs jq/);
 });

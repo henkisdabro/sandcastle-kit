@@ -18,7 +18,6 @@ the same by hand.
 | 🟩 | **Node.js 22.18+** | 24 LTS recommended. The kit runs its TypeScript on Node's own type stripping, which 22.18 is the first Node 22 to turn on. |
 | 📦 | **pnpm** | Installs the kit's dependencies. |
 | 🌿 | **git 2.31+** | Worktrees are the backbone of every run. 2.42 or newer is recommended: older git lands with a weaker check of each landing merge and finds a branch that no longer merges only once it is in a sandbox (before 2.38), or reads no `.gitattributes` in those checks, so a `merge=union` file reads as a conflict (before 2.42). |
-| 🔎 | **jq** | The status view reads run records with it; preinstalled on macOS 15+, not on most Linux. `apt install jq`, `dnf install jq` or `brew install jq`. |
 | 📋 | **procps** (`ps`), on Linux | The status view checks a run is still live with `ps -p <pid> -o command=`; without it every live run reads as ended. Most Linux has it; slim and minimal images do not. `apt install procps` or `dnf install procps-ng`. macOS has `ps` built in. |
 | 🐙 | **GitHub CLI**, signed in | `gh auth login`. Only needed when tickets are GitHub Issues; a project that keeps them as files in the repo can skip it. |
 | 🧠 | **A Claude subscription or Anthropic API key** | For the implement and review agents. A subscription token comes from `claude setup-token`, so Claude Code must be installed somewhere. |
@@ -61,7 +60,7 @@ install ends with it; to run it again later: `sandcastle setup`.
    already in it.
 6. **Inside Herdr, offers the kit's plugin** (`sandcastle herdr configure`): it shows what it adds
    to Herdr's config and asks first, with yes as the default.
-7. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `jq`, `ps` on Linux) and prints the fix
+7. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `ps` on Linux) and prints the fix
    for anything missing.
 
 It installs no software. Re-run it any time: finished steps show `ok`; for a credential it also asks whether to replace it (default no) - the way to put in a new token.
@@ -141,7 +140,7 @@ naming both numbers and the key to set. The reasoning is in the README's
 In a project, ask your agent for `/sandcastle update`: it pulls the kit, rebuilds the images,
 re-runs the hook check and the base gates, and walks you through anything in [`CHANGELOG.md`](../CHANGELOG.md)'s
 **Upgrading** notes that affects that project. By hand (pull while no run is live on the machine:
-a live run reads the kit's `prompts/`, `container/` and `status.sh` from disk, so a pull changes
+a live run reads the kit's `prompts/` and `container/` from disk and starts each status view from `status.sh` and `src/status-*.ts`, so a pull changes
 what its later tickets are built from; `sandcastle doctor` lists the live runs):
 
 ```bash

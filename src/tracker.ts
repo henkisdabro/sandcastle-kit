@@ -354,7 +354,8 @@ const github = (project: Project): Tracker => {
       BLOCKED:
         "Comment on ticket {{TICKET}} explaining what you\nlearned and what a human must decide, then add the labels:\n\n" +
         `\`\`\`\ngh label create ${project.tracker.held} --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label ${project.tracker.held} --remove-label {{KIT_LABEL}}\n\`\`\``,
-      SAY: "in a comment on the ticket",
+      // A repair agent that was told only "in a comment" said it had no tool to post one, and skipped it.
+      SAY: "in a comment on the ticket (`gh issue comment {{ISSUE_NUMBER}} --body-file <file>`)",
     },
     dryRunNote:
       "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any ticket " +

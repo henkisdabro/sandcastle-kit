@@ -25,7 +25,8 @@
 //    can fail with ENOTEMPTY. (Not `gc.auto`: a pair for it would stop `hostGitConfig` adding its own, and hide a
 //    broken `disableHostGitGc` from test/landing-queue.test.ts.)
 //  - Names the code reads as a setting or a credential are removed: HERDR_*, TMUX*, SANDCASTLE_* (but not
-//    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests) and the names in `SCRUBBED` below. A test that
+//    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests and which are the tests' own switches, such as
+//    SANDCASTLE_TEST_NOW, the fixture clock: test/status-clock.ts) and the names in `SCRUBBED` below. A test that
 //    needs one sets it itself. test/hermetic-env.test.ts fails when `src/` reads a name that is neither
 //    scrubbed nor on its short keep list, so a new setting cannot leak in later.
 //
@@ -44,6 +45,10 @@ export const SCRUBBED = [
   "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY", "LINEAR_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID",
   // The terminal the click hint senses (src/click-hint.ts), and the colour switch.
   "TERM_PROGRAM", "LC_TERMINAL", "VTE_VERSION", "KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "NO_COLOR",
+  // The status view's pane size and colour depth (src/status-view.ts): a test of a frame gives its own.
+  "TERM_COLS", "TERM_ROWS", "COLUMNS", "COLORTERM",
+  // The live status view's test knobs (src/status-view.ts): how many frames it draws, where a frame's errors go.
+  "STATUS_FRAMES", "STATUS_ERRLOG",
 ];
 
 /** Whether the preload removes this name from a test's environment. */

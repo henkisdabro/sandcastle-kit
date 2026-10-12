@@ -8,7 +8,7 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, open
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { DockerAnswerError, reapOrphans, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
+import { DockerAnswerError, reapOrphans, recordFork, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
 import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
@@ -1286,6 +1286,12 @@ export type Exclusive = <T>(fn: () => T | Promise<T>) => Promise<T>;
 
 /** Sandcastle's own limit on making a sandbox's worktree (`WORKTREE_TIMEOUT_MS`), which the kit's add now meets in its place. */
 const WORKTREE_ADD_MS = 30_000;
+let worktreeAddMs = WORKTREE_ADD_MS;
+
+/** Replaces the limit `addWorktree` runs under when its caller passes none (a test's seam, as `inject` in `src/pool.ts`: a test that opens sandboxes on a loaded machine); with no argument, restores the 30 s. */
+export const injectWorktreeLimit = (ms?: number) => {
+  worktreeAddMs = ms ?? WORKTREE_ADD_MS;
+};
 
 /**
  * Creates the worktree Sandcastle's `createSandbox` would, at the path it uses (`.sandcastle/worktrees/<branch with
@@ -1298,7 +1304,7 @@ const WORKTREE_ADD_MS = 30_000;
  * Sandcastle's did: asynchronously, or every other pipeline would wait for the checkout, and within `limitMs`, or an
  * add that never ends would hold the host-git mutex, and with it every landing, for good. Exported for its test.
  */
-export const addWorktree = async (project: Project, branch: string, limitMs = WORKTREE_ADD_MS): Promise<void> => {
+export const addWorktree = async (project: Project, branch: string, limitMs = worktreeAddMs): Promise<void> => {
   const dir = join(project.root, ".sandcastle/worktrees");
   const path = join(dir, branch.replace(/\//g, "-"));
   const slash = (p: string) => p.replace(/\\/g, "/");
@@ -1318,6 +1324,8 @@ export const addWorktree = async (project: Project, branch: string, limitMs = WO
   } catch {
     exists = false;
   }
+  // The base tip a new branch is cut from: `staleBaseParents` reads it when the base is later rewritten under a branch that never merged it.
+  const forkedFrom = exists ? undefined : sh("git", ["rev-parse", "--verify", `${project.baseBranch}^{commit}`], project.root);
   const args = [...flags, "worktree", "add", ...(exists ? [path, branch] : ["-b", branch, path, project.baseBranch])];
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -1337,6 +1345,14 @@ export const addWorktree = async (project: Project, branch: string, limitMs = WO
       reject(Object.assign(new Error(`git worktree add ${path} did not finish in ${Math.round(limitMs / 1000)} s`), { stderr: "" }));
     }, limitMs);
   });
+  // After the add, so a refused one leaves no record; a failed write only costs the detector this branch's fork point.
+  if (forkedFrom) {
+    try {
+      recordFork(project.root, branch, forkedFrom);
+    } catch {
+      /* the merge-commit detector alone, as for a branch made before the record */
+    }
+  }
 };
 
 /**

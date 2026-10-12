@@ -10,6 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
 // sandbox.ts derives USER_CONFIG from this at import: nothing here may read the user's real config.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -19,7 +20,6 @@ const { mergeBranch, abortLanding } = await import("../src/burndown.ts");
 const { loadProject } = await import("../src/config.ts");
 const { OperatorError } = await import("../src/errors.ts");
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-land-squash-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 let n = 0;
@@ -143,7 +143,7 @@ const utf8 = (() => {
   }
 })();
 const row7 = (root: string) => {
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     env: {

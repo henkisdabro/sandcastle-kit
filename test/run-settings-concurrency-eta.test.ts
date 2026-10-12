@@ -5,12 +5,13 @@
 //   pnpm test:file test/run-settings-concurrency-eta.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
+import { readFacts, spawnStatus } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-eta-"));
 const live = kitLikeProcess();
@@ -68,12 +69,12 @@ const frame = (): string[] => {
     XDG_CACHE_HOME: join(TMP, "cache"),
   };
   delete env.SANDCASTLE_SETTINGS;
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(import.meta.dirname, "..", "status.sh"), "0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnStatus(["0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   return r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
 };
 const line = (lines: string[], re: RegExp) => lines.find((l) => re.test(l)) ?? "(missing)";
 // The parts the free-slot and ETA maths draw.
-const figures = (lines: string[]) => [line(lines, /^│ +#2 +│/), line(lines, /^│ +#3 +│/), line(lines, /\bends +~/)];
+const figures = (lines: string[]) => [line(lines, /^│ +#2 +│/), line(lines, /^│ +#3 +│/), lines.join("\n").match(/\bends ~\d\d:\d\d/)?.[0] ?? "(missing)"];
 
 test("a settings group's concurrency leaves the free-slot and ETA figures as the top-level value draws them", () => {
   record();
@@ -87,9 +88,9 @@ test("a settings group's concurrency leaves the free-slot and ETA figures as the
     record({ autonomy: 0, turn: 1, cap: 1, repair: 1, concurrency: 6, asked: 8 });
     withGroup = frame();
   }
-  assert.match(line(withGroup, /^│ settings /), /concurrency 6 \(asked 8\)/);
+  assert.ok(readFacts(withGroup.join("\n"), REPO).settings?.some((i) => /concurrency 6 \(asked 8\)/.test(i)), "the settings show the asked concurrency");
   assert.match(figures(before)[0], /next to start/);
   assert.match(figures(before)[1], /1 ahead of it/);
-  assert.match(figures(before)[2], /ends +~\d\d:\d\d/);
+  assert.match(figures(before)[2], /ends ~\d\d:\d\d/);
   assert.deepEqual(figures(withGroup), figures(before));
 });

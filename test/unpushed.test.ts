@@ -6,11 +6,12 @@
 //   pnpm test:file test/unpushed.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { after, test } from "node:test";
+import { spawnStatus } from "./status-run.ts";
 
 // The machine-wide slots live under the cache dir; a test must not take real ones.
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-unpushed-"));
@@ -27,7 +28,6 @@ test("the close comment says the work is merged locally, not pushed", () => {
   assert.ok(!closeComment({ branch: "agent/issue-7", commits: 2, repairs: 0 }, "test").includes("repair"));
 });
 
-const KIT = join(import.meta.dirname, "..");
 const FAKE = join(TMP, "bin");
 mkdirSync(FAKE);
 const script = (path: string, body: string) => {
@@ -56,7 +56,7 @@ const makeRepo = (name: string, remote: boolean) => {
 };
 
 const titleOf = (repo: string): string => {
-  const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+  const r = spawnStatus(["0", "all"], {
     cwd: repo,
     encoding: "utf8",
     env: {

@@ -10,14 +10,20 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { RUN_COMMAND } from "../mod/hooks/run-live.ts";
 import { startNode } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
+import { buildFixture } from "./status-fixture.ts";
+import { machineSlots } from "./status-run.ts";
 
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = cache;
 const { liveSlots, slotsByRun, usage } = await import("../src/pool.ts");
+
+// The status view's machine lane reads the same slots; the project it draws is made up.
+const viewFixture = buildFixture("legacy", join(cache, "view"));
+after(() => viewFixture.stop());
 
 const pool = join(import.meta.dirname, "../src/pool.ts");
 const slots = join(cache, "sandcastle-kit", "slots");
@@ -144,13 +150,7 @@ test("slots are counted per run: several of one, a lock that names no run, a dea
     assert.deepEqual([...slotsByRun("sandboxes")].sort(), [["aaaa", 2], [`pid:${other.pid}`, 1]].sort());
     assert.match(usage(), /^sandboxes 3\/\d+ · gates 0\/\d+$/);
     // The status view reads the pid on the line's first field only.
-    const shell = spawnSync("bash", ["-c", `eval "$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p;/^load_pool() {/,/^}/p' status.sh)"; load_pool; echo "$USED_sandboxes $USED_gates"`], {
-      cwd: join(import.meta.dirname, ".."),
-      env: { ...process.env, XDG_CACHE_HOME: cache },
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    assert.equal(shell.stdout.trim(), "3 0", shell.stderr);
+    assert.deepEqual(machineSlots(viewFixture, { XDG_CACHE_HOME: cache }), { sandboxes: "3/6", gates: "0/2" });
   } finally {
     kit.kill();
     other.kill();

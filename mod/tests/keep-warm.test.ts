@@ -73,6 +73,13 @@ const rowNow = async ($: Parameters<TestBody>[0]) => {
   return row?.text;
 };
 
+/**
+ * Each test moves the clock an hour or more, and every wait due on the way resolves in turn: a live run's look every
+ * 3 s, the refresh's tick every minute. So each moves only as far as its claim needs - just past the next point a
+ * refresh would be due - and has more than the kit's 5 s, which a loaded machine took from the longest.
+ */
+const HOURS = { timeoutMs: 20_000 };
+
 /** The session starts, uses the skill (so it closes the run) and lets the first look and tick pass. */
 const begin = async ($: Parameters<TestBody>[0], w: ReturnType<typeof world>) => {
   await $.session.start(START);
@@ -80,7 +87,7 @@ const begin = async ($: Parameters<TestBody>[0], w: ReturnType<typeof world>) =>
   await w.clock.advance(5000);
 };
 
-test("a tick past 55 minutes of silence refreshes the cache once and redraws the row", async ($, on) => {
+test("a tick past 55 minutes of silence refreshes the cache once and redraws the row", HOURS, async ($, on) => {
   const w = world(on);
   await begin($, w);
   expect(w.forks).toEqual([]);
@@ -89,11 +96,11 @@ test("a tick past 55 minutes of silence refreshes the cache once and redraws the
   expect(w.forks).toEqual(["Reply with the single word: ok"]);
   expect(await rowNow($)).toMatch(/^cache refreshed \d\d:\d\d · 158k read$/);
   // The next refresh is 55 minutes after this one, not at every tick.
-  await w.clock.advance(30 * MIN);
+  await w.clock.advance(5 * MIN);
   expect(w.forks.length).toBe(1);
 });
 
-test("a subagent's turn ending does not put the refresh off", async ($, on) => {
+test("a subagent's turn ending does not put the refresh off", HOURS, async ($, on) => {
   const w = world(on);
   await begin($, w);
   await w.clock.advance(40 * MIN);
@@ -102,61 +109,62 @@ test("a subagent's turn ending does not put the refresh off", async ($, on) => {
   expect(w.forks.length).toBe(1);
 });
 
-test("a turn of the main thread restarts the 55 minutes", async ($, on) => {
+test("a turn of the main thread restarts the 55 minutes", HOURS, async ($, on) => {
   const w = world(on);
   await begin($, w);
-  await w.clock.advance(40 * MIN);
+  await w.clock.advance(10 * MIN);
   await $.turn.complete({ ...ENDED, answer: "checked in" });
-  await w.clock.advance(30 * MIN);
+  // Past the 55 minutes from the start, short of 55 from the turn.
+  await w.clock.advance(50 * MIN);
   expect(w.forks.length).toBe(0);
-  await w.clock.advance(30 * MIN);
+  await w.clock.advance(8 * MIN);
   expect(w.forks.length).toBe(1);
 });
 
-test("no live run, no call", async ($, on) => {
+test("no live run, no call", HOURS, async ($, on) => {
   const w = world(on, { alive: false });
   await begin($, w);
-  await w.clock.advance(3 * 60 * MIN);
+  await w.clock.advance(60 * MIN);
   expect(w.forks).toEqual([]);
   expect(await rowNow($)).toBeUndefined();
 });
 
-test("a run recorded with keepWarm false is never refreshed", async ($, on) => {
+test("a run recorded with keepWarm false is never refreshed", HOURS, async ($, on) => {
   const w = world(on, { keepWarm: false });
   await begin($, w);
-  await w.clock.advance(3 * 60 * MIN);
+  await w.clock.advance(60 * MIN);
   expect(w.forks).toEqual([]);
   expect(await rowNow($)).toBeUndefined();
 });
 
-test("overage leaves the cache to lapse and the row says so", async ($, on) => {
+test("overage leaves the cache to lapse and the row says so", HOURS, async ($, on) => {
   const w = world(on);
   w.rateLimits = [{ kind: "spend_limit", percentUsed: 100, resetsAt: "2026-10-10T12:00:00.000Z" }];
   await begin($, w);
-  await w.clock.advance(3 * 60 * MIN);
+  await w.clock.advance(60 * MIN);
   expect(w.forks).toEqual([]);
   expect(await rowNow($)).toBe("cache 5m · not warmed (a cold restart costs less)");
 });
 
-test("a refresh that finds the cache lapsed is not repeated; a turn earns one more try, and a second miss ends them", async ($, on) => {
+test("a refresh that finds the cache lapsed is not repeated; a turn earns one more try, and a second miss ends them", HOURS, async ($, on) => {
   const w = world(on);
   w.answers = [MISS];
   await begin($, w);
   await w.clock.advance(56 * MIN);
   expect(w.forks.length).toBe(1);
   expect(await rowNow($)).toBe("cache 5m · not warmed (a cold restart costs less)");
-  await w.clock.advance(2 * 60 * MIN);
+  await w.clock.advance(60 * MIN);
   expect(w.forks.length).toBe(1);
   await $.turn.complete({ ...ENDED, answer: "back" });
   await w.clock.advance(56 * MIN);
   expect(w.forks.length).toBe(2);
   await $.turn.complete({ ...ENDED, answer: "back again" });
-  await w.clock.advance(3 * 60 * MIN);
+  await w.clock.advance(60 * MIN);
   expect(w.forks.length).toBe(2);
   expect(await rowNow($)).toBeUndefined();
 });
 
-test("a fork that is not answered is logged and counted as a miss", async ($, on) => {
+test("a fork that is not answered is logged and counted as a miss", HOURS, async ($, on) => {
   const w = world(on);
   w.answers = [{ isAnswered: false, reason: "api-error" }];
   await begin($, w);
@@ -164,6 +172,6 @@ test("a fork that is not answered is logged and counted as a miss", async ($, on
   expect(w.forks.length).toBe(1);
   expect(w.logs.length).toBe(1);
   expect(w.logs[0]).toContain("api-error");
-  await w.clock.advance(2 * 60 * MIN);
+  await w.clock.advance(60 * MIN);
   expect(w.forks.length).toBe(1);
 });

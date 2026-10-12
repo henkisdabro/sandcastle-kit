@@ -107,12 +107,6 @@ const tsPrefixes = (src: string): string[] => [
   ...[...src.matchAll(/\.startsWith\((["'`])([^"'`]*)\1/g)].map((m) => m[2]),
 ];
 
-/** Prefix matches in shell: a case arm or `[[ == ]]` pattern ending in `*`, and a quoted `^…` regex (grep, awk, `=~`). */
-const shPrefixes = (src: string): string[] => [
-  ...[...src.matchAll(/(?:^|[|(\s])("?)([A-Za-z][^"|()*\n]*)\1\*(?=[|)\s\]])/gm)].map((m) => m[2]),
-  ...[...src.matchAll(/['"]\^([^'"\n]*)/g)].map((m) => literal(m[1])),
-];
-
 const matchesALine = (prefix: string) => prefix.length > 1 && LINE_STARTS.some((s) => s.startsWith(prefix) || prefix.startsWith(s));
 
 const files = (dir: string, ext: RegExp): string[] =>
@@ -125,18 +119,12 @@ test("the scan finds a reader that matches outcome text, so its silence below me
   assert.ok(tsPrefixes(`t.state === "red" && /^red (with|on the merged)/.test(t.note ?? "")`).some(matchesALine));
   assert.ok(tsPrefixes(`held.filter((id) => /^marked (for a human|needs-human)/.test(f.tickets[id].note ?? ""))`).some(matchesALine));
   assert.ok(tsPrefixes(`text.startsWith("gate red")`).some(matchesALine));
-  assert.ok(shPrefixes(`    "gate red"*|"red when merged"*|"red again"*) printf 'gate red';;`).some(matchesALine));
-  assert.ok(shPrefixes(`    uncommitted*) printf 'uncommitted';;`).some(matchesALine));
-  assert.ok(shPrefixes(`grep -q '^merge conflict' <<<"$x"`).some(matchesALine));
-  // A kind compared whole is no prefix.
-  assert.ok(!shPrefixes(`    red|"gate red") printf 'gate red';;`).some(matchesALine));
 });
 
-test("no reader in src/, mod/ or status.sh matches an outcome's text with a regex or prefix", () => {
+test("no reader in src/ or mod/ matches an outcome's text with a regex or prefix", () => {
   const found: string[] = [];
   for (const f of [...files("src", /\.ts$/), ...files("mod", /\.tsx?$/)]) {
     for (const p of tsPrefixes(readFileSync(join(KIT, f), "utf8")).filter(matchesALine)) found.push(`${f}: ${p}`);
   }
-  for (const p of shPrefixes(readFileSync(join(KIT, "status.sh"), "utf8")).filter(matchesALine)) found.push(`status.sh: ${p}`);
   assert.deepEqual(found, [], "read the outcome's kind (mod/hooks/run-record.ts), not its line");
 });

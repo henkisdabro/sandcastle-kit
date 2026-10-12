@@ -19,6 +19,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
+import { buildFixture } from "./status-fixture.ts";
+import { drawFrame } from "./status-run.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 delete process.env.LINEAR_API_KEY;
@@ -112,7 +114,7 @@ test("printed run strings, prompts and the status view carry no issue wording", 
   // What a run prints that needs Docker to render: read from the source instead.
   const files = ["src", "prompts"].flatMap((d) => readdirSync(join(kit, d)).map((f) => join(kit, d, f)));
   const banned = /issue\(s\)|per issue|queued issue|each issue|issue tracker:|the issue\b|\bthis issue\b|\bthe issue's\b/;
-  for (const f of [...files, join(kit, "status.sh")]) {
+  for (const f of files) {
     const bad = readFileSync(f, "utf8")
       .split("\n")
       // Comments are for the kit's developers; a printed or read string is not a comment.
@@ -120,9 +122,16 @@ test("printed run strings, prompts and the status view carry no issue wording", 
       .filter((l) => banned.test(l.replace(/GitHub issues?/g, "")));
     assert.deepEqual(bad, [], `${f} still says issue in a string a person or agent reads`);
   }
-  const status = readFileSync(join(kit, "status.sh"), "utf8");
-  assert.match(status, /\$\{head\}TICKET\$\{off\}/);
-  assert.doesNotMatch(status, /\$\{head\}ISSUE\$\{off\}/);
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-ticket-wording-view-"));
+  const fixture = buildFixture("legacy", dir);
+  try {
+    const drawn = drawFrame(fixture, { cols: 120 });
+    assert.equal(drawn.status, 0, drawn.stderr);
+    assert.match(drawn.frame, /│ TICKET +│/);
+    assert.doesNotMatch(drawn.frame, /\bISSUE\b/);
+  } finally {
+    fixture.stop();
+  }
 });
 
 // ---------------------------------------------------------------------------

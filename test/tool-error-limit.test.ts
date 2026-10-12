@@ -6,14 +6,14 @@
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { kitLikeProcess } from "./kit-process.ts";
 import { isToolFailureLine, logSaysLimit } from "../src/run.ts";
+import { spawnStatus } from "./status-run.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-tool-error-limit-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 
@@ -60,7 +60,7 @@ const frameFor = (name: string, logText: string) => {
     }),
   );
   try {
-    const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
+    const r = spawnStatus(["0", "all"], {
       encoding: "utf8",
       env: {
         ...process.env,
