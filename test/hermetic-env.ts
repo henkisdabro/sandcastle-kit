@@ -47,6 +47,8 @@ export const SCRUBBED = [
   "TERM_PROGRAM", "LC_TERMINAL", "VTE_VERSION", "KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "NO_COLOR",
   // The status view's pane size and colour depth (src/status-view.ts): a test of a frame gives its own.
   "TERM_COLS", "TERM_ROWS", "COLUMNS", "COLORTERM",
+  // The live status view's test knobs (src/status-view.ts): how many frames it draws, where a frame's errors go.
+  "STATUS_FRAMES", "STATUS_ERRLOG",
 ];
 
 /** Whether the preload removes this name from a test's environment. */
