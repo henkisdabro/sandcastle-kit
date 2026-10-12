@@ -38,11 +38,13 @@ const { greenProofOfBase, noteGreenCommit, requireGreenBase, verifyBase } = awai
 const { loadProject } = await import("../src/config.ts");
 const { writePlan } = await import("../src/lean.ts");
 const { landOne, createHostGit } = await import("../src/landing.ts");
-const { gitFingerprint } = await import("../src/guard.ts");
+const { gitFingerprint, injectWorktreeLimit } = await import("../src/guard.ts");
 const { inject } = await import("../src/pool.ts");
 const { commandOf } = await import("../src/live-runs.ts");
 // This process takes slots, as a run would: `ps` would call it a test runner, and its slot stale.
 inject({ probe: (pid) => (pid === process.pid ? everyPidIsTheKit() : commandOf(pid)) });
+// Under a loaded machine a worktree add for the gate-only sandbox has run past its production 30 s; nothing here depends on that limit.
+injectWorktreeLimit(120_000);
 type Ctx = import("../src/landing.ts").LandContext;
 type Opener = import("../src/land.ts").Opener;
 
