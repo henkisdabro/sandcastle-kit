@@ -43,8 +43,11 @@ export type GateRun = {
   pressureFull?: number;
   head?: string;
   rewrote?: string[];
-  /** Set when `runGates` ran the red gate again inside the same slot (`rerunOnRed`): the run that went red. This result is the re-run's, its `gates` the passes before the red gate and then the re-run's. */
-  rerunOf?: GateRun;
+  /**
+   * Set when `runGates` ran the red gate again inside the same slot (`rerunOnRed`): the run that went red, and its `ms`, the
+   * time it held the slot. This result is the re-run's, its `gates` the passes before the red gate and then the re-run's.
+   */
+  rerunOf?: GateRun & { ms?: number };
 };
 
 // Start and end of a gate's output: the first compiler error is at the top,
@@ -185,7 +188,9 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
     if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
+    const began = Date.now();
     const first = await pass(startAt(from));
+    const firstMs = Date.now() - began;
     const red = first.failure;
     const redAt = red ? first.gates.findIndex((g) => g.name === red.name) : -1;
     // The red gate's one re-run (`PipelineContext.regate`) is inside this slot: a second `withSlot` would queue behind
@@ -195,7 +200,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     progress.again?.(red.name);
     const rerun = await pass(startAt(red.name));
     // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
-    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs } };
+    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs, ms: firstMs } };
   }, progress.wait, undefined, priority);
 };
 
@@ -593,6 +598,29 @@ export const failingTestFile = (id: string) => {
 export const gateRed = (result: unknown): string[] | undefined => {
   const gates = (result as { gates?: Gate[] } | undefined)?.gates;
   return Array.isArray(gates) ? gates.filter((g) => !g.pass).map((g) => g.name) : undefined;
+};
+
+/**
+ * A gate step's timings lines: one, or for a run that re-ran its red gate inside its slot (`rerunOf`), the red run's
+ * line and then the re-run's, as two separate runs wrote them. One line for both read as a single green pass: the
+ * ticket card lost the red run, and the closing summary the memory pressure read while it went red. The wait is the
+ * red run's, and the re-run's line has only its own gates.
+ */
+export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, result: unknown): Record<string, unknown>[] => {
+  const r = result as GateRun | undefined;
+  const red = r?.rerunOf;
+  if (!red || typeof red.ms !== "number" || !Array.isArray(r?.gates)) return [line];
+  const ms = Math.min(Math.max(0, Math.round(red.ms)), line.ms);
+  const redAt = red.failure ? red.gates.findIndex((g) => g.name === red.failure!.name) : -1;
+  const { waitMs, ...rest } = line;
+  // The re-run's figures, which the red run's line must not carry: absent there unless the red run has its own.
+  const { gates: _gates, peakMib: _peak, pressureSome: _some, pressureFull: _full, red: _red, ...common } = rest as Record<string, unknown>;
+  const redGates = gateRed(red);
+  // Undefined values are left out of the line by `JSON.stringify`.
+  return [
+    { ...common, ms, ...(waitMs ? { waitMs } : {}), ok: false, gates: gateMs(red), peakMib: peakOf(red), ...pressureFields(pressureOf(red)), red: redGates?.length ? redGates : undefined },
+    { ...rest, ms: line.ms - ms, gates: gateMs({ gates: r.gates.slice(Math.max(0, redAt)) }) },
+  ];
 };
 
 /**

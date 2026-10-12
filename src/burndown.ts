@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -2817,8 +2817,10 @@ export const burndown = async (
     let pressure: ReturnType<typeof pressureOf>;
     let red: string[] | undefined;
     let times: ReturnType<typeof stepTimes> | undefined;
+    let ended: unknown;
     try {
       const result = await fn();
+      ended = result;
       times = stepTimes(Date.now() - since, result);
       // Only the wait inside the step is in `took`; the slot wait before it never was (see `withQueued`).
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
@@ -2854,7 +2856,8 @@ export const burndown = async (
         ...pressureFields(pressure),
         ...(red?.length ? { red } : {}),
       };
-      appendFileSync(timings, JSON.stringify(line) + "\n");
+      // A red gate's re-run inside its slot is a line of its own after the red run's (`timingLines`).
+      appendFileSync(timings, timingLines(line, ended).map((l) => JSON.stringify(l) + "\n").join(""));
     }
   };
 
