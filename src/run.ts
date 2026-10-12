@@ -798,7 +798,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
 // ---------------------------------------------------------------------------
 // Typical times - how long each step of an issue usually takes in this
 // project, from earlier runs' timings. The status view marks a step running
-// at twice its usual time (and says so in words at three times), and estimates when landing starts: a run that is
+// at twice its usual time - the 75th percentile of the step, so a phase with a fast and a slow kind of run is judged by the slow one (and says so in words at three times), and estimates when landing starts: a run that is
 // busy but healthy and one that is stuck looked the same for an hour.
 // ---------------------------------------------------------------------------
 
@@ -834,7 +834,7 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
 };
 
 /**
- * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
+ * Seconds per step (the 75th percentile of the window's steps of a phase), and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
  * `LANDING_GATES` is one ticket's landing gates summed, the median over the window's tickets that landed (a fast-forward,
  * with no gate, counts 0; a held, red or conflicted ticket, or one from before landings were timed, is no landing), and
  * absent when the window has no landing.
@@ -867,7 +867,9 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
     byIssue.set(key, (byIssue.get(key) ?? 0) + l.ms!);
   }
   const out: Record<string, number> = {};
-  for (const [phase, ms] of byPhase) out[phase] = Math.round(median(ms)! / 1000);
+  // A phase can have two kinds of run (gates on a warm build cache, on a cold one): its median is the fast kind, and
+  // every slow run then reads as stuck. The 75th percentile judges it against the slow kind.
+  for (const [phase, ms] of byPhase) out[phase] = Math.round(percentile(ms, USUAL)! / 1000);
   const issue = median([...byIssue.values(), ...extra]);
   if (issue !== undefined) out.issue = Math.round(issue / 1000);
   if (landing.size) {
@@ -916,6 +918,8 @@ export const isCarried = (root: string, base: string, id: string): boolean => {
 /** The nearest-rank percentile, `p` in (0, 1]; the median above takes the middle one, this the one a fraction `p` of the list is at or below. */
 const percentile = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length, Math.max(1, Math.ceil(xs.length * p))) - 1];
 const HIGH = 0.8;
+/** The percentile of a phase's recent steps that `typicalTimes` calls its usual time. */
+const USUAL = 0.75;
 /** A history run is of a similar load when its concurrency is within this many of the run's; at least `LOAD_RUNS` of them price the gate times. */
 const LOAD_BAND = 1;
 const LOAD_RUNS = 2;
