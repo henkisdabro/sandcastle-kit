@@ -394,7 +394,10 @@ export const compareFacts = (a: Facts, b: Facts): string[] => {
 // A pane's size and the pty's flags are read and changed from a helper the wrapper starts inside the
 // pty, which takes its commands from a FIFO: `script` cannot resize the terminal it made, and a
 // process on the slave side can (`stty rows R cols C`), which signals the view as a resize does.
-// `script`'s stdin is that FIFO too, not the socket Node would pass: BSD's refuses a socket.
+// The keys typed reach `script` through a pipe that `cat` fills from a second FIFO. Never the FIFO or
+// Node's stdio itself: macOS builds a FIFO on a socket, as Node does a stdio pipe, and BSD `script`
+// exits at once on either (`tcgetattr/ioctl: Operation not supported on socket`) where util-linux's
+// carries on. A pipe(2) gives BSD's `tcgetattr` the ENOTTY it accepts.
 // ---------------------------------------------------------------------------
 
 /** Whether `script(1)` is installed: a test that needs a terminal skips without it. */
@@ -497,11 +500,24 @@ kill $helper 2>/dev/null
   fixture.mark = readFileSync(fixture.pids, "utf8").split("\n").filter(Boolean).length;
   const sessionEnv: NodeJS.ProcessEnv = { ...viewEnv(fixture, { SANDCASTLE_LINKS: "", HERDR_ENV: "", ...env }) };
   for (const name of ["TERM_COLS", "TERM_ROWS", "COLUMNS", "LINES"]) delete sessionEnv[name];
-  const child: ChildProcess = spawn("script", scriptArgs, { env: sessionEnv, stdio: [inFd, "pipe", "pipe"] });
+  // `exec` keeps `script` the child, so `done` is its end; `cat` ends by itself once `inFd` (the FIFO's only writer) closes.
+  const child: ChildProcess = spawn("bash", ["-c", 'fifo=$1; shift; exec "$@" < <(exec cat "$fifo")', "session", input!, "script", ...scriptArgs], {
+    env: sessionEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let out = "";
+  let err = "";
+  let gone = false;
   child.stdout!.setEncoding("utf8").on("data", (chunk: string) => (out += chunk));
-  child.stderr!.on("data", () => {});
+  child.stderr!.setEncoding("utf8").on("data", (chunk: string) => (err += chunk));
   const done = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  void done.then(() => (gone = true));
+  let inputOpen = true;
+  const endInput = () => {
+    if (!inputOpen) return;
+    inputOpen = false;
+    closeSync(inFd);
+  };
   let closed = false;
   const close = () => {
     if (closed) return;
@@ -514,7 +530,8 @@ kill $helper 2>/dev/null
       if (pid) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
     }
     child.kill("SIGKILL");
-    for (const fd of [inFd, ctlFd]) try { closeSync(fd); } catch { /* closed */ }
+    endInput();
+    try { closeSync(ctlFd); } catch { /* closed */ }
     rmSync(dir, { recursive: true, force: true });
   };
   sessions.add(close);
@@ -527,7 +544,12 @@ kill $helper 2>/dev/null
     }
     return found;
   };
-  const pid = await until("the view to start", () => (existsSync(files.pid) && readFileSync(files.pid, "utf8").trim() ? Number(readFileSync(files.pid, "utf8")) : undefined));
+  const pid = await until("the view to start", () => {
+    if (existsSync(files.pid) && readFileSync(files.pid, "utf8").trim()) return Number(readFileSync(files.pid, "utf8"));
+    // A `script` that cannot make the terminal ends at once: fail with its words, not after the wait.
+    if (gone) throw new Error(`script ended before the view started: ${err.trim() || out.trim() || "no output"}`);
+    return undefined;
+  });
   const session: Session = {
     pid,
     output: () => out,
@@ -542,7 +564,17 @@ kill $helper 2>/dev/null
     },
     signal: (name) => process.kill(pid, name),
     ended: async (after, ms = 20_000) => {
-      const exited = await Promise.race([done.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), ms))]);
+      // BSD `script` outlives its child until its stdin ends, so the input is closed once the wrapper has read the
+      // terminal back (`after` is its last write); util-linux's has ended by then.
+      let waiting = true;
+      const wrappedUp = (async () => {
+        while (waiting && !gone && !existsSync(files.after)) await new Promise((resolve) => setTimeout(resolve, 10));
+        if (waiting) endInput();
+        await done;
+        return true;
+      })();
+      const exited = await Promise.race([wrappedUp, new Promise<false>((resolve) => setTimeout(() => resolve(false), ms))]);
+      waiting = false;
       if (!exited) throw new Error(`the view did not end ${ms / 1000}s after ${after} (output ends ${JSON.stringify(out.slice(-80))})`);
       return { status: Number(readFileSync(files.status, "utf8")), before: readFileSync(files.before, "utf8"), after: readFileSync(files.after, "utf8") };
     },
