@@ -31,7 +31,7 @@ import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, forgetFork, ownCommitList, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
-import { refOf, type Tracker } from "./tracker.ts";
+import { readTicketState, refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
 
 // "with #12" names the branches merged before it that changed the same files.
@@ -334,7 +334,7 @@ export type LandContext = {
   /** The heartbeat's: told when a landing starts waiting for a machine-wide sandbox slot and when it has one, so the wait is not counted as landing time. */
   slotWait?: (issue: string, state: "waiting" | "taken") => void;
   /** The tracker's word since the run began: closed, taken out of the queue, sent to a human. */
-  withdrawal: (id: string) => { held: boolean; reason: string } | undefined;
+  withdrawal: (id: string) => { held: boolean; reason: string } | undefined | Promise<{ held: boolean; reason: string } | undefined>;
   /** Where every write to the host's git goes. */
   host: HostGit;
   /** Gates a merged tree in the sandbox `opener` opened: the gates of the run, on a tree no pipeline gated. Its wait for a machine-wide gates slot goes before the run's ticket gates (`runGates`'s `priority`). */
@@ -476,7 +476,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
     // Someone's decision, not a failure: reported as "not landed", it came
     // back as a branch to fix and merge. A ticket sent to a human is theirs
     // now, its branch there if it helps; one closed or unqueued is done with.
-    const called = withdrawal(o.issue);
+    const called = await withdrawal(o.issue);
     if (called?.held) return { kind: "taken-back" };
     if (called) return { kind: "withdrawn", reason: called.reason };
     if (o.status === "merged-earlier") {
@@ -501,7 +501,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   let overrun: string[] = [];
   try {
     const record = readHeads(root)[o.issue];
-    overrun = touchesOverrun(root, base, o.head!, tracker.get(o.issue).body ?? "", new Set(record?.branch === o.branch ? record.repaired : []));
+    overrun = touchesOverrun(root, base, o.head!, (await readTicketState(tracker, o.issue)).body ?? "", new Set(record?.branch === o.branch ? record.repaired : []));
   } catch {
     overrun = [];
   }

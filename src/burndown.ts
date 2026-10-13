@@ -50,7 +50,7 @@ import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
@@ -195,10 +195,10 @@ export const attempted = (issue: string, result: PromiseSettledResult<Outcome>, 
  * human read as a ticket that needed no work. Work left uncommitted is a refused commit, not a
  * hand-back; a dry run's agents write nothing; an unreadable tracker leaves it "no change".
  */
-export const handBack = (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get">, at: { uncommitted: boolean; dryRun: boolean }): Outcome => {
+export const handBack = async (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get" | "getAsync">, at: { uncommitted: boolean; dryRun: boolean }): Promise<Outcome> => {
   if (!tracker.agentsWrite || at.dryRun || o.status !== "nochange" || at.uncommitted) return o;
   try {
-    return tracker.get(o.issue).held ? { ...o, handedBack: true } : o;
+    return (await readTicketState(tracker, o.issue)).held ? { ...o, handedBack: true } : o;
   } catch {
     return o;
   }
@@ -3292,8 +3292,8 @@ export const burndown = async (
   // called off, and again before landing, so none of it merges. A `TICKETS=`
   // ticket that never carried the label started with no status, so its status
   // is not checked.
-  const withdrawal = (id: string): { held: boolean; reason: string } | undefined => {
-    const now = tracker.get(id);
+  const withdrawal = async (id: string): Promise<{ held: boolean; reason: string } | undefined> => {
+    const now = await readTicketState(tracker, id);
     const startedAs = candidates.find((i) => i.id === id)?.status;
     if (now.held) return { held: true, reason: "marked for a human during the run" };
     if (!now.open) return { held: false, reason: "ticket closed during the run" };
@@ -3517,9 +3517,9 @@ export const burndown = async (
     noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
     // A tracker that cannot be read is no reason to skip: the check before landing asks again.
-    const called = (() => {
+    const called = await (async () => {
       try {
-        return withdrawal(issue.id);
+        return await withdrawal(issue.id);
       } catch {
         return undefined;
       }
@@ -3557,7 +3557,7 @@ export const burndown = async (
       return attempted(issue.id, result, check);
     }
     // Its ending arrives complete: an agent's hand-back is read now, not patched in after the schedule.
-    const ended = result.status === "fulfilled" ? { ...result, value: handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
+    const ended = result.status === "fulfilled" ? { ...result, value: await handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
     // A requeued ticket's second pipeline replaces its first in the per-issue lines.
     dropFirstResult(issue.id);
     results.push(ended.status === "rejected" ? { ...ended, issue: issue.id } : ended);

@@ -217,26 +217,31 @@ export class DockerAnswerError extends Error {
   }
 }
 
-// Asked at every close, while other pipelines run on: a synchronous call would hold all of them for each answer. The
-// limit is the kit's own timer, not `execFile`'s: that one waits for the pipes to close, which a hung wrapper's child
-// holds open.
-const dockerAsync = (args: string[], limitMs = DOCKER_ANSWER_MS) =>
+// Asked while other pipelines run on: a synchronous call would hold all of them for each answer. The limit is the
+// kit's own timer, not `execFile`'s: that one waits for the pipes to close, which a hung wrapper's child holds open.
+// A failure carries the program's stderr on `stderr`, as `sh`'s does.
+export const shAsync = (cmd: string, args: string[], limitMs: number, cwd?: string) =>
   new Promise<string>((resolve, reject) => {
     let settled = false;
-    const child = execFile("docker", args, { encoding: "utf8", maxBuffer: MAX_OUTPUT }, (error, stdout, stderr) => {
+    const child = execFile(cmd, args, { encoding: "utf8", maxBuffer: MAX_OUTPUT, cwd }, (error, stdout, stderr) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (error) reject(Object.assign(error, { stderr }));
       else resolve(stdout.trim());
     });
+    // Nothing is ever written to it, as `sh` gives its child no stdin.
+    child.stdin?.end();
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       child.kill("SIGKILL");
-      reject(Object.assign(new Error(`docker ${args[0]} gave no answer in ${Math.round(limitMs / 1000)} s`), { stderr: "" }));
+      reject(Object.assign(new Error(`${cmd} ${args[0]} gave no answer in ${+(limitMs / 1000).toFixed(1)} s`), { stderr: "" }));
     }, limitMs);
   });
+
+// Asked at every close, while other pipelines run on.
+const dockerAsync = (args: string[], limitMs = DOCKER_ANSWER_MS) => shAsync("docker", args, limitMs);
 
 /** What Docker said of a failed call: its error output, else the error's own message. */
 const saidOf = (e: unknown) => {

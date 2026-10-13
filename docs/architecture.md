@@ -456,6 +456,10 @@ of its own, only the `landing` stage; `landingWork(ctx)`: the scheduler's land a
 one `LandContext`; the lines of a requeued ticket; `createHostGit`: the mutex through which every
 host git write goes and which moves the run's expected base; also the landing merge, its abort and
 the conflict line.
+A tracker read made while a run is under way (the check before a ticket starts and before it
+lands, `handBack`, the overrun warning) goes through `readTicketState`: `Tracker.getAsync` where
+the tracker has one (GitHub: `gh` through `shAsync`, which never blocks the event loop and gives up
+at `TRACKER_READ_MS`), else `get`. A timeout is a failed read, which each caller already handles.
 What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it
 asks the ledger's `describe` for
 

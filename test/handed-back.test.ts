@@ -51,7 +51,7 @@ const run = async (t: Tracker, at = { uncommitted: false, dryRun: false }) => {
   });
   const { endings } = await createSchedule<{ id: string }, Outcome, Outcome>({ tickets: [{ id: "4" }] }).run({
     workers: 1,
-    attempt: async () => attempted("4", { status: "fulfilled", value: handBack(NO_CHANGE, t, at) }),
+    attempt: async () => attempted("4", { status: "fulfilled", value: await handBack(NO_CHANGE, t, at) }),
     land: async () => ({ kind: "merged" }),
     host: { check: async () => {}, failed: undefined },
     tell: (c) => ledger.tell(c),
@@ -81,11 +81,11 @@ test("an unreadable tracker leaves it no change, and costs the ticket nothing", 
   assert.deepEqual([r.record.state, r.outcome.kind], ["nochange", "no change"]);
 });
 
-test("no hand-back is read where none can be: work left uncommitted, a dry run, a tracker agents cannot write", () => {
+test("no hand-back is read where none can be: work left uncommitted, a dry run, a tracker agents cannot write", async () => {
   const held = tracker(true);
-  assert.equal(handBack(NO_CHANGE, held, { uncommitted: true, dryRun: false }).handedBack, undefined);
-  assert.equal(handBack(NO_CHANGE, held, { uncommitted: false, dryRun: true }).handedBack, undefined);
-  assert.equal(handBack(NO_CHANGE, tracker(true, false), { uncommitted: false, dryRun: false }).handedBack, undefined);
+  assert.equal((await handBack(NO_CHANGE, held, { uncommitted: true, dryRun: false })).handedBack, undefined);
+  assert.equal((await handBack(NO_CHANGE, held, { uncommitted: false, dryRun: true })).handedBack, undefined);
+  assert.equal((await handBack(NO_CHANGE, tracker(true, false), { uncommitted: false, dryRun: false })).handedBack, undefined);
   // Only a pipeline that changed nothing: a red gate is red, whatever its labels say.
-  assert.equal(handBack({ ...NO_CHANGE, status: "gate-failed" }, held, { uncommitted: false, dryRun: false }).handedBack, undefined);
+  assert.equal((await handBack({ ...NO_CHANGE, status: "gate-failed" }, held, { uncommitted: false, dryRun: false })).handedBack, undefined);
 });
