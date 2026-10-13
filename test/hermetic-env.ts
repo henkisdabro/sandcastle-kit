@@ -1,6 +1,6 @@
 // Preloaded into every test file's process, beside test/no-stray.ts (`--import ./test/hermetic-env.ts` in
 // package.json's `test`, `test:shard` and `test:weights`, and test/run-shards.sh): every test starts from the
-// same environment, whatever shell the developer runs it in. Six things in a developer's shell change what
+// same environment, whatever shell the developer runs it in. Eight things in a developer's shell change what
 // the code under test does, and a Linux sandbox with a clean environment passes them all:
 //
 //  - `TMPDIR` is the realpath of `os.tmpdir()`: on macOS it is a `/var/...` path that git and `process.cwd()`
@@ -29,6 +29,11 @@
 //    network or wait on a remote that does not answer. A local path or `file://` remote still works, and a test of
 //    the lookup puts a fake `git` ahead on `PATH`. test/parent-watch.ts sets it for a child started with its own
 //    environment.
+//  - `XDG_CACHE_HOME` is a directory of the test process's own, whatever the shell had: the kit's machine-wide
+//    cache (src/live-runs.ts's `KIT_CACHE`) holds the newest-release answer keyed by this checkout and its
+//    `origin`, and a test's `doctor` or `--version --json`, its read refused above, wrote a failure there that
+//    hid a newer release from the developer's own idle mark and doctor for an hour. A test that needs a cache of
+//    its own still sets it; a child the test starts inherits this one.
 //  - Names the code reads as a setting or a credential are removed: HERDR_*, TMUX*, SANDCASTLE_* (but not
 //    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests and which are the tests' own switches, such as
 //    SANDCASTLE_TEST_NOW, the fixture clock: test/status-clock.ts) and the names in `SCRUBBED` below. A test that
@@ -101,7 +106,13 @@ if (process.env.NODE_TEST_CONTEXT) {
   // An empty file, not /dev/null: a test that runs `git config --global` can write to it.
   const globalConfig = join(process.env.TMPDIR, `hermetic-gitconfig-${process.pid}`);
   writeFileSync(globalConfig, "");
-  process.on("exit", () => rmSync(globalConfig, { force: true }));
+  const cache = mkdtempSync(join(process.env.TMPDIR, "sandcastle-xdg-cache-"));
+  process.env.XDG_CACHE_HOME = cache;
+  // One listener for both: a test file that adds its own exit listeners would pass Node's warning limit of ten.
+  process.on("exit", () => {
+    rmSync(globalConfig, { force: true });
+    rmSync(cache, { recursive: true, force: true });
+  });
   process.env.GIT_CONFIG_GLOBAL = globalConfig;
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   for (const name of GIT_IDENTITY) delete process.env[name];

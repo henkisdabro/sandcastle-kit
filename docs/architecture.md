@@ -2481,7 +2481,7 @@ left out, since the prompt is read when the session is idle and a later run may 
 `src/run.ts` and the status view) and `hooks/idle.ts` (pure, imports nothing: the idle mark, one row
 of sand above the prompt between runs in a set-up project. `markText(input)` is the line or
 undefined to clear it, as `{ text, parts }` - the plain text and the same line as coloured parts
-(`name`, `hint`, `muted`; joined by a space they are the text); its one input object is the set-up
+(`name`, `hint`; joined by a space they are the text); its one input object is the set-up
 flag, the machine switch, the project's hidden flag, the dismissed ids, the cache `Entry`, the
 cached version read (`versionRead`) and the time.
 `sandcastle · N ready - /sandcastle run` shows N only while the last good read is under `COUNT_MS`
@@ -2504,8 +2504,10 @@ The newest release is `newestRelease` in `src/upgrading.ts`, not the mod's: the 
 tag in `git ls-remote --tags origin` of the kit checkout (`releaseOut` compares it with the kit's
 release; doctor prints it as an `info` line).
 The read is never a fetch and never waits on a person: `GIT_TERMINAL_PROMPT=0`, ssh in batch mode
-(the person's `GIT_SSH_COMMAND`, else `ssh`, plus `-o BatchMode=yes`), `SIGKILL` at 10 seconds, its
-output in a temp file because a remote helper the kill leaves behind would hold a pipe open.
+(the ssh git would pick - `GIT_SSH_COMMAND`, else `core.sshCommand`, which the variable set for the
+read would otherwise override, else `GIT_SSH`, else `ssh` - plus `-o BatchMode=yes`), `SIGKILL` at
+10 seconds, its output in a temp file because a remote helper the kill leaves behind would hold a
+pipe open.
 It runs only when the kit is the top of its own checkout and has an `origin` (`ls-remote --get-url`,
 which applies `insteadOf`); otherwise null.
 The answer is cached machine-wide in `KIT_CACHE/newest-release/<hash>.json`, keyed by the kit's real
@@ -2519,8 +2521,10 @@ the future (a clock that moved) is read again.
 `MACHINE_KEYS`; only `false` stops the read, and doctor's machine-wide settings check reports a value
 that is not a boolean, as for `idleMark`).
 `test/hermetic-env.ts` and `test/parent-watch.ts` set `GIT_ALLOW_PROTOCOL=file` for tests, so no
-test's `doctor` or `--version --json` reaches a remote; `test/newest-release.test.ts` puts a fake
-`git` ahead on `PATH`.
+test's `doctor` or `--version --json` reaches a remote, and `test/hermetic-env.ts` gives each test
+file a cache directory of its own, so the failure that read caches never lands in the developer's
+`KIT_CACHE` for the same checkout (`test/hermetic-cache.test.ts`); `test/newest-release.test.ts` puts
+a fake `git` ahead on `PATH`.
 The facts are read as the count is: `VersionEntry` (`afterVersionRead`, `parseVersionEntry`,
 `parseVersionFacts`) in one `$.store` key per project root (`version:<root>`), through `due` on the
 same `tried` rule and the same triggers - both reads see a trigger before either consumes it, so the

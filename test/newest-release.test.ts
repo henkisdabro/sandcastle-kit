@@ -109,6 +109,26 @@ test("the read never prompts: no terminal prompt and ssh in batch mode", () => {
   assert.match(line!, /^0\|.*ssh.* -o BatchMode=yes$/);
 });
 
+test("the read keeps the ssh git would use, a core.sshCommand included, with batch mode added", () => {
+  const before = { ...process.env };
+  const n = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+  process.env[`GIT_CONFIG_KEY_${n}`] = "core.sshCommand";
+  process.env[`GIT_CONFIG_VALUE_${n}`] = "ssh -i /home/user/.ssh/kit_key";
+  process.env.GIT_CONFIG_COUNT = String(n + 1);
+  try {
+    newest();
+    assert.equal(reads()[0], "0|ssh -i /home/user/.ssh/kit_key -o BatchMode=yes");
+    // The person's GIT_SSH_COMMAND comes before it, as it does for git.
+    rmSync(cacheHome, { recursive: true, force: true });
+    process.env.GIT_SSH_COMMAND = "ssh -F /home/user/.ssh/other";
+    newest();
+    assert.equal(reads()[1], "0|ssh -F /home/user/.ssh/other -o BatchMode=yes");
+  } finally {
+    for (const name of Object.keys(process.env)) if (!(name in before)) delete process.env[name];
+    Object.assign(process.env, before);
+  }
+});
+
 test("a second call within six hours reads no remote and answers the same", () => {
   tags("v0.2.0");
   const first = newest();

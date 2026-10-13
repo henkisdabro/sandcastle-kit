@@ -71,8 +71,14 @@ const highestRelease = (stdout: string): string | null => {
   return best;
 };
 
-/** The ssh a read uses: the person's own command (`GIT_SSH_COMMAND`) with batch mode on, so a passphrase or host-key question fails the read and never waits for a keyboard. */
-const batchSsh = (env: NodeJS.ProcessEnv): string => `${env.GIT_SSH_COMMAND || (env.GIT_SSH ? `'${env.GIT_SSH.replaceAll("'", "'\\''")}'` : "ssh")} -o BatchMode=yes`;
+/**
+ * The ssh a read uses: the one git would pick (`GIT_SSH_COMMAND`, else `core.sshCommand`, else
+ * `GIT_SSH`, else `ssh`) with batch mode on, so a passphrase or host-key question fails the read and
+ * never waits for a keyboard. `core.sshCommand` is read here because the variable set for the read
+ * overrides it: a remote that needs its own key would never answer.
+ */
+const batchSsh = (kit: string, env: NodeJS.ProcessEnv): string =>
+  `${env.GIT_SSH_COMMAND || git(kit, ["config", "core.sshCommand"]) || (env.GIT_SSH ? `'${env.GIT_SSH.replaceAll("'", "'\\''")}'` : "ssh")} -o BatchMode=yes`;
 
 /**
  * `git ls-remote --tags origin` of the kit checkout: the output, or undefined for a failure. Never
@@ -87,7 +93,7 @@ const lsRemote = (kit: string): string | undefined => {
   try {
     const r = spawnSync("git", ["-C", kit, "ls-remote", "--tags", "origin"], {
       stdio: ["ignore", fd, "ignore"],
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: batchSsh(process.env) },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: batchSsh(kit, process.env) },
       timeout: LS_REMOTE_MS,
       killSignal: "SIGKILL",
     });
