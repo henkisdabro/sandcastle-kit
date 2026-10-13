@@ -164,7 +164,12 @@ export const building = (s: Summary): boolean => (s.counts[LEGEND.findIndex((g) 
  * they fit, then the glyphs alone. A row that wraps would push the prompt down every time a
  * count gains a digit.
  */
-export const band = (s: Summary, columns: number, castle: Castle = CASTLE): Segment[][] => {
+/**
+ * The band's rows: the castle's three rows with the run's name and stage beside the middle one and the legend beside the
+ * base. `cache` (the keep-warm row) goes at the end of the name row when it fits there, before the tokens are dropped;
+ * else on a row of its own, lined up with the text beside the castle - drawn flush under the castle, it read as part of it.
+ */
+export const band = (s: Summary, columns: number, castle: Castle = CASTLE, cache?: string | null): Segment[][] => {
   // Two columns between segments, one between a segment's text and its count.
   const width = (row: Segment[]) => row.reduce((n, seg) => n + seg.text.length + (seg.count === undefined ? 0 : 1 + String(seg.count).length), 2 * (row.length - 1));
   const fit = (tries: Segment[][]) => tries.find((row) => width(row) <= columns) ?? tries.at(-1) ?? [];
@@ -180,7 +185,13 @@ export const band = (s: Summary, columns: number, castle: Castle = CASTLE): Segm
     { text: castle.base, colour: SAND.base },
     ...LEGEND.map((g, i) => ({ text: words ? `${g.glyph} ${g.label}` : g.glyph, count: s.counts[i] ?? 0, colour: g.colour })).filter((seg) => seg.count),
   ];
-  return [[{ text: castle.top, colour: SAND.top }], fit([run(true, true), run(true, false), run(false, false)]), fit([legend(true), legend(false)])];
+  const rows = [[{ text: castle.top, colour: SAND.top }], fit([run(true, true), run(true, false), run(false, false)]), fit([legend(true), legend(false)])];
+  if (!cache) return rows;
+  const note: Segment = { text: cache, colour: SAND.name };
+  const beside = [run(true, true), run(true, false), run(false, false)].map((row) => [...row, note]).find((row) => width(row) <= columns);
+  if (beside) return [rows[0]!, beside, rows[2]!];
+  // The castle's width in blank cells, so the row starts where the text beside the castle does.
+  return [...rows, [{ text: " ".repeat(castle.mid.length), colour: SAND.name }, note]];
 };
 
 /** The same summary as one line of text, for `/sandcastle-status`. A run that is over has no stage. */

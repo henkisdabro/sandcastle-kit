@@ -27,24 +27,24 @@ test("a refresh is due at 55 minutes of silence and not a millisecond before", (
 });
 
 test("the band counts down to the next refresh in minutes, rounded up", () => {
-  assert.equal(keepWarm({ ...live, now: T0 + 43 * MIN }).band, "cache warm · refresh in 12m");
-  assert.equal(keepWarm({ ...live, now: T0 + 43 * MIN + 1 }).band, "cache warm · refresh in 12m");
-  assert.equal(keepWarm({ ...live, now: T0 + 55 * MIN - 1 }).band, "cache warm · refresh in 1m");
+  assert.equal(keepWarm({ ...live, now: T0 + 43 * MIN }).band, "cache refresh in 12m");
+  assert.equal(keepWarm({ ...live, now: T0 + 43 * MIN + 1 }).band, "cache refresh in 12m");
+  assert.equal(keepWarm({ ...live, now: T0 + 55 * MIN - 1 }).band, "cache refresh in 1m");
 });
 
-test("after a refresh the band names its time and the tokens it read, and the next one is 55 minutes on", () => {
+test("after a refresh the band counts down to the next one, 55 minutes on, and names what the last one read", () => {
   const at = new Date(2026, 9, 10, 14, 2).getTime();
   const verdict = keepWarm({ live: true, lastActivity: at, last: { at, cacheRead: 157725, contextTokens: 157094 }, now: at + 2 * MIN });
-  assert.equal(verdict.band, "cache refreshed 14:02 · 158k read");
+  assert.equal(verdict.band, "cache refresh in 53m · last 158k");
   assert.equal(verdict.refresh, false);
   assert.equal(verdict.nextAt, at + 55 * MIN);
   const small = keepWarm({ live: true, lastActivity: at, last: { at, cacheRead: 900, contextTokens: 900 }, now: at });
-  assert.equal(small.band, "cache refreshed 14:02 · 900 read");
+  assert.equal(small.band, "cache refresh in 55m · last 900");
 });
 
 test("a main-thread turn after a refresh puts the countdown back", () => {
   const verdict = keepWarm({ live: true, lastActivity: T0 + 10 * MIN, last: { at: T0, cacheRead: 100, contextTokens: 100 }, now: T0 + 20 * MIN });
-  assert.equal(verdict.band, "cache warm · refresh in 45m");
+  assert.equal(verdict.band, "cache refresh in 45m");
 });
 
 test("disabled, or no live run: no refresh and no band", () => {
