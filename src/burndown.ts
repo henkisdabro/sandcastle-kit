@@ -3359,12 +3359,13 @@ export const burndown = async (
   // A sandbox slot of the machine pool, for a worker's next ticket (the schedule's `slot`) or a ticket's own after a
   // pause. A landing that waits for a slot goes first (`slotTurn`). `giveUp` ends a wait that is no longer wanted.
   // `keep`: beside another run the tickets never take the pool's last free slot, which is any run's landing's, as
-  // `pipelineWorkers` leaves one of the machine's for a run alone; a dry run lands nothing.
+  // `pipelineWorkers` leaves one of the machine's for a run alone. A dry run lands nothing, but keeps off that slot too:
+  // it is the pool's, so a dry run's ticket taking it held a real run's landing back.
   const sandboxSlot = async (label: string, giveUp: () => boolean): Promise<SlotLease | undefined> => {
     await slotTurn(slotWanted);
     const wait = slotWaits.begin();
     try {
-      return await leaseSlot("sandboxes", `${project.name} ${label}`, wait.onWait, undefined, giveUp, false, !DRY_RUN);
+      return await leaseSlot("sandboxes", `${project.name} ${label}`, wait.onWait, undefined, giveUp, false, true);
     } finally {
       wait.end();
     }
@@ -3604,9 +3605,11 @@ export const burndown = async (
 
   const { endings, stop } = await schedule
     .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), landingWaits: () => slotWanted.n > 0, attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
-    .catch((error: unknown) => {
+    .catch(async (error: unknown) => {
       clearInterval(heartbeat);
       console.log = consoleLog;
+      // A pause still open at the stop is closed first, so its time is in the summary the stop prints.
+      await pausing.end();
       usageWatch?.stop();
       // A write the host git refused is a safety stop as it happens; a `.git` change the scheduler's own state
       // would have named is lost with its rejection, and the writer's check refuses such a write by itself.

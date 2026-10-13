@@ -103,9 +103,9 @@ test("at a share of 1 the run's one slot goes to a ticket, and its next ticket w
   assert.equal(heldBy(), "1,1,2,2");
 });
 
-// burndown() needs Docker, so its call site is held by its text: a ticket pipeline's slot keeps one of the share
-// for landing, and a dry run, which lands nothing, keeps none.
-test("a run's ticket pipelines lease their slots keeping one of the share for landing, unless it is a dry run", () => {
+// burndown() needs Docker, so its call site is held by its text: a ticket pipeline's slot keeps off the pool's slot for
+// landing, a dry run's too - the slot is any run's, so a dry run that took it held a real run's landing back.
+test("a run's ticket pipelines lease their slots keeping off the pool's slot for landing, a dry run's too", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(src, /const sandboxSlot = [^]*?leaseSlot\("sandboxes", `\$\{project\.name\} \$\{label\}`, wait\.onWait, undefined, giveUp, false, !DRY_RUN\)/);
+  assert.match(src, /const sandboxSlot = [^]*?leaseSlot\("sandboxes", `\$\{project\.name\} \$\{label\}`, wait\.onWait, undefined, giveUp, false, true\)/);
 });

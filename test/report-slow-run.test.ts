@@ -36,7 +36,7 @@ const headline = (out: string) => out.split("\n").filter((l) => /^(Against the e
 
 test("a run that took five times its estimate gives both, with the tokens", () => {
   const [line] = headline(render(facts({ estimate, tokenTotal })));
-  assert.equal(line, "Against the estimate: 5h 00m against an estimate of 1h 00m (5.0x); tokens 90.0M in / 1.2M out against an estimate of 20.0M in / 400k out.");
+  assert.equal(line, "Against the estimate: 5h 00m against an estimate of 1h 00m (5.0x); tokens 90.0M in / 1.2M out against an estimate of 20.0M in / 400k out (4.5x).");
 });
 
 test("the largest causes the record measured are named, largest first, and anything under a minute is left out", () => {
@@ -63,13 +63,18 @@ test("a run within twice its estimate says nothing of it", () => {
 
 test("a run that took half its estimate or less gives the estimate and no causes", () => {
   const out = render(facts({ estimate: { ...estimate, ms: { mid: 11 * 60 * MIN, high: 12 * 60 * MIN } }, sharedMs: 3 * 60 * MIN }));
-  assert.deepEqual(headline(out), ["Against the estimate: 5h 00m against an estimate of 11h 00m."]);
+  assert.deepEqual(headline(out), ["Against the estimate: 5h 00m against an estimate of 11h 00m (0.5x)."]);
 });
 
 test("tokens alone more than twice off give the line, with no causes for a run on time", () => {
   const out = render(facts({ estimate: { ...estimate, ms: { mid: 4 * 60 * MIN, high: 5 * 60 * MIN } }, tokenTotal }));
   assert.equal(headline(out).length, 1);
-  assert.match(headline(out)[0], /tokens 90\.0M in/);
+  assert.match(headline(out)[0], /tokens 90\.0M in .* \(4\.5x\)\.$/);
+});
+
+test("tokens far under the estimate give their ratio, as a run far over it does", () => {
+  const out = render(facts({ estimate: { ...estimate, ms: { mid: 4 * 60 * MIN, high: 5 * 60 * MIN } }, tokenTotal: { input: 1, cacheWrite: 0, cacheRead: 8_000_000, output: 100_000 } }));
+  assert.match(headline(out)[0], /against an estimate of 20\.0M in \/ 400k out \(0\.4x\)\.$/);
 });
 
 test("a run with no estimate, a live run and a dry run give no line", () => {

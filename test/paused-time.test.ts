@@ -39,6 +39,15 @@ test("a pause and its resume tell the span between them", () => {
   assert.deepEqual(told, [3_600_000]);
 });
 
+test("a pause from before this turn started counts from the turn's start: an autonomy turn's own time, not the turn before's", () => {
+  // The pause file lives until `sandcastle resume`, so the next turn of the same run is told the pause with its first `since`.
+  const { handling, told, at } = harness();
+  handling.told({ kind: "paused", since: T0 - 1800, finishing: [] });
+  at(T0 + 600);
+  handling.told({ kind: "resumed" });
+  assert.deepEqual(told, [600_000]);
+});
+
 test("two pauses sum", () => {
   const { handling, told, at } = harness();
   handling.told({ kind: "paused", since: T0, finishing: [] });

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { cleanup, end, heldBy, mine, other, pool, slots, steady, ticket, until, waiting } from "./pool-sim.ts";
+import { cleanup, end, heldBy, mine, other, pool, RUN_ID, slots, steady, ticket, until, waiting } from "./pool-sim.ts";
 
 afterEach(cleanup);
 
@@ -102,8 +102,10 @@ test("a run over its share after the split keeps every slot it holds and shrinks
   pool.joinPool("mine", 5, 5);
   const held = [1, 2, 3, 4, 5].map((n) => ticket(`t${n}`, { keep: true }));
   await until(() => held.every((t) => t.taken), "a run alone to take its demand");
-  other("a", { demand: 5, since: Date.now() - 1000 });
-  assert.deepEqual(pool.members().map((m) => m.share).sort(), [2, 3]);
+  // Registered before this run whatever the five takes above cost: a `since` only a second back fell after this run's
+  // own on a loaded machine, which then got the odd slot (share 3) and let the next ticket take it.
+  other("a", { demand: 5, since: 1 });
+  assert.deepEqual(Object.fromEntries(pool.members().map((m) => [m.run, m.share])), { [RUN_ID]: 2, a: 3 });
   await steady(() => mine() === 5, "a slot was taken back from a running ticket");
   held[0]!.release();
   held[1]!.release();
@@ -111,4 +113,20 @@ test("a run over its share after the split keeps every slot it holds and shrinks
   await until(() => mine() === 2, "the run to shrink to its share as its tickets end");
   const next = ticket("next", { keep: true });
   await steady(() => !next.taken && mine() === 2, "a ticket took a slot above the share");
+});
+
+test("a landing of a run at its share takes a free slot that is not the last, while another run below its share asks for none", async () => {
+  // Before the pool kept one slot for all runs, a run's tickets stopped one short of its share and its landing fitted
+  // in the share; now they fill it, so a landing held to the share waited with slots free until run b took its own.
+  pool.joinPool("mine", 5, 5);
+  other("b", { demand: 5, held: 1, since: later(1) });
+  assert.deepEqual(Object.fromEntries(pool.members().map((m) => [m.run, m.share])), { [RUN_ID]: 3, b: 2 });
+  const held = [1, 2, 3].map((n) => ticket(`t${n}`, { keep: true }));
+  await until(() => held.every((t) => t.taken), "three tickets to take this run's whole share");
+  const landing = ticket("land", { priority: true });
+  await until(() => landing.taken, "the landing to take one of the two free slots");
+  assert.equal(mine(), 4);
+  // The landing's slot is past the share, not a ticket's: a ticket still waits beside it.
+  const ticketAfter = ticket("t4", { keep: true });
+  await steady(() => !ticketAfter.taken, "a ticket took a slot past the share beside the landing");
 });

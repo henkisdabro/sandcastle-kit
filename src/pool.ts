@@ -642,7 +642,7 @@ const olderWait = (pool: PoolName, mine: Wait, ms: Member[], seen: Seen, onLast 
  * between two of its tickets is not mistaken for one that wants nothing), and so does any other
  * run with a wait entry. Not registered, or the gates pool: no shares. With no other run
  * wanting one, a free slot is taken as before. `landingOnLast`: a landing taking the pool's last free slot
- * (`lastFreeSlot`), which no share holds back.
+ * (`lastFreeSlot`), or one slot past its run's share, which no share holds back.
  */
 const overShare = (pool: PoolName, ms: Member[], seen: Seen, landingOnLast = false) => {
   if (pool !== "sandboxes" || !joined) return false;
@@ -826,7 +826,11 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
         return undefined;
       }
       const last = pool === "sandboxes" && lastFreeSlot(ms, seen);
-      if (overShare(pool, ms, seen, priority && last)) return "share";
+      // A run's tickets fill its whole share, so its landing may take one slot past it, as it took the slot its tickets
+      // left before the pool kept one for all runs: held to the share, a landing waited with slots free.
+      const me = priority ? ms.find((m) => m.run === RUN_ID) : undefined;
+      const landingPast = priority && (last || (!!me && me.held <= me.share));
+      if (overShare(pool, ms, seen, landingPast)) return "share";
       // Out of the waits directory while kept: another run below its share would otherwise leave a free slot to
       // this older wait, which cannot take it, and both would wait until the slot is a landing's.
       const kept = keep && last;
@@ -836,7 +840,7 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
         wait.hidden = kept;
       }
       if (kept) return (yielded = "kept"), "landing";
-      if (olderWait(pool, countedFrom(wait), ms, seen, priority && last)) return (yielded = "run"), "slots";
+      if (olderWait(pool, countedFrom(wait), ms, seen, landingPast)) return (yielded = "run"), "slots";
       if (priorityAhead(wait)) return (yielded = "priority"), "slots";
       // Every slot taken is the reason to say; a free one is about to go to the earlier wait, which says nothing new.
       if (earlierAhead(wait)) return (yielded = liveSlots(pool, seen).length >= limit(pool) ? undefined : "earlier"), "slots";

@@ -995,9 +995,12 @@ export const createPauseHandling = (ports: PauseHandlingPorts) => {
   // The span in progress (its `since`, seconds) and the finished spans' total.
   let spanSince: number | undefined;
   let pausedMs = 0;
+  // A pause lasts until `sandcastle resume`, across a run's turns, so a later turn is told it with its first `since`:
+  // counted from there, the turn before's paused time was counted again, and could exceed this turn's own length.
+  const startedAt = now();
   const closeSpan = () => {
     if (spanSince === undefined) return;
-    pausedMs += Math.max(0, now() - spanSince * 1000);
+    pausedMs += Math.max(0, now() - Math.max(spanSince * 1000, startedAt));
     spanSince = undefined;
     ports.pausedFor?.(Math.round(pausedMs));
   };

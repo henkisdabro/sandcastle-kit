@@ -1054,9 +1054,11 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
   const estOut = num(est.tokensOut?.mid);
   const tokensOff = !!t && (off(inTokens, estIn) || off(t.output, estOut));
   if (!off(took, estMs) && !tokensOff) return [];
-  const times = `${span(took)} against an estimate of ${span(estMs)}${took / estMs >= 1 ? ` (${(took / estMs).toFixed(1)}x)` : ""}`;
+  // A ratio on both sides, under the estimate as over it: "17.1M in against an estimate of 40.0M in" was read as close.
+  const ratio = (actual: number, estimated: number) => ` (${(actual / estimated).toFixed(1)}x)`;
+  const times = `${span(took)} against an estimate of ${span(estMs)}${ratio(took, estMs)}`;
   const tokens = t && estIn !== undefined && estOut !== undefined
-    ? `; tokens ${tokenBrief(t)} against an estimate of ${tokenBrief({ input: estIn, cacheWrite: 0, cacheRead: 0, output: estOut })}`
+    ? `; tokens ${tokenBrief(t)} against an estimate of ${tokenBrief({ input: estIn, cacheWrite: 0, cacheRead: 0, output: estOut })}${ratio(inTokens, estIn)}`
     : "";
   const lines = [`Against the estimate: ${times}${tokens}.`];
   if (took / estMs <= SLOW) return lines;
