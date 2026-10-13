@@ -18,6 +18,7 @@ import { OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
+import type { Settled } from "./usage.ts";
 import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunEstimate, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
@@ -403,12 +404,19 @@ export const rawLog = (log: string) => log.replace(/\.log$/, ".jsonl");
  * Sandcastle's `logging` option for one agent pass: the readable log goes where it always did, and every raw
  * stdout line the agent printed (tool calls and results its parser drops) is appended to the `.jsonl` sidecar.
  */
+/**
+ * Starts a pass in an agent log's raw sidecar: the usage watch counts each marker's lines as one pass. A JSON marker,
+ * not markLog's "# run" line, so the sidecar stays valid JSONL. A pass run again in the same log (after a usage-limit
+ * pause) marks again, or the watch reads both runs as the one pass its result covers and drops the first one's spend.
+ */
+export const markPass = (log: string, runId: string, name: string) =>
+  appendFileSync(rawLog(log), JSON.stringify({ sandcastle: "run", run: runId, name, at: new Date().toISOString() }) + "\n");
+
 export const agentLogging = (project: Project, id: string, name: string, runId: string): LoggingOption => {
   const log = agentLog(project, id, name);
   markLog(log, runId);
   const raw = rawLog(log);
-  // A JSON marker, not markLog's "# run" line, so the sidecar stays valid JSONL.
-  appendFileSync(raw, JSON.stringify({ sandcastle: "run", run: runId, name, at: new Date().toISOString() }) + "\n");
+  markPass(log, runId, name);
   return {
     type: "file",
     path: log,
@@ -632,7 +640,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
     // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
-    // And the closing paragraph of its final message, which the same prompts hold the place of.
+    // And its final message, which the same prompts hold the place of.
     if (kind === "review" || kind === "rereview" || kind === "remerge") for (const k of ["IMPL_UNMET", "IMPL_SAID"]) allowed.add(k);
     // Likewise the implementer's changelog lines, in the full review's changelog ask only (CHANGELOG_REVIEW).
     if (kind === "review") allowed.add("IMPL_CHANGELOG");
@@ -917,6 +925,17 @@ export const isCarried = (root: string, base: string, id: string): boolean => {
   }
 };
 
+/**
+ * What a carried branch (`isCarried`) costs at the start of a run: `carried` when a recorded head lets it skip the
+ * implementer and the full review (`landOnlyHead`, `reviewedOnlyHead`: a land-only or narrowly reviewed branch), `unreviewed`
+ * when it has neither, so a full review still runs. Undefined for a branch that is no carried work. The estimate prices
+ * an unreviewed one as a fresh ticket, and its timings lines say `unreviewed` in place of `carried`, so the carried history stays land-only.
+ */
+export const carriedKind = (root: string, base: string, id: string): "carried" | "unreviewed" | undefined => {
+  if (!isCarried(root, base, id)) return undefined;
+  return landOnlyHead(root, base, id) !== undefined || reviewedOnlyHead(root, base, id) !== undefined ? "carried" : "unreviewed";
+};
+
 /** The nearest-rank percentile, `p` in (0, 1]; the median above takes the middle one, this the one a fraction `p` of the list is at or below. */
 const percentile = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length, Math.max(1, Math.ceil(xs.length * p))) - 1];
 const HIGH = 0.8;
@@ -1001,6 +1020,10 @@ export const SIZE_WORDS: Record<TicketSize, string> = {
  * resolve on (resolve, narrow review, gates) a carried one: a carried branch's attempt is not its
  * ticket's first one.
  *
+ * `detail.unreviewed` says which carried branches get a full review all the same (`carriedKind`: no recorded head lets them
+ * skip it). Such a ticket is priced as a fresh one and counted apart in the line (`N to review`); a history ticket whose lines
+ * say `unreviewed` is a fresh sample, so the carried history stays land-only.
+ *
  * `detail.remainder` says which tickets are re-runs for what an earlier "part of" merge left (`isRemainder`; a carried one
  * is a carried branch, not this). A remainder is the third class: a `remainder` field on its lines, priced from past
  * remainders, which are no longer counted among the fresh tickets. With none in the window it is priced as a fresh ticket
@@ -1019,7 +1042,7 @@ export const SIZE_WORDS: Record<TicketSize, string> = {
  * a row on the one worker, whatever the slots, so they count with or without `gateSlots`.
  */
 export const priceRun = (
-  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[]; bodyChars?: number[]; beside?: string[] } = {},
+  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; unreviewed?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[]; bodyChars?: number[]; beside?: string[] } = {},
 ): { text: string; figures: RunEstimate } | undefined => {
   let text: string;
   try {
@@ -1027,7 +1050,7 @@ export const priceRun = (
   } catch {
     return undefined;
   }
-  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; remainder?: unknown; touches?: unknown; bodyChars?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
+  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; unreviewed?: unknown; remainder?: unknown; touches?: unknown; bodyChars?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
   type Group = {
     ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string;
     // The path count of the ticket's `Touches:` line, from the first line that records it; undefined for a ticket of older lines.
@@ -1039,7 +1062,7 @@ export const priceRun = (
     // A `remainder` field on a line: the ticket was re-run for what an earlier "part of" merge left.
     remainder?: boolean;
     // Seen while grouping: a `carried` field on a line, a resolve pass, an implement pass.
-    flagged?: boolean; resolved?: boolean; implemented?: boolean;
+    flagged?: boolean; resolved?: boolean; implemented?: boolean; unreviewed?: boolean;
     // A ticket implemented and requeued in the same run: what came after its first resolve, the cost of a carried branch's attempt.
     tail?: Group;
     // The history ticket a `tail` was cut from, so the line counts tickets.
@@ -1077,6 +1100,7 @@ export const priceRun = (
       // A ticket's gate passes (the pre-landing `gates` lines, `waitMs` already out of `ms`): the time it holds a gates slot.
       if (l.phase === "gates") g.gateMs += l.ms as number;
       if (l.carried === true) g.flagged = true;
+      if (l.unreviewed === true) g.unreviewed = true;
       if (l.remainder === true) g.remainder = true;
       if (g.bodyChars === undefined && typeof l.bodyChars === "number" && Number.isFinite(l.bodyChars) && l.bodyChars >= 0) g.bodyChars = l.bodyChars;
       if (g.touches === undefined && typeof l.touches === "number" && Number.isFinite(l.touches) && l.touches >= 0) g.touches = l.touches;
@@ -1110,7 +1134,8 @@ export const priceRun = (
     // implemented and requeued in the same run is a fresh one, and its tail is a carried sample of its own: pricing a carried
     // ticket from its whole first attempt put the estimate at twice the real time.
     for (const g of groups.values()) {
-      g.carried = g.flagged === true || (g.resolved === true && !g.implemented);
+      // An unreviewed carried branch got a full review: a whole ticket's figures, so a fresh sample whatever its resolve says.
+      g.carried = g.unreviewed !== true && (g.flagged === true || (g.resolved === true && !g.implemented));
       if (g.carried || g.implemented !== true || !g.tail?.tokened) g.tail = undefined;
     }
     return [...groups.values()];
@@ -1169,7 +1194,9 @@ export const priceRun = (
   const olderSet = new Set<Group>(olderGroups);
   const per = Array.from({ length: tickets }, (_, at) => {
     const carried = detail.carried?.[at] ?? false;
-    const remainder = !carried && (detail.remainder?.[at] ?? false);
+    // An unreviewed carried branch is priced as a fresh ticket: it is told apart only in the start line.
+    const unreviewed = !carried && (detail.unreviewed?.[at] ?? false);
+    const remainder = !carried && !unreviewed && (detail.remainder?.[at] ?? false);
     const model = models?.[at];
     const inModel = model === undefined ? counted : counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
     const older = model === undefined || inModel.length >= SOLID_HISTORY ? [] : olderGroups.filter((g) => (g.model ?? IMPL_MODEL) === model).slice(0, SOLID_HISTORY - inModel.length);
@@ -1253,9 +1280,10 @@ export const priceRun = (
   const highSteps = steps((xs) => percentile(xs, HIGH));
   const bound = (t: { serial: number; chained: number; gated: number; landed: number }) => Math.max(t.serial, t.chained, t.gated, t.landed);
   const carriedCount = detail.carried?.slice(0, tickets).filter(Boolean).length ?? 0;
-  const remainderCount = detail.remainder?.slice(0, tickets).filter((r, at) => r && !detail.carried?.[at]).length ?? 0;
-  const split = carriedCount || remainderCount
-    ? ` (${[carriedCount ? `${carriedCount} carried` : "", remainderCount ? `${remainderCount} remainder` : "", `${tickets - carriedCount - remainderCount} fresh`].filter(Boolean).join(", ")})`
+  const unreviewedCount = detail.unreviewed?.slice(0, tickets).filter((u, at) => u && !detail.carried?.[at]).length ?? 0;
+  const remainderCount = detail.remainder?.slice(0, tickets).filter((r, at) => r && !detail.carried?.[at] && !detail.unreviewed?.[at]).length ?? 0;
+  const split = carriedCount || remainderCount || unreviewedCount
+    ? ` (${[carriedCount ? `${carriedCount} carried` : "", unreviewedCount ? `${unreviewedCount} to review` : "", remainderCount ? `${remainderCount} remainder` : "", `${tickets - carriedCount - unreviewedCount - remainderCount} fresh`].filter(Boolean).join(", ")})`
     : "";
   // At a tie too: the tickets' figure ends with a landing of its own, so landings in a row as long as it still set the time.
   const landBound = highMs.landed > 0 && highMs.landed >= Math.max(highMs.serial, highMs.chained, highMs.gated);
@@ -1414,7 +1442,7 @@ export type BranchHead = {
   red?: string;
   /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
   unmet?: string;
-  /** The last paragraph of the implementer's final message (`closingParagraphOf`), which a full review is shown: carried like `unmet`, for a land-only or requeued attempt. */
+  /** The implementer's final message (`implementerSaidOf`), cut at a word, which a full review is shown: carried like `unmet`, for a land-only or requeued attempt. */
   implSaid?: string;
   /** The gate results at `green`, for a ticket the kit holds after its gates: a land-only re-run runs none before it holds, and would report none. */
   gates?: Gate[];
@@ -1432,6 +1460,8 @@ export type BranchHead = {
   gap?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
+  /** The ticket's comment count when the kit last wrote `reviewed`, `green` or `repaired` (`commentCount`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
+  comments?: number;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -1448,7 +1478,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
@@ -1589,10 +1619,80 @@ export const peakContexts = (held: Record<string, number> | undefined, phase: st
  * becomes what its finished passes spent (`spent`, the run's own count of the results' figures) plus that live figure.
  * A pass that has ended is in `spent` and no longer live (`UsageWatch.settle`), so it is never in both.
  */
-export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: ReturnType<typeof ticketTokens>): void }, spent: Map<string, Tokens>) =>
+export const liveTokenWriter = (
+  run: { finished: boolean; ticket(id: string, fields: ReturnType<typeof ticketTokens> & { tokensNote?: TokensNote }): void },
+  spent: Map<string, Tokens>,
+  noteOf: (issue: string) => TokensNote | undefined = () => undefined,
+) =>
   (issue: string, live: Tokens) => {
-    if (!run.finished) run.ticket(issue, { ...ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)) });
+    if (!run.finished) run.ticket(issue, { ...ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)), tokensNote: noteOf(issue) });
   };
+
+/**
+ * How far a figure of tokens can be trusted, when an agent pass threw: `incomplete` is a figure with a thrown pass's
+ * stream in it (the pass may have spent more than its stream showed), `unknown` is no figure at all because the pass
+ * threw before its stream showed any usage. Never a zero.
+ */
+export type TokensNote = "incomplete" | "unknown";
+
+/** How the closing summary and the per-ticket lines word a `TokensNote`. */
+export const tokensNoteWords = (note: TokensNote | undefined) =>
+  note === "incomplete" ? "incomplete: a pass that failed may have spent more than its log showed" : note === "unknown" ? "unknown: a pass failed before its log showed any usage" : "";
+
+/**
+ * The run's own count of the tokens each ticket's steps spent (`spent`, which `liveTokenWriter` adds the running pass's
+ * figure to), written to the run record as `burndown()`'s `timed` goes. A step that returns is counted by its result's
+ * figure (`ended`); an agent pass that threw has none, so `settled` keeps what the usage watch read of its stream,
+ * and notes the ticket's and the run's tokens `incomplete` (or `unknown`, with nothing to count).
+ */
+export const createTokenCount = (
+  run: { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void },
+  settle: (issue: string) => Settled | undefined,
+) => {
+  const spent = new Map<string, Tokens>();
+  // Tickets with an agent pass that threw: whatever they spent is a floor.
+  const thrown = new Set<string>();
+  const noteOf = (issue: string): TokensNote | undefined => (thrown.has(issue) ? (spent.has(issue) ? "incomplete" : "unknown") : undefined);
+  const runNote = (): TokensNote | undefined => (thrown.size ? (spent.size ? "incomplete" : "unknown") : undefined);
+  const write = (issue: string) => {
+    const note = runNote();
+    if (spent.size || note) run.update({ ...(spent.size ? { tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) } : {}), tokensNote: note });
+    if (issue) run.ticket(issue, { ...(spent.has(issue) ? ticketTokens(spent.get(issue)!) : {}), tokensNote: noteOf(issue) });
+  };
+  return {
+    spent,
+    noteOf,
+    /** The note for the run's total. */
+    runNote,
+    /** What a ticket's record holds of its tokens now (nothing for a ticket with neither a figure nor a note). */
+    fields: (issue: string): TicketRecord => ({ ...(spent.has(issue) ? ticketTokens(spent.get(issue)!) : {}), ...(noteOf(issue) ? { tokensNote: noteOf(issue) } : {}) }),
+    /** A step returned and its result carries `tokens`. */
+    ended(issue: string, tokens: Tokens) {
+      spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
+      write(issue);
+    },
+    /**
+     * The step is over (in its `finally`): the watch stops counting the ticket's passes as live. `counted` says a result's
+     * figure was added by `ended`, which covers the step's last pass; every pass before it (a review that threw, then
+     * ran again with the fallback model) and every pass of a step that did not return (or whose failure the step
+     * swallowed, a cross-review) is one that failed, and what its stream showed is kept. Called in the same synchronous
+     * step as `ended`, so a tick never sees a pass both live and counted.
+     */
+    settled(issue: string, counted: boolean): { peakContext?: number; kept?: Tokens; note?: TokensNote } {
+      const settledNow = issue ? settle(issue) : undefined;
+      if (!settledNow) return {};
+      const failed = counted ? settledNow.passes.slice(0, -1) : settledNow.passes;
+      const shown = failed.flatMap((p) => (p.tokens ? [p.tokens] : []));
+      const kept = shown.length ? shown.reduce(addTokens, NO_TOKENS) : undefined;
+      if (failed.length) {
+        thrown.add(issue);
+        if (kept) spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, kept));
+        write(issue);
+      }
+      return { ...(settledNow.peakContext ? { peakContext: settledNow.peakContext } : {}), ...(kept ? { kept } : {}), ...(failed.length ? { note: kept ? ("incomplete" as const) : ("unknown" as const) } : {}) };
+    },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent
@@ -1631,6 +1731,49 @@ export const pruneArchive = (project: Project, now = Date.now()): number => {
   return pruned;
 };
 
+/**
+ * Drops the head record of a ticket whose branch is gone and whose last write is past `ARCHIVE_KEEP_DAYS`, so `heads.json`
+ * stays the size of the tickets in play. A recent merged ticket keeps its record: the closing summary and `report --changelog`
+ * read a hand-landed ticket's. A record with no readable `at` stays. Returns how many went.
+ */
+export const pruneHeads = (project: Project, now = Date.now()): number => {
+  const all = readHeads(project.root);
+  let dropped = 0;
+  for (const [id, head] of Object.entries(all)) {
+    const at = Date.parse(head?.at);
+    if (!(now - at > ARCHIVE_KEEP_DAYS * DAY_MS)) continue;
+    if (typeof head.branch !== "string" || !head.branch) continue;
+    try {
+      sh("git", ["show-ref", "-q", "--verify", `refs/heads/${head.branch}`], project.root);
+      continue; // the branch is still there
+    } catch {
+      // gone: the record is history
+    }
+    delete all[id];
+    dropped++;
+  }
+  if (!dropped) return 0;
+  const file = headsFile(project.root);
+  writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
+  renameSync(`${file}.tmp`, file);
+  return dropped;
+};
+
+/** Keeps the turns of `file-shares.log` whose `--- <time>, run pid <pid> ---` header is inside the archive window; lines before the first header predate the headers and go. Returns how many turns went. */
+export const trimSharesLog = (project: Project, now = Date.now()): number => {
+  const file = join(project.root, ".sandcastle/logs/file-shares.log");
+  if (!existsSync(file)) return 0;
+  const turns = readFileSync(file, "utf8").split(/^(?=--- )/m);
+  const kept = turns.filter((turn) => {
+    const at = Date.parse(/^--- ([^,\n]+),/.exec(turn)?.[1] ?? "");
+    return Number.isNaN(at) ? turn.startsWith("--- ") : now - at <= ARCHIVE_KEEP_DAYS * DAY_MS;
+  });
+  if (kept.length === turns.length) return 0;
+  writeFileSync(`${file}.tmp`, kept.join(""));
+  renameSync(`${file}.tmp`, file);
+  return turns.length - kept.length;
+};
+
 export const archiveFinishedLogs = (project: Project) => {
   const logs = join(project.root, ".sandcastle/logs");
   if (!existsSync(logs)) return;
@@ -1663,6 +1806,9 @@ export const archiveFinishedLogs = (project: Project) => {
   if (moved) console.log(`Archived ${moved} log(s) of finished branches to .sandcastle/logs/archive/.`);
   const pruned = pruneArchive(project);
   if (pruned) console.log(prunedLine(pruned));
+  const heads = pruneHeads(project);
+  if (heads) console.log(`Dropped ${heads} head record(s) of finished tickets past ${ARCHIVE_KEEP_DAYS} days from .sandcastle/logs/heads.json.`);
+  trimSharesLog(project);
 };
 
 // ---------------------------------------------------------------------------

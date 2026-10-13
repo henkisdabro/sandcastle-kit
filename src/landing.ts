@@ -23,15 +23,15 @@ import { OperatorError, SlowStartError } from "./errors.ts";
 import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type LandingGate, type Opener, squashBody } from "./land.ts";
-import { dropHandOff, handOffId, withSlot } from "./pool.ts";
+import { claimSlot, dropHandOff, handOffId, withSlot } from "./pool.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, forgetFork, sh, staleBaseParents } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, ownCommitList, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
-import { refOf, type Tracker } from "./tracker.ts";
+import { readTicketState, refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
 
 // "with #12" names the branches merged before it that changed the same files.
@@ -305,6 +305,8 @@ export type Landable = {
   status: string;
   commits: number;
   repairs: number;
+  /** The review's commits, one `<short hash> <subject>` line each (`reviewCommitLines`): the merge comment lists them. */
+  reviewLog?: string[];
   head?: string;
   unreviewed?: boolean;
   /** An acceptance criterion an agent knowingly left undone: the branch lands, the ticket stays open. */
@@ -332,7 +334,7 @@ export type LandContext = {
   /** The heartbeat's: told when a landing starts waiting for a machine-wide sandbox slot and when it has one, so the wait is not counted as landing time. */
   slotWait?: (issue: string, state: "waiting" | "taken") => void;
   /** The tracker's word since the run began: closed, taken out of the queue, sent to a human. */
-  withdrawal: (id: string) => { held: boolean; reason: string } | undefined;
+  withdrawal: (id: string) => { held: boolean; reason: string } | undefined | Promise<{ held: boolean; reason: string } | undefined>;
   /** Where every write to the host's git goes. */
   host: HostGit;
   /** Gates a merged tree in the sandbox `opener` opened: the gates of the run, on a tree no pipeline gated. Its wait for a machine-wide gates slot goes before the run's ticket gates (`runGates`'s `priority`). */
@@ -474,7 +476,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
     // Someone's decision, not a failure: reported as "not landed", it came
     // back as a branch to fix and merge. A ticket sent to a human is theirs
     // now, its branch there if it helps; one closed or unqueued is done with.
-    const called = withdrawal(o.issue);
+    const called = await withdrawal(o.issue);
     if (called?.held) return { kind: "taken-back" };
     if (called) return { kind: "withdrawn", reason: called.reason };
     if (o.status === "merged-earlier") {
@@ -499,7 +501,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   let overrun: string[] = [];
   try {
     const record = readHeads(root)[o.issue];
-    overrun = touchesOverrun(root, base, o.head!, tracker.get(o.issue).body ?? "", new Set(record?.branch === o.branch ? record.repaired : []));
+    overrun = touchesOverrun(root, base, o.head!, (await readTicketState(tracker, o.issue)).body ?? "", new Set(record?.branch === o.branch ? record.repaired : []));
   } catch {
     overrun = [];
   }
@@ -653,13 +655,17 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
             // As above.
           }
           at?.slotWaited?.(Date.now() - asked);
+          // Claimed from the moment the sandbox is held: opening it and merging take seconds, and a ticket gate asked in
+          // them would take the gates slot and hold it for a whole gate run. The landing's own gates wait spends the claim;
+          // a landing that ends without gating (a conflict, a throw) releases it here.
+          const claim = claimSlot("gates");
           return landInSandbox(
             project,
-            { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId },
+            { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId, ref: ref(o.issue) },
             opener,
             (box, how) => ctx.gate(box, o.issue, how),
             host.expected,
-          );
+          ).finally(claim.release);
         }, undefined, undefined, true, false, () => (at?.behind?.() ?? 0) > 0);
       } finally {
         if (waiting) wanted.n--;
@@ -965,12 +971,15 @@ export const redNote = (red: { with: string[]; gates?: string[]; failing?: strin
 export const carriedFrom = (requeued: boolean) => (requeued ? "its first attempt" : "an earlier run");
 
 /** `who` is the tracker's own ref for the ticket. The line for a branch at the head it was reviewed and gated green on, or past it by merge commits only. */
-export const greenCarriedLine = (who: string, head: string, requeued: boolean) =>
-  `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(requeued)} - no implement or full review; the gates decide.`;
+export const greenCarriedLine = (who: string, head: string, requeued: boolean, lateComment = false) =>
+  `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(requeued)} - ` + (lateComment ? LATE_COMMENT : "no implement or full review; the gates decide.");
+
+/** What a carried branch's line says when a person commented on its ticket after the review: no implementer, but the full review runs. */
+const LATE_COMMENT = "a comment since its review - full review (no implement); the gates decide.";
 
 /** The line for a branch reviewed at a head and stopped before any gate result (red results are not this): the gates run, not an implementer. */
-export const reviewedCarriedLine = (who: string, head: string, requeued: boolean) =>
-  `${who}: reviewed at ${head.slice(0, 7)} in ${carriedFrom(requeued)}, no gate result since - no implement or full review; the gates decide.`;
+export const reviewedCarriedLine = (who: string, head: string, requeued: boolean, lateComment = false) =>
+  `${who}: reviewed at ${head.slice(0, 7)} in ${carriedFrom(requeued)}, no gate result since - ` + (lateComment ? LATE_COMMENT : "no implement or full review; the gates decide.");
 
 /** The line for the base merged into a carried branch, cleanly or with its generated files regenerated. */
 export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
@@ -994,6 +1003,24 @@ export const firstAttemptReviewCommits = (results: readonly PromiseSettledResult
   return first?.status === "fulfilled" ? first.value.reviewCommits : 0;
 };
 
+/** The `reviewLog` a requeued ticket's first attempt made, kept for the same reason as `firstAttemptReviewCommits`. */
+export const firstAttemptReviewLog = (results: readonly PromiseSettledResult<{ issue: string; reviewLog?: string[] }>[], id: string): string[] => {
+  const first = results.find((r) => r.status === "fulfilled" && r.value.issue === id);
+  return first?.status === "fulfilled" ? (first.value.reviewLog ?? []) : [];
+};
+
+/**
+ * The branch's own commits that are not in `before` (its commit list taken ahead of a review pass), oldest first, as
+ * `<short hash> <subject>` lines. Merges are left out, as `ownCommits` leaves them, so a base merge-in is no review commit.
+ * A project that lands by squash gets the subjects alone: the branch is deleted at landing, so a hash would name nothing.
+ */
+export const reviewCommitLines = (before: readonly string[], base: string, branch: string, cwd: string, squash = false): string[] => {
+  const had = new Set(before);
+  return ownCommitList(base, branch, cwd)
+    .filter((sha) => !had.has(sha))
+    .map((sha) => sh("git", ["log", "-1", `--format=${squash ? "%s" : "%h %s"}`, sha], cwd));
+};
+
 /**
  * The repair passes a requeued ticket's first attempt made that committed. The count is per attempt, so the second
  * attempt starts from this one: its outcome line reports every repair the ticket had in the run.
@@ -1011,6 +1038,9 @@ export const firstAttemptIdleRepairs = (results: readonly PromiseSettledResult<{
 
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its reviewed branch" (reviewed, never gated green), "its branch from ...". */
 export const carriedBranch = (landOnly: boolean, requeued: boolean, reviewedOnly = false) => (landOnly ? (reviewedOnly ? "its reviewed branch" : "its green branch") : `its branch from ${carriedFrom(requeued)}`);
+
+/** A conflict the requeue-once rule would have sent back, had the run not stopped starting tickets: "with #1: a.txt; would have been retried, but the run had stopped starting tickets". Its files are this conflict's own. */
+export const unretriedLine = (c: { files: string[]; with: string[] }) => `${conflictLine(c)}; would have been retried, but the run had stopped starting tickets`;
 
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
 export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>, first: "conflict" | "red" = landed.kind) => {

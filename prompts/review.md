@@ -98,7 +98,8 @@ Constraints:
 - **A fix you commit is proved by a test, the same rule as the implementer's.** A bug you fix or a
   behaviour you change gets a test that fails without your fix, at the public interface; where it
   needs a boundary faked (a clock, a process, a slot), fake it. An `<ungated>` line is not that
-  proof: it is only for an effect no gate can run.
+  proof: it is only for an effect no gate can run. A fix you cannot prove with a test is still not
+  left in prose: an `<unmet>` or `<followup>` line says what is wrong.
 - **Never remove a safety guard, a test or an assertion to make something pass.** If a test fails,
   the implementation is the suspect, not the test. An existing test whose expected text or fixture
   the branch changed to fit (a narrower width, a longer timeout) is weakened unless the ticket
@@ -116,11 +117,13 @@ whose 2-minute default moves a longer suite to the background) and its output in
 worktree; never wait on a backgrounded run with `sleep`, `pgrep` or Monitor, and never run the suite
 to time it.
 
-The orchestrator runs every one of them on this branch as soon as you finish, and a red gate gets a
-repair pass. So run the tests and checks that cover what you are looking at or changing, as often as
-you need. Run the full suite once, after your last commit that changed code, and only if your own
-commits changed code; after docs-only commits (prose in a README, a doc or a comment), none. A full
-gate run of your own adds nothing when you commit nothing.
+The orchestrator runs every one of them on this branch as soon as you finish, the full suite
+included, re-runs a red ticket gate once in its slot and gives a red that stays a repair pass. So run
+the typecheck gate and the tests that cover what you are looking at or changing, as often as you
+need, and do not run the full suite yourself: a run of yours repeats the gates that start as you
+exit, and slows them while it runs beside them. After docs-only commits (prose in a README, a doc or
+a comment), run only the tests that cover that prose, if any. A gate run of your own adds nothing when
+you commit nothing.
 
 A long command that is not a gate - a download, an install, a build - also runs in the foreground
 with the tool's longest timeout, never in the background. If one is in the background anyway, wait for

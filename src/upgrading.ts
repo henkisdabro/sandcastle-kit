@@ -8,7 +8,7 @@
 // or "no record".
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { KIT } from "./sandbox.ts";
 
@@ -26,18 +26,37 @@ export const kitRelease = (kit = KIT): string => JSON.parse(readFileSync(join(ki
  * The kit version: the release, and in a clone that is not exactly at it, how far past it and at
  * which commit - `X.Y.Z`, `X.Y.Z +1 (1c4f46f)`, `X.Y.Z (1c4f46f, local changes)`. Counted from the
  * release's own tag, not the nearest one: between a version bump and its tag, `git describe`
- * counted from the release before and printed the wrong distance.
+ * counted from the release before and printed the wrong distance. Also the release and the commits
+ * past its tag (0 when there is no tag to count from, as in a shallow clone), for `--version --json`.
  */
-export const kitVersion = (kit = KIT): string => {
+const kitFacts = (kit: string): { version: string; release: string; past: number } => {
   const release = kitRelease(kit);
   // A kit that is not the top of its own checkout (unpacked or installed inside another repository) would report that repository's commit.
-  if (git(kit, ["rev-parse", "--show-cdup"]) !== "") return release;
+  if (git(kit, ["rev-parse", "--show-cdup"]) !== "") return { version: release, release, past: 0 };
   const head = git(kit, ["rev-parse", "--short", "HEAD"]);
   const tag = git(kit, ["rev-parse", "-q", "--verify", `refs/tags/v${release}^{commit}`]);
   const past = tag ? Number(git(kit, ["rev-list", "--count", `${tag}..HEAD`])) : undefined;
   const changed = !!git(kit, ["status", "--porcelain", "--untracked-files=no"]);
-  if (past === 0 && !changed) return release;
-  return `${release}${past ? ` +${past}` : ""} (${head}${changed ? ", local changes" : ""})`;
+  const counted = past !== undefined && Number.isFinite(past) ? past : 0;
+  if (past === 0 && !changed) return { version: release, release, past: 0 };
+  return { version: `${release}${past ? ` +${past}` : ""} (${head}${changed ? ", local changes" : ""})`, release, past: counted };
+};
+
+export const kitVersion = (kit = KIT): string => kitFacts(kit).version;
+
+/**
+ * What `sandcastle --version --json` prints, for the Claude Code mod's idle mark: the kit version,
+ * the newest tagged release (null: this kit does not read one yet), and the project's update state.
+ * `project` is null when `root` is not a set-up project (no `.sandcastle/config.ts` plain file at
+ * the git root); `recorded` is false when there is no usable update record, and `release` null when
+ * a usable record names none.
+ */
+export const versionFacts = (root: string | undefined, kit = KIT) => {
+  const setUp = root !== undefined && statSync(join(root, ".sandcastle/config.ts"), { throwIfNoEntry: false })?.isFile() === true;
+  if (!setUp) return { kit: kitFacts(kit), newestRelease: null, project: null };
+  const pending = pendingUpgrades(root, kit);
+  const release = pending.recorded ? (recordedRelease(root, kit) ?? null) : null;
+  return { kit: kitFacts(kit), newestRelease: null, project: { recorded: pending.recorded, release, pendingNotes: pending.notes } };
 };
 
 /** Each bullet under a `### Upgrading` heading, by its bold lead (else its first line). */

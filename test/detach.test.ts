@@ -41,7 +41,9 @@ const end = (code) => {
 process.on("SIGINT", () => { writeFileSync(join(logs, "sigint"), "seen"); end(130); });
 setInterval(() => {
   const release = join(process.cwd(), "release");
-  if (existsSync(release)) end(Number(readFileSync(release, "utf8")));
+  // The test's write creates the file before it writes the code: an empty read is a write in progress, not exit 0.
+  const code = existsSync(release) ? readFileSync(release, "utf8").trim() : "";
+  if (code) end(Number(code));
 }, 50);
 `;
 const scripts = mkdtempSync(join(tmpdir(), "sandcastle-detach-script-"));

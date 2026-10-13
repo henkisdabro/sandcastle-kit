@@ -137,6 +137,11 @@ _Avoid_: weight (a lasting per-project setting, which this is not), override
 The release a kit is at; a kit between releases also says how far past that release it is.
 _Avoid_: kit commit (one way of telling a kit between releases, not its version)
 
+**Newest release**:
+The highest release tagged on the kit's own remote: what a kit could be updated to. Unknown when
+that cannot be read, and then nothing is said about it.
+_Avoid_: upstream, latest (which names Claude Code's release channel)
+
 **Upgrading note**:
 One item in a release's Upgrading section: something an existing project may have to act on.
 _Avoid_: migration, upgrade step
@@ -150,7 +155,8 @@ _Avoid_: marker, kit-updated (the file's name, not the concept)
 
 **Idle mark**:
 The Claude Code mod's one row of sand, led by a castle tower, above the prompt in a set-up project while no run is live: it
-says the project is ready for runs, and how many ready tickets wait. The live band replaces it while
+says the project is ready for runs, which kit version it would run on (a clone past its release tag reads `0.16.0+3`), how many ready tickets wait, and when
+the project needs `/sandcastle update` (Upgrading notes it has not had, or no usable update record) or was last updated at an older release. The live band replaces it while
 a run is alive, the session's own or one it follows in another directory. It is drawn by the mod, not pinned as a status line: Claude
 Code gives a pinned line its warning triangle and notice colour.
 _Avoid_: indicator, badge

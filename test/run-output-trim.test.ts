@@ -41,8 +41,8 @@ test("a release says no share line the start already said, and a new line under 
   assert.deepEqual(release("3", ["src/a.ts"]), [], "all said at the start: no header, no line");
   assert.equal(logged.length, loggedAtStart + 1, "the pair line is still logged");
 
-  assert.deepEqual(release("4", ["src/a.ts", "src/b.ts"]), ["more tickets that share files:", "src/a.ts: #2 #4", "src/b.ts: #2 #4"], "a line naming a new ticket is a new line");
-  assert.deepEqual(release("4", ["src/b.ts"]), [], "the same line again is not said");
+  assert.deepEqual(release("4", ["src/a.ts", "src/b.ts"]), ["more tickets that share files:", "src/a.ts: #4 joins #2", "src/b.ts: #2 #4"], "a ticket new to a file joins it; a new file gets its line");
+  assert.deepEqual(release("4", ["src/b.ts"]), [], "the same tickets again are not said");
   assert.equal(logged.length, loggedAtStart + 3, "every pair is logged, every time");
 });
 

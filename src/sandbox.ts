@@ -217,26 +217,31 @@ export class DockerAnswerError extends Error {
   }
 }
 
-// Asked at every close, while other pipelines run on: a synchronous call would hold all of them for each answer. The
-// limit is the kit's own timer, not `execFile`'s: that one waits for the pipes to close, which a hung wrapper's child
-// holds open.
-const dockerAsync = (args: string[], limitMs = DOCKER_ANSWER_MS) =>
+// Asked while other pipelines run on: a synchronous call would hold all of them for each answer. The limit is the
+// kit's own timer, not `execFile`'s: that one waits for the pipes to close, which a hung wrapper's child holds open.
+// A failure carries the program's stderr on `stderr`, as `sh`'s does.
+export const shAsync = (cmd: string, args: string[], limitMs: number, cwd?: string) =>
   new Promise<string>((resolve, reject) => {
     let settled = false;
-    const child = execFile("docker", args, { encoding: "utf8", maxBuffer: MAX_OUTPUT }, (error, stdout, stderr) => {
+    const child = execFile(cmd, args, { encoding: "utf8", maxBuffer: MAX_OUTPUT, cwd }, (error, stdout, stderr) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (error) reject(Object.assign(error, { stderr }));
       else resolve(stdout.trim());
     });
+    // Nothing is ever written to it, as `sh` gives its child no stdin.
+    child.stdin?.end();
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       child.kill("SIGKILL");
-      reject(Object.assign(new Error(`docker ${args[0]} gave no answer in ${Math.round(limitMs / 1000)} s`), { stderr: "" }));
+      reject(Object.assign(new Error(`${cmd} ${args[0]} gave no answer in ${+(limitMs / 1000).toFixed(1)} s`), { stderr: "" }));
     }, limitMs);
   });
+
+// Asked at every close, while other pipelines run on.
+const dockerAsync = (args: string[], limitMs = DOCKER_ANSWER_MS) => shAsync("docker", args, limitMs);
 
 /** What Docker said of a failed call: its error output, else the error's own message. */
 const saidOf = (e: unknown) => {
@@ -1026,6 +1031,53 @@ export const sandboxCpus = (
   if (!known) return undefined;
   const sharers = kind === "gate" ? pool.maxGates : pool.concurrency;
   return Math.min(ncpu, Math.max(2, Math.floor(ncpu / Math.max(1, sharers))));
+};
+
+/**
+ * Runs `run` with the sandbox's container limited to `cpus.gate`, and puts it back to `cpus.ticket` after, whatever `run`
+ * did. A ticket's gates hold a gates slot, so while they run the sandbox is one of at most `maxGates` suites at once and
+ * its share is the gate share, not the ticket share it was created with (`docker run --cpus` is fixed at creation).
+ * The kit holds no name for the container: its short id is the container's `hostname`, read through the sandbox's own
+ * exec. No limit to move (`cpus` unset, or the gate share no larger than the ticket's, which is a project's own `cpus`
+ * number or a pool whose gate share is the smaller) runs it as it is. A failed read or update says one line and leaves the
+ * limit as it was; it never fails `run`, and a limit that was not raised is not "put back".
+ */
+export const withContainerCpus = async <T>(
+  sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> },
+  cpus: { gate: number; ticket: number } | undefined,
+  run: () => Promise<T>,
+  say: (line: string) => void = console.log,
+): Promise<T> => {
+  if (!cpus || !(cpus.gate > cpus.ticket)) return run();
+  const set = async (id: string, n: number) => {
+    try {
+      await dockerAsync(["update", "--cpus", String(n), id]);
+      return true;
+    } catch (e) {
+      say(`  could not set the sandbox's CPU limit to ${n}: ${saidOf(e).split("\n")[0]}`);
+      return false;
+    }
+  };
+  let id = "";
+  try {
+    // Read inside the sandbox, where an agent can put its own `hostname` on PATH (one that prints another container's id
+    // would have the host raise, then "put back", that container's limit): the kernel's own file, by absolute paths,
+    // which the agent cannot change without CAP_SYS_ADMIN. Only a container id reaches `docker update`, never a flag.
+    const r = await sandbox.exec("/bin/cat /proc/sys/kernel/hostname");
+    id = r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
+  } catch {
+    /* said below */
+  }
+  if (!id) {
+    say("  could not read the sandbox's container id: its gates run at the ticket's CPU limit");
+    return run();
+  }
+  const raised = await set(id, cpus.gate);
+  try {
+    return await run();
+  } finally {
+    if (raised) await set(id, cpus.ticket);
+  }
 };
 
 /** The run's start line for the limits `sandboxCpus` chose: a ticket's sandbox, then a gate-only one when it differs. */

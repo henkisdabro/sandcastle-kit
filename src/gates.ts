@@ -18,7 +18,7 @@ import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, G
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
-import { EXEC_TAIL_CHARS, sandboxConfig, sh } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -76,6 +76,12 @@ export type GateProgress = {
   log?: string;
   /** The run went red and starts again from gate `name` in the same slot (`runGates`' `rerunOnRed`): the caller's section header for it. */
   again?: (name: string) => void;
+  /**
+   * A ticket's gates (`priority` false) run in the ticket's own sandbox, created at the ticket share of the CPUs: while
+   * they hold the gates slot its container is raised to `gate`, the gate share, and set back to `ticket` when the slot
+   * is released (`withContainerCpus`). Unset for a gate-only sandbox, which has the gate share from its start.
+   */
+  cpus?: { gate: number; ticket: number };
 };
 
 // One decimal under 10 s: gates average a few seconds, and "green in 0s" says
@@ -169,7 +175,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         progress.gate?.(i, g.name);
         if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${localStamp()}\n`);
         const since = Date.now();
-        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, stripVTControlCharacters(line) + "\n") } : undefined);
+        // Every stdout line the tail was offered, with its separator: more than the tail returned means it dropped some.
+        let seen = 0;
+        let lines = 0;
+        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => { seen += line.length + (lines++ > 0 ? 1 : 0); appendFileSync(log, stripVTControlCharacters(line) + "\n"); } } : undefined);
         const ms = Date.now() - since;
         const timedOut = r.exitCode === 124;
         const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
@@ -188,9 +197,12 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // prompt, `failureKey` and `failingTests` read plain text. The gates log is stripped as it is written, too: a
         // `grep "Test Files"` over colour-coded lines misses or garbles them.
         const whole = stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim();
-        // The exec tail drops whole items, so after any drop more than half of its cap remains: a stream over half
-        // may have been cut, and a test missing from it is not known to be green.
-        const mayBeCut = r.stdout.length > EXEC_TAIL_CHARS / 2 || r.stderr.length > EXEC_TAIL_CHARS / 2;
+        // The exec tail reports no drop. Stdout's items are whole lines, so one very long line can evict most of the
+        // cap and leave far less than half of it: stdout is cut when the lines `onLine` saw add up to more than came
+        // back. Stderr's items are pipe chunks of at most 64 KiB, so after a drop more than half of the cap remains:
+        // a stream over half may have been cut, and a test missing from it is not known to be green. (Stdout keeps
+        // the half rule too: with no log there is no `onLine` to count by.)
+        const mayBeCut = seen > r.stdout.length || r.stdout.length > EXEC_TAIL_CHARS / 2 || r.stderr.length > EXEC_TAIL_CHARS / 2;
         failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output: clip(whole), ...(mayBeCut ? {} : { tests: failingTests(whole, Infinity) }) });
         // A timed-out gate may still be running in this container (or Docker
         // may not be answering): a later gate would run beside it, or wait out
@@ -202,7 +214,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const rewrote = await restoreGateChanges(sandbox, before);
     return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   };
-  return withSlot("gates", label, async (): Promise<GateRun> => {
+  return withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
@@ -236,7 +248,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     // rewrote it may not run again, and the run's `gateRewrites` line would lose it.
     const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? [])])];
     return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) };
-  }, progress.wait, undefined, priority);
+  }), progress.wait, undefined, priority);
 };
 
 // ---------------------------------------------------------------------------
@@ -769,11 +781,12 @@ export const LANDING = "landing";
  * and then found a conflict ran no gate and left no line at all.
  */
 export const writeLandingLine = (
-  timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, took: { elapsed: number; slotWaitMs: number }, result: { ok: boolean; kind: string },
+  timings: string, who: { run: string; project: string; issue: string; carried?: boolean; unreviewed?: boolean }, took: { elapsed: number; slotWaitMs: number }, result: { ok: boolean; kind: string },
 ) => {
   const line = {
     ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING, ...stepTimes(took.elapsed, { waitMs: took.slotWaitMs }), ok: result.ok, result: result.kind,
     ...(who.carried ? { carried: true } : {}),
+    ...(who.unreviewed ? { unreviewed: true } : {}),
   };
   appendFileSync(timings, JSON.stringify(line) + "\n");
 };
@@ -790,7 +803,7 @@ export const BASE_RED = "base-red";
  * ticket's state, and a ticket landing already holds the landing stage `landOne` wrote.
  */
 export const timedLandingGate = <T>(
-  timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, fn: () => Promise<T>,
+  timings: string, who: { run: string; project: string; issue: string; carried?: boolean; unreviewed?: boolean }, fn: () => Promise<T>,
 ): Promise<T> => timedGate(LANDING_GATES, timings, who, fn);
 
 /**
@@ -798,7 +811,7 @@ export const timedLandingGate = <T>(
  * gate asks for - `BASE_RED`) still leaves its line, so the time it took is on record.
  */
 export const timedGate = async <T>(
-  phase: string, timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, fn: () => Promise<T>,
+  phase: string, timings: string, who: { run: string; project: string; issue: string; carried?: boolean; unreviewed?: boolean }, fn: () => Promise<T>,
 ): Promise<T> => {
   const since = Date.now();
   let result: T | undefined;
@@ -815,6 +828,7 @@ export const timedGate = async <T>(
     const line = {
       ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
       ...(who.carried ? { carried: true } : {}),
+      ...(who.unreviewed ? { unreviewed: true } : {}),
       ...(gateTimes ? { gates: gateTimes } : {}),
       ...(peakMib ? { peakMib } : {}),
       ...pressure,

@@ -23,6 +23,8 @@ export type Queue<T> = {
   run(workers: number, fn: (item: T) => Promise<void>): Promise<void>;
   /** The item `run` would take next, taken now, or undefined when none is queued: for a worker that holds what an item needs before it takes one. */
   takeNow(): T | undefined;
+  /** The item `takeNow` would take, left queued; undefined when none is. */
+  peek(): T | undefined;
   /** Resolves true once more items are queued than `claimed()` says are spoken for already, false once the queue is closed and empty. */
   ready(claimed: () => number): Promise<boolean>;
 };
@@ -40,11 +42,11 @@ export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> =>
     for (const resume of waiting.splice(0)) resume();
   };
   // Boxed, so an item that is itself undefined or falsy is not mistaken for "no more".
+  const headAt = () => items.reduce((best, item, i) => (rank(item) > rank(items[best]) ? i : best), 0);
   const head = (): { item: T } | undefined => {
     if (!items.length) return undefined;
     // `>` keeps the earliest of equal ranks.
-    const at = items.reduce((best, item, i) => (rank(item) > rank(items[best]) ? i : best), 0);
-    const item = items.splice(at, 1)[0];
+    const item = items.splice(headAt(), 1)[0];
     // A worker in `ready` may be waiting for the queue to be closed and empty.
     wake();
     return { item };
@@ -81,6 +83,7 @@ export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> =>
       );
     },
     takeNow: () => head()?.item,
+    peek: () => (items.length ? items[headAt()] : undefined),
     async ready(claimed) {
       for (;;) {
         if (items.length > claimed()) return true;
@@ -121,6 +124,15 @@ const DOC_FILES = ["README.md", "CHANGELOG.md"];
  * appear. Empty when no pair shares a file.
  */
 export const fileShareSummary = (ref: (id: string) => string, pairs: { id: string; share: FileShare }[]) => {
+  const byFile = sharesByFile(pairs);
+  const lines = [...byFile].filter(([file]) => !DOC_FILES.includes(file)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([file, ids]) => `${file}: ${ids.map(ref).join(" ")}`);
+  const docs = [...byFile].filter(([file]) => DOC_FILES.includes(file));
+  if (docs.length) lines.push(`${docs.map(([file]) => file).join(", ")}: shared by ${new Set(docs.flatMap(([, ids]) => ids)).size} tickets (not listed)`);
+  return lines;
+};
+
+/** Each mergeable file the pairs share, with its tickets in the order they first appear; a docs file every ticket touches (`isDocFile`) among them. */
+export const sharesByFile = (pairs: { id: string; share: FileShare }[]) => {
   const byFile = new Map<string, string[]>();
   for (const { id, share } of pairs)
     for (const file of share.files) {
@@ -128,11 +140,9 @@ export const fileShareSummary = (ref: (id: string) => string, pairs: { id: strin
       for (const t of [share.with, id]) if (!ids.includes(t)) ids.push(t);
       byFile.set(file, ids);
     }
-  const lines = [...byFile].filter(([file]) => !DOC_FILES.includes(file)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([file, ids]) => `${file}: ${ids.map(ref).join(" ")}`);
-  const docs = [...byFile].filter(([file]) => DOC_FILES.includes(file));
-  if (docs.length) lines.push(`${docs.map(([file]) => file).join(", ")}: shared by ${new Set(docs.flatMap(([, ids]) => ids)).size} tickets (not listed)`);
-  return lines;
+  return byFile;
 };
+export const isDocFile = (file: string) => DOC_FILES.includes(file);
 
 /** The note of a ticket parked in a run that has stopped: nothing will start it before the next run. */
 export const stoppedWaitNote = (ref: (id: string) => string, w?: FileWait) =>
@@ -557,14 +567,15 @@ export class StoppedWhileParked extends Error {
  * collided with, on a second attempt's landing; its `landed.with` then names the tickets of both.
  */
 export type Ending<G, O> =
-  | { kind: "landing"; green: G; landed: Landed; attempts: number; again?: Again; unstarted?: true }
+  | { kind: "landing"; green: G; landed: Landed; attempts: number; again?: Again; unstarted?: true; wouldRetry?: true }
   | { kind: "pipeline"; outcome: O; attempts: number }
   /**
    * Its branch no longer merged onto the base before its review or its gates (`conflict`), and it was not sent back:
    * a second conflict (`again` is the first, and `conflict.with` then names the tickets of both), or a run that starts
    * nothing. `unstarted`: it was sent back and its next attempt never began - `withdrawn` when the tracker took it back meanwhile.
+   * `wouldRetry`: a conflict the requeue-once rule would have sent back, had the run not stopped starting tickets (on a landing ending too); its `with` then names only its own tickets.
    */
-  | { kind: "conflict"; outcome: O; conflict: Conflict; attempts: number; again?: Again; unstarted?: true; withdrawn?: string }
+  | { kind: "conflict"; outcome: O; conflict: Conflict; attempts: number; again?: Again; unstarted?: true; withdrawn?: string; wouldRetry?: true }
   /** `green` when the land port threw, rather than the pipeline. */
   | { kind: "crashed"; error: unknown; attempts: number; green?: G }
   /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
@@ -585,17 +596,18 @@ export type Ending<G, O> =
  * before. `next run`: the run starts nothing more, so a parked ticket waits for the next run, behind
  * `wait.with` if that one is still in flight (`freed` ended just now). `resolve waits`: a ticket
  * sent back after a conflict holds its second attempt until the tickets `for` - green branches
- * queued to land, and tickets still in their pipelines, that share files with it - have landed or
+ * queued to land, and tickets in their gates, that share files with it - have landed or
  * ended, told once its list has held for `RESOLVE_SETTLE_MS` and again when the list changes after that, with
- * `running` the ones of `for` still in their pipelines (the others are queued to land) and `first` set for the
- * wait's first telling - a wait that ends sooner is never told; `resolve starts`: none is left, the attempt
- * begins, told only for a wait that was.
+ * `running` the ones of `for` still in their gates (the others are queued to land) and `first` set for the
+ * wait's first telling - a wait that ends sooner is never told; `resolve queued`: none is left and the ticket waits for a
+ * free slot, told only for a wait that was; `resolve starts`: the attempt begins, told only for a wait that was.
  */
 export type HoldChange =
   | { kind: "started"; id: string; after: { kind: "blockers" } | { kind: "file"; freed: string }; shares: FileShare[] }
   | { kind: "waits"; id: string; wait: FileWait; parked: boolean }
   | { kind: "next run"; id: string; freed: string; wait?: FileWait }
   | { kind: "resolve waits"; id: string; for: string[]; running: string[]; first: boolean }
+  | { kind: "resolve queued"; id: string }
   | { kind: "resolve starts"; id: string };
 
 /**
@@ -849,12 +861,13 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
    * goes on from that phase. A paused run holds no ticket's sandbox at a juncture, and a ticket that
    * has not begun waits before its attempt does. `paused()` reads the pause now: an attempt that waits
    * for a machine-wide slot stops waiting when the run is paused, and reaches its first juncture instead.
-   * `resolveWaitMs`: how long a sent-back ticket's resolve waited for the tickets ahead of it (`resolveTurn`; the time parked by a pause is left out), for the record of the attempt's start.
+   * `gates()`: the attempt is past its review and about to run its gates; from then until the attempt ends, a conflicted ticket's resolve that shares files with it waits for it.
+   * `resolveWaitMs`: how long a sent-back ticket's resolve waited, from its requeue to the attempt's start (the wait for the tickets ahead of it and the queue after it; the time a pause held the run is left out), for the record of the attempt's start. None for a resolve that never waited.
    * `slot`: the sandbox slot the worker leased for it (`slot` above), the attempt's to give back and lease again across
    * a pause and to release as it ends. None without the port, or when the run was paused as the attempt began: the
    * scheduler gave that one back before the ticket waited for the resume, and the attempt leases its own.
    */
-  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number; slot?: Slot }): Promise<Attempted<G, O>>;
+  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; resolveWaitMs?: number; slot?: Slot }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
   tell(change: Change<G, O, B>): void;
 };
@@ -933,6 +946,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const sentBack = new Map<string, { green: G; landed: Landed } | { outcome: O; conflict: Conflict }>();
       // The files a ticket sent back after a conflict collided on: its second attempt waits for the green branches that touch them.
       const conflicted = new Map<string, string[]>();
+      // The tickets whose conflict the rule would have sent back, had the run not stopped starting tickets (`sendBack`).
+      const wouldRetry = new Set<string>();
       // Sent-back tickets whose second attempt waits for those landings: in no pipeline, and no one waits for them.
       const resolving = new Set<string>();
       // Landings that reached the base, counted as they settle: a second attempt that begins after n of them
@@ -944,12 +959,14 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const resolveSaid = new Map<string, string>();
       // The list a resolve wait last saw, and when it last changed: said once it has held for RESOLVE_SETTLE_MS.
       const resolveSeen = new Map<string, { key: string; at: number }>();
-      // The tickets a resolve wait began with (`ahead` reads it, up to the attempt that follows the wait): a ticket that starts
-      // after the wait began lands on a base the resolve merges anyway, and waiting for it could outlast the queue.
-      const resolveHolders = new Map<string, Set<string>>();
-      // How long each sent-back ticket's resolve waited, from the end of that wait to the attempt that follows it.
-      const resolveWaited = new Map<string, number>();
+      // The sent-back tickets whose resolve waited for the tickets ahead of it, and so records its time from the requeue.
+      const resolveWaited = new Set<string>();
       const clock = work.now ?? Date.now;
+      // When each sent-back ticket was queued again, and how much of the run's time held by a pause had passed by then:
+      // its resolve's recorded wait runs from the requeue to the attempt's start, less what a pause held.
+      const requeuedAt = new Map<string, { at: number; pausedMs: number }>();
+      let pausedMs = 0;
+      let pauseBegan = 0;
       const failures: unknown[] = [];
       const settles: (() => void)[] = [];
       let working = 0;
@@ -975,6 +992,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Tickets inside an attempt, and green branches queued for landing or landing: what a pause lets finish.
       const running = new Set<string>();
       const greens = new Set<string>();
+      // The tickets in an attempt that are past their review and in their gates: at most a gate run and a landing from
+      // queued to land, so a resolve that shares their files waits for them (`ahead`). A ticket still implementing or in
+      // review is not: the resolve's own landing meets the one that conflicts after it (#398's exception).
+      const gating = new Set<string>();
       const wakers: (() => void)[] = [];
       let toldFinishing: string | undefined;
       // While paused only the tickets inside an attempt that hold a sandbox ask for a slot: one queued for a
@@ -1034,6 +1055,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         }
         if (now && pausedSince === undefined) {
           pausedSince = now.since;
+          pauseBegan = clock();
           pausedFor = now.usage;
           toldFinishing = undefined;
           tellPaused();
@@ -1044,6 +1066,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           tellPaused();
         } else if (!now && pausedSince !== undefined) {
           pausedSince = undefined;
+          pausedMs += clock() - pauseBegan;
           pausedFor = undefined;
           parked.clear();
           toldFinishing = undefined;
@@ -1188,10 +1211,16 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
        */
       const sendBack = (issue: string, met: Extract<Landed, { kind: "conflict" | "red" }>, back: { green: G; landed: Landed } | { outcome: O; conflict: Conflict }): boolean => {
         const t = byId.get(issue);
-        if (!t || stop.startsNothing || pipelines.closed) return false;
+        if (!t || pipelines.closed) return false;
         // A second conflict is final, unless a landing that finished after the resolve began caused it: the
         // resolve could not have merged that one, so it is no fault of the resolve and the ticket is sent back again.
         if (first.has(t.id) && !(met.kind === "conflict" && met.with.some((id) => (landedAt.get(id) ?? 0) > (resolveFrom.get(t.id) ?? Infinity)))) return false;
+        // The rule would send it back, but the second attempt would never begin: the ending says so, so a person
+        // does not read a conflict that was never retried as one that failed twice.
+        if (stop.startsNothing) {
+          if (met.kind === "conflict") wouldRetry.add(t.id);
+          return false;
+        }
         // Where it was found: a pipeline's conflict says which check (`Conflict.found`), a landing's is the landing.
         const found = "conflict" in back ? back.conflict.found : "landing";
         const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }), ...(met.seen && { seen: true as const }) } : { kind: "conflict", with: met.with, ...(found && { found }) };
@@ -1200,6 +1229,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         sentBack.set(t.id, back);
         tell({ kind: "requeued", id: t.id, again });
         inPipeline++;
+        // A landing goes on during a pause, so a requeue may come in one: its part before the requeue is no part of the wait.
+        requeuedAt.set(t.id, { at: clock(), pausedMs: pausedMs + (pausedSince !== undefined ? clock() - pauseBegan : 0) });
         pipelines.push({ ticket: t, rank: REQUEUED });
         demand();
         return true;
@@ -1215,10 +1246,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           if (requeue(g, got)) return;
           const id = g.issue;
           const again = first.get(id);
-          // A second collision names the tickets of both attempts.
-          const landed = again && (got.kind === "conflict" || got.kind === "red") ? { ...got, with: [...new Set([...again.with, ...got.with])] } : got;
+          const unretried = wouldRetry.has(id) && got.kind === "conflict";
+          // A second collision names the tickets of both attempts; one that would have been retried names only its own.
+          const landed = again && !unretried && (got.kind === "conflict" || got.kind === "red") ? { ...got, with: [...new Set([...again.with, ...got.with])] } : got;
           const closed = landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier";
-          await end(id, { kind: "landing", green: g, landed, attempts: attempts.get(id) ?? 1, ...(again && { again }) }, closed);
+          await end(id, { kind: "landing", green: g, landed, attempts: attempts.get(id) ?? 1, ...(again && { again }), ...(unretried && { wouldRetry: true as const }) }, closed);
         },
         stopped: (g) => {
           dealt++;
@@ -1259,45 +1291,56 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         return end(t.id, { kind: "landing", green: back.green, landed, attempts: done, ...(done > 1 && { unstarted: true as const }) });
       };
       // What a sent-back ticket's resolve waits for: the green branches queued to land that share a file with it, and the
-      // tickets still in their pipelines whose branches touch the files it conflicted on. Each lands on the same lines
-      // and would send the resolve back again; the ticket merges the base once they are done.
+      // tickets past their review, in their gates, that do. Each lands on the same lines and would send the resolve back
+      // again; the ticket merges the base once they are done. Whenever they started: a ticket still implementing or in
+      // review is not waited for, being a gate run and a landing from this stage, which a queue that keeps starting
+      // tickets cannot stretch.
       const ahead = (t: T): { queued: string[]; running: string[] } => {
         const touched = hold?.touched();
         if (!touched) return { queued: [], running: [] };
-        const holders = resolveHolders.get(t.id);
-        const hit = (id: string, files: Set<string>) => (touched.get(id) ?? []).some((f) => files.has(f));
-        const conflict = new Set(conflicted.get(t.id));
-        const mine = new Set([...(touched.get(t.id) ?? []), ...conflict]);
-        // Once a wait has begun, only the tickets it began with count: those that started since are not waited for.
-        const counts = (id: string) => id !== t.id && (!holders || holders.has(id));
+        const mine = new Set([...(touched.get(t.id) ?? []), ...(conflicted.get(t.id) ?? [])]);
+        const counts = (id: string) => id !== t.id && (touched.get(id) ?? []).some((f) => mine.has(f));
         return {
-          queued: [...greens].filter((id) => counts(id) && hit(id, mine)),
-          running: [...running].filter((id) => counts(id) && !greens.has(id) && !resolving.has(id) && hit(id, conflict)),
+          queued: [...greens].filter(counts),
+          running: [...gating].filter((id) => !greens.has(id) && !resolving.has(id) && counts(id)),
         };
       };
       const aheadOf = (t: T) => Object.values(ahead(t)).flat();
-      // Who a resolve wait begins with: every other ticket queued to land or in its pipeline that touches its files. One at
-      // work on a file it did not conflict on counts once its branch is queued, so it is kept here before it does.
-      const holdersOf = (t: T) => {
-        const touched = hold?.touched();
-        const mine = new Set([...(touched?.get(t.id) ?? []), ...(conflicted.get(t.id) ?? [])]);
-        return new Set([...greens, ...running].filter((id) => id !== t.id && (touched?.get(id) ?? []).some((f) => mine.has(f))));
+      // The sent-back tickets whose resolve waits off the pipeline workers (`waitToResolve`), until they are queued again.
+      const offWorker = new Set<string>();
+      // Whether a resolve is about to be released and the next pick is a ticket that has not started: its wait is on green
+      // branches queued to land only (none in its gates). Their landing ends the wait and the resolve goes first in line,
+      // so the worker that is free now leaves the tickets that have not started until it has: else it starts a pipeline, and
+      // the resolve waits out the pipelines of every worker.
+      // One worker holds for each resolve about to be released, not every worker that comes free: a resolve takes one
+      // worker, and the others' slots would sit idle until the landing it waits for is done. `self`: the asking worker
+      // is one of the holders, so it does not count against itself.
+      let holding = 0;
+      const resolveComes = (self = false) => {
+        if (pausedSince !== undefined || stop.startsNothing) return false;
+        const next = pipelines.peek();
+        if (!next || next.rank === REQUEUED) return false;
+        // Counted until it is pushed, not only while it waits: the landing that ends the wait wakes the worker too, and a worker
+        // that looked between the wait's end and the push would find no resolve and take the next ticket.
+        const coming = [...offWorker].filter((id) => {
+          const t = byId.get(id);
+          return t !== undefined && ahead(t).running.length === 0;
+        }).length;
+        return coming > holding - (self ? 1 : 0);
       };
       // Returns when none is ahead of the ticket's resolve, or the run starts nothing; a pause parks it as at the start.
-      // The time it waited for the tickets ahead is the result (a pause's parked time is no part of it).
-      const resolveTurn = async (t: T): Promise<number> => {
-        let waited = 0;
+      const resolveTurn = async (t: T): Promise<void> => {
         try {
           for (sync(); !stop.startsNothing; sync()) {
             if (pausedSince !== undefined) {
               await waitParked(t.id, "start");
               continue;
             }
-            if (!resolveHolders.has(t.id)) resolveHolders.set(t.id, holdersOf(t));
             const { queued, running: inPipeline } = ahead(t);
             const before = [...queued, ...inPipeline];
             if (!before.length) break;
             resolving.add(t.id);
+            resolveWaited.add(t.id);
             const key = `${queued.join(",")}|${inPipeline.join(",")}`;
             const at = clock();
             if (resolveSeen.get(t.id)?.key !== key) resolveSeen.set(t.id, { key, at });
@@ -1311,9 +1354,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               const timer = setTimeout(wake, 1000);
               settles.push(() => (clearTimeout(timer), wake()));
             });
-            waited += clock() - at;
           }
-          return waited;
         } finally {
           resolving.delete(t.id);
           resolveSeen.delete(t.id);
@@ -1324,13 +1365,20 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // queue, so with N workers a waiting resolve leaves all N for the tickets behind it. Pushed again once nothing
       // is ahead of it (or the run starts nothing: the attempt then ends it as not begun), ahead of the queue as before.
       const waitToResolve = (t: T) => {
+        offWorker.add(t.id);
         void resolveTurn(t).then(
-          (waitedMs) => {
-            resolveWaited.set(t.id, (resolveWaited.get(t.id) ?? 0) + waitedMs);
+          () => {
             // A closed queue means a worker or the landing worker failed: the run rejects with that, nothing would take it.
-            if (!pipelines.closed) pipelines.push({ ticket: t, rank: REQUEUED });
+            if (pipelines.closed) return void offWorker.delete(t.id);
+            // The wait is over; what is left is the queue for a free slot. Said, or the note keeps naming the ticket that landed.
+            if (resolveSaid.has(t.id)) tell({ kind: "resolve queued", id: t.id });
+            pipelines.push({ ticket: t, rank: REQUEUED });
+            offWorker.delete(t.id);
+            // A worker holding off the tickets that have not started for this resolve takes it now, not at its next backstop tick.
+            for (const wake of settles.splice(0)) wake();
           },
           (error) => {
+            offWorker.delete(t.id);
             failures.push(error);
             closeAll();
           },
@@ -1350,14 +1398,13 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         const resolves = n >= 2 && first.get(t.id)?.kind === "conflict";
         // Something is ahead of its resolve (checked again here: a landing may have queued since it was pushed): wait off the worker.
         if (resolves && !stop.startsNothing && aheadOf(t).length) return waitToResolve(t);
-        // The wait is over: a later one (a third attempt) takes its own holders.
-        resolveHolders.delete(t.id);
         const slot = held.slot;
         held.slot = undefined;
         working++;
         running.add(t.id);
-        const resolveWaitMs = resolveWaited.get(t.id);
-        resolveWaited.delete(t.id);
+        // A resolve that waited records its time from the requeue: the wait, and the queue for a free slot after it.
+        const sentAt = requeuedAt.get(t.id);
+        const resolveWaitMs = resolves && resolveWaited.delete(t.id) && sentAt ? Math.max(0, clock() - sentAt.at - (pausedMs - sentAt.pausedMs)) : undefined;
         try {
           if (stop.startsNothing) return await notBegun(t, stop.headline!);
           if (resolves) {
@@ -1369,7 +1416,13 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           // attempt before the first of them found nothing begun: the ticket ends as not begun, and a requeued one keeps its landing.
           let stepped = false;
           try {
-            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => ((stepped ||= phase !== "start"), juncture(t.id, phase, park)), paused: () => (sync(), pausedSince !== undefined), ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
+            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => {
+              stepped ||= phase !== "start";
+              // Out of its gates: a repair (and the review after it) can take an hour, which a resolve that shares its files
+              // does not wait out. It counts again from its next gate run (`gates`).
+              if (phase === "repair" || phase === "review") gating.delete(t.id);
+              return juncture(t.id, phase, park);
+            }, paused: () => (sync(), pausedSince !== undefined), gates: () => void gating.add(t.id), ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {
@@ -1398,9 +1451,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               for (const c of r.causes ?? []) stop.add(c);
               if (sendBack(t.id, { kind: "conflict", ...r.conflict }, { outcome: r.outcome, conflict: r.conflict })) return;
               const again = first.get(t.id);
-              // A second collision names the tickets of both attempts, as a landing's does.
-              const conflict = again ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
-              return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }) });
+              const unretried = wouldRetry.has(t.id);
+              // A second collision names the tickets of both attempts, as a landing's does; one that would have been retried names only its own.
+              const conflict = again && !unretried ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
+              return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }), ...(unretried && { wouldRetry: true as const }) });
             }
             case "crashed": {
               for (const c of r.causes ?? []) stop.add(c);
@@ -1419,6 +1473,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           slot?.release();
           working--;
           running.delete(t.id);
+          gating.delete(t.id);
           inPipeline--;
           stage();
         }
@@ -1430,6 +1485,26 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // worker asks the pool only while more tickets are queued than workers asking already, none while the run is
       // paused (no ticket starts) and none once it starts nothing (each queued ticket ends as not begun, with no slot).
       let asking = 0;
+      // A worker whose next pick is a ticket that has not started waits while a resolve is about to be released (`resolveComes`),
+      // and takes the resolve first. It keeps a slot it holds, unless a landing of the run waits for one: that goes back to the pool.
+      const holdForResolve = async (held: { slot?: Slot }) => {
+        holding++;
+        try {
+          while (resolveComes(true)) {
+            if (held.slot && work.landingWaits?.()) {
+              held.slot.release();
+              held.slot = undefined;
+            }
+            // Woken at every stage change and when the resolve is pushed; the timer is a backstop against one that is missed.
+            await new Promise<void>((wake) => {
+              const timer = setTimeout(wake, 1000);
+              settles.push(() => (clearTimeout(timer), wake()));
+            });
+          }
+        } finally {
+          holding--;
+        }
+      };
       const worker = async () => {
         const held: { slot?: Slot } = {};
         try {
@@ -1444,6 +1519,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               if (!(await pipelines.ready(() => asking))) return;
               // Checked again: another worker may have begun asking for the same ticket since `ready` answered.
               if (pipelines.size <= asking) continue;
+              if (resolveComes()) {
+                await holdForResolve(held);
+                continue;
+              }
               if (work.slot && (sync(), !stop.startsNothing)) {
                 if (pausedSince !== undefined) {
                   // Woken by the resume or a stop.
@@ -1454,13 +1533,16 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
                 try {
                   // Not wanted once nothing is queued: a worker whose ticket went off to wait for its resolve kept its slot and
                   // took the ticket this one asked for, and a run with no demand left beside a hungry run is never granted one.
-                  held.slot = await work.slot(() => (sync(), pipelines.size > 0 && pausedSince === undefined && !stop.startsNothing));
+                  held.slot = await work.slot(() => (sync(), pipelines.size > 0 && pausedSince === undefined && !stop.startsNothing && !resolveComes()));
                 } finally {
                   asking--;
                 }
                 if (!held.slot) continue;
               }
             }
+            // The slot came while the resolve was being released: it waits for it too.
+            // Not awaited when there is none: the extra tick would move a pick past a landing that finishes at that moment.
+            if (resolveComes()) await holdForResolve(held);
             const next = pipelines.takeNow();
             if (!next) {
               held.slot?.release();

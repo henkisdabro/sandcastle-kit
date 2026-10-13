@@ -11,3 +11,16 @@ index 93f24d139b795c284915a10c34d82f2fa769eab0..52e7f4e874567251a6bec401c03588eb
          }
          return { path: normalize(collision.path), branch };
        }
+diff --git a/dist/index.js b/dist/index.js
+index 2a1d6d7e902e34620d64929418b34c715ab65d7d..efe00e94346075ea23d89750eda2f0e44f5438e6 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -56,7 +56,7 @@ var agentStreamEmitterLayer = (onEvent) => Layer_exports.succeed(AgentStreamEmit
+ });
+ 
+ // src/PromptPreprocessor.ts
+-var PROMPT_EXPANSION_TIMEOUT_MS = 3e4;
++var PROMPT_EXPANSION_TIMEOUT_MS = 12e4; // sandcastle-kit patch (#782): room for gh-retry.sh to ride out a GitHub 5xx
+ var SHELL_BLOCK_MARKER = "";
+ var MARKED_SHELL_BLOCK_PATTERN = new RegExp(
+   `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,

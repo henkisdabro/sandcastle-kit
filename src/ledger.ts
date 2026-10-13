@@ -23,7 +23,7 @@ import { type Gate, gateLine } from "./gates.ts";
 import { promptExpansionLine } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
-import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
+import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine, unretriedLine } from "./landing.ts";
 import { overrunLine, overrunNoted } from "./report.ts";
 import { HANDED_BACK, readOutcomes, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
@@ -104,10 +104,15 @@ export const repairWords = (o: { repairs: number; idleRepairs?: number }) => {
   return `${o.repairs ? ` repaired=${o.repairs}` : ""}${idle ? ` ${idle === 1 ? "repair made" : `${idle} repairs made`} no change` : ""}`;
 };
 
+// A review that committed reworked the branch, and the implementer's record above can describe what it removed:
+// one line per review commit (short hash and subject) says so on the ticket.
+const reviewedLines = (log: readonly string[] | undefined) =>
+  log?.length ? `\n\nThe review changed the branch (${log.length} commit(s)):\n${log.map((l) => `- ${l}`).join("\n")}` : "";
+
 // The ticket closes on the local merge, so the comment says the work is not on
 // the remote yet: a repo that deploys on push has nothing live when this reads "done".
 export const closeComment = (
-  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
+  o: { branch: string; commits: number; repairs: number; reviewLog?: string[]; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
   gateNames: string,
   report?: string,
 ): string =>
@@ -117,13 +122,14 @@ export const closeComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
+  reviewedLines(o.reviewLog) +
   (overrunNoted(o.overrun) ? `\n\n${overrunLine(o.overrun!)}` : "") +
   (report ? `\n\n${report}` : "");
 
 // A merged ticket left open, an acceptance criterion undone: the comment says what, and that the
 // next run picks up the remainder (or whose decision it is). Posted after the schedule, as the comment on any ticket not closed.
 export const partlyDoneComment = (
-  o: { branch: string; commits: number; repairs: number; unmet: string; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
+  o: { branch: string; commits: number; repairs: number; reviewLog?: string[]; unmet: string; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
   gateNames: string,
   report?: string,
 ): string =>
@@ -134,8 +140,48 @@ export const partlyDoneComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
+  reviewedLines(o.reviewLog) +
   (overrunNoted(o.overrun) ? `\n\n${overrunLine(o.overrun!)}` : "") +
   (report ? `\n\n${report}` : "");
+
+// The openings of the comments the kit writes itself: the close and "not landed" comments above, a hold's
+// text (`describe`, and the pipeline's own holds), `sandcastle land`'s merge comment and the repeat of a
+// follow-up filed already (`repeatComment`, burndown.ts). A person's comment on a ticket after its
+// review is told from these (`personCommentsSince`). `sandcastle requeue --note` is a person's word and
+// is not here.
+const KIT_COMMENT = /^(?:Sandcastle (?:ran this ticket|held this|could not finish this)|(?:Merged|Squashed) locally, not yet pushed, by|Merged into `[^`]*` by an earlier Sandcastle run|Gated green on `|Named again by the )/;
+
+/**
+ * A ticket's comments one to an entry. GitHub's come that way; a Markdown ticket file holds them as one
+ * section, so its entries are the `### ` headings under `## Comments` (the kit writes each as `### <date> - sandcastle`).
+ */
+const commentEntries = (comments: string[]): { text: string; heading?: string }[] =>
+  comments.flatMap((c) => {
+    if (!/^## Comments\b/m.test(c)) return [{ text: c.trim() }];
+    return c
+      .split(/^(?=### )/m)
+      .filter((part) => part.startsWith("### "))
+      .map((part) => {
+        const [heading, ...rest] = part.split("\n");
+        return { heading: heading.trim(), text: rest.join("\n").trim() };
+      });
+  });
+
+/** How many comments a ticket has, as `personCommentsSince` counts them. */
+export const commentCount = (comments: string[]): number => commentEntries(comments).length;
+
+/**
+ * The comments past the first `seen` that a person wrote: not one the kit wrote (its openings are fixed), and not
+ * an agent's, which a snapshot of the count taken after the agent's pass already holds. `seen` is the count
+ * recorded with a branch's head; none recorded means none can be told, and none is returned.
+ */
+export const personCommentsSince = (comments: string[], seen: number | undefined): string[] =>
+  seen === undefined
+    ? []
+    : commentEntries(comments)
+        .slice(seen)
+        .filter((e) => !KIT_COMMENT.test(e.text) && !(e.heading ?? "").endsWith(" - sandcastle"))
+        .map((e) => e.text);
 
 // The one comment a ticket that did not land gets: the conflict (the other
 // ticket and the files), the agents' report, or both - never two comments.
@@ -235,7 +281,7 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
         };
       case "conflict": {
         // A second conflict is held with the tickets of both attempts named.
-        const line = e.again ? againNoteOf(landed, e.again.kind) : conflictLine(landed);
+        const line = e.wouldRetry ? unretriedLine(landed) : e.again ? againNoteOf(landed, e.again.kind) : conflictLine(landed);
         return {
           record: { state: "conflict", note: line, files: landed.files },
           outcome: { kind: "conflict", ...withOf(landed.with), text: `merge conflict: ${line}` },
@@ -369,9 +415,9 @@ const describeConflict = (e: Extract<TicketEnding, { kind: "conflict" }>, c: Con
       view: { word: "withdrawn", landed: true },
       tracker: comment(notLandedComment(c.report, undefined)),
     };
-  const line = e.again ? againNoteOf({ kind: "conflict", ...conflict }, e.again.kind) : conflictLine(conflict);
+  const line = e.wouldRetry ? unretriedLine(conflict) : e.again ? againNoteOf({ kind: "conflict", ...conflict }, e.again.kind) : conflictLine(conflict);
   return {
-    record: { state: "conflict", note: e.again ? line : `no longer merges onto ${c.base}: ${line}`, files: conflict.files, ...(unstarted && { requeued: null }) },
+    record: { state: "conflict", note: e.again && !e.wouldRetry ? line : `no longer merges onto ${c.base}: ${line}`, files: conflict.files, ...(unstarted && { requeued: null }) },
     outcome: { kind: "conflict", ...(conflict.with.length ? { with: conflict.with } : {}), text: `merge conflict before landing: ${line}` },
     view: { word: "merge conflict", landed: false },
     tracker: comment(notLandedComment(c.report, { branch: o.branch, base: c.base, files: conflict.files, with: conflict.with })),

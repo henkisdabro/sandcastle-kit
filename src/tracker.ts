@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { sh } from "./sandbox.ts";
+import { MANAGED_SETTINGS, sh, shAsync } from "./sandbox.ts";
 
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
@@ -37,6 +37,12 @@ export interface Tracker {
   open(withComments?: boolean): Ticket[];
   /** One ticket now, for `TICKETS=` and the check just before landing. */
   get(id: string): TicketState;
+  /**
+   * `get` for a read made while a run is under way: asynchronous, so the run's landings, heartbeat and slot waits go
+   * on during it, and given up at `limitMs` (`TRACKER_READ_MS`) with an error, which callers read as "cannot be read".
+   * A tracker with none (ticket files, local reads) is read by `get`: `readTicketState`.
+   */
+  getAsync?(id: string, limitMs?: number): Promise<TicketState>;
   /** Extra prompt arguments for a ticket (the ticket text, when the sandbox cannot fetch it). */
   promptArgs(id: string): Record<string, string>;
   /** `agents` write their own comments (GitHub); otherwise the orchestrator posts their report. */
@@ -66,6 +72,13 @@ export interface Tracker {
   /** Prompt wording that differs by tracker; fills the prompts' {{KIT_<NAME>}}. */
   readonly words: Record<"LOST" | "TICKET_VIEW" | "COMMENTS_VIEW" | "RECORD" | "NOCHANGE" | "BLOCKED" | "SAY", string>;
 }
+
+/** How long a read of the tracker made during a run (`Tracker.getAsync`) may take before it is given up as unreadable. */
+export const TRACKER_READ_MS = 30_000;
+
+/** One ticket now, read as the tracker offers: asynchronously and time-limited when it can be, else by `get`. A failure is a rejection. */
+export const readTicketState = async (tracker: Pick<Tracker, "get" | "getAsync">, id: string): Promise<TicketState> =>
+  tracker.getAsync ? tracker.getAsync(id) : tracker.get(id);
 
 /** The snapshot key for the GitHub repo's highest issue number: a new issue moves it. Not a ticket id. */
 export const LATEST_ISSUE = "latest issue";
@@ -135,23 +148,37 @@ const nativeIds = (blockedBy: unknown, here: () => string | undefined): string[]
 const github = (project: Project): Tracker => {
   // A failed gh call is the operator's to act on (signed out, no such issue, no network): its own
   // first stderr line, not a stack trace. Callers that match a message (`already exists`) still can.
+  const refusal = (e: unknown, args: string[]): never => {
+    const err = e as { stderr?: unknown; message?: string };
+    const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
+    // gh's own words name no way out: a Go dial error, or a signed-out token.
+    const fix = /no git remotes found|none of the git remotes .* point to a known GitHub host/i.test(why)
+      ? ` - this repository has no GitHub remote, so the github tracker has no GitHub issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
+      : /dial tcp|connection refused|no such host|i\/o timeout|proxyconnect|error connecting|TLS handshake|network is unreachable/i.test(why)
+      ? " - GitHub could not be reached. Check the network (or proxy), then try again."
+      : /HTTP 401|bad credentials|gh auth login|authentication/i.test(why)
+      ? " - gh is not signed in to GitHub: `gh auth status` says why, `gh auth login` signs it in."
+      : /gave no answer in/.test(why)
+      ? " - GitHub is slow or not answering."
+      : /Could not resolve to an? /i.test(why)
+      ? ""
+      : " - `sandcastle doctor` checks gh's sign-in and the GitHub remote.";
+    throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
+  };
   const gh = (args: string[]) => {
     try {
       return sh("gh", args);
     } catch (e) {
-      const err = e as { stderr?: unknown; message?: string };
-      const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
-      // gh's own words name no way out: a Go dial error, or a signed-out token.
-      const fix = /no git remotes found|none of the git remotes .* point to a known GitHub host/i.test(why)
-        ? ` - this repository has no GitHub remote, so the github tracker has no GitHub issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
-        : /dial tcp|connection refused|no such host|i\/o timeout|proxyconnect|error connecting|TLS handshake|network is unreachable/i.test(why)
-        ? " - GitHub could not be reached. Check the network (or proxy), then try again."
-        : /HTTP 401|bad credentials|gh auth login|authentication/i.test(why)
-        ? " - gh is not signed in to GitHub: `gh auth status` says why, `gh auth login` signs it in."
-        : /Could not resolve to an? /i.test(why)
-        ? ""
-        : " - `sandcastle doctor` checks gh's sign-in and the GitHub remote.";
-      throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
+      return refusal(e, args);
+    }
+  };
+  // The same, for the reads made during a run: the event loop goes on while gh answers, and a gh that does not answer in
+  // time is a failed read, not a hang.
+  const ghAsync = async (args: string[], limitMs: number) => {
+    try {
+      return await shAsync("gh", args, limitMs);
+    } catch (e) {
+      return refusal(e, args);
     }
   };
   // This repository's name, asked of gh once and only when a native blocker names a repository. A
@@ -168,6 +195,16 @@ const github = (project: Project): Tracker => {
     }
     return here;
   };
+  const thisRepoAsync = async (limitMs: number) => {
+    if (here === null) {
+      try {
+        here = (await ghAsync(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], limitMs)).trim() || undefined;
+      } catch {
+        here = undefined;
+      }
+    }
+    return here;
+  };
   // Each ticket's native blockers (`12`, or `owner/repo#12` from another repository), as the list and view calls read them.
   const native = new Map<string, string[]>();
   // `fields` with `blockedBy` while gh knows it; the refusal of an old gh, or of a GitHub Enterprise Server
@@ -177,6 +214,17 @@ const github = (project: Project): Tracker => {
     if (!nativeBlockers) return call(fields);
     try {
       return call(`${fields},blockedBy`);
+    } catch (e) {
+      if (!(e instanceof OperatorError) || !/unknown json field.*blockedBy|field 'blockedBy' doesn't exist/i.test(e.message)) throw e;
+      nativeBlockers = false;
+      console.warn(NATIVE_REFUSED);
+      return call(fields);
+    }
+  };
+  const withNativeAsync = async (fields: string, call: (fields: string) => Promise<string>): Promise<string> => {
+    if (!nativeBlockers) return call(fields);
+    try {
+      return await call(`${fields},blockedBy`);
     } catch (e) {
       if (!(e instanceof OperatorError) || !/unknown json field.*blockedBy|field 'blockedBy' doesn't exist/i.test(e.message)) throw e;
       nativeBlockers = false;
@@ -207,6 +255,19 @@ const github = (project: Project): Tracker => {
       labels: (i.labels ?? []).map((l: { name: string }) => l.name),
     }));
   };
+  const ticketOf = (i: any): TicketState => {
+    if (nativeBlockers) native.set(String(i.number), nativeIds(i.blockedBy, thisRepo));
+    return {
+      id: String(i.number),
+      title: i.title,
+      body: i.body ?? "",
+      comments: i.comments.map((c: { body: string }) => c.body),
+      labels: (i.labels ?? []).map((l: { name: string }) => l.name),
+      open: i.state === "OPEN",
+      held: i.labels.some((l: { name: string }) => isHeld(project, l.name)),
+      status: i.labels.some((l: { name: string }) => l.name === project.label) ? project.label : undefined,
+    };
+  };
   return {
     kind: "github",
     agentsWrite: true,
@@ -215,19 +276,12 @@ const github = (project: Project): Tracker => {
     // sees a ticket taken out of the queue mid-run, as it does for ticket files.
     queued: (withComments = true) => list(["--label", project.label], withComments).map((t) => ({ ...t, status: project.label })),
     open: (withComments = true) => list([], withComments),
-    get: (id) => {
-      const i = JSON.parse(withNative("number,title,state,body,comments,labels", (fields) => gh(["issue", "view", id, "--json", fields])));
-      if (nativeBlockers) native.set(String(i.number), nativeIds(i.blockedBy, thisRepo));
-      return {
-        id: String(i.number),
-        title: i.title,
-        body: i.body ?? "",
-        comments: i.comments.map((c: { body: string }) => c.body),
-        labels: (i.labels ?? []).map((l: { name: string }) => l.name),
-        open: i.state === "OPEN",
-        held: i.labels.some((l: { name: string }) => isHeld(project, l.name)),
-        status: i.labels.some((l: { name: string }) => l.name === project.label) ? project.label : undefined,
-      };
+    get: (id) => ticketOf(JSON.parse(withNative("number,title,state,body,comments,labels", (fields) => gh(["issue", "view", id, "--json", fields])))),
+    getAsync: async (id, limitMs = TRACKER_READ_MS) => {
+      const i = JSON.parse(await withNativeAsync("number,title,state,body,comments,labels", (fields) => ghAsync(["issue", "view", id, "--json", fields], limitMs)));
+      // The repository's name is asked only for a blocker from another repository, and not again.
+      if (nativeBlockers && JSON.stringify(i.blockedBy ?? null).includes("nameWithOwner")) await thisRepoAsync(limitMs);
+      return ticketOf(i);
     },
     // The sandbox reads the live issue itself, with the token it already holds.
     promptArgs: () => ({}),
@@ -344,8 +398,9 @@ const github = (project: Project): Tracker => {
     },
     words: {
       LOST: "comment on the ticket that the sandbox's git record was lost",
-      TICKET_VIEW: "!`gh issue view {{ISSUE_NUMBER}}`",
-      COMMENTS_VIEW: "# Comments on the ticket\n\n!`gh issue view {{ISSUE_NUMBER}} --comments`\n\n",
+      // Through container/gh-retry.sh: a GitHub 5xx or timeout is retried there, a 4xx fails at once.
+      TICKET_VIEW: `!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}}\``,
+      COMMENTS_VIEW: `# Comments on the ticket\n\n!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}} --comments\`\n\n`,
       RECORD:
         "**Before you finish, comment on the ticket** with what you changed, the commit(s), and anything a\n" +
         "human must still do. The ticket is closed automatically when your branch merges, so that comment is\n" +

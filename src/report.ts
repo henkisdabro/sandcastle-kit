@@ -49,6 +49,23 @@ export const contextLines = (f: Pick<Facts, "tickets">): string[] => {
   });
 };
 
+/**
+ * One line naming the tickets whose tokens carry a note (`tokensNote` in the run record): an agent pass of theirs threw, so what
+ * the summary shows for them is a floor (`incomplete`) or missing (`unknown`), and a spend limit would count too little.
+ */
+export const tokenNoteLines = (f: Pick<Facts, "tickets">): string[] => {
+  const named = (note: "incomplete" | "unknown") => Object.entries(f.tickets).filter(([, t]) => t.tokensNote === note).map(([id]) => refOf(id));
+  const incomplete = named("incomplete");
+  const unknown = named("unknown");
+  if (!incomplete.length && !unknown.length) return [];
+  return [
+    `Tokens: ${[
+      ...(incomplete.length ? [`incomplete for ${incomplete.join(", ")} (a pass that failed may have spent more than its log showed)`] : []),
+      ...(unknown.length ? [`unknown for ${unknown.join(", ")} (a pass failed before its log showed any usage)`] : []),
+    ].join("; ")}`,
+  ];
+};
+
 /** "stopped by `sandcastle stop`", "stopped by Ctrl-C": what a run's `stoppedBy` reads as in the summary and the notify line. */
 export const stoppedByText = (by: string) => `stopped by ${by === "sandcastle stop" ? "`sandcastle stop`" : by}`;
 
@@ -64,6 +81,8 @@ export type Facts = {
   killed?: boolean;
   dryRun: boolean;
   tokens?: string;
+  /** The run record's `tokensNote`: an agent pass threw, so the figures are a floor (`incomplete`) or there is none (`unknown`). */
+  tokensNote?: "incomplete" | "unknown";
   /** This run's tokens summed from timings.jsonl, with the cached share. */
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
@@ -572,6 +591,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     killed: alive.state === "dead",
     dryRun: !!run.dryRun,
     tokens: run.tokens,
+    ...(run.tokensNote === "incomplete" || run.tokensNote === "unknown" ? { tokensNote: run.tokensNote } : {}),
     tokenTotal: timed?.total,
     byModel: timed?.byModel,
     ...(pressure ? { pressure } : {}),
@@ -1033,10 +1053,14 @@ const fromTurn = (turn: number, lines: string[]) => lines.map((l) => (l.startsWi
 
 const SLOW = 2;
 
+/** A cause this large a part of the run's time is said even for a run inside its estimate: a run bound by its one gates slot took 1.6x and said nothing. */
+const LARGE_CAUSE = 0.2;
+
 /**
  * The run's time and tokens beside the estimate it was given, when either is more than twice off, and for a run that took
  * more than twice its estimate the largest causes the record can measure (a minute or more each, largest first): the time
- * paused, held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. The estimate
+ * paused, held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. A run
+ * inside its estimate still gets the causes when the largest is a fifth of its time or more (`LARGE_CAUSE`). The estimate
  * comes from the record (a file in a repository): only finite positive figures count. None for a run still going, which
  * has neither its time nor its tokens yet.
  */
@@ -1053,7 +1077,9 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
   const estIn = num(est.tokensIn?.mid);
   const estOut = num(est.tokensOut?.mid);
   const tokensOff = !!t && (off(inTokens, estIn) || off(t.output, estOut));
-  if (!off(took, estMs) && !tokensOff) return [];
+  const causes = causesOf(f);
+  const large = causes.length > 0 && causes[0]!.ms >= LARGE_CAUSE * took;
+  if (!off(took, estMs) && !tokensOff) return large ? [causesLine(causes)] : [];
   // A ratio on both sides, under the estimate as over it: "17.1M in against an estimate of 40.0M in" was read as close.
   const ratio = (actual: number, estimated: number) => ` (${(actual / estimated).toFixed(1)}x)`;
   const times = `${span(took)} against an estimate of ${span(estMs)}${ratio(took, estMs)}`;
@@ -1061,11 +1087,17 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
     ? `; tokens ${tokenBrief(t)} against an estimate of ${tokenBrief({ input: estIn, cacheWrite: 0, cacheRead: 0, output: estOut })}${ratio(inTokens, estIn)}`
     : "";
   const lines = [`Against the estimate: ${times}${tokens}.`];
-  if (took / estMs <= SLOW) return lines;
+  if (took / estMs <= SLOW && !large) return lines;
+  lines.push(causes.length ? causesLine(causes) : "No cause measured: no pause, time beside another run, slot wait, re-run or repair reached a minute.");
+  return lines;
+};
+
+/** The largest causes the record measures, largest first, of a minute or more each (see `estimateLines`). */
+const causesOf = (f: Facts): { ms: number; text: string; gates?: true }[] => {
   const lost = f.timeLost;
-  const causes = [
+  return [
     ...(f.sharedMs ? [{ ms: f.sharedMs, text: `${span(f.sharedMs)} at a share below what it asked for, beside another run` }] : []),
-    ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets` }] : []),
+    ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets`, gates: true as const }] : []),
     ...(f.pausedMs ? [{ ms: f.pausedMs, text: `${span(f.pausedMs)} paused (sandcastle pause or the plan's usage)` }] : []),
     ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
     ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
@@ -1076,9 +1108,11 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
         }]
       : []),
   ].filter((c) => c.ms >= 60_000).sort((a, b) => b.ms - a.ms);
-  lines.push(causes.length ? `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` : "No cause measured: no pause, time beside another run, slot wait, re-run or repair reached a minute.");
-  return lines;
 };
+
+// Led by the gates wait, the line names the check that says whether the machine has room for another gates slot.
+const causesLine = (causes: { text: string; gates?: true }[]) =>
+  `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` + (causes[0]?.gates ? " `sandcastle size` says whether the machine has room for more gates slots." : "");
 
 /**
  * Likely flaky tests, on any ticket: each once, with the tickets it hit. Two fields name them - `flaked` (red on one run of a
@@ -1176,7 +1210,7 @@ export const render = (f: Facts, plain = false): string => {
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
-      `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
+      `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : f.tokensNote === "unknown" ? " - tokens unknown" : ""}${f.tokensNote === "incomplete" ? " (incomplete)" : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
       : f.verify === undefined || f.verify === null
@@ -1201,6 +1235,7 @@ export const render = (f: Facts, plain = false): string => {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
+  out.push(...tokenNoteLines(f));
   out.push(...contextLines(f));
   out.push(...settingsLines(f, plain));
   // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.

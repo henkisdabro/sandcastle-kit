@@ -1,7 +1,7 @@
-// A sent-back ticket's resolve waits for the tickets that were ahead of it when the wait began, and
-// no ticket that starts after: the run keeps starting tickets, and a wait that follows them can
-// outlast the queue (createSchedule in src/schedule.ts). Driven through the scheduler's ports with
-// made-up files and fake work. No git, no Docker, no network.
+// A sent-back ticket's resolve waits only for the tickets past their review - in their gates, or green and
+// queued to land - that share its files, whenever they started; a ticket still implementing never holds
+// it (createSchedule in src/schedule.ts). Driven through the scheduler's ports with made-up files and
+// fake work. No git, no Docker, no network.
 //
 //   pnpm test:file test/schedule-resolve-snapshot.test.ts
 
@@ -24,15 +24,14 @@ const until = async (what: string, ok: () => boolean) => {
   assert.ok(ok(), what);
 };
 
-test("a resolve does not wait for a ticket that shares its file but started after the wait began", async () => {
+test("a resolve does not wait for a ticket that shares its file and is still implementing, whether it started before the wait or after", async () => {
   const run20 = later();
   const run30 = later();
   const sentBack = later();
-  const started: string[] = [];
   const attempts: string[] = [];
   let conflicted = false;
   const schedule = createSchedule<T, G, string>({
-    // 15 holds the worker that would start 30 until 10 is sent back: 30 starts after the resolve's wait began.
+    // 15 holds the worker that would start 30 until 10 is sent back: 30 starts after the resolve could have waited.
     tickets: [{ id: "10" }, { id: "20" }, { id: "15" }, { id: "30" }],
     files: { of: (t: T): TicketFiles => ({ all: [t.id === "15" ? "src/other.ts" : "src/a.ts"], unmergeable: [] }) },
   });
@@ -40,14 +39,12 @@ test("a resolve does not wait for a ticket that shares its file but started afte
     workers: 2,
     attempt: async (t, at) => {
       attempts.push(`${t.id}#${at.n}`);
-      started.push(t.id);
       if (t.id === "20") await run20.done;
       if (t.id === "15") {
         await sentBack.done;
         // Time for 10 to be queued again and taken by the free worker before 30.
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      // 30 starts once 10 is sent back and waiting, and stays in its pipeline well past 20's landing.
       if (t.id === "30") await run30.done;
       return green(t.id);
     },
@@ -63,22 +60,20 @@ test("a resolve does not wait for a ticket that shares its file but started afte
       if (c.kind === "requeued") sentBack.open();
     },
   });
-  await until("30 started while 10 waits for 20", () => started.includes("30"));
-  assert.deepEqual(attempts, ["10#1", "20#1", "15#1", "30#1"]);
-  // 20 lands: the resolve's whole snapshot has gone, so 10 begins again with 30 still working.
+  // 20 never reached its gates, and 30 never started before the resolve: 10 resolves with both still at work.
+  await until("10 resolves with 20 implementing", () => attempts.includes("10#2"));
+  assert.ok(!attempts.includes("30#1") || attempts.indexOf("10#2") < attempts.indexOf("30#1"), attempts.join(" "));
   run20.open();
-  await until("10 resolves behind 20 alone", () => attempts.includes("10#2"));
+  await until("30 starts", () => attempts.includes("30#1"));
   run30.open();
   const { endings } = await running;
   assert.equal((endings.get("10") as { landed: Landed }).landed.kind, "merged");
 });
 
-test("a resolve still waits for a ticket at work when its wait began, once that ticket's branch is queued to land", async () => {
-  const run20 = later();
+test("a resolve waits for a ticket in its gates that shares only its other file, until it has landed, and not for one still implementing", async () => {
   const run30 = later();
   const land30 = later();
   const sentBack = later();
-  const started: string[] = [];
   const attempts: string[] = [];
   const landing: string[] = [];
   let conflicted = false;
@@ -91,20 +86,19 @@ test("a resolve still waits for a ticket at work when its wait began, once that 
     workers: 3,
     attempt: async (t, at) => {
       attempts.push(`${t.id}#${at.n}`);
-      started.push(t.id);
-      // 20 shares the file 10 conflicts on and leaves the run red; 30 shares only the other file, and goes green later.
-      if (t.id === "20") {
-        await run20.done;
-        return { kind: "pipeline", outcome: "red" };
+      // 20 shares the file 10 conflicts on and stays at work (implementing); 30 shares only the other file, and is in its gates.
+      if (t.id === "20") await new Promise((resolve) => setTimeout(resolve, 600));
+      if (t.id === "30") {
+        at.gates();
+        await run30.done;
       }
-      if (t.id === "30") await run30.done;
       return green(t.id);
     },
     land: async (g) => {
       landing.push(g.issue);
       if (g.issue === "10" && !conflicted) {
-        // Both others are at work when 10 conflicts, so both were ahead of it when its wait began.
-        await until("20 and 30 started", () => started.includes("20") && started.includes("30"));
+        // 30 is in its gates when 10 conflicts.
+        await until("20 and 30 started", () => attempts.includes("20#1") && attempts.includes("30#1"));
         conflicted = true;
         return { kind: "conflict", files: ["src/a.ts"], with: [] } satisfies Landed;
       }
@@ -117,10 +111,11 @@ test("a resolve still waits for a ticket at work when its wait began, once that 
     },
   });
   await sentBack.done;
+  // 30 is only in its gates, and the resolve waits for it; 20, still implementing, does not hold it.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.ok(!attempts.includes("10#2"), `10 resolved with 30 in its gates: ${attempts.join(" ")}`);
   run30.open();
   await until("30 queued to land", () => landing.includes("30"));
-  run20.open();
-  // 20 has left; 30's branch, which shares 10's other file, is still landing: 10 waits for it.
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.ok(!attempts.includes("10#2"), `10 resolved with 30 still queued to land: ${attempts.join(" ")}`);
   land30.open();

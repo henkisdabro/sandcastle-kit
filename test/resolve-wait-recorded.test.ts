@@ -42,7 +42,11 @@ test("a requeued ticket's attempt is told how long its resolve waited, and a fir
     now: () => clock,
     attempt: async (t, at) => {
       attempts.push({ id: t.id, n: at.n, resolveWaitMs: at.resolveWaitMs });
-      if (t.id === "20") await run20.done;
+      if (t.id === "20") {
+        // In its gates: a ticket still implementing would not hold 10's resolve.
+        at.gates();
+        await run20.done;
+      }
       return green(t.id);
     },
     land: async (g) => {
@@ -57,7 +61,7 @@ test("a requeued ticket's attempt is told how long its resolve waited, and a fir
     },
   });
   await requeued.done;
-  // The wait is on while 20 is in its pipeline: the minutes that pass on the run's clock are the wait.
+  // The wait is on while 20 is in its gates: the minutes that pass on the run's clock are the wait.
   await until("the resolve waits", () => told.some((c) => c.kind === "requeued"));
   await new Promise((resolve) => setTimeout(resolve, 1200));
   clock += 90_000;

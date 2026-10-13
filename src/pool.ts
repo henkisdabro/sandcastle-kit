@@ -723,6 +723,7 @@ const writeWait = (wait: OwnWait) => {
   renameSync(`${wait.file}.tmp`, wait.file);
 };
 const beginWait = (pool: PoolName, label: string, priority: boolean): OwnWait => {
+  if (priority) spendClaim(pool);
   const since = clock();
   const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}${priority ? PRIORITY_MARK : ".wait"}`);
   const wait = { file, pid: process.pid, run: RUN_ID, since, pool, priority, order: sequence - 1, label };
@@ -746,8 +747,47 @@ const countedFrom = (wait: OwnWait): Wait => {
   return { ...wait, since: oldest };
 };
 
-/** This run has a priority wait for `pool` that is not `wait`: `wait` leaves the slot to it. */
-const priorityAhead = (wait: OwnWait) => !wait.priority && [...waiting].some((w) => w.pool === wait.pool && w.priority);
+/**
+ * The claims this run has on a pool: a landing that will gate has not asked for its gates slot yet (it opens a sandbox and
+ * merges first, seconds), and a ticket gate asked meanwhile took the slot and held it for a whole gate run. In this process
+ * only, like `waiting`: another run needs nothing of it.
+ */
+const claims = new Map<PoolName, Set<object>>();
+
+/** A claim on `pool` for this run's coming priority wait; `release` ends it, once, and the first priority wait for the pool does too. */
+export type SlotClaim = { release(): void };
+
+/**
+ * A landing that will gate the merged tree claims the gates pool when it holds its sandbox slot: a ticket gate of this run
+ * yields to it (`priorityAhead`) while the pool's free slots are no more than the run's claims. Held until the landing's
+ * own priority wait for the pool begins (`beginWait`) or the landing ends without gating (`release`).
+ */
+export const claimSlot = (pool: PoolName): SlotClaim => {
+  const mine = {};
+  const set = claims.get(pool) ?? new Set<object>();
+  claims.set(pool, set);
+  set.add(mine);
+  return { release: () => void set.delete(mine) };
+};
+
+/** The oldest claim on `pool` ends: the priority wait it was made for has begun and stands in its place. */
+const spendClaim = (pool: PoolName) => {
+  const set = claims.get(pool);
+  const first = set?.values().next();
+  if (first && !first.done) set!.delete(first.value);
+};
+
+/**
+ * This run has a priority wait for `pool` that is not `wait`, or a claim on a free slot's worth of it: `wait` leaves the
+ * slot to it. A claim holds a ticket back only while the free slots are no more than the claims, so with a slot to spare
+ * the ticket goes on, where it would idle through every landing's merge.
+ */
+const priorityAhead = (wait: OwnWait, seen: Seen) => {
+  if (wait.priority) return false;
+  if ([...waiting].some((w) => w.pool === wait.pool && w.priority)) return true;
+  const claimed = claims.get(wait.pool)?.size ?? 0;
+  return claimed > 0 && limit(wait.pool) - liveSlots(wait.pool, seen).length <= claimed;
+};
 
 /**
  * This run has a wait for `pool` that began before `wait`, and neither asked for priority: `wait` leaves the
@@ -841,7 +881,7 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       }
       if (kept) return (yielded = "kept"), "landing";
       if (olderWait(pool, countedFrom(wait), ms, seen, landingPast)) return (yielded = "run"), "slots";
-      if (priorityAhead(wait)) return (yielded = "priority"), "slots";
+      if (priorityAhead(wait, seen)) return (yielded = "priority"), "slots";
       // Every slot taken is the reason to say; a free one is about to go to the earlier wait, which says nothing new.
       if (earlierAhead(wait)) return (yielded = liveSlots(pool, seen).length >= limit(pool) ? undefined : "earlier"), "slots";
       slot = tryAcquire(pool, `run=${RUN_ID} ${label}`);

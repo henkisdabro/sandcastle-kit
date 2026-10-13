@@ -17,15 +17,17 @@ import type { EngineInterface, Register } from "claude-code";
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
 import { activity, afterTurn, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
-import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
+import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Tone, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
 const castle = atom({ plugin: "sandcastle", key: "castle" } as const, HELD);
 /** The castle tower (a chess rook: one cell, text style, no emoji form) that leads the idle mark's row. */
 const MARK_ICON = "♜";
-/** The idle mark's line the band draws between runs, in sand; null for none. */
+/** The idle mark's line the band draws between runs, as sand-coloured parts; null for none. */
 const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
+/** The sand each tone of the mark's line is drawn in: the hint in the castle's bright sand and bold, never Claude Code's notice colour. */
+const TONES: Record<Tone, { color: string; bold?: boolean }> = { name: { color: SAND.name }, hint: { color: SAND.top, bold: true }, muted: { color: SAND.muted } };
 /** The cache refresh's row the band draws under the castle; null for none. */
 const warmLine = atom({ plugin: "sandcastle", key: "warm" } as const, null);
 /** What the cache refresh remembers; `$.state`, because a reload restarts module variables and not state. */
@@ -85,6 +87,9 @@ let trigger: Trigger | undefined;
 let reading = false;
 /** A trigger fired during that read, which may have started before what the trigger is about. */
 let again = false;
+/** The same two for the version read, which has its own: a slow queue never holds it up. */
+let readingVersion = false;
+let againVersion = false;
 /** The sandcastle skill was used and its turn has not ended: the labelling it may do is still to come. */
 let skillTurn = false;
 /** The `sandcastle` to run, found once: the kit's own `bin/sandcastle` beside the mod, else the one on PATH. */
@@ -174,7 +179,7 @@ async function owns($: EngineInterface, kept: Kept): Promise<boolean> {
   return kept?.session === (await $.session.id());
 }
 
-/** The idle mark the band was last told to draw; undefined until the first look of this load. */
+/** The idle mark the band was last told to draw, as its parts in JSON; undefined until the first look of this load. */
 let marked: string | null | undefined;
 
 /**
@@ -182,11 +187,11 @@ let marked: string | null | undefined;
  * pinned status line with its warning triangle and paints it in its notice colour, and a mod
  * cannot change either. The pinned line stays for what needs a person.
  */
-async function place($: EngineInterface, text: string | undefined) {
-  const line = text ?? null;
-  if (line === marked) return;
-  marked = line;
-  await update($, markLine, () => line);
+async function place($: EngineInterface, mark: Mark | undefined) {
+  const key = mark ? JSON.stringify(mark.parts) : null;
+  if (key === marked) return;
+  marked = key;
+  await update($, markLine, () => mark?.parts ?? null);
 }
 
 function pin($: EngineInterface, text: string | undefined) {
@@ -363,6 +368,40 @@ async function refresh($: EngineInterface, root: string, forced: boolean) {
   }
 }
 
+/** The version entry's key, beside the ready entry's: one per project root, shared by every session on the machine. */
+const versionKey = (root: string) => `version:${root}`;
+
+/** The facts from `sandcastle --version --json`, or undefined when the read failed or timed out. */
+async function readVersion($: EngineInterface, root: string) {
+  try {
+    const out = await exec($, [await sandcastle($), "--version", "--json"], { cwd: root, timeoutMs: READ_TIMEOUT_MS });
+    return out.exitCode === 0 && !out.isStdoutTruncated ? parseVersionFacts(out.stdout) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads the version facts into the shared entry, as `refresh` does the queue: one at a time, never awaited by a look. */
+async function refreshVersion($: EngineInterface, root: string, forced: boolean) {
+  if (readingVersion) {
+    if (forced) againVersion = true;
+    return;
+  }
+  readingVersion = true;
+  try {
+    do {
+      againVersion = false;
+      const facts = await readVersion($, root);
+      const prior = parseVersionEntry(await $.store.get(versionKey(root)));
+      await $.store.set(versionKey(root), afterVersionRead(prior, facts, await $.clock.now()));
+    } while (againVersion);
+  } catch {
+    // A store or clock that cannot be reached leaves the entry as it was: the next look reads again.
+  } finally {
+    readingVersion = false;
+  }
+}
+
 /** The person's choices for a project's mark: the store's entry, none when it holds nothing usable. */
 const markKey = (root: string) => `mark:${root}`;
 
@@ -387,15 +426,16 @@ async function facts($: EngineInterface, root: string): Promise<MarkInput> {
   const idleMark = setUp ? await machineOn($) : true;
   const now = await $.clock.now();
   const entry = parseEntry(await $.store.get(readyKey(root)));
+  const versionRead = parseVersionEntry(await $.store.get(versionKey(root)));
   const choice = parseChoice(await $.store.get(markKey(root)));
-  return { setUp, idleMark, hidden: choice?.hidden, dismissed: choice?.dismissed, entry, now };
+  return { setUp, idleMark, hidden: choice?.hidden, dismissed: choice?.dismissed, entry, versionRead, now };
 }
 
 /**
  * The idle mark's text for the session root's project, which no followed run changes - a read it
  * starts is for the next look to show.
  */
-async function mark($: EngineInterface, root: string): Promise<string | undefined> {
+async function mark($: EngineInterface, root: string): Promise<Mark | undefined> {
   const input = await facts($, root);
   if (!input.setUp || !input.idleMark) return markText(input);
   if (input.dismissed && dismissalEnded(input.dismissed, input.entry, input.now)) {
@@ -403,8 +443,11 @@ async function mark($: EngineInterface, root: string): Promise<string | undefine
     await $.store.set(markKey(root), { hidden: input.hidden === true });
     input.dismissed = undefined;
   }
-  if (!input.hidden && due(input.entry, input.now!, trigger)) {
-    void refresh($, root, trigger !== undefined);
+  if (!input.hidden) {
+    // Both reads see the trigger before either consumes it: the end of a skill's turn re-reads the count and the version.
+    const forced = trigger !== undefined;
+    if (due(input.entry, input.now!, trigger)) void refresh($, root, forced);
+    if (due(input.versionRead, input.now!, trigger)) void refreshVersion($, root, forced);
     trigger = undefined;
   }
   return markText(input);
@@ -631,12 +674,17 @@ export const register: Register = (on) => {
     const { Box, Text } = $.ui.resolve(e);
     return (
       <Box flexDirection="column">
-        {line === null ? null : (
+        {/* A session reloaded from an older mod still holds the mark as a string: draw nothing until it is set again. */}
+        {!Array.isArray(line) ? null : (
           <Box flexDirection="row" columnGap={1}>
             <Text color={SAND.top} bold>
               {MARK_ICON}
             </Text>
-            <Text color={SAND.name}>{line}</Text>
+            {line.map((part) => (
+              <Text color={TONES[part.tone].color} bold={TONES[part.tone].bold}>
+                {part.text}
+              </Text>
+            ))}
           </Box>
         )}
         {now === null

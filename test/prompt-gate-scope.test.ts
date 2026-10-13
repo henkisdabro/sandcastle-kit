@@ -3,7 +3,8 @@
 // all its time on one, a reviewer re-ran the suite after a docs-only commit, and in a 32-ticket run the
 // implementers' own full-suite runs took about 90 minutes of sandbox time. The prompts now say who
 // runs what (the implementer runs the typecheck gate and the tests covering its change, as the resolver
-// does), and the implementer says which spec it followed when a comment amended the ticket's.
+// does; the reviewer too, since a reviewer's full run repeated the gates that start as it exits), and
+// the implementer says which spec it followed when a comment amended the ticket's.
 // No model calls.
 //
 //   pnpm test:file test/prompt-gate-scope.test.ts
@@ -30,9 +31,14 @@ test("the resolver's finishing and commit steps no longer ask for every gate", (
   assert.match(p, /typecheck gate and the covering tests pass and the merge is committed/);
 });
 
-test("the reviewer runs the full suite once, after its last code commit, and only if its own commits changed code", () => {
+test("the reviewer runs the typecheck gate and the tests covering its change, never the full suite", () => {
   const p = read("review.md");
-  assert.match(p, /Run the full suite once, after your last commit that changed code, and only if your own commits changed code; after docs-only commits .*, none\./);
+  assert.doesNotMatch(p, /Run the full suite once/);
+  assert.match(p, /the full suite included, re-runs a red ticket gate once in its slot and gives a red that stays a repair pass/);
+  assert.match(p, /run the typecheck gate and the tests that cover what you are looking at or changing, as often as you need, and do not run the full suite yourself/);
+  assert.match(p, /After docs-only commits .*, run only the tests that cover that prose, if any\./);
+  // The prompt is generic across projects: it names no project script.
+  assert.doesNotMatch(p, /test:related/);
 });
 
 test("the implementer names the spec it followed when a comment on the ticket amends it", () => {

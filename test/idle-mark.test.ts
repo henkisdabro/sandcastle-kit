@@ -15,7 +15,7 @@ test("markText: set up gives the bare mark; not set up, and the machine switch o
     [{ setUp: true, idleMark: false }, undefined],
     [{ setUp: false, idleMark: false }, undefined],
   ];
-  for (const [input, text] of table) assert.equal(markText(input), text, JSON.stringify(input));
+  for (const [input, text] of table) assert.equal(markText(input)?.text, text, JSON.stringify(input));
 });
 
 test("machineSwitch: off only for idleMark false; a file it cannot use leaves the mark on", () => {

@@ -60,15 +60,16 @@ const firstSetup = async () => {
   return steps;
 };
 
-test("the attempt takes its worker's slot, and the summary line has the ticket's work alone", () => {
+test("the attempt takes its worker's slot, and the summary line labels the ticket's work, waits and landing", () => {
   // burndown() needs Docker, so no test drives it: its wiring is held by its source.
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
   assert.match(src, /slot: \(wanted\) => sandboxSlot\("next ticket", \(\) => !wanted\(\)\)/);
   assert.match(src, /let lease: SlotLease \| undefined = slot;/);
   assert.match(src, /for \(await juncture\("start", start\); !lease; await juncture\("start", start\)\) await take\(\);/);
-  assert.match(src, /pipeline\(issue, \{ juncture: [^\n]*, paused, resolveWaitMs \}\)/);
+  assert.match(src, /pipeline\(issue, \{ juncture: [^\n]*, paused, gates, resolveWaitMs \}\)/);
   assert.match(src, /times = withQueued\(times, queuedMs\)/);
-  assert.match(src, /const time = ticketTime\(took\.get\(o\.issue\)\)/);
+  assert.match(src, /const time = ticketTime\(took\.get\(o\.issue\), waited\.get\(o\.issue\), final\[o\.issue\]\?\.state === "merged" \? landingMs\.get\(o\.issue\) : undefined\)/);
+  assert.match(src, /landingMs\.set\(id, \(landingMs\.get\(id\) \?\? 0\) \+ took\.elapsed\)/);
   assert.doesNotMatch(src, /slotWaitMs/);
 });
 
@@ -110,8 +111,11 @@ test("a wait before the step is the setup line's waitMs, apart from its own ms a
   assert.deepEqual(withQueued(stepTimes(8_000, {}), undefined), { ms: 8_000 });
 });
 
-test("the summary's per-ticket line is the ticket's own time", () => {
-  assert.equal(ticketTime(8 * MIN), " 8m");
-  assert.equal(ticketTime(45_000), " 45s");
+test("the summary's per-ticket line labels work, waiting and landing", () => {
+  assert.equal(ticketTime(27 * MIN, 8 * MIN, 12 * MIN), " work 19m + 8m waiting, landing 12m");
+  assert.equal(ticketTime(8 * MIN), " work 8m");
+  assert.equal(ticketTime(45_000, 0), " work 45s");
+  assert.equal(ticketTime(28 * MIN, 8 * MIN), " work 20m + 8m waiting", "a ticket that did not land has no landing part");
+  assert.equal(ticketTime(10 * MIN, 0, 90_000), " work 10m, landing 2m");
   assert.equal(ticketTime(undefined), "");
 });

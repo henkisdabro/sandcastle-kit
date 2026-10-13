@@ -373,11 +373,11 @@ test("after a usage stop a conflict at landing is not requeued, and a green tick
   assert.equal(r.seen.told.some((c) => c.kind === "requeued"), false, "no requeue told");
   assert.deepEqual(r.sentBack, [], "no 'tried again in this run' line");
   assert.equal(r.attempts.get("2"), 1);
-  assert.deepEqual(r.endings.get("2"), { kind: "landing", green: outcome(root, "2"), landed: { kind: "conflict", files: ["shared.txt"], with: ["1"] }, attempts: 1 });
+  assert.deepEqual(r.endings.get("2"), { kind: "landing", green: outcome(root, "2"), landed: { kind: "conflict", files: ["shared.txt"], with: ["1"] }, attempts: 1, wouldRetry: true });
   assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"], ["2", "conflict"], ["3", "merged"]]);
   assert.equal(r.states["2"].state, "conflict");
   assert.equal(r.states["2"].requeued ?? null, null, "no requeue recorded");
-  assert.deepEqual(r.seen.outcomes.get("2"), { kind: "conflict", with: ["1"], text: "merge conflict: with #1: shared.txt" });
+  assert.deepEqual(r.seen.outcomes.get("2"), { kind: "conflict", with: ["1"], text: "merge conflict: with #1: shared.txt; would have been retried, but the run had stopped starting tickets" });
   assert.deepEqual(r.stopped, []);
   // A limit still lands what is green.
   assert.deepEqual(mergeOrder(root), ["1", "3"]);
@@ -569,7 +569,7 @@ test("red, requeued, red again: no doubled 'red', and the comment names both att
   assert.match(r.seen.comment("2") ?? "", /since this branch forked, changing a file it also changed: #1, #3/);
 });
 
-test("a first red or conflict that is not requeued keeps the plain outcome lines", async () => {
+test("a first red that is not requeued keeps the plain outcome line, and a first conflict says it would have been retried", async () => {
   // 1 finds a usage limit before it begins; 2 and 3, already running, land after it and are not requeued.
   let found!: () => void;
   const limit = new Promise<void>((resolve) => (found = resolve));
@@ -586,11 +586,11 @@ test("a first red or conflict that is not requeued keeps the plain outcome lines
     },
   }));
   assert.equal(r.seen.line("2"), "red when merged with #1 (gate test)");
-  assert.equal(r.seen.line("3"), "merge conflict: with #1: a.txt, b.txt, c.txt and 1 more");
+  assert.equal(r.seen.line("3"), "merge conflict: with #1: a.txt, b.txt, c.txt and 1 more; would have been retried, but the run had stopped starting tickets");
   assert.deepEqual([r.seen.outcomes.get("2"), r.seen.outcomes.get("3")?.kind, r.seen.outcomes.get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1 (gate test)" }, "conflict", ["1"]]);
   assert.deepEqual([r.written()["2"].state, r.written()["2"].note], ["red", "red with #1 (gate test)"]);
   // Each landing's own line, and no requeue line.
-  assert.deepEqual(r.seen.said, ["#2: red when merged.", "#3: merge conflict: with #1: a.txt, b.txt, c.txt and 1 more."]);
+  assert.deepEqual(r.seen.said, ["#2: red when merged.", "#3: merge conflict: with #1: a.txt, b.txt, c.txt and 1 more; would have been retried, but the run had stopped starting tickets."]);
 });
 
 test("requeued, then withdrawn before the second start: withdrawn, not green, and the first pipeline's entry dropped", async () => {
@@ -733,4 +733,54 @@ test("a requeue is told, and recorded, before the ticket is queued again", async
   );
   // Then each ticket's landing, as the ledger records its ending.
   assert.deepEqual(order, ["told, queued: false", "write queued", "after, queued: true", "write merged", "write merged"]);
+});
+
+test("a conflict found after the run stopped starting tickets says it would have been retried, not that it came after a requeue", async () => {
+  const usage: StopCause = { kind: "usage limit", line: "usage 97% of the 5-hour window" };
+  const { r } = await stopMidRun({ kind: "not begun", why: usage });
+  const line = "with #1: shared.txt; would have been retried, but the run had stopped starting tickets";
+  assert.equal(r.states["2"].note, line);
+  assert.equal(r.seen.line("2"), `merge conflict: ${line}`);
+  assert.doesNotMatch(r.states["2"].note ?? "", /after a requeue|again/);
+  // Only this conflict's files: the ticket's record lists the one file it collided on.
+  assert.deepEqual(r.states["2"].files, ["shared.txt"]);
+});
+
+test("a conflict after a real requeue keeps its wording, with no 'would have been retried'", async () => {
+  const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n" } });
+  // 2 meets 1 at landing, is requeued, and its second try (no base merged in) conflicts again: final, as before.
+  const r = await run(root, ["1", "2"], async (issue) => outcome(root, issue.id), async () => GREEN, 2);
+  assert.equal(r.attempts.get("2"), 2);
+  assert.equal(r.states["2"].note, "conflicted again with #1 after a requeue: shared.txt");
+  assert.doesNotMatch(r.states["2"].note ?? "", /would have been retried/);
+});
+
+test("a second conflict that would have sent the ticket back once more, after the run stopped starting tickets, names only that conflict", async () => {
+  // 2 meets 1 and is requeued; while its second attempt runs, 3 lands and 4 finds a usage limit. The second try then
+  // conflicts with 3, which the resolve could not have merged: the rule would send it back again, but nothing starts.
+  const usage: StopCause = { kind: "usage limit", line: "usage 97% of the 5-hour window" };
+  const told = endings();
+  let secondBegun!: () => void;
+  const atSecond = new Promise<void>((resolve) => (secondBegun = resolve));
+  const r = await settle(["2", "3", "4"], { 2: [conflictWith1, { kind: "conflict", files: ["other.txt"], with: ["3"] }] }, () => ({
+    workers: 3,
+    onTell: told.tell,
+    attempt: async (t, { n }) => {
+      if (t.id === "2" && n === 2) {
+        secondBegun();
+        await told.of("4");
+      }
+      if (t.id === "3") await atSecond;
+      if (t.id === "4") {
+        await told.of("3");
+        return { kind: "not begun", why: usage };
+      }
+      return { kind: "green", green: waiting(t.id) };
+    },
+  }));
+  const line = "with #3: other.txt; would have been retried, but the run had stopped starting tickets";
+  assert.equal(r.seen.line("2"), `merge conflict: ${line}`);
+  assert.equal(r.written()["2"].note, line);
+  assert.deepEqual(r.written()["2"].files, ["other.txt"]);
+  assert.deepEqual(r.seen.outcomes.get("2")?.with, ["3"]);
 });

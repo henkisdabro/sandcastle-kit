@@ -118,7 +118,11 @@
 //                    of a branch that is gone or merged, and list unmerged ones;
 //                    --all deletes those too, without asking; a worktree a sandbox
 //                    tampered with is left, named, and the exit code is 1
-//   --version        the kit version: the release, and in a clone past it, the commit
+//   --version [--json]
+//                    the kit version: the release, and in a clone past it, the commit;
+//                    --json prints the facts the Claude Code mod's idle mark reads (the
+//                    version, and this project's update record and pending Upgrading notes;
+//                    works outside a project)
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
 //                    and keys to Herdr's config (shows them and asks first); --remove
@@ -152,7 +156,7 @@ import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTi
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
-import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine } from "./upgrading.ts";
+import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine, versionFacts } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, toolsFloorLine, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -220,7 +224,7 @@ try {
     process.exit(process.exitCode ?? 0);
   }
   if (command === "--version") {
-    console.log(`sandcastle-kit ${kitVersion()}`);
+    console.log(args.includes("--json") ? JSON.stringify(versionFacts(repoRoot)) : `sandcastle-kit ${kitVersion()}`);
     process.exit(0);
   }
   if (command === "help" || command === "--help" || command === "-h") {
@@ -425,7 +429,6 @@ try {
       }
       if (level === "drain" && drain.turns > 0) {
         const cause = drain.cause ?? "the run ended";
-        console.log(`Autonomy level drain: not running again - ${cause}.`);
         console.log(drainLine(drain.turns, drain.landed, cause));
         // One more queue read: a ticket queued while the drain ran is not in any turn's list, so it waits for the next run.
         const tracker = makeTracker(project);

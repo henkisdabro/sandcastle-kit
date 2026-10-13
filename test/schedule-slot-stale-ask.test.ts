@@ -61,7 +61,11 @@ test("a worker stops asking for a slot once the ticket it asked for was taken by
     slot,
     attempt: async (t, at) => {
       order.push(`start ${t.id} #${at.n}`);
-      if (t.id === "20") await twenty;
+      if (t.id === "20") {
+        // In its gates: a ticket still implementing would not hold 10's resolve.
+        at.gates();
+        await twenty;
+      }
       return { kind: "green", green: { issue: t.id } };
     },
     land: async (g) => {

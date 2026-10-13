@@ -88,7 +88,8 @@ test("a view opened before the plugin was linked shows links once the marker app
 test("a view drops its links once the marker goes", needsScript, async () => {
   link();
   const s = await open({ args: ["1"], env: { HERDR_ENV: "1" } });
-  const first = await s.frame();
+  // A ticket's link needs the run record's logs: the first paint can come while the record still loads.
+  const first = await s.frame(0, (f) => READ(f).linked, 15_000);
   assert.deepEqual(READ(first), BOTH);
   unlink();
   const later = await s.frame(first.end, (f) => !READ(f).linked, 15_000);
@@ -107,7 +108,7 @@ test("a marker that appears mid-view changes nothing outside Herdr or under SAND
   }
   link();
   const forced = await open({ args: ["1"], env: { SANDCASTLE_LINKS: "1" } });
-  const first = await forced.frame();
+  const first = await forced.frame(0, (f) => READ(f).linked, 15_000);
   unlink();
   assert.deepEqual([READ(first), READ(await second(forced, first.end))], [BOTH, BOTH]);
 });

@@ -15,7 +15,7 @@ import type { Tokens } from "../src/run.ts";
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-live-tokens-"));
 process.env.XDG_CACHE_HOME = join(TMP, "cache");
 after(() => rmSync(TMP, { recursive: true, force: true }));
-const { agentLog, agentLogging, liveTokenWriter, logOwner, rawLog, recordRun, tokenBrief, addTokens, NO_TOKENS } = await import("../src/run.ts");
+const { agentLog, agentLogging, markPass, liveTokenWriter, logOwner, rawLog, recordRun, tokenBrief, addTokens, NO_TOKENS } = await import("../src/run.ts");
 const { watchUsage } = await import("../src/usage.ts");
 
 // Not under TMP: the record is finished by an exit handler, which writes it once more after the cleanup above.
@@ -185,13 +185,27 @@ test("a record the run has finished is not written to", () => {
 test("burndown starts the watch with or without a plan to show, and settles a ticket in the step that counts its pass's result", () => {
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   const start = src.slice(src.indexOf("usageWatch = watchUsage({"));
-  assert.match(start.slice(0, start.indexOf("});")), /tokens: \{ owner: logOwner, write: liveTokenWriter\(run, spent\) \}/);
+  assert.match(start.slice(0, start.indexOf("});")), /tokens: \{ owner: logOwner, write: liveTokenWriter\(run, spent, count\.noteOf\) \}/);
   assert.match(src, /\n {2}usageWatch = watchUsage\(\{/, "at the run's own level");
   assert.doesNotMatch(src, /if \(planUsage\.length\) \{/, "not inside the plan usage row's `if`");
   const timed = src.slice(src.indexOf("const timed = "), src.indexOf("const image = await timed("));
-  const counted = timed.indexOf("spent.set(issue, ");
-  const settled = timed.indexOf("usageWatch?.settle(issue)");
+  const counted = timed.indexOf("count.ended(issue, tokens)");
+  const settled = timed.indexOf("count.settled(issue, counted)");
   assert.ok(counted > 0 && settled > counted, "settled after the result's figure is in `spent`");
   assert.ok(timed.lastIndexOf("finally {", settled) > counted, "in the `finally`, so a pass that threw is settled too");
   assert.doesNotMatch(timed.slice(counted, settled), /\bawait\b/, "nothing a tick could interleave with between them");
+});
+
+test("a pass run again in the same log after a usage-limit pause is settled as two passes, the first one's spend kept", () => {
+  const p = project();
+  const { watch } = running(p);
+  const first = pass(p, "8", "impl-8", "run-1");
+  first.say(...message("msg_a", A));
+  // The pass hit the limit and threw; the run paused, then ran it again with the same logging: `markPass` starts it.
+  markPass(agentLog(p, "8", "impl-8"), "run-1", "implement");
+  first.say(...message("msg_b", B));
+  const settled = watch.settle("8");
+  assert.equal(settled.passes.length, 2, "both runs of the pass, not one");
+  assert.equal(settled.passes[0]!.tokens?.output, A.output);
+  assert.equal(settled.passes[1]!.tokens?.output, B.output);
 });

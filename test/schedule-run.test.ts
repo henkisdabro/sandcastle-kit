@@ -165,7 +165,7 @@ test("after a usage stop a conflict at landing is not requeued, and a green tick
     land: async (g) => (g.issue === "2" ? { kind: "conflict", files: ["shared.txt"], with: ["9"] } : { kind: "merged" }),
   });
   assert.equal(told.some((c) => c.kind === "requeued"), false);
-  assert.deepEqual(endings.get("2"), { kind: "landing", green: { issue: "2" }, landed: { kind: "conflict", files: ["shared.txt"], with: ["9"] }, attempts: 1 });
+  assert.deepEqual(endings.get("2"), { kind: "landing", green: { issue: "2" }, landed: { kind: "conflict", files: ["shared.txt"], with: ["9"] }, attempts: 1, wouldRetry: true });
   assert.deepEqual(endings.get("3"), { kind: "landing", green: { issue: "3" }, landed: { kind: "merged" }, attempts: 1 });
   assert.deepEqual(stop.causes, [usage]);
   assert.equal(stop.landsNothing, false);

@@ -49,7 +49,7 @@ comments, and the gates can prove it.
 
    | Category | Action |
    |---|---|
-   | Ready - spec closed, provable by the gates | label now; add a short triage note if the ticket is stale or half-fixed |
+   | Ready - spec closed, provable by the gates | label (step 6), after the cold read (step 5) if its body was written or changed in this session; add a short triage note if the ticket is stale or half-fixed |
    | Needs a decision | ask (step 3) |
    | Human-only - console, device, secret, production, legal | the hold label - `ready-for-human`, or what `docs/agents/triage-labels.md` maps it to (a run never takes a ticket carrying it, nor the older `needs-human`) - with a comment saying why |
    | Blocked by another ticket | label it, with a blocker line in the ticket body (see "Writing a ticket body"): a run skips it until the blocker is closed |
@@ -62,9 +62,49 @@ comments, and the gates can prove it.
    theme. Each question stands alone - enough context to decide without opening GitHub, the ticket
    link, the recommended option first. Continue until every decision is answered. A ticket the
    user says needs a design discussion stays unlabelled, with that noted.
-4. **Close the spec, then label.** Take each decision from its file, and record the user's answer
-   in it as `answer`. Then comment the decision on the ticket - the implementing agent reads the
-   ticket and its comments, never this chat - then add the queue label. Create a missing label with
+4. **Close the spec.** Take each decision from its file, and record the user's answer in it as
+   `answer`. Then comment the decision on the ticket - the implementing agent reads the ticket and
+   its comments, never this chat - and put it in the body where the body states the requirement.
+5. **Cold read.** A ticket that step 2 called ready, or that a decision just made ready, and whose
+   body was written or changed in this session (by this action or by the audit), gets one cold read
+   after step 4 and before the queue label goes on. Step 2's subagent has read the code and the
+   history, so it fills a ticket's gaps from what it learned; the implementer will not have that.
+   A ticket already queued, or not updated since its cold read, is not read again: the file's
+   `coldRead.at` is later than the ticket's `updatedAt`, as in step 2.
+   - **Who.** A fresh read-only subagent given only the final ticket body and comments (paste
+     them in) - not step 2's notes, the evidence found, or any explanation. It may read the repo,
+     as the implementer will. Without subagents, do the step yourself and say plainly that it is
+     not an independent read: the context you hold is the context the implementer lacks.
+   - **What it returns.** Only readings of the ticket that differ materially and that its
+     acceptance checks would not tell apart, each with the check that would. It flags a missing
+     decision, a contradiction, or a prerequisite the agent could not reach (a secret, a service,
+     a file that is not in the repo). Ordinary code discovery - where a function lives, how a test
+     is written - is the implementer's job, not a gap. It never picks the requirement itself.
+   - **What happens next.** Each ambiguity goes back through step 3 as a decision question with
+     the readings as its options, and the answer through step 4. Read once: do not read the
+     answers cold again. A contradiction or an unreachable prerequisite the user cannot settle is
+     not ready: the hold label, as in step 2's table.
+   - **Measuring the trial.** Write the read into the ticket's triage file as `coldRead`: `at`
+     (ISO 8601 now), `by` (`subagent` or `harness`), `finds` (each with its `kind`: `decision`,
+     `contradiction` or `prerequisite`) and, per find, what the user did (`answered`, `dismissed`
+     as a false alarm, or `held`). A later review weighs the real catches against the false
+     alarms and the time. Set `at` again after the label goes on: the label is an update to the
+     ticket, and must not make the read look stale.
+
+   ```text
+   Brief for the cold reader
+   You are the agent that will implement this ticket alone, with no chat and no one to ask. Read-only:
+   no edits, no commits, no tracker writes, and no `sandcastle run`, `preflight` or anything else
+   that spends model allowance. The ticket and its comments follow; you have been told nothing else.
+   Find where two reasonable implementations would meet different readings of it: outcomes that
+   differ materially and that the ticket's acceptance checks would not tell apart. For each, say
+   what the two outcomes are and the check that would tell them apart.
+   Flag only: a missing decision, a contradiction, or a prerequisite you could not reach. Where
+   something is in the code, find it - that is not a gap. Never choose the requirement yourself.
+   Return the list, or "none".
+   <the final ticket body and comments>
+   ```
+6. **Label.** Add the queue label. Create a missing label with
    `gh label create`. This holds for every label this action applies, not the queue label alone:
    before applying a role's label (`needs-info`, the hold label, `wontfix`, or what
    `docs/agents/triage-labels.md` maps it to), check it exists (`gh label list --search <name>`)
@@ -73,7 +113,7 @@ comments, and the gates can prove it.
    tracker has no labels to create: a status is just text. A hard ticket can carry
    `model:`/`effort:` labels (GitHub) for a stronger implementer; offer it, and add it only on a
    yes.
-5. **Report**: a table of what was labelled, what was decided, and what was left and why, built
+7. **Report**: a table of what was labelled, what was decided, and what was left and why, built
    from the files in `.sandcastle/triage/`. Add the queue's shape from `sandcastle queue --lint`
    (read-only, no model calls; give it the ticket numbers the run will name, if it is limited to some,
    and it lints those alone): the longest `Blocked by` chain, edges that only order overlapping
@@ -104,8 +144,9 @@ from it, and only in plain text: a line inside a code block or backticks is not 
   directory path covers everything under it. Name only files an agent may edit under the
   project's rules: a file the rules forbid (a changelog the maintainer writes, say) is no ticket's,
   and listing it makes a false overlap line at the run's start. Write an existing file's path as
-  it is. Name a file the fix will create too, and list a lockfile or generated file if the fix
-  will rewrite it. Mark a new file as new in the ticket's prose (under `## Fix`), never on the
+  it is. Name a file the fix will create too - the new test file the project's rules ask for, not
+  only the existing tests - the docs the rules make every behaviour change update, and a lockfile
+  or generated file if the fix will rewrite it. Mark a new file as new in the ticket's prose (under `## Fix`), never on the
   `Touches:` line, where "(new)" would be read as part of the path. A second `Touches:` line is
   merged into the first. It goes in the body as a bare line, without the backticks shown here.
   Example: `Touches: src/pages/pricing.tsx, src/components/**/*.tsx, public/pricing.css`. The kit
