@@ -23,7 +23,7 @@ import { type Gate, gateLine } from "./gates.ts";
 import { promptExpansionLine } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
-import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
+import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine, unretriedLine } from "./landing.ts";
 import { overrunLine, overrunNoted } from "./report.ts";
 import { HANDED_BACK, readOutcomes, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
@@ -274,7 +274,7 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
         };
       case "conflict": {
         // A second conflict is held with the tickets of both attempts named.
-        const line = e.again ? againNoteOf(landed, e.again.kind) : conflictLine(landed);
+        const line = e.wouldRetry ? unretriedLine(landed) : e.again ? againNoteOf(landed, e.again.kind) : conflictLine(landed);
         return {
           record: { state: "conflict", note: line, files: landed.files },
           outcome: { kind: "conflict", ...withOf(landed.with), text: `merge conflict: ${line}` },
@@ -408,7 +408,7 @@ const describeConflict = (e: Extract<TicketEnding, { kind: "conflict" }>, c: Con
       view: { word: "withdrawn", landed: true },
       tracker: comment(notLandedComment(c.report, undefined)),
     };
-  const line = e.again ? againNoteOf({ kind: "conflict", ...conflict }, e.again.kind) : conflictLine(conflict);
+  const line = e.wouldRetry ? unretriedLine(conflict) : e.again ? againNoteOf({ kind: "conflict", ...conflict }, e.again.kind) : conflictLine(conflict);
   return {
     record: { state: "conflict", note: e.again ? line : `no longer merges onto ${c.base}: ${line}`, files: conflict.files, ...(unstarted && { requeued: null }) },
     outcome: { kind: "conflict", ...(conflict.with.length ? { with: conflict.with } : {}), text: `merge conflict before landing: ${line}` },
