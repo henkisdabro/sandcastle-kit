@@ -226,7 +226,7 @@ export const namedStraysView = (named: NamedStray[], review: "narrow" | "full" =
     return (
       "# Files the resolver changed that merged cleanly\n\n" +
       "A conflicted merge of the base into this branch was resolved since it was last reviewed. The resolver changed these files, " +
-      "which git merged without a conflict and the base had changed, and gave the reason for each. The branch diff above can hide " +
+      "which git merged without a conflict and the base had changed, and gave the reason for each. The branch's diff against the base can hide " +
       "a line the resolution dropped from the base's side, so read each file's diff against that side, " +
       "`git diff <merge>^2 <merge> -- <file>`, with `<merge>` the branch's latest merge commit (`git log --merges -1 --format=%H`). " +
       ask +

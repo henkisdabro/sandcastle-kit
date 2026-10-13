@@ -390,7 +390,7 @@ test("the full review of a conflicted carried merge with a late comment is shown
   assert.match(shown, /`landed\.txt` - the landed assertion pinned the sentence this ticket replaces/);
   // The full review is shown no combined diff: it is told the command that shows each stray instead.
   assert.match(shown, /git diff <merge>\^2 <merge> -- <file>/);
-  assert.doesNotMatch(shown, /combined diff above/);
+  assert.doesNotMatch(shown, /diff above/);
 });
 
 test("the narrow review's strays still point at the combined diff above", async () => {
@@ -432,5 +432,5 @@ test("the rendered review prompt holds the strays slot, and filled in it never p
   assert.ok(text.indexOf("{{MERGE_STRAYS}}") < text.indexOf("# What to look for"));
   const filled = text.replace("{{MERGE_STRAYS}}", () => namedStraysView([{ path: "landed.txt", why: "adapted" }], "full"));
   assert.match(filled, /`landed\.txt` - adapted/);
-  assert.doesNotMatch(filled, /combined diff above/);
+  assert.doesNotMatch(filled, /diff above/);
 });
