@@ -1019,6 +1019,9 @@ export const firstAttemptIdleRepairs = (results: readonly PromiseSettledResult<{
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its reviewed branch" (reviewed, never gated green), "its branch from ...". */
 export const carriedBranch = (landOnly: boolean, requeued: boolean, reviewedOnly = false) => (landOnly ? (reviewedOnly ? "its reviewed branch" : "its green branch") : `its branch from ${carriedFrom(requeued)}`);
 
+/** A conflict the requeue-once rule would have sent back, had the run not stopped starting tickets: "with #1: a.txt; would have been retried, but the run had stopped starting tickets". Its files are this conflict's own. */
+export const unretriedLine = (c: { files: string[]; with: string[] }) => `${conflictLine(c)}; would have been retried, but the run had stopped starting tickets`;
+
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
 export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>, first: "conflict" | "red" = landed.kind) => {
   const line = againLine(landed.kind, landed.with, landed.kind === "red" ? landed : undefined, first);
