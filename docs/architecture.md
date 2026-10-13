@@ -591,18 +591,27 @@ state.
   line says "as seen on the branch before".
   A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
-  is queued to land and no ticket still in its pipeline has touched the files it conflicted on
-  (the tickets ahead of it when the wait begins, and only those: one that starts later is not
-  waited for, so the wait cannot outlast a queue that keeps starting tickets),
+  is queued to land and no ticket in its gates shares one (`ahead` in `src/schedule.ts`; a ticket
+  reaches its gates when `at.gates()` is called, after its review, and stays there until its attempt
+  ends). Whenever those tickets started: one still implementing or in review never holds the resolve,
+  being at most one gate run and a landing away from the queue, and a later landing that conflicts
+  the resolved branch sends it back again by #398's exception,
   then merges the base and resolves once (each landing ahead of it would have conflicted the resolve
   again; the wait holds no sandbox slot and no pipeline worker - the worker that takes the ticket
   hands it to the wait and goes back to the queue, and the ticket is pushed again, first in line,
   once nothing is ahead of it - and is not in the run's demand, and ends at a stop; a pause
   parks it as at the start; the run says `resolve waits` once the list has held for `RESOLVE_SETTLE_MS`
-  (the log line once, a later change only the record's note; a ticket still in its pipeline is worded
-  "lands or leaves the run", a queued branch "has landed") and `resolve starts` for a wait it said,
+  (the log line once, a later change only the record's note; a ticket in its gates is worded
+  "lands or leaves the run", a queued branch "has landed"), `resolve queued` when the wait ends (the
+  record's note says it waits for a free slot, not for the ticket that has landed) and
+  `resolve starts` for a wait it said,
   `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`,
   `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`).
+  While a resolve waits for queued branches only (none in its gates), a worker that is free does
+  not take a ticket that has not started: it waits, with its slot if it holds one (a landing that
+  waits for a slot still takes it back), and takes the resolve when it is pushed, else the landing
+  that ends the wait found every worker in a new pipeline (`resolveComes`,
+  `test/schedule-resolve-first.test.ts`).
   A second conflict is still final, unless it names a ticket
   that landed after the resolve began (the resolve's merge could not hold it): that one sends the
   ticket back again, with the same wait, and each such requeue needs a new landing, so it ends.
@@ -1779,8 +1788,10 @@ moved branch, a dry run - writes none): its `waitMs` is `landOne`'s wait for a l
 rest, and its `result` the kind of ending.
 It holds the landing gates' time, so `typicalTimes` and `estimate` skip it too, or the landing gates
 count twice.
-A requeued ticket's resolve wait (`resolveTurn`, without the time a pause parked it) reaches its
-attempt as `at.resolveWaitMs` and is added to the `waitMs` of that attempt's first `setup` line
+A requeued ticket's resolve wait, for a resolve that waited, runs from its requeue to its
+attempt's start: the queue before the wait and the queue for a free worker after it are in it, the
+time a pause held the run is not. It reaches the attempt as `at.resolveWaitMs` and is added to the
+`waitMs` of that attempt's first `setup` line
 (`withQueued`); a ticket has no slot wait to add it to (slot first).
 The landings in a row (the history tickets' landing gates, none for one that landed without a gate,
 summed over the run's tickets: one worker, whatever the slots) are a fourth bound, a floor on the

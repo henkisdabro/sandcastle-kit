@@ -36,8 +36,10 @@ test("a sent-back ticket waiting for the ticket ahead of its resolve leaves its 
     attempt: async (t, at) => {
       order.push(`start ${t.id} #${at.n}`);
       if (t.id === "20") {
-        // Still running, on the file 10 conflicted on, until 40 has started - or a moment passes, as it would
-        // if 10's resolve kept a worker and 40 had none: the order below then shows 20 ending first.
+        // In its gates, on the file 10 conflicted on (a ticket still implementing would not hold the resolve), until
+        // 40 has started - or a moment passes, as it would if 10's resolve kept a worker and 40 had none: the order
+        // below then shows 20 ending first.
+        at.gates();
         await Promise.race([fortyStarted.done, new Promise((resolve) => setTimeout(resolve, 300))]);
       }
       if (t.id === "30") await requeued.done;

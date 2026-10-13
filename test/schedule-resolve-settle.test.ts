@@ -1,5 +1,5 @@
 // A sent-back ticket's resolve wait is said once, after its list has held for RESOLVE_SETTLE_MS, with
-// the tickets still in their pipelines worded apart from the branches queued to land; a wait that ends
+// the tickets still in their gates worded apart from the branches queued to land; a wait that ends
 // sooner is not said at all. The clock is the test's own (`now` of the plan's work); the scheduler's
 // one-second wake-up is real time. No git, no Docker, no network.
 //
@@ -42,7 +42,9 @@ test("a resolve wait is said once its list has held, worded by who is still runn
   const running = schedule.run({
     workers: 3,
     now: () => clock,
-    attempt: async (t) => {
+    attempt: async (t, at) => {
+      // Both in their gates: a ticket still implementing would not hold the resolve.
+      if (t.id === "20" || t.id === "30") at.gates();
       if (t.id === "20") await run20.done;
       if (t.id === "30") await run30.done;
       return green(t.id);
