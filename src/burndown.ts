@@ -50,7 +50,7 @@ import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, type Ticket, type Tracker } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
@@ -799,7 +799,7 @@ const placesThisRun: Places = new Map();
  * its reason, never thrown, and its title left unseen for a later turn to file: the run's landings stand.
  */
 export const fileFollowUps = async (
-  tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open">>,
+  tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open" | "openAsync">>,
   followUps: readonly FollowUp[],
   o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists; named?: NamedOnBase; triage?: string },
 ): Promise<FiledFollowUp[]> => {
@@ -807,12 +807,14 @@ export const fileFollowUps = async (
   const places = o.places ?? new Map();
   const out: FiledFollowUp[] = [];
   // The open tickets awaiting triage, read once for the batch and only when a follow-up gets as far as a new ticket. A
-  // list that fails files as before: the check is a courtesy, never a reason to lose a follow-up.
+  // list that fails, or is not answered in time (`TRACKER_READ_MS`), files as before: the check is a courtesy, never a
+  // reason to lose a follow-up. Read asynchronously: up to 500 issues, while the run's other work goes on.
   let awaiting: Ticket[] | undefined;
-  const awaitingTriage = (): Ticket[] => {
+  const awaitingTriage = async (): Promise<Ticket[]> => {
     if (awaiting) return awaiting;
     try {
-      awaiting = o.triage === undefined || !tracker.open ? [] : tracker.open(false).filter((t) => t.labels?.includes(o.triage!) || t.status === o.triage);
+      const open = o.triage === undefined || !tracker.open ? [] : tracker.openAsync ? await tracker.openAsync(false) : tracker.open(false);
+      awaiting = open.filter((t) => t.labels?.includes(o.triage!) || t.status === o.triage);
     } catch {
       awaiting = [];
     }
@@ -841,7 +843,7 @@ export const fileFollowUps = async (
       out.push(at);
       continue;
     }
-    const same = place.spots.length ? awaitingTriage().find((t) => t.id !== f.from && namesPlaceOf(t, place)) : undefined;
+    const same = place.spots.length ? (await awaitingTriage()).find((t) => t.id !== f.from && namesPlaceOf(t, place)) : undefined;
     if (same) {
       try {
         await o.write(() => {
@@ -1111,6 +1113,22 @@ export const scopeIds = (tracker: Tracker, list: string, known: Issue[] = []): S
   );
 
 /**
+ * The merge `git log` found for a ticket (`found`: its short hash and commit time) when nobody reopened the ticket
+ * since. The reopen check is asynchronous and time-limited (`TRACKER_READ_MS`) where the tracker has one; a check that
+ * cannot be made, or is not answered in time, counts as a reopen, so the ticket runs normally.
+ */
+export const notReopened = async (tracker: Pick<Tracker, "reopenedSince" | "reopenedSinceAsync">, issue: string, found: string, limitMs?: number): Promise<string | undefined> => {
+  const [merge, mergedAt] = found.split(" ");
+  let reopened: boolean;
+  try {
+    reopened = tracker.reopenedSinceAsync ? await tracker.reopenedSinceAsync(issue, Date.parse(mergedAt), limitMs) : tracker.reopenedSince(issue, Date.parse(mergedAt));
+  } catch {
+    reopened = true;
+  }
+  return reopened ? undefined : merge;
+};
+
+/**
  * Every queued ticket with an open blocker, whether or not this turn runs it. A later autonomy
  * turn names its tickets in `TICKETS`, and a `waiting` built from those alone loses every
  * dependant outside the list - so the closing summary never says they were freed.
@@ -1118,10 +1136,13 @@ export const scopeIds = (tracker: Tracker, list: string, known: Issue[] = []): S
 export const waitingTickets = async (project: Project, tracker: Tracker, whole: Issue[]): Promise<{ issue: string; on: string[] }[]> =>
   [...(await openOnQueue(project, tracker, whole))].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
 
-/** The open blockers of each ticket in `whole` that has any, in queue order. */
-export const openOnQueue = async (project: Project, tracker: Tracker, whole: Issue[]): Promise<Map<string, Blocker[]>> => {
-  const resolve = blockerResolver(project, tracker, new Set(whole.map((i) => i.id)));
-  const open = await Promise.all(whole.map((i) => openBlockers(project, tracker, resolve, i)));
+/**
+ * The open blockers of each ticket in `whole` that has any, in queue order. Read for a run, so asynchronously and
+ * given up at `limitMs`: a blocker, or a ticket's blocker links, that cannot be read in time counts as open.
+ */
+export const openOnQueue = async (project: Project, tracker: Tracker, whole: Issue[], limitMs = TRACKER_READ_MS): Promise<Map<string, Blocker[]>> => {
+  const resolve = blockerResolver(project, tracker, new Set(whole.map((i) => i.id)), limitMs);
+  const open = await Promise.all(whole.map((i) => openBlockers(project, tracker, resolve, i, limitMs)));
   return new Map(whole.flatMap((i, at) => (open[at].length ? [[i.id, open[at]] as const] : [])));
 };
 
@@ -1584,11 +1605,9 @@ export const createPipeline = (ctx: PipelineContext) => {
   // own merge message finds it instead - unless someone reopened the issue
   // after that merge, which asks for more work, not for a close. Any doubt
   // (gh unreachable) means a normal run, which is what happened before.
-  const mergedEarlier = (issue: string, branch: string) => {
+  const mergedEarlier = async (issue: string, branch: string) => {
     const found = sh("git", ["log", base, "-1", "--format=%h %cI", "--fixed-strings", `--grep=Merge ${branch} (closes ${ref(issue)})`], project.root);
-    if (!found) return undefined;
-    const [merge, mergedAt] = found.split(" ");
-    return tracker.reopenedSince(issue, Date.parse(mergedAt)) ? undefined : merge;
+    return found ? notReopened(tracker, issue, found) : undefined;
   };
 
   /**
@@ -1776,7 +1795,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     // unmet line, final message and changelog lines (see `implUnmetView`, `implSaidView`, `implChangelogView`).
     // `FOLLOWUPS_NAMED` is empty here too, and filled at every agent pass (`pass`) from the run's follow-up book.
     const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_SAID: "", IMPL_CHANGELOG: "", FOLLOWUPS_NAMED: "", ...tracker.promptArgs(issue.id) };
-    const merge = mergedEarlier(issue.id, branch);
+    const merge = await mergedEarlier(issue.id, branch);
     if (merge) {
       return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
     }

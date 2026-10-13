@@ -35,6 +35,8 @@ export interface Tracker {
   queued(withComments?: boolean): Ticket[];
   /** Every open ticket, queued or not. */
   open(withComments?: boolean): Ticket[];
+  /** `open` for a read made while a run is under way, as `getAsync` is `get`: an error at `limitMs` (`TRACKER_READ_MS`) is a list that cannot be read. */
+  openAsync?(withComments?: boolean, limitMs?: number): Promise<Ticket[]>;
   /** One ticket now, for `TICKETS=` and the check just before landing. */
   get(id: string): TicketState;
   /**
@@ -63,8 +65,16 @@ export interface Tracker {
   snapshot(ids: string[]): Map<string, string>;
   /** Whether the ticket was reopened / requeued by someone after `at` (ms). */
   reopenedSince(id: string, at: number): boolean;
+  /** `reopenedSince` for a read made while a run is under way: a read given up at `limitMs` (`TRACKER_READ_MS`) answers true, as a failed one does. */
+  reopenedSinceAsync?(id: string, at: number, limitMs?: number): Promise<boolean>;
   /** Blockers a ticket declares besides "Blocked by ..." in its body. On GitHub one from another repository is `owner/repo#N`. */
   declaredBlockers(id: string): string[];
+  /**
+   * `declaredBlockers` for a read made while a run is under way. Unlike the sync form, which says nothing for a ticket it
+   * cannot read, this throws when the read fails or is given up at `limitMs` (`TRACKER_READ_MS`): the caller
+   * counts the ticket as blocked, as it does any blocker it cannot read.
+   */
+  declaredBlockersAsync?(id: string, limitMs?: number): Promise<string[]>;
   /** Whether a ticket id is closed, for a blocker on this same tracker. */
   isClosed(id: string): boolean | undefined;
   /** What a dry run tells agents not to touch. */
@@ -232,8 +242,9 @@ const github = (project: Project): Tracker => {
       return call(fields);
     }
   };
-  const list = (extra: string[], withComments: boolean): Ticket[] => {
-    const listed = JSON.parse(withNative(`number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`, (fields) => gh(["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", fields]))) as any[];
+  const listFields = (withComments: boolean) => `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`;
+  const listArgs = (extra: string[]) => (fields: string) => ["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", fields];
+  const shaped = (listed: any[], extra: string[]): Ticket[] => {
     if (nativeBlockers) for (const i of listed) native.set(String(i.number), nativeIds(i.blockedBy, thisRepo));
     // Counted before the hold-label filter below: a full page is full whatever
     // is dropped from it. stderr, because `queue --json` is parsed from stdout.
@@ -254,6 +265,14 @@ const github = (project: Project): Tracker => {
       updated: i.updatedAt ? Math.floor(Date.parse(i.updatedAt) / 1000) : undefined,
       labels: (i.labels ?? []).map((l: { name: string }) => l.name),
     }));
+  };
+  const list = (extra: string[], withComments: boolean): Ticket[] =>
+    shaped(JSON.parse(withNative(listFields(withComments), (fields) => gh(listArgs(extra)(fields)))) as any[], extra);
+  const listAsync = async (extra: string[], withComments: boolean, limitMs: number): Promise<Ticket[]> => {
+    const listed = JSON.parse(await withNativeAsync(listFields(withComments), (fields) => ghAsync(listArgs(extra)(fields), limitMs))) as any[];
+    // The repository's name is asked only for a blocker from another repository, and not again.
+    if (nativeBlockers && JSON.stringify(listed.map((i) => i.blockedBy ?? null)).includes("nameWithOwner")) await thisRepoAsync(limitMs);
+    return shaped(listed, extra);
   };
   const ticketOf = (i: any): TicketState => {
     if (nativeBlockers) native.set(String(i.number), nativeIds(i.blockedBy, thisRepo));
@@ -276,6 +295,7 @@ const github = (project: Project): Tracker => {
     // sees a ticket taken out of the queue mid-run, as it does for ticket files.
     queued: (withComments = true) => list(["--label", project.label], withComments).map((t) => ({ ...t, status: project.label })),
     open: (withComments = true) => list([], withComments),
+    openAsync: (withComments = true, limitMs = TRACKER_READ_MS) => listAsync([], withComments, limitMs),
     get: (id) => ticketOf(JSON.parse(withNative("number,title,state,body,comments,labels", (fields) => gh(["issue", "view", id, "--json", fields])))),
     getAsync: async (id, limitMs = TRACKER_READ_MS) => {
       const i = JSON.parse(await withNativeAsync("number,title,state,body,comments,labels", (fields) => ghAsync(["issue", "view", id, "--json", fields], limitMs)));
@@ -369,6 +389,14 @@ const github = (project: Project): Tracker => {
         return true;
       }
     },
+    reopenedSinceAsync: async (id, at, limitMs = TRACKER_READ_MS) => {
+      try {
+        const events = await ghAsync(["api", "--paginate", `repos/{owner}/{repo}/issues/${id}/events`, "--jq", '.[] | select(.event == "reopened") | .created_at'], limitMs);
+        return events.split("\n").some((t) => t && Date.parse(t) > at);
+      } catch {
+        return true;
+      }
+    },
     // GitHub's native "blocked by" edges. A ticket neither the list nor `get` has read is asked for.
     declaredBlockers: (id) => {
       if (!nativeBlockers) return [];
@@ -382,6 +410,17 @@ const github = (project: Project): Tracker => {
           return [];
         }
         if (!nativeBlockers) return [];
+        native.set(id, nativeIds(read.blockedBy, thisRepo));
+      }
+      return native.get(id)!;
+    },
+    declaredBlockersAsync: async (id, limitMs = TRACKER_READ_MS) => {
+      if (!nativeBlockers) return [];
+      if (!native.has(id)) {
+        const read = JSON.parse(await withNativeAsync("number", (fields) => ghAsync(["issue", "view", id, "--json", fields], limitMs))) as { blockedBy?: unknown };
+        if (!nativeBlockers) return [];
+        // Never the sync `thisRepo`: it would ask gh with no limit.
+        if (JSON.stringify(read.blockedBy ?? null).includes("nameWithOwner")) await thisRepoAsync(limitMs);
         native.set(id, nativeIds(read.blockedBy, thisRepo));
       }
       return native.get(id)!;
