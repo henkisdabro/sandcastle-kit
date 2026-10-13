@@ -194,6 +194,25 @@ test("the band is the castle's three rows, the run beside its walls, each row cu
   for (const frame of CASTLE_FRAMES) assert.deepEqual(text(34, frame).map((r) => r.slice(5)), text(34).map((r) => r.slice(5)));
 });
 
+test("the cache row goes at the end of the title row while it fits, else on a row of its own lined up with the text", () => {
+  const s = summarise(run);
+  const cache = "cache warm · refresh in 55m";
+  const text = (columns: number) =>
+    band(s, columns, CASTLE, cache).map((row) => row.map((seg) => (seg.count === undefined ? seg.text : `${seg.text} ${seg.count}`)).join("  "));
+  const full = `█████  sandcastle  demo  landing 2/4  1.7M in / 30k out  ${cache}`;
+  assert.deepEqual(text(full.length).slice(0, 2), ["▄ ▄ ▄", full]);
+  // The tokens go before the cache row moves off the title row.
+  assert.deepEqual(text(full.length - 1)[1], `█████  sandcastle  demo  landing 2/4  ${cache}`);
+  assert.equal(text(full.length - 1).length, 3);
+  // Too narrow for both: a fourth row, starting where the text beside the castle starts, never flush under the castle.
+  const narrow = text(40);
+  assert.equal(narrow.length, 4);
+  assert.equal(narrow[3], `${" ".repeat(CASTLE.mid.length)}  ${cache}`);
+  assert.equal(narrow[3]!.indexOf("c"), narrow[1]!.indexOf("s"));
+  // No cache row: the band is as before.
+  assert.equal(band(s, 120, CASTLE, null).length, 3);
+});
+
 test("the castle builds through five-cell frames and loops, holding complete at least as long as it builds", () => {
   const cycle = CASTLE_FRAMES.reduce((n, f) => n + f.ms, 0);
   const held = CASTLE_FRAMES[HELD]!;

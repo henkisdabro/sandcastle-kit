@@ -1260,8 +1260,8 @@ all of it. The mod:
   run does not re-read it all uncached. It reads the plan's usage windows (`$.session.usage`) to
   skip the refresh when the cache is the 5-minute kind (a window at 100%, or a refresh that found
   the cache already lapsed: warming that costs more than one cold restart, and a second such miss
-  in a run stops it for the run), and draws one row under the castle (like `cache warm · refresh
-  in 12m`). `keepWarm: false` in the project config or your personal settings turns it off;
+  in a run stops it for the run), and says so beside the run's name above the prompt (like `cache warm · refresh
+  in 12m`; on a narrow screen, on a row under it). `keepWarm: false` in the project config or your personal settings turns it off;
 - submits one prompt when a run ends.
 
 It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no

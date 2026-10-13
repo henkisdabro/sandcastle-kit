@@ -2583,8 +2583,11 @@ In `register.tsx` a `$.clock.every(60_000)` tick runs while `round` finds a live
 started, followed, or (recording no session) closes; it reads `$.session.usage()`, calls
 `$.model.fork` when `refresh` is set, keeps `Warmth` in `$.state` (`sandcastle.warmth`, which a
 reload keeps and module variables do not; a different run's `startedAt` starts its misses over),
-logs an unanswered fork with `$.ui.log` and draws the row as one more `Text` under the castle in the
-`AbovePrompt` band (`sandcastle.warm`).
+logs an unanswered fork with `$.ui.log` and draws the row in the `AbovePrompt` band
+(`sandcastle.warm`): `band()` puts it at the end of the title row while it fits there (the tokens go
+first), else on a row of its own lined up with the text beside the castle - flush under the castle it
+read as part of the drawing. The band, the idle mark and the row stand one column in from the
+screen's edge (`BAND_INDENT`).
 The main thread's `turn.complete` (never a subagent's) records the turn's end.
 The status line stays the needs-you text's alone, and the skill note the mod appends says the mod
 keeps the cache warm. `test/keep-warm.test.ts` holds the rule, `mod/tests/keep-warm.test.ts` the
