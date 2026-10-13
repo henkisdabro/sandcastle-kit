@@ -359,27 +359,31 @@ export const implUnmetView = (unmet: string | undefined): string =>
       "finishes nor restates is dropped from the ticket as done.\n\n"
     : "";
 
-// The last paragraph of an implementer's final message, with the kit's own tags (`<promise>`, `<unmet>`,
-// `<changelog>`, `<followup>`, `<ungated>`) and fenced blocks taken out first: a caveat ("I did not check that
-// the new test fails without the change") sits in the closing prose, and no other pass reads that prose. Cut at
-// a word to UNGATED_MAX; undefined when the message has no prose. A `<report>` keeps its words and loses only its
-// tags: with a tracker agents do not write to, the implementer's prose for the ticket, caveat and all, is in it.
-export const closingParagraphOf = (text: string): string | undefined => {
+// How much of the implementer's final message a full review is shown: the prompt asks the implementer for about 20 lines.
+export const IMPL_SAID_MAX = 4000;
+// An implementer's whole final message, with the kit's own tags (`<promise>`, `<unmet>`, `<changelog>`, `<followup>`,
+// `<ungated>`) and fenced blocks taken out first: a caveat ("I did not check that the new test fails without the
+// change") sits anywhere in its prose, usually in a list mid-message with a status line after it, and no other pass
+// reads that prose. Cut at a word to IMPL_SAID_MAX; undefined when the message has no prose. A `<report>` keeps its
+// words and loses only its tags: with a tracker agents do not write to, the implementer's prose for the ticket,
+// caveat and all, is in it.
+export const implementerSaidOf = (text: string): string | undefined => {
   const prose = text
     .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "")
     .replace(/^[ \t]*<(promise|unmet|changelog|followup|ungated)\b[^>\n]*>[\s\S]*?<\/\1>[ \t]*$/gm, "")
-    .replace(/<\/?report>/g, "");
-  const last = prose.split(/\n[ \t]*\n/).map((p) => p.trim()).filter(Boolean).at(-1);
-  return last ? cutAtWord(last, UNGATED_MAX) : undefined;
+    .replace(/<\/?report>/g, "")
+    .replace(/(\n[ \t]*){3,}/g, "\n\n")
+    .trim();
+  return prose ? cutAtWord(prose, IMPL_SAID_MAX) : undefined;
 };
-// What a full review is shown of it, for `IMPL_SAID`: the paragraph quoted, with the ask to make any check the
+// What a full review is shown of it, for `IMPL_SAID`: the message quoted, with the ask to make any check the
 // implementer says it did not make. Empty when there is none, so the prompt carries no heading over nothing.
 export const implSaidView = (said: string | undefined): string =>
   said
-    ? "# What the implementer said last\n\nThe last paragraph of the implementer's final message, quoted as it wrote it. If it says " +
+    ? "# What the implementer said\n\nThe implementer's final message, quoted as it wrote it. If it says " +
       "it did not check something (a test not shown to fail without the change, a platform it did not run), make that check yourself " +
       "before you accept the claim:\n\n" +
-      `${said.split("\n").map((l) => `> ${l}`).join("\n")}\n\n`
+      `${said.split("\n").map((l) => `> ${l}`.trimEnd()).join("\n")}\n\n`
     : "";
 
 // The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
@@ -1704,7 +1708,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     const own = overrides.get(issue.id) ?? {};
     const implModel = own.model ?? IMPL_MODEL;
     // `IMPL_UNMET`, `IMPL_SAID` and `IMPL_CHANGELOG` are empty here: only a full review is shown the implementer's
-    // unmet line, closing paragraph and changelog lines (see `implUnmetView`, `implSaidView`, `implChangelogView`).
+    // unmet line, final message and changelog lines (see `implUnmetView`, `implSaidView`, `implChangelogView`).
     // `FOLLOWUPS_NAMED` is empty here too, and filled at every agent pass (`pass`) from the run's follow-up book.
     const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_SAID: "", IMPL_CHANGELOG: "", FOLLOWUPS_NAMED: "", ...tracker.promptArgs(issue.id) };
     const merge = mergedEarlier(issue.id, branch);
@@ -2121,7 +2125,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // review has read the branch after it: the reviewer may have finished the criterion.
       // A land-only branch runs no implementer or review: what its agents said stands from its head record.
       let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
-      // The implementer's closing paragraph, which a full review is shown (`implSaidView`); kept in the head
+      // The implementer's final message, which a full review is shown (`implSaidView`); kept in the head
       // record like `unmet`, so a land-only or requeued attempt still has it.
       let implSaid = landOnly ? readHeads(project.root)[issue.id]?.implSaid : undefined;
       let reviewed = false;
@@ -2243,7 +2247,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         }
         noteChangelog(impl.stdout);
         implUnmet = unmetOf(impl.stdout);
-        implSaid = closingParagraphOf(impl.stdout);
+        implSaid = implementerSaidOf(impl.stdout);
 
         // `impl.commits` counts what THIS run added, which is zero in two very
         // different cases: the agent found nothing to do, and the agent found the
