@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -21,7 +21,10 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
 const { createPipeline } = await import("../src/burndown.ts");
 const { closeComment, commentCount, notLandedComment, partlyDoneComment, personCommentsSince } = await import("../src/ledger.ts");
-const { readHeads, recordHead } = await import("../src/run.ts");
+const { readHeads, recordHead, renderPrompts } = await import("../src/run.ts");
+const { namedStraysView } = await import("../src/resolution.ts");
+const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
 type Outcome = Awaited<ReturnType<ReturnType<typeof createPipeline>>>;
@@ -362,4 +365,72 @@ test("a Markdown ticket file's comments count by their headings, the kit's marke
   assert.equal(commentCount([section(kit, person)]), 2);
   assert.deepEqual(personCommentsSince([section(kit, person)], 1), ["Change the design."]);
   assert.deepEqual(personCommentsSince([section(kit)], 0), []);
+});
+
+/** The resolution of the conflict in shared.txt that also changes landed.txt, which the base added and the branch never had. */
+const resolvingAlso = (say: string): Agent => (wt) => {
+  write(wt, "shared.txt", "one\nseven\n");
+  write(wt, "landed.txt", "another ticket's line, adapted\n");
+  git(wt, "add", "shared.txt", "landed.txt");
+  git(wt, "commit", "-q", "--no-edit");
+  return say;
+};
+
+test("the full review of a conflicted carried merge with a late comment is shown the cleanly merged file the resolver named, and why", async () => {
+  const h = await greenBranch();
+  h.land("shared.txt", "one\n");
+  h.land("landed.txt", "another ticket's line\n");
+  h.comments.push(SPEC_CHANGE);
+  h.agents.resolve = resolvingAlso('<stray path="landed.txt">the landed assertion pinned the sentence this ticket replaces</stray>');
+  h.gates.push(GREEN);
+  const o = await h.attempt();
+  assert.equal(o.status, "green");
+  assert.deepEqual(h.passes.map((p) => p.prompt), ["resolve", "review"]);
+  const shown = h.passes[1].args.MERGE_STRAYS;
+  assert.match(shown, /`landed\.txt` - the landed assertion pinned the sentence this ticket replaces/);
+  // The full review is shown no combined diff: it is told the command that shows each stray instead.
+  assert.match(shown, /git diff <merge>\^2 <merge> -- <file>/);
+  assert.doesNotMatch(shown, /diff above/);
+});
+
+test("the narrow review's strays still point at the combined diff above", async () => {
+  const h = await greenBranch();
+  h.land("shared.txt", "one\n");
+  h.land("landed.txt", "another ticket's line\n");
+  h.agents.resolve = resolvingAlso('<stray path="landed.txt">adapted to the merge</stray>');
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.passes.map((p) => p.prompt), ["resolve", "remerge"]);
+  assert.match(h.passes[1].args.MERGE_STRAYS, /combined diff above/);
+});
+
+test("a first-attempt full review gets no strays heading", async () => {
+  const h = harness();
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.passes.map((p) => p.prompt), ["implement", "review"]);
+  assert.equal(h.passes[1].args.MERGE_STRAYS, "");
+});
+
+test("a late comment on a conflicted merge whose resolver named nothing gives the full review an empty strays slot", async () => {
+  const h = await greenBranch();
+  h.land("shared.txt", "one\n");
+  h.comments.push(SPEC_CHANGE);
+  h.agents.resolve = resolving;
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.equal(h.passes[1].args.MERGE_STRAYS, "");
+});
+
+test("the rendered review prompt holds the strays slot, and filled in it never points at a combined diff above", () => {
+  const root = mkdtempSync(join(TMP, "render-"));
+  const p = { root, name: "fixture", label: "fixture", gates: [{ name: "test", command: "run-tests" }], tracker: fakeTracker() } as unknown as Parameters<typeof renderPrompts>[0];
+  const text = readFileSync(renderPrompts(p, makeTracker(p)).review, "utf8");
+  assert.equal(text.split("{{MERGE_STRAYS}}").length - 1, 1);
+  // Before "What to look for", where the ticket and the diff are.
+  assert.ok(text.indexOf("{{MERGE_STRAYS}}") < text.indexOf("# What to look for"));
+  const filled = text.replace("{{MERGE_STRAYS}}", () => namedStraysView([{ path: "landed.txt", why: "adapted" }], "full"));
+  assert.match(filled, /`landed\.txt` - adapted/);
+  assert.doesNotMatch(filled, /diff above/);
 });

@@ -2079,7 +2079,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // implementer takes the branch, as it does for any carried branch.
       // The cleanly merged files the resolver said it had to change, and why (`strayNamesOf`).
       let resolverSaid: NamedStray[] = [];
-      // The stray changes among them that `strayChanges` found, which the narrow review is shown.
+      // The stray changes among them that `strayChanges` found, which the review is shown.
       let namedStrays: NamedStray[] = [];
       if (landOnly && mergeConflicted) {
         await juncture("resolve");
@@ -2230,7 +2230,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           () => {
             return reviewWithFallback(ref(issue.id), (agent, model) => {
               reviewModel = model;
-              return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
+              return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog), MERGE_STRAYS: namedStraysView(namedStrays, "full") })(agent);
             });
           },
           undefined,
@@ -2242,7 +2242,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               issue.id,
               "cross-review",
               () => {
-                return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) }));
+                return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog), MERGE_STRAYS: namedStraysView(namedStrays, "full") }));
               },
               undefined,
               () => CROSS_REVIEW_MODEL,

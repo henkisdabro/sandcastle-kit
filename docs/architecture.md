@@ -561,7 +561,10 @@ why in a `<stray path="...">reason</stray>` line of its final message (`strayNam
 `src/burndown.ts`), `splitStrays` sets those against the check's list, and only a path left unnamed
 holds the ticket (`strayNote` lists it, and the named ones apart) - the named ones go to the narrow
 review as `MERGE_STRAYS` (`namedStraysView`, in the `remerge` prompt) and the gates
-(`test/pipeline-named-strays.test.ts`)
+(`test/pipeline-named-strays.test.ts`); the full review a person's late comment sends a conflicted
+carried merge to gets them too, in the `review` prompt's `{{KIT_AFTER_REPAIR}}` slot and with its own
+lead-in, since it is shown no combined diff - the cross-review as well
+(`test/carried-late-comment.test.ts`, `test/carried-late-comment-cross.test.ts`)
 
 ## `src/schedule.ts`
 
