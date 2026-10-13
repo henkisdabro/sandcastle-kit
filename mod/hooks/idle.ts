@@ -18,6 +18,30 @@ export type Entry = {
   tried: number;
 };
 
+/** What `sandcastle --version --json` prints (src/upgrading.ts's `versionFacts`), the part the mark reads. */
+export type VersionFacts = {
+  kit: { version: string; release: string; past: number };
+  /** The newest tagged release; always null until the kit reads one, and the mark says nothing of it yet. */
+  newestRelease: { release: string; checkedAt: string } | null;
+  /** Null outside a set-up project. */
+  project: { recorded: boolean; release: string | null; pendingNotes: string[] } | null;
+};
+
+/**
+ * A project's cached version read, one `$.store` entry beside the ready entry and shared by every
+ * session on the machine. A failed read keeps the last good `facts` and `at`, as the ready entry does.
+ */
+export type VersionEntry = {
+  /** When `facts` were read, in ms since the epoch. */
+  at: number;
+  /** The facts of the last good read; null before one. */
+  facts: VersionFacts | null;
+  /** Whether the latest read worked. */
+  ok: boolean;
+  /** When the latest read ended, good or not: what `due` measures. */
+  tried: number;
+};
+
 /**
  * A person's choices for one project, one `$.store` entry beside the ready entry: machine-local,
  * kept across a restart, never in the repository.
@@ -41,6 +65,8 @@ export type MarkInput = {
   dismissed?: string[];
   /** The cached read; none yet, or with no `now`, gives the bare mark. */
   entry?: Entry;
+  /** The cached version read; none yet, or too old to show, and the mark carries no version. */
+  versionRead?: VersionEntry;
   /** The time, ms since the epoch. */
   now?: number;
 };
@@ -61,18 +87,60 @@ const current = (entry: Entry | undefined, now: number | undefined): string[] =>
 export const dismissalEnded = (dismissed: string[], entry: Entry | undefined, now: number | undefined): boolean =>
   current(entry, now).some((id) => !dismissed.includes(id));
 
+/** A tone of the mark's line: `name` the row's sand, `hint` the castle's bright sand in bold, `muted` the dimmer sand. */
+export type Tone = "name" | "hint" | "muted";
+
+/** One coloured piece of the line. The pieces are drawn side by side with a space between them. */
+export type MarkPart = { text: string; tone: Tone };
+
+/** The idle mark's line: its coloured parts and the same line as plain text (the parts joined by a space). */
+export type Mark = { text: string; parts: MarkPart[] };
+
+const numbers = (release: string): number[] | undefined => (/^\d+\.\d+\.\d+$/.test(release) ? release.split(".").map(Number) : undefined);
+
+/** Whether release `a` is newer than `b`, part by part as numbers (`0.10.0` is newer than `0.9.0`); false for anything that is not `X.Y.Z`. */
+const newer = (a: string, b: string): boolean => {
+  const [x, y] = [numbers(a), numbers(b)];
+  if (!x || !y) return false;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! > y[i]!;
+  return false;
+};
+
+/** The facts of a read that is current - under `COUNT_MS` old - else none: what a version may be shown from. */
+const currentFacts = (read: VersionEntry | undefined, now: number | undefined): VersionFacts | null =>
+  read !== undefined && now !== undefined && now - read.at >= 0 && now - read.at < COUNT_MS ? read.facts : null;
+
+/** The kit's release, with `+N` when the clone is N commits past its release's own tag: `0.16.0+3`. */
+const releaseLabel = (kit: VersionFacts["kit"]): string => `${kit.release}${kit.past > 0 ? `+${kit.past}` : ""}`;
+
 /**
  * The line, or undefined to clear it. A count shows only while the last good read is under an
  * hour old, so a tracker that cannot be reached keeps the number for a while and then goes quiet;
  * the line never says why (`sandcastle queue` and the status view do). A dismissal takes the
  * count off, never the mark; hiding takes both.
+ *
+ * With version facts the name carries the kit's release, and one hint may follow the count:
+ * `update needed` when the project has Upgrading notes it has not had or no usable update record
+ * (bold, the call to action becomes `/sandcastle update`), else `project on X` when its recorded
+ * release is older than the kit's (muted, the call to action stays `/sandcastle run`).
  */
-export const markText = (input: MarkInput): string | undefined => {
+export const markText = (input: MarkInput): Mark | undefined => {
   if (!input.setUp || !input.idleMark || input.hidden) return undefined;
   const { entry, now, dismissed } = input;
   const ids = current(entry, now);
   const quiet = dismissed !== undefined && !dismissalEnded(dismissed, entry, now);
-  return ids.length > 0 && !quiet ? `sandcastle · ${ids.length} ready - /sandcastle run` : "sandcastle";
+  const count = ids.length > 0 && !quiet ? ids.length : 0;
+  const facts = currentFacts(input.versionRead, now);
+  const lead = `${facts ? `sandcastle ${releaseLabel(facts.kit)}` : "sandcastle"}${count ? ` · ${count} ready` : ""}`;
+  const project = facts?.project;
+  const parts: MarkPart[] = [];
+  if (project && (!project.recorded || project.pendingNotes.length > 0)) {
+    parts.push({ text: `${lead} ·`, tone: "name" }, { text: "update needed", tone: "hint" }, { text: "- /sandcastle update", tone: "name" });
+  } else if (facts && project?.release && newer(facts.kit.release, project.release)) {
+    parts.push({ text: `${lead} ·`, tone: "name" }, { text: `project on ${project.release}`, tone: "muted" });
+    if (count) parts.push({ text: "- /sandcastle run", tone: "name" });
+  } else parts.push({ text: count ? `${lead} - /sandcastle run` : lead, tone: "name" });
+  return { text: parts.map((p) => p.text).join(" "), parts };
 };
 
 /** What `/sandcastle-mark` takes. */
@@ -119,7 +187,21 @@ export const markReport = (input: MarkInput): string => {
   const count = !entry
     ? "No count read yet."
     : `${entry.ids.length} ready, read ${now === undefined ? "earlier" : ago(now - entry.at)}${entry.ok ? "" : " (the latest read failed)"}${shown(entry, now) ? "" : "; too old to show"}.`;
-  return `Idle mark: ${state}.\nCached count: ${count}`;
+  return `Idle mark: ${state}.\nCached count: ${count}\n${versionReport(input.versionRead, now)}`;
+};
+
+/** The report's version lines: the last facts held, whatever their age, or that none are. */
+const versionReport = (read: VersionEntry | undefined, now: number | undefined): string => {
+  const facts = read?.facts;
+  if (!read || !facts) return "Kit version: not read yet.";
+  const { kit, project } = facts;
+  const recorded = !project ? "this is not a set-up project" : !project.recorded ? "none (no usable update record on this machine)" : (project.release ?? "none named by the record");
+  const notes = !project || project.pendingNotes.length === 0 ? [" none held."] : ["", ...project.pendingNotes.map((n) => `  - ${n}`)];
+  return [
+    `Kit version: ${kit.version}, read ${now === undefined ? "earlier" : ago(now - read.at)}${read.ok ? "" : " (the latest read failed)"}${currentFacts(read, now) ? "" : "; too old to show"}.`,
+    `Project's recorded release: ${recorded}.`,
+    `Pending Upgrading notes:${notes.join("\n")}`,
+  ].join("\n");
 };
 
 /**
@@ -154,7 +236,7 @@ export const readyIds = (stdout: string): string[] | undefined => {
 export type Trigger = "run-ended" | "skill";
 
 /** Whether to read the tracker now: no entry, one `READ_MS` old or more, or a trigger fired. */
-export const due = (entry: Entry | undefined, now: number, trigger?: Trigger): boolean => {
+export const due = (entry: Pick<Entry, "tried"> | undefined, now: number, trigger?: Trigger): boolean => {
   if (trigger !== undefined || entry === undefined) return true;
   const age = now - entry.tried;
   // An entry from the future is a clock that moved: read it again rather than trust it.
@@ -172,6 +254,53 @@ export const parseEntry = (value: unknown): Entry | undefined => {
   if (typeof at !== "number" || !Number.isFinite(at) || typeof tried !== "number" || !Number.isFinite(tried) || typeof ok !== "boolean") return undefined;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return undefined;
   return { at, ids: ids as string[], ok, tried };
+};
+
+/** The entry after a version read: `facts` is the read's result, or undefined for a failed one. */
+export const afterVersionRead = (prior: VersionEntry | undefined, facts: VersionFacts | undefined, now: number): VersionEntry =>
+  facts !== undefined ? { at: now, facts, ok: true, tried: now } : { at: prior?.at ?? now, facts: prior?.facts ?? null, ok: false, tried: now };
+
+const nonEmpty = (value: unknown): value is string => typeof value === "string" && value !== "";
+
+/**
+ * The facts in `sandcastle --version --json`'s stdout, or undefined for output that is not them -
+ * a failed read keeps the last good facts, and one that parses to something else must not blank them.
+ */
+export const parseVersionFacts = (stdout: string): VersionFacts | undefined => {
+  let value: unknown;
+  try {
+    value = JSON.parse(stdout);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) return undefined;
+  const { kit, newestRelease, project } = value as Record<string, unknown>;
+  if (typeof kit !== "object" || kit === null) return undefined;
+  const { version, release, past } = kit as Record<string, unknown>;
+  if (!nonEmpty(version) || !nonEmpty(release) || typeof past !== "number" || !Number.isFinite(past)) return undefined;
+  let newest: VersionFacts["newestRelease"] = null;
+  if (newestRelease !== null && newestRelease !== undefined) {
+    if (typeof newestRelease !== "object") return undefined;
+    const { release: r, checkedAt } = newestRelease as Record<string, unknown>;
+    if (!nonEmpty(r) || !nonEmpty(checkedAt)) return undefined;
+    newest = { release: r, checkedAt };
+  }
+  if (project === null) return { kit: { version, release, past }, newestRelease: newest, project: null };
+  if (typeof project !== "object") return undefined;
+  const { recorded, release: recordedRelease, pendingNotes } = project as Record<string, unknown>;
+  if (typeof recorded !== "boolean" || (recordedRelease !== null && typeof recordedRelease !== "string")) return undefined;
+  if (!Array.isArray(pendingNotes) || !pendingNotes.every((n) => typeof n === "string")) return undefined;
+  return { kit: { version, release, past }, newestRelease: newest, project: { recorded, release: recordedRelease, pendingNotes: pendingNotes as string[] } };
+};
+
+/** A stored value as a version entry, or undefined when it is not one: a store is shared, so it is checked. */
+export const parseVersionEntry = (value: unknown): VersionEntry | undefined => {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { at, facts, ok, tried } = value as Record<string, unknown>;
+  if (typeof at !== "number" || !Number.isFinite(at) || typeof tried !== "number" || !Number.isFinite(tried) || typeof ok !== "boolean") return undefined;
+  if (facts === null) return { at, facts: null, ok, tried };
+  const parsed = parseVersionFacts(JSON.stringify(facts));
+  return parsed ? { at, facts: parsed, ok, tried } : undefined;
 };
 
 /**

@@ -68,7 +68,7 @@ test("markText: no count at 0 ready, the count at N, and the last good count onl
     ["not set up", { ...set, setUp: false, entry: entry(MIN, ["1"]) }, undefined],
     ["the machine switch off", { ...set, idleMark: false, entry: entry(MIN, ["1"]) }, undefined],
   ];
-  for (const [what, input, text] of table) assert.equal(markText(input), text, what);
+  for (const [what, input, text] of table) assert.equal(markText(input)?.text, text, what);
 });
 
 test("afterRead: a good read replaces the entry; a failed one keeps the last good ids and their time", () => {

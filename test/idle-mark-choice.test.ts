@@ -10,7 +10,7 @@ import { choiceAfter, COUNT_MS, type Entry, markAction, markReport, markText, pa
 const NOW = 1_800_000_000_000;
 const MIN = 60 * 1000;
 const read = (ids: string[], ageMin = 1, ok = true): Entry => ({ at: NOW - ageMin * MIN, ids, ok, tried: NOW - ageMin * MIN });
-const mark = (extra: object) => markText({ setUp: true, idleMark: true, now: NOW, ...extra });
+const mark = (extra: object) => markText({ setUp: true, idleMark: true, now: NOW, ...extra })?.text;
 const READY = (n: number) => `sandcastle · ${n} ready - /sandcastle run`;
 
 test("markText: hidden clears the line, with or without a count", () => {
@@ -77,8 +77,8 @@ test("parseChoice: only what the mod stores, since the store is shared", () => {
 
 test("markReport: shown, hidden here or machine-wide, dismissed, and the cached count with its age", () => {
   const base = { setUp: true, idleMark: true, now: NOW };
-  assert.equal(markReport({ ...base }), "Idle mark: shown.\nCached count: No count read yet.");
-  assert.equal(markReport({ ...base, entry: read(["1", "2", "3"], 4) }), "Idle mark: shown.\nCached count: 3 ready, read 4 min ago.");
+  assert.equal(markReport({ ...base }), "Idle mark: shown.\nCached count: No count read yet.\nKit version: not read yet.");
+  assert.equal(markReport({ ...base, entry: read(["1", "2", "3"], 4) }), "Idle mark: shown.\nCached count: 3 ready, read 4 min ago.\nKit version: not read yet.");
   assert.match(markReport({ ...base, hidden: true }), /^Idle mark: hidden in this project/);
   assert.match(markReport({ ...base, idleMark: false }), /^Idle mark: hidden on this machine \("idleMark": false/);
   assert.match(markReport({ ...base, idleMark: false, hidden: true }), /on this machine .* and in this project/);
@@ -86,8 +86,8 @@ test("markReport: shown, hidden here or machine-wide, dismissed, and the cached 
   const dismissed = markReport({ ...base, entry: read(["1"]), dismissed: ["1", "2"] });
   assert.match(dismissed, /^Idle mark: shown without a count: dismissed/);
   // A dismissal a new ticket has ended is not reported as one.
-  assert.equal(markReport({ ...base, entry: read(["1", "3"]), dismissed: ["1", "2"] }), "Idle mark: shown.\nCached count: 2 ready, read 1 min ago.");
+  assert.equal(markReport({ ...base, entry: read(["1", "3"]), dismissed: ["1", "2"] }), "Idle mark: shown.\nCached count: 2 ready, read 1 min ago.\nKit version: not read yet.");
   // A stale count is told from an empty queue.
-  assert.equal(markReport({ ...base, entry: read([], 90) }), "Idle mark: shown.\nCached count: 0 ready, read 1 h 30 min ago; too old to show.");
-  assert.match(markReport({ ...base, entry: read(["1"], 5, false) }), /read 5 min ago \(the latest read failed\)\.$/);
+  assert.equal(markReport({ ...base, entry: read([], 90) }), "Idle mark: shown.\nCached count: 0 ready, read 1 h 30 min ago; too old to show.\nKit version: not read yet.");
+  assert.match(markReport({ ...base, entry: read(["1"], 5, false) }), /read 5 min ago \(the latest read failed\)\./);
 });

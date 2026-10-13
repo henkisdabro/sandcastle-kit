@@ -1163,7 +1163,18 @@ itself, in the status view's castle, glyphs and colours:
   another directory - and it returns after the end notice. Its count is always the session's own
   project's. When **ready tickets** wait - queued
   tickets with no open blocker, the ones a run would start now - it reads `sandcastle · 4 ready -
-  /sandcastle run`. The count comes from `sandcastle queue --json`, read in the background and
+  /sandcastle run`. The kit version leads the line once the mod has read it, `sandcastle 0.16.0 · 4
+  ready - /sandcastle run` (a clone past its release tag shows how far, `0.16.0+3`). When the
+  project has Upgrading notes it has not had, or no usable update record on this machine (one set
+  up before records existed, or on another machine), the line says so and points at the update:
+  `sandcastle 0.17.0 · 4 ready · update needed - /sandcastle update`, `update needed` in brighter
+  sand and bold. When the project's recorded release is older than the kit's and nothing is
+  pending, a quiet note names it and the call to action stays `/sandcastle run`: `sandcastle
+  0.17.0 · 4 ready · project on 0.16.0 - /sandcastle run`. The version and the project's state come
+  from `sandcastle --version --json`, which also works outside a project and is read like the
+  queue: in the background, on the same ten-minute schedule and triggers (the end of a
+  `/sandcastle update` turn drops the hint), never in a project that is not set up or while the
+  mark is hidden. The count comes from `sandcastle queue --json`, read in the background and
   cached once per project in the mod's store, shared by every Claude Code session on the machine:
   at most one tracker read per project every 10 minutes while nothing changes, plus one when a run
   of the project, or one the session follows, ends and one when you use `/sandcastle` (it may just have labelled tickets). A
@@ -1180,7 +1191,9 @@ itself, in the status view's castle, glyphs and colours:
     dismissal.
   - With no argument it says whether the mark is shown, hidden (here or machine-wide) or
     dismissed, and the cached count with its age, so a stale count can be told from an empty
-    queue. Any other argument prints the usage line.
+    queue. It also reports the full kit version (the commit and local changes too), the release
+    this project last updated at and the Upgrading notes it has not had, or that none are held -
+    the facts last read, even while the mark is hidden. Any other argument prints the usage line.
 
   The choices are kept in the mod's store under the project root: on your machine only, across a
   restart, and never in the repository. The machine-wide `idleMark` switch stays in your personal
@@ -1224,6 +1237,9 @@ all of it. The mod:
   it does it through the kit, never itself. It makes none while an entry under 10 minutes old
   stands, except when you use `/sandcastle` and again when that turn ends (triage labels tickets
   in between);
+- in the same cases, runs `sandcastle --version --json` there for the kit version and the
+  project's update state, with the same 20 second timeout and one entry per project in its store.
+  A few local `git` commands run inside it, and nothing reaches the network;
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -1231,7 +1247,7 @@ all of it. The mod:
   `~/.cache` when unset) and the resolved roots in it, then reads `run.json` there only to see
   whether it names this session;
 - keeps small entries per project in its own store: which session closes the run and the last run
-  it has accounted for, the cached ready count, and your `/sandcastle-mark` choices (hidden, and
+  it has accounted for, the cached ready count and version facts, and your `/sandcastle-mark` choices (hidden, and
   the ids of a dismissal);
 - while a run this session started (or follows) is live, once a minute checks how long the session
   has been silent and, after 55 minutes, sends one cache refresh: a tool-less request over the
@@ -1273,7 +1289,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor, then points to `sandcastle size` while neither machine pool limit is set | ➖ no |
 | `sandcastle help` | Lists every command | ➖ no |
-| `sandcastle --version` | The kit version: the release (`X.Y.Z`), and in a clone that is past it or has local changes, how far and at which commit (`X.Y.Z +1 (1c4f46f)`). Doctor's first line says the same, and so do a run's start line and its record (`versions.kit` in `logs/run.json`) | ➖ no |
+| `sandcastle --version` | The kit version: the release (`X.Y.Z`), and in a clone that is past it or has local changes, how far and at which commit (`X.Y.Z +1 (1c4f46f)`). Doctor's first line says the same, and so do a run's start line and its record (`versions.kit` in `logs/run.json`). `--json` prints the facts the Claude Code mod's idle mark reads instead (`kit`, `newestRelease` - always `null` for now - and `project`: null outside a set-up project, else whether it has an update record, the release recorded and the Upgrading notes it has not had); it works outside a project too | ➖ no |
 | `sandcastle doctor [--verify]` | Checks machine and project setup (inside a project also the tracker and, on GitHub, the queue label) and prints the fix for each problem as the command that applies it; doctor itself changes nothing. Names the Claude Code and Codex versions sandbox images will get, shows the size of Docker's build cache with the `docker builder prune` hint, points to `sandcastle size` (an `info` line) while neither machine pool limit is set, warns when the pool limits need more memory than the VM has, priced from the measured anonymous memory of gates and agents (both numbers and the `config.json` key; a run's start prints the same warning), and warns - never fails - when the release channel cannot be reached, the project's base image is more than 30 days old, or a pulled kit has Upgrading notes the project has not had since its last update. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call), and in a GitHub project whether `GH_TOKEN` can push there - a probe that writes nothing; a token that can is a FIX | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle updated [--declined KEY[,KEY...]] [--accepted KEY[,KEY...]]` | Records that this project has acted on the kit's Upgrading notes (the last step of `/sandcastle update`), as the update record `.sandcastle/.run/kit-updated`: the kit's release, every Upgrading note it has now and `declined`, the update steps the user declined (`--declined` adds keys such as `claude-mod` at this release; earlier ones are kept; `--accepted` takes off one the user has since asked for), so the next update names a declined step in a line and does not ask again; it prints the release recorded before (or that there was none) and the kit's version now. Until then, after a pull, doctor lists the notes the project has not had and a run warns about them | ➖ no |
