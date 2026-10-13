@@ -124,6 +124,15 @@ const DOC_FILES = ["README.md", "CHANGELOG.md"];
  * appear. Empty when no pair shares a file.
  */
 export const fileShareSummary = (ref: (id: string) => string, pairs: { id: string; share: FileShare }[]) => {
+  const byFile = sharesByFile(pairs);
+  const lines = [...byFile].filter(([file]) => !DOC_FILES.includes(file)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([file, ids]) => `${file}: ${ids.map(ref).join(" ")}`);
+  const docs = [...byFile].filter(([file]) => DOC_FILES.includes(file));
+  if (docs.length) lines.push(`${docs.map(([file]) => file).join(", ")}: shared by ${new Set(docs.flatMap(([, ids]) => ids)).size} tickets (not listed)`);
+  return lines;
+};
+
+/** Each mergeable file the pairs share, with its tickets in the order they first appear; a docs file every ticket touches (`isDocFile`) among them. */
+export const sharesByFile = (pairs: { id: string; share: FileShare }[]) => {
   const byFile = new Map<string, string[]>();
   for (const { id, share } of pairs)
     for (const file of share.files) {
@@ -131,11 +140,9 @@ export const fileShareSummary = (ref: (id: string) => string, pairs: { id: strin
       for (const t of [share.with, id]) if (!ids.includes(t)) ids.push(t);
       byFile.set(file, ids);
     }
-  const lines = [...byFile].filter(([file]) => !DOC_FILES.includes(file)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([file, ids]) => `${file}: ${ids.map(ref).join(" ")}`);
-  const docs = [...byFile].filter(([file]) => DOC_FILES.includes(file));
-  if (docs.length) lines.push(`${docs.map(([file]) => file).join(", ")}: shared by ${new Set(docs.flatMap(([, ids]) => ids)).size} tickets (not listed)`);
-  return lines;
+  return byFile;
 };
+export const isDocFile = (file: string) => DOC_FILES.includes(file);
 
 /** The note of a ticket parked in a run that has stopped: nothing will start it before the next run. */
 export const stoppedWaitNote = (ref: (id: string) => string, w?: FileWait) =>
@@ -1305,16 +1312,21 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // branches queued to land only (none in its gates). Their landing ends the wait and the resolve goes first in line,
       // so the worker that is free now leaves the tickets that have not started until it has: else it starts a pipeline, and
       // the resolve waits out the pipelines of every worker.
-      const resolveComes = () => {
+      // One worker holds for each resolve about to be released, not every worker that comes free: a resolve takes one
+      // worker, and the others' slots would sit idle until the landing it waits for is done. `self`: the asking worker
+      // is one of the holders, so it does not count against itself.
+      let holding = 0;
+      const resolveComes = (self = false) => {
         if (pausedSince !== undefined || stop.startsNothing) return false;
         const next = pipelines.peek();
         if (!next || next.rank === REQUEUED) return false;
         // Counted until it is pushed, not only while it waits: the landing that ends the wait wakes the worker too, and a worker
         // that looked between the wait's end and the push would find no resolve and take the next ticket.
-        return [...offWorker].some((id) => {
+        const coming = [...offWorker].filter((id) => {
           const t = byId.get(id);
           return t !== undefined && ahead(t).running.length === 0;
-        });
+        }).length;
+        return coming > holding - (self ? 1 : 0);
       };
       // Returns when none is ahead of the ticket's resolve, or the run starts nothing; a pause parks it as at the start.
       const resolveTurn = async (t: T): Promise<void> => {
@@ -1404,7 +1416,13 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           // attempt before the first of them found nothing begun: the ticket ends as not begun, and a requeued one keeps its landing.
           let stepped = false;
           try {
-            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => ((stepped ||= phase !== "start"), juncture(t.id, phase, park)), paused: () => (sync(), pausedSince !== undefined), gates: () => void gating.add(t.id), ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
+            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => {
+              stepped ||= phase !== "start";
+              // Out of its gates: a repair (and the review after it) can take an hour, which a resolve that shares its files
+              // does not wait out. It counts again from its next gate run (`gates`).
+              if (phase === "repair" || phase === "review") gating.delete(t.id);
+              return juncture(t.id, phase, park);
+            }, paused: () => (sync(), pausedSince !== undefined), gates: () => void gating.add(t.id), ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {
@@ -1470,16 +1488,21 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // A worker whose next pick is a ticket that has not started waits while a resolve is about to be released (`resolveComes`),
       // and takes the resolve first. It keeps a slot it holds, unless a landing of the run waits for one: that goes back to the pool.
       const holdForResolve = async (held: { slot?: Slot }) => {
-        while (resolveComes()) {
-          if (held.slot && work.landingWaits?.()) {
-            held.slot.release();
-            held.slot = undefined;
+        holding++;
+        try {
+          while (resolveComes(true)) {
+            if (held.slot && work.landingWaits?.()) {
+              held.slot.release();
+              held.slot = undefined;
+            }
+            // Woken at every stage change and when the resolve is pushed; the timer is a backstop against one that is missed.
+            await new Promise<void>((wake) => {
+              const timer = setTimeout(wake, 1000);
+              settles.push(() => (clearTimeout(timer), wake()));
+            });
           }
-          // Woken at every stage change and when the resolve is pushed; the timer is a backstop against one that is missed.
-          await new Promise<void>((wake) => {
-            const timer = setTimeout(wake, 1000);
-            settles.push(() => (clearTimeout(timer), wake()));
-          });
+        } finally {
+          holding--;
         }
       };
       const worker = async () => {
