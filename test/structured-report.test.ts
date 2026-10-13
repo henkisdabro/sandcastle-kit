@@ -365,7 +365,7 @@ test("codex with an output schema: the result is the JSON, which carries the sig
   try {
     const r = await silent(() => passOf(without, agent));
     assert.deepEqual(JSON.parse(r.stdout), REPORT, "the pass's result is the final message and nothing else");
-    assert.equal(r.completionSignal, undefined, "no signal anywhere: the pass reads as not done, and a hang would wait for the 10 minute idle timeout, not the grace window");
+    assert.equal(r.completionSignal, undefined, "no signal anywhere: the pass reads as not done, and a hang would wait for the idle timeout (2400 s for the kit's review passes), not the grace window");
   } finally {
     await without.close();
   }
