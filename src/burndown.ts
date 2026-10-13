@@ -3173,6 +3173,8 @@ export const burndown = async (
         appendFileSync(gatesLog(project, id), rerunNote(name));
       },
       log: gatesLog(project, id),
+      // A ticket's gates, in its own sandbox: the gate share while they hold the slot (a landing's sandbox has it already).
+      ...(!priority && ticketCpus !== undefined && gateCpus !== undefined ? { cpus: { gate: gateCpus, ticket: ticketCpus } } : {}),
     }, priority, from, rerunOnRed, thirdOnDisjoint);
     // A ticket's gates only (the landing's own red is judged against these): the first run's failures and a re-run's alike.
     // Not a requeued ticket's: its gates run on a tree the base was merged into, so a test a landed ticket broke

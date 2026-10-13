@@ -18,7 +18,7 @@ import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, G
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
-import { EXEC_TAIL_CHARS, sandboxConfig, sh } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -76,6 +76,12 @@ export type GateProgress = {
   log?: string;
   /** The run went red and starts again from gate `name` in the same slot (`runGates`' `rerunOnRed`): the caller's section header for it. */
   again?: (name: string) => void;
+  /**
+   * A ticket's gates (`priority` false) run in the ticket's own sandbox, created at the ticket share of the CPUs: while
+   * they hold the gates slot its container is raised to `gate`, the gate share, and set back to `ticket` when the slot
+   * is released (`withContainerCpus`). Unset for a gate-only sandbox, which has the gate share from its start.
+   */
+  cpus?: { gate: number; ticket: number };
 };
 
 // One decimal under 10 s: gates average a few seconds, and "green in 0s" says
@@ -202,7 +208,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const rewrote = await restoreGateChanges(sandbox, before);
     return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   };
-  return withSlot("gates", label, async (): Promise<GateRun> => {
+  return withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
@@ -236,7 +242,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     // rewrote it may not run again, and the run's `gateRewrites` line would lose it.
     const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? [])])];
     return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) };
-  }, progress.wait, undefined, priority);
+  }), progress.wait, undefined, priority);
 };
 
 // ---------------------------------------------------------------------------
