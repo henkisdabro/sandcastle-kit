@@ -73,7 +73,9 @@ state.
   timeout or a setup failure; `test/landing-red-rerun.test.ts`). A red landing is named with the landed tickets that touch
   its files or its failing tests, unless every failing test is one the branch's own ticket gates failed in this run
   (`LandContext.failedBefore`, kept by `rememberFailed` from `runGates`' ticket gates in `src/burndown.ts`, a flake that
-  went green on a re-run included): then `Landed.seen` is set, `with` is empty and the line says "as seen on the branch before". A conflicted ticket's
+  went green on a re-run included, a test a later green run fixed after a repair commit not: it is kept by the head it went red on, `GateRun.head`,
+  and a green run drops the tests recorded on another head; a red run drops none, its list can be clipped; a run with no head counts as the same one;
+  `test/landing-failed-before-fixed.test.ts`): then `Landed.seen` is set, `with` is empty and the line says "as seen on the branch before". A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
   is queued to land and no ticket still in its pipeline has touched the files it conflicted on
   (the tickets ahead of it when the wait begins, and only those: one that starts later is not

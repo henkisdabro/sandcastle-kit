@@ -95,6 +95,18 @@ const dirtyPaths = async (sandbox: Parameters<typeof execGate>[0]): Promise<Dirt
   }
 };
 
+// The commit a pass gated, or undefined when git cannot say or the answer is no commit id (a fake sandbox's): a ticket's
+// failed tests are kept or dropped by the head they went red on (`rememberFailed`), and a run with none counts as the same head.
+const headOf = async (sandbox: Parameters<typeof execGate>[0]): Promise<string | undefined> => {
+  try {
+    const r = await sandbox.exec("git rev-parse HEAD");
+    const head = r.exitCode === 0 ? r.stdout.trim() : "";
+    return /^[0-9a-f]{40,64}$/.test(head) ? head : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // Sandcastle keeps a dirty worktree, and its branch, at close: a gate that rewrites a tracked file (a build that
 // regenerates a checked-in one) or leaves a build behind would leak both. So the paths the gates changed are
 // put back; whatever was dirty before them is the agent's, and stays. Returns the tracked files restored.
@@ -147,6 +159,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const gates: Gate[] = [];
     const failures: Failure[] = [];
     const before = await dirtyPaths(sandbox);
+    const head = await headOf(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     const pressure: Pressure = {};
     await sampling(sandbox, "gate", async () => {
@@ -186,7 +199,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     }, pressure);
     const peakMib = await samplePeak(sandbox);
     const rewrote = await restoreGateChanges(sandbox, before);
-    return { gates, failure: failures[0], failures, ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
+    return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   };
   return withSlot("gates", label, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
