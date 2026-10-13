@@ -25,7 +25,7 @@
 
 import { claudeCode, codex } from "@ai-hero/sandcastle";
 import type { ProjectConfig } from "./config.ts";
-import { cutAtWord, OperatorError } from "./errors.ts";
+import { cutAtWord, OperatorError, promptExpansionLine } from "./errors.ts";
 import { CODEX_RATE_LIMITS_READOUT } from "./usage.ts";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -243,13 +243,14 @@ export const agentFailure = (error: unknown) => {
   return cutAtWord(code ? `${first} - ${code.replace(/_/g, " ")}` : first);
 };
 
-// Runs the review with REVIEW_MODEL, and once more with IMPL_MODEL if it throws.
+// Runs the review with REVIEW_MODEL, and once more with IMPL_MODEL if it throws - but not for a prompt that could
+// not be expanded (GitHub's failure or a setup problem, not the model's): the other model would read the same ticket and fail the same way.
 export const reviewWithFallback = <T>(
   label: string,
   run: (agent: ReturnType<typeof claudeCode>, model: string) => Promise<T>,
 ): Promise<T> =>
   run(claude(REVIEW_MODEL, REVIEW_EFFORT), REVIEW_MODEL).catch((error) => {
-    if (REVIEW_MODEL === IMPL_MODEL) throw error;
+    if (REVIEW_MODEL === IMPL_MODEL || promptExpansionLine(error) !== undefined) throw error;
     console.log(
       `${label}: ${REVIEW_MODEL} review failed (${agentFailure(error)}); ` +
         `the agent log's last line has the real cause. Reviewing with ${IMPL_MODEL}.`,

@@ -2290,6 +2290,14 @@ sets it from `loadProject`, as `configureModels` sets the models. `claude()` als
 The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does
 not govern, and `git-guard.sh` is unchanged.
 
+`gh-retry.sh` is `gh` retried on a GitHub 5xx or a timeout, three tries: the GitHub tracker's
+`TICKET_VIEW` and `COMMENTS_VIEW` (`src/tracker.ts`) run `gh issue view` through it, so a moment of
+GitHub's trouble does not crash a ticket's prompt expansion, and a 4xx fails at once.
+Its waits (5 s and 12 s) fit the 30 s Sandcastle gives a prompt's shell expression in all; the
+command stays short so a failed expansion's line, which `promptExpansionLine` cuts, keeps gh's words.
+`reviewWithFallback` (`src/agents.ts`) re-raises a prompt-expansion error: the other model would read
+the same ticket (`test/gh-retry.test.ts`).
+
 ## `test/*.test.ts`
 
 One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split`
