@@ -71,5 +71,6 @@ test("every sandbox the kit opens is built from that environment", () => {
   for (const file of ["burndown.ts", "land.ts", "gates.ts"]) {
     assert.match(readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8"), /\.\.\.sandboxConfig\(project, image, planFile\)/, file);
   }
-  assert.equal(source.match(/\bdocker\(\{/g)?.length, 1, "one place builds a docker sandbox");
+  assert.equal(source.match(/\bdocker\(/g)?.length, 1, "one place builds a docker sandbox");
+  assert.match(source, /\bdocker\(dockerOptions\(project, image\)\)/, "from dockerOptions, which carries the env");
 });

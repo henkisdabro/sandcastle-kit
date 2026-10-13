@@ -2208,8 +2208,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // they passed - `exitCode` is returned rather than thrown.
       // A requeue after a red landing gate, on a base that has not moved and a branch no agent has touched since
       // the merge: that merge is the tree the landing gate ran, so a gate run would return the same red. No full
-      // gate run, then: the red gate is re-run once below (the gates before it passed on this tree in the landing's
-      // sandbox), and the repair starts from the landing gate's own output when it is red again.
+      // gate run, then. A landing that already re-ran its red gate (`rerun`) leaves nothing to re-run: the repair
+      // starts from its output. Otherwise the red gate is re-run once below (the gates before it passed on this tree
+      // in the landing's sandbox), and the repair starts from the landing gate's own output when it is red again.
       const redAtLanding = requeued && joined && sh("git", ["rev-parse", branch], project.root) === joined.merge ? repairFromRed(reds.get(issue.id), joined) : undefined;
       reds.delete(issue.id);
       let gated: GateRun;
@@ -2217,7 +2218,9 @@ export const createPipeline = (ctx: PipelineContext) => {
         const name = redAtLanding.failure.name;
         console.log(
           `${ref(issue.id)}: ${base} has not moved since ${name} went red at landing - ` +
-            (ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
+            (redAtLanding.rerun
+              ? `it went red twice there (re-run included); no gate run, the repair starts from that output.`
+              : ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
         );
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
       } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
@@ -2276,7 +2279,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           // The note says the gate ran three times: only true when the third run went red on that same gate.
           else if (gated.failure.name === secondRun.failure.name) threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
         } else if (!gated.failure) console.log(`${ref(issue.id)}: ${firstRun.failure?.name ?? "a gate"} red, then green on a re-run - a flake, no repair pass`);
-      } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
+      } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0 && !redAtLanding?.rerun) {
         const again = ctx.regate;
         const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, first.name));
         earlier.push(first);
@@ -2713,7 +2716,7 @@ export const burndown = async (
   // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
     `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, up to ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
-      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"), split?.share)})` : ""),
+      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"), split !== undefined)})` : ""),
   );
   for (const i of candidates) {
     const o = overrides.get(i.id) ?? {};
@@ -2758,8 +2761,8 @@ export const burndown = async (
   const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
   const remainderAtStart = new Set(candidates.filter((i) => isRemainder(project.root, project.baseBranch, i.id)).map((i) => i.id));
-  // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. A dry run keeps no slot for landing.
-  const slots = estimateSlots(workers, split, !DRY_RUN);
+  // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. Beside another run the share is the tickets' whole: the pool's one landing slot is outside it.
+  const slots = estimateSlots(workers, split);
   // The path count of each ticket's `Touches:` line (0 with none): the estimate prices a ticket by its size, and each timings line records it for later runs.
   const touchPaths = new Map(candidates.map((i) => [i.id, parseTouches(i.body ?? "").length]));
   // The length of each ticket's body: with the path count it sizes the ticket (`sizeOf`, src/run.ts), and each timings line records it.
@@ -2823,10 +2826,12 @@ export const burndown = async (
   // (set once `slotWaits` exists): the closing summary names both when the run took far longer than its estimate.
   const shared = createSharedMeter();
   let sandboxWaitedMs = () => 0;
+  // The time the run spent paused (a person's `sandcastle pause`, or a usage pause), told by the pause handling as each pause ends.
+  let pausedMs = 0;
   const lostTimes = (): RunRecord => {
     const sharedMs = shared.ms();
     const sandboxWaitMs = Math.round(sandboxWaitedMs());
-    return { ...(sharedMs > 0 ? { sharedMs } : {}), ...(sandboxWaitMs > 0 ? { sandboxWaitMs } : {}) };
+    return { ...(sharedMs > 0 ? { sharedMs } : {}), ...(sandboxWaitMs > 0 ? { sandboxWaitMs } : {}), ...(pausedMs > 0 ? { pausedMs } : {}) };
   };
   // The ticket slots the run could use, over the time its tickets work at full demand: the record keeps their mean, not the start's share, which moves.
   const load = createLoadMeter(slots);
@@ -2843,15 +2848,15 @@ export const burndown = async (
     if (run.finished) return clearInterval(poolWatch);
     const mine = myShare();
     if (!mine) return;
-    // As at the start: beside another run a share keeps a slot for landing; alone, the machine limit and the workers bound it.
+    // As at the start: beside another run the share is the tickets' whole; alone, the machine limit and the workers bound it.
     // At every look, not only on a change: another run beginning or ending moves that with this run's share unchanged.
     // Counted only while the run asks for all the slots its startable tickets can use: the base gates (one slot) and the tail
     // where the last tickets finish are bound by demand, and would pull the figure down to what the run asked for, not what it ran at.
-    load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN), mine.demand >= Math.min(CONCURRENCY, issues.length));
+    load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined), mine.demand >= Math.min(CONCURRENCY, issues.length));
     shared.sample(sharedBelowAsk(mine, otherRuns().length));
     // The live figures of a run that is not finished yet (a killed run never writes the end's): rewritten as they grow, so a partial summary has them.
     const lost = lostTimes();
-    if (lost.sharedMs !== shownLost.sharedMs || lost.sandboxWaitMs !== shownLost.sandboxWaitMs) {
+    if (lost.sharedMs !== shownLost.sharedMs || lost.sandboxWaitMs !== shownLost.sandboxWaitMs || lost.pausedMs !== shownLost.pausedMs) {
       shownLost = lost;
       run.update(lost);
     }
@@ -3353,8 +3358,8 @@ export const burndown = async (
 
   // A sandbox slot of the machine pool, for a worker's next ticket (the schedule's `slot`) or a ticket's own after a
   // pause. A landing that waits for a slot goes first (`slotTurn`). `giveUp` ends a wait that is no longer wanted.
-  // `keep`: beside another run the tickets leave the last slot of the run's share to landing, as `pipelineWorkers`
-  // leaves one of the machine's for a run alone; a dry run lands nothing.
+  // `keep`: beside another run the tickets never take the pool's last free slot, which is any run's landing's, as
+  // `pipelineWorkers` leaves one of the machine's for a run alone; a dry run lands nothing.
   const sandboxSlot = async (label: string, giveUp: () => boolean): Promise<SlotLease | undefined> => {
     await slotTurn(slotWanted);
     const wait = slotWaits.begin();
@@ -3475,6 +3480,10 @@ export const burndown = async (
 
   const pausing = createPauseHandling({
     record: (paused) => run.update({ paused }),
+    pausedFor: (ms) => {
+      pausedMs = ms;
+      run.update({ pausedMs });
+    },
     say: (line) => console.log(line),
     ref,
     releaseAwake,

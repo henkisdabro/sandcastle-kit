@@ -40,10 +40,11 @@
 // A run that starts beside others says how the pool is split (`startLines`), and its estimate divides by its share.
 // A landing's slot is handed on, not freed, when the run has another landing queued behind it (`withSlot`'s `onward`,
 // `handOff`): the freed slot would go to the longest wait across runs, and the queued landing would wait for another run.
-// Beside another run, a run's ticket pipelines (`keep`) leave the last slot of its share, at 2 or more, to its
-// landings (`keptForLanding`). While none of its landings waits, that slot counts as the run's own in the share
-// sums (`heldWithKept`), so another run at or above its share may take it rather than yield to a run that cannot;
-// the run's landing then takes the next slot freed, ahead of the other run's tickets.
+// One slot of the pool is kept for any run's landing, not one per run: from the second run asking for sandbox slots the
+// shares split the pool less one slot (`shareable`), a run's ticket pipelines use their whole share, and a ticket's
+// lease (`keep`) never takes the pool's last free slot while another run is live (`lastFreeSlot`; it waits with the reason
+// `landing`). A landing's lease (priority) may take that slot whatever its run holds against its share, and two runs'
+// landings go in the order they began waiting. A run alone has the whole pool; its workers leave one slot for its landing.
 // The gates pool has no shares.
 //
 // A cap (`sandcastle cap`) is a person's limit on one run's share, in that run's registration, so it
@@ -71,6 +72,8 @@ export type PoolName = "sandboxes" | "gates";
 export const DIR = join(KIT_CACHE, "slots");
 // A subdirectory, so the status view's slot count and `usage` never see an entry.
 const WAITS = join(DIR, "waits");
+// The end of a priority wait's file name (a landing's): another run reads it to tell a landing's wait from a ticket's.
+const PRIORITY_MARK = "-priority.wait";
 const RUNS = join(DIR, "runs");
 
 /** This process's run, as its slot locks and wait entries name it: one id per process, never reused. */
@@ -227,11 +230,9 @@ export const releaseLock = (file: string, mine: string) => {
 
 const held = new Map<string, string>();
 // This process's own waits, with what the entry files do not say: the pool and whether the wait asked for priority.
-// `hidden`: its entry file is out of the waits directory while the slot kept for landing holds it back (`keptForLanding`).
+// `hidden`: its entry file is out of the waits directory while the pool's last free slot, kept for a landing, holds it back (`lastFreeSlot`).
 type OwnWait = Wait & { pool: PoolName; priority: boolean; order: number; label: string; hidden?: boolean };
 const waiting = new Set<OwnWait>();
-// The sandbox slots this process holds for ticket pipelines (`leaseSlot`'s `keep`): what the slot kept for landing caps.
-let keeping = 0;
 let joined: Joined | undefined;
 process.on("exit", () => {
   for (const [file, mine] of held) releaseLock(file, mine);
@@ -326,7 +327,7 @@ export const slotsByRun = (pool: PoolName): Map<string, number> => {
   return counts;
 };
 
-type Wait = { file: string; pid: number; run: string; since: number };
+type Wait = { file: string; pid: number; run: string; since: number; priority?: boolean };
 
 /** The live waits for `pool`; an entry left by a dead process is removed, one that cannot be read is skipped. */
 const waits = (pool: PoolName, seen?: Seen): Wait[] => {
@@ -341,7 +342,7 @@ const waits = (pool: PoolName, seen?: Seen): Wait[] => {
         rmSync(file, { force: true });
         return [];
       }
-      return [{ file, pid: Number(pid), run, since: Number(since) }];
+      return [{ file, pid: Number(pid), run, since: Number(since), priority: f.endsWith(PRIORITY_MARK) }];
     });
 };
 
@@ -441,6 +442,13 @@ const concurrencyOfRun = (pid: number): number | undefined => {
   return Number.isInteger(concurrency) && concurrency! > 0 ? concurrency : undefined;
 };
 
+/**
+ * What the sandbox shares split: the pool less the one slot kept for any run's landing, from the second run that holds or
+ * wants sandbox slots. A run alone has the whole pool, and so does a pool of one slot: a slot kept there would never run a ticket.
+ */
+const shareable = (total: number, runs: { demand: number; held?: number }[]) =>
+  total >= 2 && runs.filter((r) => r.demand > 0 || (r.held ?? 0) > 0).length >= 2 ? total - 1 : total;
+
 /** One live run as the pool sees it: what it wants, what it holds and, for the sandbox pool, its share. */
 export type Member = { run: string; project?: string; pid: number; demand: number; held: number; share: number; registered: boolean; since: number; cap?: number; concurrency?: number };
 
@@ -484,7 +492,7 @@ export const members = (pool: PoolName = "sandboxes", seen?: Seen): Member[] => 
     const pid = locks.find((l) => l.run === run)!.pid;
     rows.push({ run, pid, demand: concurrencyOfRun(pid) ?? count, held: count, registered: false, since: 0 });
   }
-  const shares = splitShares(limit(pool), rows);
+  const shares = splitShares(pool === "sandboxes" ? shareable(limit(pool), rows) : limit(pool), rows);
   return rows.map((r) => ({ ...r, share: shares.get(r.run) ?? 0 }));
 };
 
@@ -532,20 +540,19 @@ export const createSharedMeter = (now: () => number = Date.now) => {
  * are free this moment, which it can take without waiting for any run to finish a ticket.
  */
 export const splitAtStart = (demand: number, others: Member[], total = limit("sandboxes")): { share: number; free: number } => {
-  const shares = splitShares(total, [...others, { run: RUN_ID, demand, since: clock() }]);
-  return { share: shares.get(RUN_ID) ?? 0, free: Math.max(0, total - others.reduce((n, m) => n + m.held, 0)) };
+  const wants = [...others, { run: RUN_ID, demand, since: clock() }];
+  const shared = shareable(total, wants);
+  const shares = splitShares(shared, wants);
+  // The slot kept for landing is no ticket's to take: not counted as free.
+  return { share: shares.get(RUN_ID) ?? 0, free: Math.max(0, shared - others.reduce((n, m) => n + m.held, 0)) };
 };
 
 /**
- * The sandboxes the start estimate divides by: the run's workers within the share its tickets can use when another
- * run is live, else within the machine limit. Beside another run a share of 2 or more keeps one slot for landing
- * (`keptForLanding`), so the tickets count as share - 1; a share of 1, a run alone and a dry run (`landing` false:
- * it keeps nothing) count the whole share.
+ * The sandboxes the start estimate divides by: the run's workers within its share when another run is live (the whole
+ * share is the tickets', the slot kept for landing is outside it), else within the machine limit.
  */
-export const estimateSlots = (workers: number, split?: { share: number }, landing = true, total = limit("sandboxes")) => {
-  const share = split ? (landing && split.share >= 2 ? split.share - 1 : split.share) : Infinity;
-  return Math.max(1, Math.min(workers, total, share));
-};
+export const estimateSlots = (workers: number, split?: { share: number }, total = limit("sandboxes")) =>
+  Math.max(1, Math.min(workers, total, split ? split.share : Infinity));
 
 /** Another live run as the start line tells it: `wait` is the seconds until its first ticket likely ends, when the history says. */
 export type Neighbour = { project?: string; root?: string; pid?: number; registered: boolean; held: number; demand: number; wait?: number };
@@ -589,7 +596,7 @@ export const estimateBeside = (others: Neighbour[], self?: string, selfRoot?: st
 
 /**
  * The start lines of a run that begins while others are live: who they are, what each holds and
- * wants, this run's share (and, from 2, the slot of it kept for landing) and, when no slot is free, when the first is likely. A run from an older
+ * wants, this run's share (and that one slot of the pool is kept for any run's landing) and, when no slot is free, when the first is likely. A run from an older
  * kit gets a line of its own - it takes no share on trust, and the run still starts. No other run:
  * no line. No history for the wait: the line leaves it out.
  *
@@ -609,7 +616,7 @@ export const startLines = (split: { share: number; free: number }, others: Neigh
     const first = waits.length ? `, the first likely in ~${approx(Math.min(...waits))}` : "";
     const finish = `as ${holders.map((n) => `${name(n)}'s`).join(" and ")} tickets finish${first}`;
     const tail = split.free >= split.share ? "it starts at once" : split.free > 0 ? `it starts with ${slotsOf(split.free)} now and takes the rest ${finish}` : `it starts ${finish}`;
-    const kept = landing && split.share >= 2 ? `, its tickets ${split.share - 1} at a time (one slot is kept for landing)` : "";
+    const kept = landing ? " (one of the pool's slots is kept for any run's landing)" : "";
     lines.push(`${live}: this run's share is ${split.share}${kept}; ${tail}`);
   }
   for (const n of others) if (!n.registered) lines.push(`${name(n)}'s run predates shares: it keeps taking free slots until it ends`);
@@ -619,55 +626,46 @@ export const startLines = (split: { share: number; free: number }, others: Neigh
 /** A run that could take a slot if one were free: one that knows no shares, or holds fewer than its share. */
 const below = (m: Member | undefined) => !m || !m.registered || m.held < m.share;
 
-/** Another live run has waited for this pool longer than `mine` (ties go to the lower run id), and could take a slot. */
-const olderWait = (pool: PoolName, mine: Wait, ms: Member[], seen: Seen) =>
-  waits(pool, seen).some(
-    (w) => w.run !== mine.run && (w.since < mine.since || (w.since === mine.since && w.run < mine.run)) && (pool !== "sandboxes" || below(ms.find((m) => m.run === w.run))),
-  );
-
 /**
- * What another run holds for the share sums, counting the slot it keeps for landing as held while no landing of
- * its waits: a run of share 2 or more beside this one holds its tickets to share - 1 (`keptForLanding`), and with
- * no wait entry of its own - a landing's wait is in the waits directory, a ticket's kept back is not - the kept slot
- * is idle. Counted as the owner's, it does not make the owner "below its share", so this run, at or above its own,
- * may take the idle slot instead of yielding to a run that cannot use it. The owner's landing, once it waits, makes
- * the run below its share again, and this run takes no further slot (none is taken back from a running ticket).
+ * Another live run has waited for this pool longer than `mine` (ties go to the lower run id), and could take a slot. For
+ * the pool's last free slot (`onLast`), a landing's wait (`mine` too) counts whatever its run holds against its share:
+ * a landing may take that slot, so the longest wait of two runs' landings goes first.
  */
-const heldWithKept = (m: Member, pool: PoolName, seen: Seen) => {
-  if (m.share < 2 || m.held < m.share - 1 || m.held >= m.share) return m.held;
-  return waits(pool, seen).some((w) => w.run === m.run) ? m.held : m.held + 1;
-};
+const olderWait = (pool: PoolName, mine: Wait, ms: Member[], seen: Seen, onLast = false) =>
+  waits(pool, seen).some(
+    (w) => w.run !== mine.run && (w.since < mine.since || (w.since === mine.since && w.run < mine.run)) && (pool !== "sandboxes" || below(ms.find((m) => m.run === w.run)) || (onLast && !!w.priority)),
+  );
 
 /**
  * This run is at or above its share of the sandbox pool and another run below its share wants a
  * slot: a registered run below its share does (its demand is what it will ask for next, so a run
  * between two of its tickets is not mistaken for one that wants nothing), and so does any other
  * run with a wait entry. Not registered, or the gates pool: no shares. With no other run
- * wanting one, a free slot is taken as before.
+ * wanting one, a free slot is taken as before. `landingOnLast`: a landing taking the pool's last free slot
+ * (`lastFreeSlot`), which no share holds back.
  */
-const overShare = (pool: PoolName, ms: Member[], seen: Seen) => {
+const overShare = (pool: PoolName, ms: Member[], seen: Seen, landingOnLast = false) => {
   if (pool !== "sandboxes" || !joined) return false;
   const me = ms.find((m) => m.run === RUN_ID);
   if (below(me)) return false;
   // A cap is a limit whether or not another run wants the slot. Held, not share: a demand below the
   // cap leaves the share below it too, and a run with no rival takes slots past its share.
   if (me?.cap !== undefined && me.held >= me.cap) return true;
-  if (ms.some((m) => m.run !== RUN_ID && m.registered && heldWithKept(m, pool, seen) < m.share)) return true;
+  if (landingOnLast) return false;
+  if (ms.some((m) => m.run !== RUN_ID && m.registered && m.held < m.share)) return true;
   return waits(pool, seen).some((w) => w.run !== RUN_ID && !ms.find((m) => m.run === w.run)?.registered);
 };
 
 /**
- * Beside another run, while this run's share is 2 or more, its ticket pipelines (`keep`) hold no more than
- * share - 1 sandbox slots: the last of the share is kept for a landing, as `pipelineWorkers` keeps one of the
- * machine's slots for a run alone. Read at each look, as the share moves with every run's demand. At a share of 1
- * nothing is kept: the run's one slot is a ticket's, and a landing goes first when it frees.
+ * The slot the pool keeps for landing is free now: another run is live and exactly one sandbox slot is free. A ticket
+ * pipeline's lease (`keep`) never takes it; a landing's (priority) may, whatever its run holds against its share. The shares
+ * split the pool less this slot (`shareable`), so a run's tickets use their whole share and no run keeps a slot of its own.
+ * A run alone keeps nothing here: `pipelineWorkers` leaves one of the machine's slots in its worker count.
  */
-const keptForLanding = (ms: Member[]) => {
-  if (!joined) return false;
-  const me = ms.find((m) => m.run === RUN_ID);
-  if (!me || me.share < 2) return false;
+const lastFreeSlot = (ms: Member[], seen: Seen) => {
+  if (!joined || limit("sandboxes") < 2) return false;
   if (!ms.some((m) => m.run !== RUN_ID && (m.held > 0 || m.demand > 0))) return false;
-  return keeping >= me.share - 1;
+  return liveSlots("sandboxes", seen).length === limit("sandboxes") - 1;
 };
 
 /**
@@ -726,7 +724,7 @@ const writeWait = (wait: OwnWait) => {
 };
 const beginWait = (pool: PoolName, label: string, priority: boolean): OwnWait => {
   const since = clock();
-  const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}.wait`);
+  const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}${priority ? PRIORITY_MARK : ".wait"}`);
   const wait = { file, pid: process.pid, run: RUN_ID, since, pool, priority, order: sequence - 1, label };
   writeWait(wait);
   waiting.add(wait);
@@ -782,7 +780,7 @@ const lastWaitLine = new Map<string, { line: string; at: number }>();
 
 /**
  * Why a wait waits: every slot is taken, this run is at its share while another run waits below its own (or at its
- * cap), or the last slot of the run's share is kept for a landing (`keptForLanding`).
+ * cap), or the pool's last free slot is kept for a landing (`lastFreeSlot`).
  */
 export type WaitReason = "slots" | "share" | "landing";
 
@@ -798,7 +796,7 @@ export type SlotLease = { release(): void };
  * slot is free, a wait that is no longer wanted (the run was paused) ends with no lease and no trace.
  * `priority` puts this wait before the run's other waits for the pool (the ones that did not ask for
  * it), without changing which run is served. `keep` is a ticket pipeline's sandbox slot: beside another run it
- * leaves the last slot of the run's share to a landing (`keptForLanding`), and waits with the reason `landing`.
+ * never takes the pool's last free slot (`lastFreeSlot`), which is any run's landing's, and waits with the reason `landing`.
  */
 export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number, giveUp?: undefined, priority?: boolean, keep?: boolean): Promise<SlotLease>;
 export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean, priority?: boolean, keep?: boolean): Promise<SlotLease | undefined>;
@@ -827,17 +825,18 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
         slot = takeHandOff(label);
         return undefined;
       }
-      if (overShare(pool, ms, seen)) return "share";
+      const last = pool === "sandboxes" && lastFreeSlot(ms, seen);
+      if (overShare(pool, ms, seen, priority && last)) return "share";
       // Out of the waits directory while kept: another run below its share would otherwise leave a free slot to
-      // this older wait, which cannot take it, and both would wait until one of this run's tickets ended.
-      const kept = keep && pool === "sandboxes" && keptForLanding(ms);
+      // this older wait, which cannot take it, and both would wait until the slot is a landing's.
+      const kept = keep && last;
       if (kept !== !!wait.hidden) {
         if (kept) rmSync(wait.file, { force: true });
         else writeWait(wait);
         wait.hidden = kept;
       }
       if (kept) return (yielded = "kept"), "landing";
-      if (olderWait(pool, countedFrom(wait), ms, seen)) return (yielded = "run"), "slots";
+      if (olderWait(pool, countedFrom(wait), ms, seen, priority && last)) return (yielded = "run"), "slots";
       if (priorityAhead(wait)) return (yielded = "priority"), "slots";
       // Every slot taken is the reason to say; a free one is about to go to the earlier wait, which says nothing new.
       if (earlierAhead(wait)) return (yielded = liveSlots(pool, seen).length >= limit(pool) ? undefined : "earlier"), "slots";
@@ -853,7 +852,7 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       if (yielded !== "earlier" && (printedAt === undefined || clock() - printedAt >= REPRINT_MS)) {
         printedAt = clock();
         const me = why === "share" || why === "landing" ? myShare() : undefined;
-        const reason = yielded === "kept" ? `this run's share is ${me?.share ?? 0} and its tickets hold ${keeping}: one slot of it is kept for landing`
+        const reason = yielded === "kept" ? `the pool's last free slot is kept for a landing, and this run's share is ${me?.share ?? 0}`
           : why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}`
           : yielded === "run" ? "another run has waited longer"
           : yielded === "priority" ? "a landing, base or verify gate of this run goes first"
@@ -876,13 +875,11 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
   }
   const taken = slot;
   held.set(taken.file, taken.mine);
-  if (keep) keeping++;
   let released = false;
   return await use({
     release() {
       if (released) return;
       released = true;
-      if (keep) keeping--;
       // Handed on instead of freed: see `handOff`. Only one at a time; a second one frees as usual.
       let onwards = false;
       try {

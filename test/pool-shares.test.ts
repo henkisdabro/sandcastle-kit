@@ -1,7 +1,8 @@
 // The machine pool's shares (src/pool.ts, docs/adr/0001): live runs split the sandbox slots
 // equally between them, up to each run's demand. A run above its share takes no new slot while
 // another run below its own waits, and never loses one it holds; a dead run's registration is
-// ignored; a run with slots and no registration is an older kit's, counted at its concurrency.
+// ignored; a run with slots and no registration is an older kit's, counted at its concurrency. Beside another
+// run the shares split the pool less the one slot kept for any run's landing (6 slots, two runs of demand 5: 3 + 2).
 //
 // This process is one run and the others are files (test/pool-sim.ts): the slot logic runs in
 // process, a ticket looking again every few milliseconds, so no test waits on a real poll. Only a
@@ -23,7 +24,6 @@ const { joinPool, members, setDemand, splitShares } = pool;
 afterEach(cleanup);
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sandcastle-shares-"));
-const sharesOf = () => members().map((m) => m.share).join();
 
 test("the split: equal parts, none above its demand, the rest to the others, the odd slot to the earlier run", () => {
   const split = (total: number, demands: number[]) => {
@@ -42,24 +42,44 @@ test("the split: equal parts, none above its demand, the rest to the others, the
   assert.deepEqual(split(2, [5, 5, 5]), [1, 1, 0]);
 });
 
+test("beside another run the shares split the pool less the one slot kept for landing; a run alone has the whole pool", () => {
+  const byProject = () => Object.fromEntries(members().map((m) => [m.project, m.share]));
+  joinPool("mine", 5, 5);
+  assert.deepEqual(byProject(), { mine: 5 }, "alone: the whole pool up to its demand");
+  other("a", { demand: 5, since: 1 });
+  assert.deepEqual(byProject(), { a: 3, mine: 2 }, "6 slots between two runs of demand 5: 3 + 2");
+  other("b", { demand: 5, since: 2 });
+  assert.deepEqual(byProject(), { a: 2, b: 2, mine: 1 }, "three runs: 2 + 2 + 1, five tickets");
+  other("c", { demand: 5, since: 3 });
+  assert.deepEqual(byProject(), { a: 2, b: 1, c: 1, mine: 1 }, "four runs: 2 + 1 + 1 + 1");
+  end("b");
+  end("c");
+  other("a", { demand: 1, since: 1 });
+  assert.deepEqual(byProject(), { a: 1, mine: 4 }, "a run that wants less releases the rest to the other, up to the 5 slots");
+  end("a");
+  assert.deepEqual(byProject(), { mine: 5 }, "the other run ends: the whole pool again");
+  other("idle", { demand: 0 });
+  assert.deepEqual(byProject(), { idle: 0, mine: 5 }, "a drained run asks for nothing: no slot is kept for it");
+});
+
 test("a run filling its demand alone gives way to a second one: its tickets that finish are not replaced above its share", async () => {
   // A fills 5 slots alone. Run B joins and waits for 5; two of A's tickets finish and its workers
-  // ask again at once - the way a run starts its next ticket.
+  // ask again at once - the way a run starts its next ticket. The shares split 5 slots, 3 + 2.
   joinPool("alpha", 5, 5);
   const first = tix("a", 5);
   await until(() => heldBy() === "5", "run A to fill its demand alone");
   other("beta", { demand: 5, held: 0 });
-  assert.equal(sharesOf(), "3,3");
+  assert.deepEqual(members().map((m) => m.share).sort(), [2, 3]);
   first[0]!.release();
   first[1]!.release();
-  const again = tix("again", 2);
+  const again = [ticket("again0", { keep: true }), ticket("again1", { keep: true })];
   await until(() => mine() === 3, "A's two tickets to finish");
-  // A holds 3 and its share is 3: the three free slots are B's, and A leaves them.
+  // A holds 3 and its share is 3: the three free slots are B's (two) and the landing's (one), and A leaves them.
   await steady(() => mine() === 3 && again.every((t) => !t.taken), "run A took a slot above its share");
   assert.deepEqual(again[0]!.why, ["share"]);
-  // B takes them: the pool settles at 3 + 3, and A's two new tickets and its other waiters stay waiting.
-  setHeld("beta", 3);
-  await steady(() => heldBy() === "3,3" && again.every((t) => !t.taken), "the split moved");
+  // B takes its two: the pool settles at 3 + 2 with the landing slot free, and A's new tickets stay waiting.
+  setHeld("beta", 2);
+  await steady(() => heldBy() === "2,3" && again.every((t) => !t.taken), "the split moved");
 });
 
 test("a run below its share takes the slots a run above its own frees, and not past it", async () => {
@@ -83,7 +103,7 @@ test("a run wanting 1 leaves 5 to the other", async () => {
 });
 
 test("a run over its share takes no new slot while another waits, and keeps every slot it holds", async () => {
-  // A holds all six; B has joined and waits for 5. Its share is 3, A's own is 3.
+  // A holds all six; B has joined and waits for 5. B's share is 3, A's own is 2 (the 5 slots less B's).
   joinPool("alpha", 7, 7);
   const held = tix("a", 6);
   await until(() => mine() === 6, "run A to hold the whole pool");
@@ -97,8 +117,8 @@ test("a run over its share takes no new slot while another waits, and keeps ever
   await until(() => mine() === 5, "A to free the slot");
   await steady(() => !again.taken && heldBy() === "5", "run A took the freed slot back");
   assert.deepEqual(again.why, ["share"]);
-  assert.ok(said.some((line) => /this run's share is 3 and it holds \d, another run waits below its own/.test(line)), said.join("\n"));
-  // B has the slot; A frees two more, B takes them: 3 + 3.
+  assert.ok(said.some((line) => /this run's share is 2 and it holds \d, another run waits below its own/.test(line)), said.join("\n"));
+  // B has the slot; A frees two more, B takes them: 3 + 3 (the pool is full: A's share of 2 is exceeded until its tickets end).
   setHeld("beta", 1);
   held[1]!.release();
   held[2]!.release();
@@ -112,10 +132,10 @@ test("a run between two of its tickets keeps its share: another run leaves those
   other("idle", { demand: 3 });
   joinPool("alpha", 6, 6);
   const a = tix("a", 6);
-  await until(() => heldBy() === "3", "run A to take its share");
+  await until(() => heldBy() === "2", "run A to take its share");
   await until(() => a.some((t) => t.why.includes("share")), "run A to say it waits for its share");
-  // Three slots stay free: they are the other run's share, not anyone's to take.
-  await steady(() => heldBy() === "3", "a slot of the other run's share was taken");
+  // Three slots stay free: they are the other run's share, not anyone's to take (and one more is the landing's).
+  await steady(() => heldBy() === "2", "a slot of the other run's share was taken");
   // A drained run (demand 0) wants nothing: with no one else wanting one, a free slot is taken as before.
   other("idle", { demand: 0 });
   await until(() => heldBy() === "6", "run A to take the slots no one wants");
@@ -186,7 +206,7 @@ test("a run with slots and no registration is counted at its concurrency, or at 
   assert.equal(old.demand, 4, "its concurrency, though it holds one slot");
   assert.equal(old.held, 1);
   assert.equal(old.share, 3);
-  assert.equal(theirs.share, 3, "the older run's wish takes its part of the pool");
+  assert.equal(theirs.share, 2, "the older run's wish takes its part of the pool, less the landing slot");
 
   // A record that cannot be read: the slots it holds stand in.
   writeFileSync(record, "not json");
@@ -194,7 +214,7 @@ test("a run with slots and no registration is counted at its concurrency, or at 
   writeFileSync(join(slots, "sandboxes-1.lock"), `${older} t2 another label\n`);
   const unread = members();
   assert.equal(unread.find((m) => !m.registered)!.demand, 2);
-  assert.deepEqual(unread.map((m) => m.share).sort(), [2, 4]);
+  assert.deepEqual(unread.map((m) => m.share).sort(), [2, 3]);
 });
 
 test("a registration is written whole and names its run", () => {

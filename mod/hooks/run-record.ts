@@ -312,6 +312,12 @@ export type RunRecord = {
    * workers), written as the run goes and at its end. Absent until there is some.
    */
   sandboxWaitMs?: number;
+  /**
+   * Milliseconds the run spent paused (a person's `sandcastle pause`, or a pause it took for its plan's usage), summed
+   * from each pause's `since` to its resume, its stop or the run's end, and written as each pause ends and at the
+   * run's end: the closing summary names it as a cause of a run that took far longer than its estimate. Absent at zero.
+   */
+  pausedMs?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
   /**

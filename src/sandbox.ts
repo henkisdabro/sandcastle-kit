@@ -1036,17 +1036,29 @@ export const cpusLine = (project: Pick<Project, "cpus">, ticket: number | undefi
         typeof project.cpus !== "number" ? "" : ticket < project.cpus ? ` (cpus ${project.cpus} in the project config, but the VM has ${ticket})` : " (cpus in the project config)"
       }`;
 
+/**
+ * How much of each stream an exec returns. Sandcastle keeps only the last 64 KiB of stdout and of stderr when an
+ * `onLine` callback is given, and `runGates` always gives one when it has a gates log: a test gate's output passes
+ * that, and the failing tests it lost were read as green. 8 MiB is a gate's whole output in practice and far below
+ * V8's string limit, which the option exists for.
+ */
+export const EXEC_TAIL_CHARS = 8 * 1024 * 1024;
+
+/** What every docker sandbox is built from. */
+export const dockerOptions = (project: Project, image: string) => ({
+  imageName: image,
+  env: sandboxEnv(project),
+  mounts: sandboxMounts(project),
+  maxOutputTailChars: EXEC_TAIL_CHARS,
+  ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
+});
+
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
 // each fresh worktree before the agent sees it. A numeric `project.cpus` caps each container: a
 // run, `sandcastle gates` and `sandcastle land` set it from `sandboxCpus` (per kind of sandbox)
 // before their first sandbox, so gates.ts and land.ts take no argument for it.
 export const sandboxConfig = (project: Project, image: string, leanPlan: string) => ({
-  sandbox: docker({
-    imageName: image,
-    env: sandboxEnv(project),
-    mounts: sandboxMounts(project),
-    ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
-  }),
+  sandbox: docker(dockerOptions(project, image)),
   hooks: {
     host: {
       onWorktreeReady: [{ command: `"${KIT}/bin/sandcastle" lean-apply "${leanPlan}"` }],

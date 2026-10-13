@@ -118,10 +118,10 @@ export const other = (run: string, o: Other) => {
   writeFileSync(join(registrations, `${run}.run`), JSON.stringify({ pid, run, project, demand, concurrency, since, shares: true, ...(cap ? { cap } : {}) }) + "\n");
   if (o.held !== undefined) setHeld(run, o.held);
 };
-/** A wait entry of another run, `since` ms since the epoch. */
-export const waiting = (run: string, since: number) => {
+/** A wait entry of another run, `since` ms since the epoch; `landing` is a landing's (priority) wait, as the pool names its file. */
+export const waiting = (run: string, since: number, landing = false) => {
   mkdirSync(waits, { recursive: true });
-  writeFileSync(join(waits, `sandboxes-${since}-${run}-0.wait`), `${pidOf(run)} ${run} ${since} a ticket\n`);
+  writeFileSync(join(waits, `sandboxes-${since}-${run}-0${landing ? "-priority" : ""}.wait`), `${pidOf(run)} ${run} ${since} ${landing ? "a landing" : "a ticket"}\n`);
 };
 /** Another run ends: its slots, registration and waits go. */
 export const end = (run: string) => {

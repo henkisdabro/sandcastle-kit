@@ -51,8 +51,8 @@ const CONFIGURED = [
 ];
 
 /** A gate run that passed the gates named in `passed`, then went red on `name`. */
-const red = (name: string, output: string, passed: string[] = [], exitCode = 1): GateRun => {
-  const failure = { name, command: CONFIGURED.find((g) => g.name === name)!.command, exitCode, output };
+const red = (name: string, output: string, passed: string[] = [], exitCode = 1, tests?: string[]): GateRun => {
+  const failure = { name, command: CONFIGURED.find((g) => g.name === name)!.command, exitCode, output, ...(tests ? { tests } : {}) };
   return { gates: [...passed.map((p) => ({ name: p, pass: true })), { name, pass: false, ...(exitCode === 124 ? { timedOut: true } : {}) }], failure, failures: [failure] };
 };
 /** A gate run that passed the gates named, from whichever gate it started at. */
@@ -310,6 +310,32 @@ test("a re-run whose test ids cannot be read goes to repair after the re-run, as
   h.gates.push(BOTH);
   await h.attempt();
   assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "repair", "gate", "review"]);
+});
+
+// What `clip` makes of an output over 32k characters: a marker line between the head and the tail.
+const CLIPPED_OUTPUT = (...tests: string[]) => `${specRed(...tests)}\n[... 90000 characters cut ...]\nlast lines`;
+
+test("a re-run whose clipped output carries no whole-output tests gives no flaked entry and no third run", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push(red("test", CLIPPED_OUTPUT("alpha"), ["lint"]));
+  h.regates.push(red("test", CLIPPED_OUTPUT("beta")));
+  h.gates.push(BOTH);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "repair", "gate", "review"]);
+  assert.equal(o.flaked, undefined);
+});
+
+test("reds with whole-output tests on disjoint ids still get the third run, though their outputs are clipped", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.gates.push(red("test", CLIPPED_OUTPUT("other"), ["lint"], 1, [id("alpha")]));
+  h.regates.push(red("test", CLIPPED_OUTPUT("other"), [], 1, [id("beta")]), green("test"));
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "regate"]);
+  assert.equal(o.status, "green");
+  assert.deepEqual(o.flaked, [id("alpha"), id("beta")]);
 });
 
 test("a re-run that timed out is not run a third time", async () => {

@@ -19,8 +19,8 @@ const shares = () => Object.fromEntries(members().map((m) => [m.project ?? m.run
 
 test("a paused run's demand is 0, so another run's share is the whole pool until the resume", async () => {
   joinPool("alpha", 3, 3);
-  other("beta", { demand: 6, held: 0 });
-  assert.deepEqual(shares(), { alpha: 3, beta: 3 }, "two runs wanting the pool split it");
+  other("beta", { demand: 6, held: 0, since: Date.now() + 60_000 });
+  assert.deepEqual(shares(), { alpha: 3, beta: 2 }, "two runs wanting the pool split it, less the one slot kept for landing");
 
   // Three tickets with a sandbox each.
   const leases = await Promise.all([0, 1, 2].map((i) => leaseSlot("sandboxes", `alpha ticket ${i}`, undefined, 2)));
@@ -36,7 +36,7 @@ test("a paused run's demand is 0, so another run's share is the whole pool until
 
   // The resume: the demand returns, and the share with it.
   setDemand(3);
-  assert.deepEqual(shares(), { alpha: 3, beta: 3 });
+  assert.deepEqual(shares(), { alpha: 3, beta: 2 });
 });
 
 test("a ticket resumed after a pause leases a slot within its run's share, and a lease released twice frees one slot", async () => {
