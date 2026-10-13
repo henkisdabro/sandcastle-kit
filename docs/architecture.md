@@ -1676,8 +1676,9 @@ this sandbox ran; a pipeline's `pass` wraps every agent pass (implement, review,
 repair, resolve), the highest of which is `agentAnonMib`. `memory.peak` cannot be reset inside a
 sandbox (`/sys/fs/cgroup` is read-only there), so the agent baseline is read before the first gate:
 `agentBaseline` in the pipeline, between the review block and the gates step, once, and only when an
-agent pass ran there (a land-only re-run gives one only when a narrow review ran in its sandbox,
-after a resolve or for a carried merge), sets `agentMib`.
+agent pass ran there (a land-only re-run gives one only when a review ran in its sandbox: a narrow
+one after a resolve or for a carried merge, or the full one for a person's comment since its review),
+sets `agentMib`.
 Base, verify and landing sandboxes never set the agent fields, so a line without `agentMib` (every
 older line too) counts as a gate peak only. `poolWarnings` (doctor's `warn`, and `warning:` on a
 run's start line, both through `poolWarningsNow`) prices the effective limits the same way
