@@ -1682,13 +1682,13 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[] }) => {
+  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number }) => {
     if (dryRun) return;
     try {
-      // The comment count is read now, after the pass that wrote these fields: an agent's own comment (a repair's report)
-      // is then inside it, and only a person's later comment reads as new at the next carry.
-      const comments = "reviewed" in fields || "green" in fields || "repaired" in fields ? await ticketComments(id) : undefined;
-      recordHead(project.root, id, { branch, ...fields, ...(comments ? { comments: commentCount(comments) } : {}) }, runId);
+      // `comments` is given only by the full review, read just before its pass starts (`fullReview`): a person's comment
+      // during the gates or a repair, or after the reviewer read the thread, then stays past the count at the next carry.
+      // An agent's own comment opens with the kit's marker (`AGENT_COMMENT_MARKER`), which `personCommentsSince` skips.
+      recordHead(project.root, id, { branch, ...fields }, runId);
     } catch (error) {
       console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
     }
@@ -2240,6 +2240,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // the ticket's comments, which its prompt reads. Returns the review commits it made.
       const fullReview = async () => {
         await juncture("review");
+        // The comments the reviewer is about to read. Only this review records the count: the narrow reviews and the
+        // re-review after a repair are told to leave the spec alone, so a comment before them is still unread.
+        const seenComments = await ticketComments(issue.id);
         let reviewModel: string | undefined;
         const beforeReview = ownNow();
         const listBefore = ownList();
@@ -2267,7 +2270,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               () => CROSS_REVIEW_MODEL,
             )
           : undefined;
-        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenComments ? { comments: commentCount(seenComments) } : {}) });
         reviewed = true;
         for (const r of [review, cross]) {
           const u = r && ungatedOf(r.stdout);

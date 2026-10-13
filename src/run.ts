@@ -1463,7 +1463,7 @@ export type BranchHead = {
   gap?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
-  /** The ticket's comment count when the kit last wrote `reviewed`, `green` or `repaired` (`commentCount`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
+  /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`commentCount`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
   comments?: number;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;

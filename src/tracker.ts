@@ -22,6 +22,9 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { MANAGED_SETTINGS, sh, shAsync } from "./sandbox.ts";
 
+/** The words every comment an agent posts on a ticket opens with (the GitHub tracker's `SAY`): the kit's own, to `personCommentsSince`. */
+export const AGENT_COMMENT_MARKER = "Sandcastle agent:";
+
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
 
@@ -449,7 +452,8 @@ const github = (project: Project): Tracker => {
         "Comment on ticket {{TICKET}} explaining what you\nlearned and what a human must decide, then add the labels:\n\n" +
         `\`\`\`\ngh label create ${project.tracker.held} --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label ${project.tracker.held} --remove-label {{KIT_LABEL}}\n\`\`\``,
       // A repair agent that was told only "in a comment" said it had no tool to post one, and skipped it.
-      SAY: "in a comment on the ticket (`gh issue comment {{ISSUE_NUMBER}} --body-file <file>`)",
+      // The marker is how `personCommentsSince` tells the agent's comment from a person's: one that drops it costs a full review.
+      SAY: `in a comment on the ticket (\`gh issue comment {{ISSUE_NUMBER}} --body-file <file>\`) that opens with the words "${AGENT_COMMENT_MARKER}"`,
     },
     dryRunNote:
       "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any ticket " +

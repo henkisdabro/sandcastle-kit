@@ -23,7 +23,7 @@ const { createPipeline } = await import("../src/burndown.ts");
 const { closeComment, commentCount, notLandedComment, partlyDoneComment, personCommentsSince } = await import("../src/ledger.ts");
 const { readHeads, recordHead, renderPrompts } = await import("../src/run.ts");
 const { namedStraysView } = await import("../src/resolution.ts");
-const { makeTracker } = await import("../src/tracker.ts");
+const { AGENT_COMMENT_MARKER, makeTracker } = await import("../src/tracker.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
@@ -84,6 +84,8 @@ const harness = () => {
   const phases: string[] = [];
   const agents: Record<string, Agent> = {};
   const gates: GateRun[] = [];
+  // What happens as a gate run starts, one per run in order: a person's comment arriving while the gates run.
+  const duringGates: (() => void)[] = [];
 
   // Sandcastle's sandbox on the ticket's branch: a worktree of the shared repo, cut from main for a new branch.
   const open = async (branch: string): Promise<Box> => {
@@ -147,6 +149,7 @@ const harness = () => {
     open,
     gate: async () => {
       events.push("gate");
+      duringGates.shift()?.();
       const next = gates.shift();
       assert.ok(next, "a gate run the test did not expect");
       return next;
@@ -192,7 +195,7 @@ const harness = () => {
     commit(path, file, text);
     git(root, "worktree", "remove", "--force", path);
   };
-  return { root, agents, gates, events, passes, phases, notes, reds, comments, printed, attempt, requeue, land, tip, onBranch };
+  return { root, agents, gates, events, passes, phases, notes, reds, comments, duringGates, printed, attempt, requeue, land, tip, onBranch };
 };
 
 
@@ -254,15 +257,18 @@ test("the kit's own comment on the ticket since the review leaves a clean carrie
   assert.equal(o.status, "green");
 });
 
-test("a comment an agent wrote during its pass is inside the recorded count and sends nothing to review", async () => {
+const AGENT_SAID = `${AGENT_COMMENT_MARKER} the review found nothing to change.`;
+
+test("a comment an agent wrote during its pass, opening with the kit's marker, sends a clean carried merge nowhere but the gates", async () => {
   const h = harness();
   h.agents.impl = implementing("shared.txt", "seven\n");
   h.agents.review = () => {
-    h.comments.push("The review found nothing to change.");
+    h.comments.push(AGENT_SAID);
   };
   h.gates.push(GREEN);
   await h.attempt();
-  assert.equal(readHeads(h.root)[ID].comments, 1);
+  // The count is read before the review pass starts: the agent's comment is past it and skipped by its marker.
+  assert.equal(readHeads(h.root)[ID].comments, 0);
   h.land("landed.txt", "another ticket's line\n");
   h.gates.push(GREEN);
   await h.attempt();
@@ -273,7 +279,7 @@ test("a person's comment after an agent's is still told, by its place past the r
   const h = harness();
   h.agents.impl = implementing("shared.txt", "seven\n");
   h.agents.review = () => {
-    h.comments.push("The review found nothing to change.");
+    h.comments.push(AGENT_SAID);
   };
   h.gates.push(GREEN);
   await h.attempt();
@@ -355,6 +361,105 @@ test("the kit's own comments are told from a person's by their fixed openings", 
   // Only those past the count recorded.
   assert.deepEqual(personCommentsSince(["old one", "old two"], 2), []);
   assert.deepEqual(personCommentsSince(["old one"], undefined), []);
+});
+
+test("a comment opening with the agent marker is the kit's, whatever follows it, and one that only mentions it is a person's", () => {
+  const agent = `${AGENT_COMMENT_MARKER}\n\nGate output:\n\n    1 failing`;
+  assert.deepEqual(personCommentsSince([agent], 0), []);
+  assert.deepEqual(personCommentsSince(["old", agent, SPEC_CHANGE], 1), [SPEC_CHANGE]);
+  const mention = `Please start your comments with "${AGENT_COMMENT_MARKER}" as asked.`;
+  assert.deepEqual(personCommentsSince([mention], 0), [mention]);
+});
+
+test("a person's comment while the ticket's gates run is not absorbed by the green write: the next carry gets the full review", async () => {
+  const h = harness();
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  h.duringGates.push(() => h.comments.push(SPEC_CHANGE));
+  h.gates.push(GREEN);
+  const first = await h.attempt();
+  assert.equal(first.status, "green");
+  assert.deepEqual(h.events, ["impl", "review", "gate"]);
+  h.land("landed.txt", "another ticket's line\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+  assert.equal(h.passes[0].prompt, "review");
+});
+
+test("a person's comment during a repair pass is not absorbed by the repaired write: the next carry gets the full review", async () => {
+  const h = harness();
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  h.agents.repair = (wt) => {
+    h.comments.push(SPEC_CHANGE);
+    commit(wt, "fix.txt", "fix\n");
+  };
+  const failure = { name: "test", command: "run-tests", exitCode: 1, output: "1 failing" };
+  h.gates.push({ gates: [{ name: "test", pass: false }], failure, failures: [failure] }, GREEN);
+  const first = await h.attempt();
+  assert.equal(first.status, "green");
+  assert.ok(h.events.includes("repair"), h.events.join(","));
+  h.land("landed.txt", "another ticket's line\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+});
+
+test("an agent's marked comment during the gates or a repair leaves the next clean carried merge land-only", async () => {
+  const h = harness();
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  h.agents.repair = (wt) => {
+    h.comments.push(AGENT_SAID);
+    commit(wt, "fix.txt", "fix\n");
+  };
+  const failure = { name: "test", command: "run-tests", exitCode: 1, output: "1 failing" };
+  h.gates.push({ gates: [{ name: "test", pass: false }], failure, failures: [failure] }, GREEN);
+  h.duringGates.push(() => {}, () => h.comments.push(AGENT_SAID));
+  await h.attempt();
+  h.land("landed.txt", "another ticket's line\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["gate"]);
+});
+
+test("a person's comment before the narrow review of a conflict resolution still sends the next carry to the full review", async () => {
+  const h = await greenBranch();
+  h.land("shared.txt", "one\n");
+  h.agents.resolve = (wt) => {
+    h.comments.push(SPEC_CHANGE);
+    return resolving(wt);
+  };
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.passes.map((p) => p.prompt), ["resolve", "remerge"]);
+  h.land("landed.txt", "another ticket's line\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+  assert.equal(h.passes[0].prompt, "review");
+});
+
+test("a person's comment before the narrow review of a base merge still sends the next carry to the full review", async () => {
+  const h = harness();
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  const failure = { name: "test", command: "run-tests", exitCode: 1, output: "1 failing" };
+  const red = { gates: [{ name: "test", pass: false }], failure, failures: [failure] };
+  // The repair pass commits nothing, and the gates run once more on the unchanged branch.
+  h.gates.push(red, red);
+  const first = await h.attempt();
+  assert.equal(first.status, "gate-failed");
+  // Red, so the next attempt is not land-only: the implementer runs, and the base merge since the review gets the narrow one.
+  h.land("landed.txt", "another ticket's line\n");
+  h.agents.impl = () => {
+    h.comments.push(SPEC_CHANGE);
+  };
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.passes.map((p) => p.prompt), ["implement", "remerge"]);
+  h.land("other.txt", "a third ticket's line\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+  assert.equal(h.passes[0].prompt, "review");
 });
 
 test("a Markdown ticket file's comments count by their headings, the kit's marked by theirs", () => {
