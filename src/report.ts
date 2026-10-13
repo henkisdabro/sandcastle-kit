@@ -49,6 +49,23 @@ export const contextLines = (f: Pick<Facts, "tickets">): string[] => {
   });
 };
 
+/**
+ * One line naming the tickets whose tokens carry a note (`tokensNote` in the run record): an agent pass of theirs threw, so what
+ * the summary shows for them is a floor (`incomplete`) or missing (`unknown`), and a spend limit would count too little.
+ */
+export const tokenNoteLines = (f: Pick<Facts, "tickets">): string[] => {
+  const named = (note: "incomplete" | "unknown") => Object.entries(f.tickets).filter(([, t]) => t.tokensNote === note).map(([id]) => refOf(id));
+  const incomplete = named("incomplete");
+  const unknown = named("unknown");
+  if (!incomplete.length && !unknown.length) return [];
+  return [
+    `Tokens: ${[
+      ...(incomplete.length ? [`incomplete for ${incomplete.join(", ")} (a pass that failed may have spent more than its log showed)`] : []),
+      ...(unknown.length ? [`unknown for ${unknown.join(", ")} (a pass failed before its log showed any usage)`] : []),
+    ].join("; ")}`,
+  ];
+};
+
 /** "stopped by `sandcastle stop`", "stopped by Ctrl-C": what a run's `stoppedBy` reads as in the summary and the notify line. */
 export const stoppedByText = (by: string) => `stopped by ${by === "sandcastle stop" ? "`sandcastle stop`" : by}`;
 
@@ -64,6 +81,8 @@ export type Facts = {
   killed?: boolean;
   dryRun: boolean;
   tokens?: string;
+  /** The run record's `tokensNote`: an agent pass threw, so the figures are a floor (`incomplete`) or there is none (`unknown`). */
+  tokensNote?: "incomplete" | "unknown";
   /** This run's tokens summed from timings.jsonl, with the cached share. */
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
@@ -572,6 +591,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     killed: alive.state === "dead",
     dryRun: !!run.dryRun,
     tokens: run.tokens,
+    ...(run.tokensNote === "incomplete" || run.tokensNote === "unknown" ? { tokensNote: run.tokensNote } : {}),
     tokenTotal: timed?.total,
     byModel: timed?.byModel,
     ...(pressure ? { pressure } : {}),
@@ -1176,7 +1196,7 @@ export const render = (f: Facts, plain = false): string => {
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
-      `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
+      `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : f.tokensNote === "unknown" ? " - tokens unknown" : ""}${f.tokensNote === "incomplete" ? " (incomplete)" : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
       : f.verify === undefined || f.verify === null
@@ -1201,6 +1221,7 @@ export const render = (f: Facts, plain = false): string => {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
+  out.push(...tokenNoteLines(f));
   out.push(...contextLines(f));
   out.push(...settingsLines(f, plain));
   // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.

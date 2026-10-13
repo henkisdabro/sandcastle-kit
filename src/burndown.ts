@@ -42,7 +42,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -2991,7 +2991,9 @@ export const burndown = async (
   const took = new Map<string, number>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
-  const spent = new Map<string, Tokens>();
+  // The run's own count of tokens (`createTokenCount`), settled against the usage watch, which is made below.
+  const count = createTokenCount(run, (issue) => usageWatch?.settle(issue));
+  const spent = count.spent;
   const keptWorktrees: { issue: string; path: string }[] = [];
   // Tracked files a gate rewrote, named once for the run however many worktrees it was gated in.
   const gateRewrites = new Set<string>();
@@ -3010,6 +3012,7 @@ export const burndown = async (
     } else run.update({ stage: phase });
     let ok = false;
     let tokens: Tokens | undefined;
+    let counted = false;
     let gateTimes: Record<string, number> | undefined;
     let peakMib: number | undefined;
     let pressure: ReturnType<typeof pressureOf>;
@@ -3031,16 +3034,17 @@ export const burndown = async (
       // `ok` is pass/fail: a gate run with a red gate is not ok, though it ran.
       ok = !red?.length;
       if (tokens) {
-        spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
-        run.update({ tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) });
-        if (issue) run.ticket(issue, { ...ticketTokens(spent.get(issue)!) });
+        count.ended(issue, tokens);
+        counted = true;
       }
       return result;
     } finally {
       // The pass is over, and its result carries its own figure (in `spent` above, with nothing in between that a
-      // tick could interleave with): what its log showed stops counting as live. A pass that threw has none, and nothing of it is kept.
+      // tick could interleave with): what its log showed stops counting as live. A pass that threw has no result, so
+      // what its log showed is kept instead (`kept`, noted `incomplete`, or `unknown` with no usage in the stream), as is
+      // that of a review that threw before its fallback ran, and of a cross-review that failed and was swallowed.
       // Its largest turn's context (`peakContext`) goes to the timings line and the ticket's record, even when the pass threw.
-      const peakContext = issue ? usageWatch?.settle(issue) : undefined;
+      const { peakContext, kept, note: tokensNote } = count.settled(issue, counted);
       if (issue && peakContext) run.ticket(issue, { peakContext: peakContexts(run.tickets()[issue]?.peakContext, phase, peakContext) });
       active.delete(issue);
       const m = model?.();
@@ -3051,7 +3055,8 @@ export const burndown = async (
         ...(touchPaths.has(issue) ? { touches: touchPaths.get(issue) } : {}),
         ...(bodyChars.has(issue) ? { bodyChars: bodyChars.get(issue) } : {}),
         ...(m ? { model: m } : {}),
-        ...(tokens ? { tokens } : {}),
+        ...(tokens || kept ? { tokens: addTokens(tokens ?? NO_TOKENS, kept ?? NO_TOKENS) } : {}),
+        ...(tokensNote ? { tokensNote } : {}),
         ...(peakContext ? { peakContext } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
         ...(peakMib ? { peakMib } : {}),
@@ -3114,7 +3119,7 @@ export const burndown = async (
     providers: planUsage.map((u) => u.provider),
     // A record the next turn replaced is not this watch's to write.
     finished: () => run.finished,
-    tokens: { owner: logOwner, write: liveTokenWriter(run, spent) },
+    tokens: { owner: logOwner, write: liveTokenWriter(run, spent, count.noteOf) },
     write: (reading) => {
       if (run.finished) return;
       planUsage[planUsage.findIndex((u) => u.provider === reading.provider)] = reading;
@@ -3545,11 +3550,10 @@ export const burndown = async (
       const value = ended.value;
       const report = attempted(issue.id, ended, check);
       bookkeep(issue.id, () => {
-        const tokens = spent.get(issue.id);
         run.ticket(issue.id, {
           commits: value.commits,
           minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
-          ...(tokens ? ticketTokens(tokens) : {}),
+          ...count.fields(issue.id),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.flaked?.length ? { flaked: value.flaked } : {}),
           ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
@@ -3835,9 +3839,13 @@ export const burndown = async (
   // state: "shipped" once sat on every branch, held ones included.
   console.log("\n--- per ticket ---");
   const final = run.tickets();
+  const tokenCost = (id: string) => {
+    const note = count.noteOf(id);
+    return spent.has(id) || note ? `  tokens ${spent.has(id) ? tokenLine(spent.get(id)!) : "unknown"}${note ? ` (${tokensNoteWords(note)})` : ""}` : "";
+  };
   for (const r of results) {
     if (r.status === "rejected") {
-      const cost = r.issue && spent.has(r.issue) ? `  tokens ${tokenLine(spent.get(r.issue)!)}` : "";
+      const cost = r.issue ? tokenCost(r.issue) : "";
       console.log(`  ${r.issue ? `${ref(r.issue)} ` : ""}CRASHED  ${String(r.reason).split("\n")[0].slice(0, 200)}${cost}`);
       continue;
     }
@@ -3845,11 +3853,12 @@ export const burndown = async (
     const state = final[o.issue]?.state === "red" ? "gate red" : (final[o.issue]?.state ?? o.status);
     const repaired = repairWords(o);
     const time = ticketTime(took.get(o.issue), waited.get(o.issue), final[o.issue]?.state === "merged" ? landingMs.get(o.issue) : undefined);
-    const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
+    const cost = tokenCost(o.issue);
     console.log(`  ${ref(o.issue)} ${state.padEnd(10)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${gateLine(o.gates)}${time}  ${o.branch}${cost}`);
   }
   const total = [...spent.values()].reduce(addTokens, NO_TOKENS);
-  if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
+  const totalNote = count.runNote();
+  if (spent.size || totalNote) console.log(`  all agents: tokens ${spent.size ? tokenLine(total) : "unknown"}${totalNote ? ` (${tokensNoteWords(totalNote)})` : ""} (per phase in .sandcastle/logs/timings.jsonl)`);
   console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (a merged branch's logs move to logs/archive/ at the next run or `sandcastle clean`)");
   if (stopLine) console.log(`\nSTOPPED EARLY: ${stopLine}; ${notStarted} queued ticket(s) were not started.`);
   let dryRunCheck: string | undefined;
