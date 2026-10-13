@@ -661,7 +661,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
           const claim = claimSlot("gates");
           return landInSandbox(
             project,
-            { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId },
+            { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId, ref: ref(o.issue) },
             opener,
             (box, how) => ctx.gate(box, o.issue, how),
             host.expected,
@@ -1012,12 +1012,13 @@ export const firstAttemptReviewLog = (results: readonly PromiseSettledResult<{ i
 /**
  * The branch's own commits that are not in `before` (its commit list taken ahead of a review pass), oldest first, as
  * `<short hash> <subject>` lines. Merges are left out, as `ownCommits` leaves them, so a base merge-in is no review commit.
+ * A project that lands by squash gets the subjects alone: the branch is deleted at landing, so a hash would name nothing.
  */
-export const reviewCommitLines = (before: readonly string[], base: string, branch: string, cwd: string): string[] => {
+export const reviewCommitLines = (before: readonly string[], base: string, branch: string, cwd: string, squash = false): string[] => {
   const had = new Set(before);
   return ownCommitList(base, branch, cwd)
     .filter((sha) => !had.has(sha))
-    .map((sha) => sh("git", ["log", "-1", "--format=%h %s", sha], cwd));
+    .map((sha) => sh("git", ["log", "-1", `--format=${squash ? "%s" : "%h %s"}`, sha], cwd));
 };
 
 /**

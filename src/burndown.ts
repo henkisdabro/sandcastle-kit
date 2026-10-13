@@ -41,7 +41,7 @@ import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
@@ -63,7 +63,7 @@ import {
   carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine } from "./ledger.ts";
-import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -502,8 +502,10 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 // alone", "each unfixed case" of a test, "the branch had opened this gap" and remaining things that are "different
 // rules that still apply". Narrowly: "every unfixed caller still reads the old key" and "the remaining issues that
 // still apply ... are not fixed" are real gaps, and a negation matches its clause (`isGap` splits a sentence at a contrast).
+// Also "filled two gaps in the tests", a time between events ("three 0.6 s gaps") and the word naming the kit's own
+// gap sentence or gap test files: each read as a gap in one run's closing summary.
 const GAP_NEGATED =
-  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b|\b(?:rightly|correctly|properly|deliberately|intentionally)\s+left\s+(?:alone|as\s+is|unfixed)\b|\bgaps?\s+(?:is\s+|was\s+|now\s+|has\s+been\s+)?(?:fixed|closed|addressed)\b|\b(?:each|every)\s+unfixed\s+(?:case|run|test)s?\b(?![^.]*\bstill\b)|\bhad\s+(?:opened|introduced|created|caused)\s+(?:this|the|that|a)\s+gap\b|\bremaining\s+(?:\w+\s+){0,3}?(?:are|is)\s+(?:different|other|separate|unrelated)\b/i;
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a|one|two|three|both|all|these|those|\d+)\s+gaps?\b|\b\d[\d.]*\s*(?:ms|s|sec|seconds?|m|min|minutes?)\s+gaps?\b|\bgap\s+(?:sentences?|tests?|test\s+files?|files?|lines?|detector|words?)\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b|\b(?:rightly|correctly|properly|deliberately|intentionally)\s+left\s+(?:alone|as\s+is|unfixed)\b|\bgaps?\s+(?:is\s+|was\s+|now\s+|has\s+been\s+)?(?:fixed|closed|addressed)\b|\b(?:each|every)\s+unfixed\s+(?:case|run|test)s?\b(?![^.]*\bstill\b)|\bhad\s+(?:opened|introduced|created|caused)\s+(?:this|the|that|a)\s+gap\b|\bremaining\s+(?:\w+\s+){0,3}?(?:are|is)\s+(?:different|other|separate|unrelated)\b/i;
 // A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
 // all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" and "I have not yet fixed it" are no fix.
 const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+(?:(?:yet|fully|really|actually|properly)\s+)?)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
@@ -614,8 +616,17 @@ const gapOf = (text: string): string | undefined => {
       size += all[j].text.length + 1;
     }
   });
-  const said = [...take].sort((x, y) => x - y).map((i) => all[i].text);
-  return said.length ? cutAtWord([...new Set(said)].join(" "), UNGATED_MAX) : undefined;
+  // Sentences that do not follow each other in one unit are joined with an ellipsis: run together, two bullets' halves read as one sentence.
+  let said = "";
+  let last: number | undefined;
+  const seen = new Set<string>();
+  for (const i of [...take].sort((x, y) => x - y)) {
+    if (seen.has(all[i].text)) continue;
+    seen.add(all[i].text);
+    said += last === undefined ? all[i].text : `${last === i - 1 && all[last].unit === all[i].unit ? " " : " … "}${all[i].text}`;
+    last = i;
+  }
+  return said ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 // The phase a pass's name says, in the words a person reads in the filed ticket.
 const phaseOf = (name: string) =>
@@ -1173,6 +1184,8 @@ export const heartbeatLine = (o: {
   resolving?: { ref: string; since: number }[];
   queued?: { ref: string; since: number }[];
   slotWait?: number;
+  /** What holds the slot wait back, when not a full pool alone: the run's share beside another run, or the slot kept for landing. */
+  waitsFor?: "share" | "landing";
   typicalMs?: number;
 }): string | undefined => {
   const stalled = o.typicalMs !== undefined && o.slotWait !== undefined && o.now - o.slotWait > o.typicalMs;
@@ -1181,7 +1194,8 @@ export const heartbeatLine = (o: {
   if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.queued?.length) parts.push(`queued to land: ${o.queued.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
-  if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}`);
+  const why = o.waitsFor === "share" ? " (this run's share beside another run)" : o.waitsFor === "landing" ? " (the pool's last free slot is kept for a landing)" : "";
+  if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}${why}`);
   return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
 };
 
@@ -1274,12 +1288,23 @@ export const createHoldRecord = (o: {
     write(run);
   };
   // One line per file, not per pair: the pairs of a wide run number in the dozens. The pairs go to the log.
-  // A release says only the file lines not said yet this run: the start's block was repeated at every release.
+  // A release says only the tickets not said yet on each file (`#N joins #a #b`): a released ticket's line names every
+  // ticket it shares the file with, so the same file was said again at each release with one more ticket in it.
   const said = new Set<string>();
+  const told = new Map<string, Set<string>>();
   const sayShares = (pairs: { id: string; share: FileShare }[]) => {
-    const lines = fileShareSummary(o.ref, pairs);
-    if (!lines.length) return;
-    const fresh = lines.filter((line) => !said.has(line));
+    const fresh: string[] = [];
+    for (const [file, ids] of sharesByFile(pairs)) {
+      if (isDocFile(file)) continue;
+      const known = told.get(file) ?? new Set<string>();
+      const joining = ids.filter((id) => !known.has(id));
+      if (!joining.length) continue;
+      fresh.push(known.size ? `${file}: ${joining.map(o.ref).join(" ")} joins ${ids.filter((id) => known.has(id)).map(o.ref).join(" ")}` : `${file}: ${ids.map(o.ref).join(" ")}`);
+      told.set(file, new Set([...known, ...ids]));
+    }
+    fresh.sort();
+    // The count line for the docs files every ticket touches, once.
+    for (const line of fileShareSummary(o.ref, pairs).filter((l) => l.endsWith("(not listed)") && !said.has(l))) fresh.push(line);
     if (fresh.length) {
       o.say(said.size ? "  more tickets that share files:" : "  tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:");
       for (const line of fresh) {
@@ -1829,6 +1854,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             await juncture(phase as TicketState, true);
             if (parkCount !== parks) {
               run.ticket(issue.id, { state: phase as TicketState, note: "running the pass again after the plan's usage window reset" });
+              if (opts.logging?.type === "file" && typeof opts.logging.path === "string") markPass(opts.logging.path, runId, opts.name ?? phase);
               continue;
             }
           }
@@ -2146,7 +2172,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       let reviewLog = landOnly && requeued ? firstAttemptReviewLog(results, issue.id) : [];
       const ownList = () => ownCommitList(base, branch, project.root);
       const noteReviewed = (before: string[]) => {
-        reviewLog = [...reviewLog, ...reviewCommitLines(before, base, branch, project.root)];
+        reviewLog = [...reviewLog, ...reviewCommitLines(before, base, branch, project.root, project.land === "squash")];
       };
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       // A land-only branch runs no review: what its reviewers said stands from its head record, as `unmet` does.
@@ -2520,6 +2546,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               // The merge is the base's lines, not repair commits: the review after a repair reads from here,
               // unless this ticket repaired before it waited - those commits still get their review.
               if (!repairs) preRepair = sh("git", ["rev-parse", branch], project.root);
+              at?.gates?.();
               gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
               continue;
             }
@@ -2576,6 +2603,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (!fixed) break;
         // A tag on a pass that committed is ignored: the commits are the repair, and they are gated as ever.
         outside = verdict && !lastCommitted ? verdict : undefined;
+        at?.gates?.();
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
         if (outside) {
           console.log(`${ref(issue.id)}: the repair judged the red outside this branch${outside.line ? ` (${outside.line})` : ""} - one gate run, no further repair pass`);
@@ -2634,7 +2662,10 @@ export const createPipeline = (ctx: PipelineContext) => {
           await noteHead(issue.id, branch, agentsSaid());
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
-          if (after.commits.length) gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+          if (after.commits.length) {
+            at?.gates?.();
+            gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+          }
         }
       }
 
@@ -3295,12 +3326,14 @@ export const burndown = async (
   // The run's waits for a sandbox slot. One held back by the run's share or by the slot kept for landing, not only
   // by a full pool, is the run record's `waitsFor` (and `waitsForShare`, for an older view), which the status
   // view's next-to-start rows say.
+  let slotWaitsFor: "share" | "landing" | undefined;
   const slotWaits = createSlotWaits((held, waitsFor) => {
     try {
       run.update({ waitsForShare: held || undefined, waitsFor });
     } catch {
       /* the record's note only: a throw here would end the wait it describes */
     }
+    slotWaitsFor = held ? waitsFor : undefined;
   });
   sandboxWaitedMs = () => slotWaits.waitedMs;
   // A run is silent for as long as its agents are, which for a review can be
@@ -3317,10 +3350,12 @@ export const burndown = async (
       now: Date.now(),
       clock: new Date().toTimeString().slice(0, 5),
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
-      landing: [...landing].map(([n, l]) => ({ ref: ref(n), ...(l.phase ? { phase: l.phase } : {}), since: l.since })),
+      // A landing that has not reported a step yet is merging: an entry with no step read as stuck.
+      landing: [...landing].map(([n, l]) => ({ ref: ref(n), phase: l.phase ?? "merging", since: l.since })),
       resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
       queued: [...queuedToLand].map(([n, since]) => ({ ref: ref(n), since })),
       slotWait: slotWaits.since,
+      ...(slotWaitsFor ? { waitsFor: slotWaitsFor } : {}),
       typicalMs: typicalIssueMs(typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)))),
     });
     if (line) console.log(line);

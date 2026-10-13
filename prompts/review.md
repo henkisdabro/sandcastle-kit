@@ -98,7 +98,8 @@ Constraints:
 - **A fix you commit is proved by a test, the same rule as the implementer's.** A bug you fix or a
   behaviour you change gets a test that fails without your fix, at the public interface; where it
   needs a boundary faked (a clock, a process, a slot), fake it. An `<ungated>` line is not that
-  proof: it is only for an effect no gate can run.
+  proof: it is only for an effect no gate can run. A fix you cannot prove with a test is still not
+  left in prose: an `<unmet>` or `<followup>` line says what is wrong.
 - **Never remove a safety guard, a test or an assertion to make something pass.** If a test fails,
   the implementation is the suspect, not the test. An existing test whose expected text or fixture
   the branch changed to fit (a narrower width, a longer timeout) is weakened unless the ticket

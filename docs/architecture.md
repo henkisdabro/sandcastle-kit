@@ -604,8 +604,9 @@ state.
   A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
   is queued to land and no ticket in its gates shares one (`ahead` in `src/schedule.ts`; a ticket
-  reaches its gates when `at.gates()` is called, after its review, and stays there until its attempt
-  ends). Whenever those tickets started: one still implementing or in review never holds the resolve,
+  reaches its gates when `at.gates()` is called, after its review and again before each later gate
+  run, and leaves them at a `repair` or `review` juncture, since a repair and the review after it can
+  take an hour, or when its attempt ends; `test/schedule-resolve-one-holder.test.ts`). Whenever those tickets started: one still implementing or in review never holds the resolve,
   being at most one gate run and a landing away from the queue, and a later landing that conflicts
   the resolved branch sends it back again by #398's exception,
   then merges the base and resolves once (each landing ahead of it would have conflicted the resolve
@@ -624,7 +625,9 @@ state.
   not take a ticket that has not started: it waits, with its slot if it holds one (a landing that
   waits for a slot still takes it back), and takes the resolve when it is pushed, else the landing
   that ends the wait found every worker in a new pipeline (`resolveComes`,
-  `test/schedule-resolve-first.test.ts`).
+  `test/schedule-resolve-first.test.ts`). One worker holds for each resolve about to be released
+  (`holding`): a worker freed while another already holds for it takes the queue's next ticket, or
+  its slot sat idle until the landing ended (`test/schedule-resolve-one-holder.test.ts`).
   A second conflict is still final, unless it names a ticket
   that landed after the resolve began (the resolve's merge could not hold it): that one sends the
   ticket back again, with the same wait, and each such requeue needs a new landing, so it ends.
@@ -1233,6 +1236,9 @@ wanted. `test/sandcastle-no-origin-refresh.test.ts` reads the installed `dist` a
 is back, so an upgrade that loses the patch is loud; make the patch again with `pnpm patch` and
 `pnpm patch-commit` on an upgrade, and remove it once Sandcastle has an option to skip the origin
 refresh.
+The patch also raises `PROMPT_EXPANSION_TIMEOUT_MS` from 30 s to 120 s, so `gh-retry.sh`'s waits can
+ride out a GitHub 5xx that lasts a minute; `test/gh-retry.test.ts` holds the constant above the
+script's waits.
 
 **Before every sandbox closes** (`checkBeforeClose`): Sandcastle's close stops the container, then
 runs `git status` on the host in the sandbox's worktree with the run's environment (and
@@ -2393,7 +2399,7 @@ not govern, and `git-guard.sh` is unchanged.
 `gh-retry.sh` is `gh` retried on a GitHub 5xx or a timeout, three tries: the GitHub tracker's
 `TICKET_VIEW` and `COMMENTS_VIEW` (`src/tracker.ts`) run `gh issue view` through it, so a moment of
 GitHub's trouble does not crash a ticket's prompt expansion, and a 4xx fails at once.
-Its waits (5 s and 12 s) fit the 30 s Sandcastle gives a prompt's shell expression in all; the
+Its waits (15 s and 45 s) fit the 120 s the patched Sandcastle gives a prompt's shell expression; the
 command stays short so a failed expansion's line, which `promptExpansionLine` cuts, keeps gh's words.
 `reviewWithFallback` (`src/agents.ts`) re-raises a prompt-expansion error: the other model would read
 the same ticket (`test/gh-retry.test.ts`).

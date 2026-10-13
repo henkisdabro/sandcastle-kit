@@ -37,3 +37,10 @@ test("a long wait is said even when no ticket is working, and nothing waiting an
   assert.equal(heartbeatLine({ now, clock: "14:05", working: [], slotWait: now - 90 * MIN, typicalMs: typicalIssueMs({ issue: 2400 }) }), "[14:05] waiting for a sandbox slot: 90m");
   assert.equal(heartbeatLine({ now, clock: "14:05", working: [], typicalMs: 40 * MIN }), undefined);
 });
+
+test("a long wait says what holds it back: the run's share beside another run, or the slot kept for a landing", () => {
+  const share = heartbeatLine({ now, clock: "14:05", working, slotWait: now - 50 * MIN, waitsFor: "share", typicalMs: 40 * MIN });
+  assert.equal(share, "[14:05] working: #12 implement 7m; waiting for a sandbox slot: 50m (this run's share beside another run)");
+  const kept = heartbeatLine({ now, clock: "14:05", working: [], slotWait: now - 50 * MIN, waitsFor: "landing", typicalMs: 40 * MIN });
+  assert.equal(kept, "[14:05] waiting for a sandbox slot: 50m (the pool's last free slot is kept for a landing)");
+});

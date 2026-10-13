@@ -128,7 +128,7 @@ export type LandingGate = (box: Box, how?: { rerunOnRed?: boolean; from?: string
  */
 export const landInSandbox = async (
   project: Project,
-  t: { branch: string; head: string; message: string; squash?: boolean; run?: string },
+  t: { branch: string; head: string; message: string; squash?: boolean; run?: string; ref?: string },
   open: Opener,
   gate?: LandingGate,
   expected?: Fingerprint,
@@ -192,7 +192,7 @@ export const landInSandbox = async (
             // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
             red = { ...rerun, gates: [...red.gates.slice(0, redAt), ...rerun.gates], rerunOf: red };
           }
-          if (red.rerunOf && !red.failure && red.rerunOf.failure) console.log(`${t.branch}: ${red.rerunOf.failure.name} red at landing, then green on a re-run - a flake`);
+          if (red.rerunOf && !red.failure && red.rerunOf.failure) console.log(`${t.ref ?? t.branch}: ${red.rerunOf.failure.name} red at landing, then green on a re-run - a flake`);
         }
         if (red.failures.length || red.gates.some((g) => !g.pass)) {
           // The merge's own first parent, not the host's read before the sandbox opened: it is the tip this
@@ -340,7 +340,7 @@ export const landTicket = async (
   const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
     landInSandbox(
       project,
-      { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" },
+      { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash", ref },
       open,
       (box, how) => runGates(project, box, `${ref} land gates`, false, { log }, true, how?.from, how?.rerunOnRed),
       expected,

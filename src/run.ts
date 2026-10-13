@@ -404,12 +404,19 @@ export const rawLog = (log: string) => log.replace(/\.log$/, ".jsonl");
  * Sandcastle's `logging` option for one agent pass: the readable log goes where it always did, and every raw
  * stdout line the agent printed (tool calls and results its parser drops) is appended to the `.jsonl` sidecar.
  */
+/**
+ * Starts a pass in an agent log's raw sidecar: the usage watch counts each marker's lines as one pass. A JSON marker,
+ * not markLog's "# run" line, so the sidecar stays valid JSONL. A pass run again in the same log (after a usage-limit
+ * pause) marks again, or the watch reads both runs as the one pass its result covers and drops the first one's spend.
+ */
+export const markPass = (log: string, runId: string, name: string) =>
+  appendFileSync(rawLog(log), JSON.stringify({ sandcastle: "run", run: runId, name, at: new Date().toISOString() }) + "\n");
+
 export const agentLogging = (project: Project, id: string, name: string, runId: string): LoggingOption => {
   const log = agentLog(project, id, name);
   markLog(log, runId);
   const raw = rawLog(log);
-  // A JSON marker, not markLog's "# run" line, so the sidecar stays valid JSONL.
-  appendFileSync(raw, JSON.stringify({ sandcastle: "run", run: runId, name, at: new Date().toISOString() }) + "\n");
+  markPass(log, runId, name);
   return {
     type: "file",
     path: log,

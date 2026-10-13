@@ -29,7 +29,7 @@ const project = { name: "fixture", gates: [{ name: "test", command: "run-tests" 
 /** A sandbox whose container id is `abc123def456`; its gate logs `gate`, and is red (exit 1) or throws when asked. */
 const sandbox = (how: "green" | "red" | "throws", hostname = "abc123def456\n") => ({
   exec: async (cmd: string) => {
-    if (cmd === "hostname") return { exitCode: hostname ? 0 : 1, stdout: hostname, stderr: "" };
+    if (cmd === "/bin/cat /proc/sys/kernel/hostname") return { exitCode: hostname ? 0 : 1, stdout: hostname, stderr: "" };
     if (!cmd.includes("run-tests")) return { exitCode: 0, stdout: "", stderr: "" };
     appendFileSync(calls, "gate\n");
     if (how === "throws") throw new Error("the sandbox died");

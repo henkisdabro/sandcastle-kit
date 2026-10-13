@@ -674,7 +674,8 @@ export const register: Register = (on) => {
     const { Box, Text } = $.ui.resolve(e);
     return (
       <Box flexDirection="column">
-        {line === null ? null : (
+        {/* A session reloaded from an older mod still holds the mark as a string: draw nothing until it is set again. */}
+        {!Array.isArray(line) ? null : (
           <Box flexDirection="row" columnGap={1}>
             <Text color={SAND.top} bold>
               {MARK_ICON}

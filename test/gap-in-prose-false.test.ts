@@ -226,3 +226,15 @@ test("approving prose the detector reads as a gap is not counted: no headline ne
   assert.equal(await gapOfReview("A real gap remains: the link step reads the old name.\n"), "A real gap remains: the link step reads the old name.");
   assert.match(await summaryWithGap("A real gap remains: the link step reads the old name."), /^Worth a glance - the reviewer's prose may name a gap: #7 "A real gap remains/m);
 });
+
+test("gaps a reviewer filled, a time between events and the kit's own gap sentence are no gaps; a gap still is", async () => {
+  assert.equal(await gapOfReview("I made one fix and filled two gaps in the tests.\n"), undefined);
+  assert.equal(await gapOfReview("Its three 0.6 s gaps add up to more than the 1 s window, so the test fails if a line stops restarting it.\n"), undefined);
+  assert.equal(await gapOfReview("The forward loop quotes the sentences after a lead-in gap sentence, and the eight other gap test files pass.\n"), undefined);
+  assert.equal(await gapOfReview("Two gaps remain in the README: the install step and the update step.\n"), "Two gaps remain in the README: the install step and the update step.");
+});
+
+test("gap sentences that do not follow each other are joined with an ellipsis, not run together", async () => {
+  const gap = await gapOfReview("- A gap remains in the parser.\n- The tests pass.\n- The same gap remains in the docs.\n");
+  assert.equal(gap, "A gap remains in the parser. … The same gap remains in the docs.");
+});

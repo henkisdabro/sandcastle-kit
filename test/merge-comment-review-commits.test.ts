@@ -44,7 +44,7 @@ const ISSUE = { id: ID, title: "seven", body: "" } as Parameters<ReturnType<type
 const GREEN: GateRun = { gates: [{ name: "test", pass: true }], failures: [] };
 
 /** A project in a temp repo whose prompts are the kit's own, and a pipeline over it with every port faked. */
-const harness = (opts: { changelog: boolean } = { changelog: true }) => {
+const harness = (opts: { changelog: boolean; land?: "squash" } = { changelog: true }) => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
@@ -55,7 +55,7 @@ const harness = (opts: { changelog: boolean } = { changelog: true }) => {
 
   const project = {
     root, name: "fixture", label: "ready-for-agent", baseBranch: "main", gates: [{ name: "test", command: "run-tests" }],
-    generated: [], setup: [], implement: {}, review: {}, repair: {}, tracker: fakeTracker(), changelog: opts.changelog,
+    generated: [], setup: [], implement: {}, review: {}, repair: {}, tracker: fakeTracker(), changelog: opts.changelog, ...(opts.land ? { land: opts.land } : {}),
   };
   const prompts = renderPrompts(project as unknown as Parameters<typeof renderPrompts>[0], makeTracker(project as unknown as Parameters<typeof makeTracker>[0]));
 
@@ -173,4 +173,16 @@ test("the merge comment names each review commit, oldest first, and leaves the i
   assert.deepEqual(outcome.reviewLog?.map((l) => l.replace(/^\w+ /, "")), ["change b.txt", "change c.txt"]);
   assert.doesNotMatch(landed(outcome), /change a\.txt/);
   assert.match(landed(outcome), /\(2 commit\(s\)\):\n- \w+ change b\.txt\n- \w+ change c\.txt/);
+});
+
+test("a project that lands by squash gets the review's subjects alone: the branch and its hashes are gone after landing", async () => {
+  const h = harness({ changelog: true, land: "squash" });
+  h.agents.impl = implementing;
+  h.agents.review = (wt) => {
+    commit(wt, "b.txt", "b\n");
+    return "";
+  };
+  h.gates.push(GREEN);
+  const outcome = await h.attempt();
+  assert.deepEqual(outcome.reviewLog, ["change b.txt"]);
 });

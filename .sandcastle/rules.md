@@ -58,3 +58,6 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   for `^not ok` or `^# pass` finds nothing. Redirect the run to a file and grep that. `pnpm test`
   runs `test/status.test.sh` first, and it reports a failure as a line starting `FAIL [` instead:
   grep for both (`^✖|^FAIL \[`), or a red run can show no matching line.
+- **A nested `claude` has no login here.** The sandbox carries no Claude credentials, so
+  `claude --plugin-dir mod` stops at the login screen and the mod's drawn output cannot be seen.
+  `claude plugin test mod` is the check; the look goes in an `<ungated>` line.

@@ -1053,10 +1053,14 @@ const fromTurn = (turn: number, lines: string[]) => lines.map((l) => (l.startsWi
 
 const SLOW = 2;
 
+/** A cause this large a part of the run's time is said even for a run inside its estimate: a run bound by its one gates slot took 1.6x and said nothing. */
+const LARGE_CAUSE = 0.2;
+
 /**
  * The run's time and tokens beside the estimate it was given, when either is more than twice off, and for a run that took
  * more than twice its estimate the largest causes the record can measure (a minute or more each, largest first): the time
- * paused, held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. The estimate
+ * paused, held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. A run
+ * inside its estimate still gets the causes when the largest is a fifth of its time or more (`LARGE_CAUSE`). The estimate
  * comes from the record (a file in a repository): only finite positive figures count. None for a run still going, which
  * has neither its time nor its tokens yet.
  */
@@ -1073,7 +1077,9 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
   const estIn = num(est.tokensIn?.mid);
   const estOut = num(est.tokensOut?.mid);
   const tokensOff = !!t && (off(inTokens, estIn) || off(t.output, estOut));
-  if (!off(took, estMs) && !tokensOff) return [];
+  const causes = causesOf(f);
+  const large = causes.length > 0 && causes[0]!.ms >= LARGE_CAUSE * took;
+  if (!off(took, estMs) && !tokensOff) return large ? [causesLine(causes)] : [];
   // A ratio on both sides, under the estimate as over it: "17.1M in against an estimate of 40.0M in" was read as close.
   const ratio = (actual: number, estimated: number) => ` (${(actual / estimated).toFixed(1)}x)`;
   const times = `${span(took)} against an estimate of ${span(estMs)}${ratio(took, estMs)}`;
@@ -1081,11 +1087,17 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
     ? `; tokens ${tokenBrief(t)} against an estimate of ${tokenBrief({ input: estIn, cacheWrite: 0, cacheRead: 0, output: estOut })}${ratio(inTokens, estIn)}`
     : "";
   const lines = [`Against the estimate: ${times}${tokens}.`];
-  if (took / estMs <= SLOW) return lines;
+  if (took / estMs <= SLOW && !large) return lines;
+  lines.push(causes.length ? causesLine(causes) : "No cause measured: no pause, time beside another run, slot wait, re-run or repair reached a minute.");
+  return lines;
+};
+
+/** The largest causes the record measures, largest first, of a minute or more each (see `estimateLines`). */
+const causesOf = (f: Facts): { ms: number; text: string; gates?: true }[] => {
   const lost = f.timeLost;
-  const causes = [
+  return [
     ...(f.sharedMs ? [{ ms: f.sharedMs, text: `${span(f.sharedMs)} at a share below what it asked for, beside another run` }] : []),
-    ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets` }] : []),
+    ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets`, gates: true as const }] : []),
     ...(f.pausedMs ? [{ ms: f.pausedMs, text: `${span(f.pausedMs)} paused (sandcastle pause or the plan's usage)` }] : []),
     ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
     ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
@@ -1096,9 +1108,11 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
         }]
       : []),
   ].filter((c) => c.ms >= 60_000).sort((a, b) => b.ms - a.ms);
-  lines.push(causes.length ? `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` : "No cause measured: no pause, time beside another run, slot wait, re-run or repair reached a minute.");
-  return lines;
 };
+
+// Led by the gates wait, the line names the check that says whether the machine has room for another gates slot.
+const causesLine = (causes: { text: string; gates?: true }[]) =>
+  `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` + (causes[0]?.gates ? " `sandcastle size` says whether the machine has room for more gates slots." : "");
 
 /**
  * Likely flaky tests, on any ticket: each once, with the tickets it hit. Two fields name them - `flaked` (red on one run of a

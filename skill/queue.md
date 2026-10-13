@@ -144,8 +144,9 @@ from it, and only in plain text: a line inside a code block or backticks is not 
   directory path covers everything under it. Name only files an agent may edit under the
   project's rules: a file the rules forbid (a changelog the maintainer writes, say) is no ticket's,
   and listing it makes a false overlap line at the run's start. Write an existing file's path as
-  it is. Name a file the fix will create too, and list a lockfile or generated file if the fix
-  will rewrite it. Mark a new file as new in the ticket's prose (under `## Fix`), never on the
+  it is. Name a file the fix will create too - the new test file the project's rules ask for, not
+  only the existing tests - the docs the rules make every behaviour change update, and a lockfile
+  or generated file if the fix will rewrite it. Mark a new file as new in the ticket's prose (under `## Fix`), never on the
   `Touches:` line, where "(new)" would be read as part of the path. A second `Touches:` line is
   merged into the first. It goes in the body as a bare line, without the backticks shown here.
   Example: `Touches: src/pages/pricing.tsx, src/components/**/*.tsx, public/pricing.css`. The kit

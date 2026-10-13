@@ -56,14 +56,28 @@ test("the largest causes the record measured are named, largest first, and anyth
   assert.match(headline(small)[1], /^No cause measured/);
 });
 
-test("a run within twice its estimate says nothing of it", () => {
-  const out = render(facts({ estimate: { ...estimate, ms: { mid: 180 * MIN, high: 240 * MIN } }, tokenTotal: { input: 1, cacheWrite: 0, cacheRead: 30_000_000, output: 600_000 }, sharedMs: 3 * 60 * MIN }));
-  assert.deepEqual(headline(out), []);
+test("a run within twice its estimate says nothing of it, unless one cause took a fifth of its time or more", () => {
+  const within = { estimate: { ...estimate, ms: { mid: 180 * MIN, high: 240 * MIN } }, tokenTotal: { input: 1, cacheWrite: 0, cacheRead: 30_000_000, output: 600_000 } };
+  assert.deepEqual(headline(render(facts({ ...within, sharedMs: 59 * MIN }))), []);
+  // 3 of its 5 hours beside another run: the operator is told, though the run was inside twice its estimate.
+  assert.deepEqual(headline(render(facts({ ...within, sharedMs: 3 * 60 * MIN }))), ["Largest causes measured: 3h 00m at a share below what it asked for, beside another run."]);
 });
 
-test("a run that took half its estimate or less gives the estimate and no causes", () => {
-  const out = render(facts({ estimate: { ...estimate, ms: { mid: 11 * 60 * MIN, high: 12 * 60 * MIN } }, sharedMs: 3 * 60 * MIN }));
-  assert.deepEqual(headline(out), ["Against the estimate: 5h 00m against an estimate of 11h 00m (0.5x)."]);
+test("a run bound by its gates slot names the check that says whether the machine has room for more", () => {
+  const within = { estimate: { ...estimate, ms: { mid: 180 * MIN, high: 240 * MIN } }, tokenTotal: { input: 1, cacheWrite: 0, cacheRead: 30_000_000, output: 600_000 } };
+  const timeLost = { gateWaitMs: 4 * 60 * MIN, landingWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 };
+  assert.deepEqual(headline(render(facts({ ...within, timeLost }))), [
+    "Largest causes measured: 4h 00m waiting for gates slots, summed over tickets. `sandcastle size` says whether the machine has room for more gates slots.",
+  ]);
+});
+
+test("a run that took half its estimate or less gives the estimate, and causes only when one is large", () => {
+  const fast = { estimate: { ...estimate, ms: { mid: 11 * 60 * MIN, high: 12 * 60 * MIN } } };
+  assert.deepEqual(headline(render(facts({ ...fast, sharedMs: 30 * MIN }))), ["Against the estimate: 5h 00m against an estimate of 11h 00m (0.5x)."]);
+  assert.deepEqual(headline(render(facts({ ...fast, sharedMs: 3 * 60 * MIN }))), [
+    "Against the estimate: 5h 00m against an estimate of 11h 00m (0.5x).",
+    "Largest causes measured: 3h 00m at a share below what it asked for, beside another run.",
+  ]);
 });
 
 test("tokens alone more than twice off give the line, with no causes for a run on time", () => {

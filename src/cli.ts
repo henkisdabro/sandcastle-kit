@@ -429,7 +429,6 @@ try {
       }
       if (level === "drain" && drain.turns > 0) {
         const cause = drain.cause ?? "the run ended";
-        console.log(`Autonomy level drain: not running again - ${cause}.`);
         console.log(drainLine(drain.turns, drain.landed, cause));
         // One more queue read: a ticket queued while the drain ran is not in any turn's list, so it waits for the next run.
         const tracker = makeTracker(project);

@@ -9,6 +9,82 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **The merge comment lists what a review changed**: each review commit's short hash and subject
+  (the subject alone for a project that lands by squash, whose branch is gone after landing), so
+  a reader can see the branch changed after the implementer's record. (#766)
+- **`/sandcastle queue` and `/sandcastle audit` give each new or changed ready ticket a cold read**
+  by a fresh subagent with no triage notes before it is queued; where two reasonable readings would
+  differ, you are asked to decide, and each read is recorded in the triage file. (#771)
+- **The Claude Code mod's idle mark shows the kit version** (`sandcastle 0.16.0`, or `0.16.0+3` for
+  a clone past its release tag), `update needed` when the project has Upgrading notes it has not had,
+  and `project on X` when its recorded release is older with nothing pending.
+  `sandcastle --version --json` gives the facts, and a bare `/sandcastle-mark` reports them in
+  full. (#786)
+
+### Changed
+
+- **A full review sees the implementer's whole final message**, cut at about 4,000 characters,
+  not only its last paragraph, so a caveat in a mid-message list reaches the reviewer. (#746)
+- **A ticket's gates run at the gate share of the CPUs** while they hold a gates slot, not the
+  smaller ticket share its sandbox was created with, and the limit is set back afterwards. (#760)
+- **A reviewer no longer runs the full suite after its last commit**: it runs the typecheck and the
+  tests covering what it changed, and leaves the rest to the ticket gates that start as it exits.
+  (#761)
+- **The audit says when a lens stopped at its cap** ("cap reached - coverage incomplete"), and
+  marks a bug finding ready only when its evidence names a reachable trigger, an observable failure
+  and a checked guard or caller. (#772)
+- **The closing summary's per-ticket time is labelled**, for example
+  `work 19m + 8m waiting, landing 12m`. (#777)
+- **The closing summary names the largest causes of a run's time whenever one took a fifth of it or
+  more**, not only for a run over twice its estimate; a run bound by its gates slot is pointed at
+  `sandcastle size`.
+- **A prompt's ticket reads ride out a minute of GitHub trouble**: the kit's patch of
+  `@ai-hero/sandcastle` gives a prompt's shell expression 120 s instead of 30 s, and the retries of
+  a GitHub 5xx wait 15 s and 45 s. (#782)
+
+### Fixed
+
+- **A conflicted ticket's resolve is no longer lost to a fresh ticket**: one free worker waits for
+  the resolve to be released, while the others take the queue's next tickets, and the resolve waits
+  only for tickets past their review that share its files - not for one that has gone back to a
+  repair. Its recorded wait runs from its requeue to its start. (#748)
+- **A landing that will gate the merged tree claims the gates slot as soon as it holds its
+  sandbox**, so a ticket gate asked during its merge no longer holds up the landing for a whole gate
+  run. (#749)
+- **Tracker reads during a run no longer stop the whole run while GitHub is slow**, and give up after
+  30 seconds instead of hanging. (#750)
+- **A carried branch gets the full review when a person has commented since its last review**;
+  before, a clean merge landed it unread. (#759)
+- **An agent's follow-up that names the same file and symptom as an open ticket awaiting triage** is
+  a comment on that ticket, not a duplicate. (#762)
+- **The "Worth a glance" line quotes what a reviewer's lead-in leads into**, no longer reads
+  "filled two gaps", a time between events or the word for the kit's own gap tests as a gap, and
+  marks sentences quoted from different places with an ellipsis. (#763)
+- **The start estimate prices a carried branch that gets a full review as a fresh ticket**, and its
+  timings lines say `unreviewed: true` in place of `carried: true`. (#764)
+- **The heartbeat line** lists a green ticket waiting to land as `queued to land: #N 4m`, names a
+  landing's step from its start, and says why a sandbox slot is slow to come (this run's share
+  beside another run, or the slot kept for a landing). (#765)
+- **Tokens are no longer dropped**: an agent pass that throws, a review that falls back, a failed
+  cross-review and a pass run again after a usage-limit pause keep what they spent in the ticket's,
+  the run's and the closing summary's totals, marked incomplete where the figure is partial. (#769,
+  #789)
+- **`.sandcastle/logs/heads.json` and `file-shares.log` no longer grow without end**: an archived
+  entry for a ticket whose branch is gone and older than 14 days is dropped. (#776)
+- **A gate's stdout cut by one very long line is no longer trusted as whole**, so flake detection
+  never judges from an incomplete test list. (#778)
+- **A GitHub 5xx or timeout while a prompt reads its ticket is retried**, and a review whose prompt
+  could not be expanded is no longer re-run on the implementer's model. (#782)
+- **A merge conflict the stop kept from a retry** says it would have been retried and names only its
+  own tickets and files. (#784)
+- **A release of a held ticket says only the tickets new to each shared file** (`#N joins #a`),
+  not the whole growing list again; the drain's end says its cause once; and a landing's flake line
+  names the ticket, not its branch.
+- **The gate CPU raise reads the container id from the kernel's own file**, so an agent's own
+  `hostname` on the sandbox's PATH cannot point the host's `docker update` at another container.
+
 ## [0.16.0] - 2026-10-13
 
 ### Added

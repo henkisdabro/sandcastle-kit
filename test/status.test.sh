@@ -17,7 +17,8 @@ KIT="$(cd "$(dirname "$0")/.." && pwd)"
 export LC_ALL="$(locale -a 2>/dev/null | grep -iE '^(c|en_US)\.utf-?8$' | head -1)"
 TMP=$(mktemp -d)
 LIVE=""
-cleanup() { [ -n "$LIVE" ] && kill "$LIVE" 2>/dev/null; rm -rf "$TMP"; }
+# Waited for, so bash does not report the killed job ("Terminated") on stderr, which a gate log then carries.
+cleanup() { [ -n "$LIVE" ] && { kill "$LIVE"; wait "$LIVE"; } 2>/dev/null; rm -rf "$TMP"; }
 trap cleanup EXIT
 
 # The view under test, started as `sandcastle status` starts it: through status.sh, with the bash this file runs
