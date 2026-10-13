@@ -6,48 +6,529 @@ The terms (run record, attempt, ending, requeued) are defined in `GLOSSARY.md`.
 
 ## `bin/sandcastle`
 
-Shell entry; resolves symlinks, checks the temp directory can be written, runs `src/cli.ts` in one node process on Node's own type stripping, after `src/node-check.mjs` has refused a Node without it (never a wrapper that runs the CLI in a child: tsx's binary did, and SIGKILLed it on a slow answer to SIGTERM); `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone, as Herdr's tab bar calls it every 10 seconds
+Shell entry; resolves symlinks, checks the temp directory can be written, runs `src/cli.ts` in one
+node process on Node's own type stripping, after `src/node-check.mjs` has refused a Node without it
+(never a wrapper that runs the CLI in a child: tsx's binary did, and SIGKILLed it on a slow answer
+to SIGTERM); `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone, as Herdr's tab bar calls it
+every 10 seconds
 
 ## `src/cli.ts`
 
-Commands: help, `--version`, setup, doctor, init, updated, changes, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop, pause, resume, report, status, clean, herdr; also the autonomy loop around `burndown()`. The help text and each command's `--help` come from `src/help.ts`
+Commands: help, `--version`, setup, doctor, init, updated, changes, build, gates, land, preview,
+lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop,
+pause, resume, report, status, clean, herdr; also the autonomy loop around `burndown()`.
+The help text and each command's `--help` come from `src/help.ts`
 
 ## `src/burndown.ts`
 
-The orchestrator: base gates, then every attempt and landing through `createSchedule(plan).run(work)` (the attempt port: implement, review, gate with repair, in the pipeline `createPipeline(ctx)` makes; the land port: merge or squash, on the landing worker as each ticket goes green), then verify and report; it records what the scheduler tells, handing each ending to the ledger (`src/ledger.ts`), and posts the hold notes and the comments the ledger words after the schedule; the attempt reports its pipeline (`attempted`) with the agent's hand-back read as it ends (`handBack`) and the `.git` check at its end (`settleAfter`, the settle's check, made before its sandbox closes, once its container is stopped, with the worktree's records - `checkBeforeClose`, `src/guard.ts` - so a failure removes the container without Sandcastle's close), whose failure stops the run without replacing the pipeline's own ending, and writes only the pipeline's facts (commits, minutes, tokens); dependencies, the files the scheduler's hold compares (`ticketFiles`, `refreshFiles`: one ticket at a time per file git cannot merge) and the record of what it tells (`createHoldRecord`), re-runs of carried branches (land-only, narrow review; a branch reviewed but never green is land-only too, from `reviewedOnlyHead`, unless its head record's `red` says its gates ended red at that tip; a branch left with no commit ahead of the base is no carried work, so the pipeline's setup cuts it from the base's tip again before its sandbox opens - `cutFromBase`, through `host.write`, after `host.begin` so the `.git` check reads the new tip as the pipeline's own move, and a branch a worktree holds is moved only with a clean kept worktree under `.sandcastle/worktrees/` (a killed run's, fast-forwarded in place with `git merge --ff-only --no-overwrite-ignore`, branch and checkout together; the clean check leaves ignored files out, so the flag makes git refuse, not overwrite, one the base now tracks, its installed dependencies kept, once its records pass `assertWorktreeRecords`) - one with uncommitted or untracked files, or outside `.sandcastle/worktrees/` (a person's own), is left, as git refuses to move its branch; `test/stale-empty-branch.test.ts`, `test/stale-empty-branch-kept-worktree.test.ts`; a kit worktree Sandcastle's open would reuse - holding the branch, or at its path - has its records checked before the open too, at the setup and at a resume, `test/guard-worktree-records.test.ts`), timings. A red gate whose failing tests all lie in files the branch did not change (`failingTestFile`: pytest's `path::test`, vitest's and jest's `FAIL path` - a workspace project's label (`|web|`, or a bare word or a scoped package name such as `@acme/web` before a file) is skipped, and `failingTests` strips colour codes, as `runGates` does from a red gate's failure output (and from the gates log it streams) - and node:test's spec summary, whose `test at <path>:<line>:<col>` line above each failing test gives `path::name`; a test whose file the output does not name, or names outside the repo, is the branch's own - so is node:test's red when its `✖ failing tests:` summary was cut off, or under Node 20 and 22's TAP default, whose absolute `location:` paths are not read) is checked against the base: `redOnBase` in `createPipeline` runs every gate once per base tip through `gateBase` (`baseGate`, a promise cached by the tip, so branches red together share it, and filed under the commit its sandbox gated - `GateRun.head` - when a landing moved the base in between; the run that is made leaves a `base-red` line under the asking ticket in `timings.jsonl`, `timedGate`, its slot wait as `waitMs`), and runs none when the green-base record already holds the tip (`baseRecordedGreen`, any proof kind: the gates passed on that commit, so the red is the branch's own and its repair starts without the wait for the gates slot), and a failure whose tests are all on the base's whole failing list (not the first five) gets no repair pass, is printed once as `base went red mid-run: <test>` and is kept once in the run record's `baseRed`, which the closing summary lists under Needs you (`test/base-red-mid-run.test.ts`, `test/base-red-check.test.ts`). An id that names only a file (`FAIL path`, a node:test file that failed to load) says nothing of which test failed, so with one the red is the base's only when the gate's `failureKey` is the same on the branch and the base
+The orchestrator: base gates, then every attempt and landing through
+`createSchedule(plan).run(work)` (the attempt port: implement, review, gate with repair, in the
+pipeline `createPipeline(ctx)` makes; the land port: merge or squash, on the landing worker as each
+ticket goes green), then verify and report; it records what the scheduler tells, handing each ending
+to the ledger (`src/ledger.ts`), and posts the hold notes and the comments the ledger words after
+the schedule; the attempt reports its pipeline (`attempted`) with the agent's hand-back read as it
+ends (`handBack`) and the `.git` check at its end (`settleAfter`, the settle's check, made before
+its sandbox closes, once its container is stopped, with the worktree's records - `checkBeforeClose`,
+`src/guard.ts` - so a failure removes the container without Sandcastle's close), whose failure stops
+the run without replacing the pipeline's own ending, and writes only the pipeline's facts (commits,
+minutes, tokens); dependencies, the files the scheduler's hold compares (`ticketFiles`,
+`refreshFiles`: one ticket at a time per file git cannot merge) and the record of what it tells
+(`createHoldRecord`), re-runs of carried branches (land-only, narrow review; a branch reviewed but
+never green is land-only too, from `reviewedOnlyHead`, unless its head record's `red` says its gates
+ended red at that tip; a branch left with no commit ahead of the base is no carried work, so the
+pipeline's setup cuts it from the base's tip again before its sandbox opens - `cutFromBase`, through
+`host.write`, after `host.begin` so the `.git` check reads the new tip as the pipeline's own move,
+and a branch a worktree holds is moved only with a clean kept worktree under
+`.sandcastle/worktrees/` (a killed run's, fast-forwarded in place with
+`git merge --ff-only --no-overwrite-ignore`, branch and checkout together; the clean check leaves
+ignored files out, so the flag makes git refuse, not overwrite, one the base now tracks, its
+installed dependencies kept, once its records pass `assertWorktreeRecords`) - one with uncommitted
+or untracked files, or outside `.sandcastle/worktrees/` (a person's own), is left, as git refuses to
+move its branch; `test/stale-empty-branch.test.ts`, `test/stale-empty-branch-kept-worktree.test.ts`;
+a kit worktree Sandcastle's open would reuse - holding the branch, or at its path - has its records
+checked before the open too, at the setup and at a resume, `test/guard-worktree-records.test.ts`),
+timings.
+A red gate whose failing tests all lie in files the branch did not change (`failingTestFile`:
+pytest's `path::test`, vitest's and jest's `FAIL path` - a workspace project's label (`|web|`, or a
+bare word or a scoped package name such as `@acme/web` before a file) is skipped, and `failingTests`
+strips colour codes, as `runGates` does from a red gate's failure output (and from the gates log it
+streams) - and node:test's spec summary, whose `test at <path>:<line>:<col>` line above each failing
+test gives `path::name`; a test whose file the output does not name, or names outside the repo, is
+the branch's own - so is node:test's red when its `✖ failing tests:` summary was cut off, or under
+Node 20 and 22's TAP default, whose absolute `location:` paths are not read) is checked against the
+base: `redOnBase` in `createPipeline` runs every gate once per base tip through `gateBase`
+(`baseGate`, a promise cached by the tip, so branches red together share it, and filed under the
+commit its sandbox gated - `GateRun.head` - when a landing moved the base in between; the run that
+is made leaves a `base-red` line under the asking ticket in `timings.jsonl`, `timedGate`, its slot
+wait as `waitMs`), and runs none when the green-base record already holds the tip
+(`baseRecordedGreen`, any proof kind: the gates passed on that commit, so the red is the branch's
+own and its repair starts without the wait for the gates slot), and a failure whose tests are all on
+the base's whole failing list (not the first five) gets no repair pass, is printed once as
+`base went red mid-run: <test>` and is kept once in the run record's `baseRed`, which the closing
+summary lists under Needs you (`test/base-red-mid-run.test.ts`, `test/base-red-check.test.ts`).
+An id that names only a file (`FAIL path`, a node:test file that failed to load) says nothing of
+which test failed, so with one the red is the base's only when the gate's `failureKey` is the same
+on the branch and the base
 
-The pipeline takes everything outside itself through one `PipelineContext`, as a landing takes its `LandContext`: its sandbox (`open`, whose `run` is every agent pass and `exec` every git command in it), its gate runs (`gate`, and `regate`: the gates from a named one on), the step timer (`timed`), and what the run keeps across a ticket's attempts (`requeuedAs`, `results`, `reds`, the heads record under the project root), the run's landings so far (`landed`: who a branch that no longer merges collides with), and the fix board it shares with the run's other pipelines (`fixes`, `src/schedule.ts`). `test/pipeline.test.ts` drives it over a temp repo with a worktree for the sandbox, scripted agents and scripted gate runs: a change to the pipeline is tested there, by what it does, not by matching the source of `src/burndown.ts`. An attempt's first red gate is run again once before any repair pass - and before the base check and the fix board are asked - from that gate on, in config order and stopping at the first red, in the same sandbox with no model (`regate`, built on `runGates`' `from`; a ticket's first gate run asks for the re-run itself, `runGates`' `rerunOnRed`, and runs it **inside the same gates slot** - one `withSlot("gates")` covers the run that went red and its one re-run, whose result carries the red run as `rerunOf`, so the re-run queues behind no other run's gates wait, records no `waitMs` of its own and the pipeline makes no `regate` call, while timings.jsonl still has the red run's line and then the re-run's (`timingLines`, `test/gates-rerun-timings.test.ts`: the ticket card's red pass, the closing summary's memory pressure); `regate` itself, with a slot of its own, is for a requeue after a red landing gate whose result carries no `rerunOf` (a port that ran no re-run at landing); one that did leaves `rerun: true` on its `RedLanding` (`ctx.reds`), and the requeue on the unmoved base makes no `regate` call and no gate run - its repair starts from the landing's output, the re-run's failure, with the line that the gate went red twice there; base, verify and landing gates are unchanged - `test/gates-rerun-keeps-slot.test.ts`; the gates before it passed on this tree, and a branch that holds the base's tip lands as a fast-forward on its own gate results, so a re-run of the red gate alone would leave the later gates never run). Green means the red was a flake: no repair pass, and the result's `gates` are the passes before the red gate followed by the re-run's, still a prefix of the configured gates (`gateResultLines`). Red again goes on to the repair loop from the re-run's failure - unless the re-run's failing tests (`failingTests`) share none with the first red's (`disjointReds`, `src/gates.ts`; both lists must be readable, so a lint or type gate never qualifies): that is a flake each time - only on the same gate: a re-run that passed the red gate and went red on a later one, which never ran before, goes to repair - and the gate runs once more from the re-run's red gate (a third run), with no repair pass. A ticket's own gates run that third run **inside the same gates slot** too (`runGates`' `thirdOnDisjoint`, asked together with `rerunOnRed`): a `regate` would queue behind every other run's gates again, the wait the in-slot re-run removed, and it would hit exactly the load flakes that move from test to test. The runs chain through `rerunOf` (the third run's result, its `rerunOf` the re-run with its `ms`, that one's `rerunOf` the first red, which holds the `waitMs`; `rewrote` is the union of the three), `timingLines` writes one line per run, oldest first, and `rememberFailed` walks the chain; the pipeline then makes no `regate` call (`earlier.length === 1` no longer holds). A port that ignores the in-slot runs, and the landing gate (a re-run only: `rerunOnRed` alone), still reach `regate` or stop at two runs. A landing gate that goes red and then green on its in-slot re-run keeps the red run's tests as the ticket's `flaked` (`landingFlaked`, written by burndown's landing `gate` port, so the closing summary's "Likely flaky" list has it), and `timedGate` writes the re-run as a `LANDING_GATES` line of its own after the red run's through `timingLines`, which marks every line after the first `rerun: true`: `timeLostFromTimings` counts a marked landing line as a re-run, and `typicalTimes` leaves it out of the landing-gates sum (a requeued ticket's second landing has no mark and is summed). Green on the third run goes on as after any green gate; red on it, on any tests, goes to repair as above, and the repair prompt opens with the failing tests of all three runs (`threeRunsNote`). A test id that went red on one run and green on a later one is kept on the ticket's run record as `flaked` (`flakedTests`: an id before a run with no readable test ids is left out, as is one red on the last run), whatever the ticket's ending (`test/pipeline-red-third-run.test.ts`). A red's failing tests are read from the gate's whole output, never from the clipped `Failure.output`: `runGates` parses them before `clip` into `Failure.tests`, and the sandbox's exec tail is raised to 8 MiB (`EXEC_TAIL_CHARS`, `dockerOptions` in `src/sandbox.ts`) so Sandcastle's 64 KiB default cuts nothing; a stream over half of that cap may have been cut, so its run has no `tests` and is unreadable. `wholeTests` is what `flakedTests`, `disjointReds` and `threeRunsNote` read: `tests`, else the output's own ids when it holds no clip marker (a Failure built elsewhere), else none, which keeps the unreadable meaning above (no `flaked` entry from a run before it, never disjoint). The other readers of `failingTests(output)` keep the clipped output. It is not run for a timeout (exit 124), for `SANDCASTLE_TEST_RED_GATE`'s forced red, or for a red after a repair pass or a fix-board merge, and a pipeline given no `regate` repairs at once (`test/pipeline-red-rerun.test.ts`). A repair pass counts in the outcome's `repairs` only when the branch's tip moved over it; one that left the tip where it was is in `idleRepairs`, which a requeue carries as it does `repairs` (`firstAttemptIdleRepairs`), and the per-ticket line words (`repairWords`, `src/ledger.ts`) as `repaired=N` and `repair made no change` (`test/pipeline-repair-no-change.test.ts`). A repair pass that committed nothing and ends with `<verdict>outside-branch</verdict>` (`repairVerdict`; `prompts/repair.md` asks for it, with a `Flaky:` line of the tests it judges flaky) is followed by one gate run and no further pass, whatever `repair.attempts` leaves: green goes on as after any green gate, red ends the ticket red with the verdict's line in its note, and the tests are kept on the ticket's run record as `flaky`; the tag on a pass that committed is ignored (`test/pipeline-repair-verdict.test.ts`). The verify records the image it ran on - the run's own, built before any ticket landed - and the Dockerfiles the run's merges changed since (`changedDockerfiles`, `src/gates.ts`: the kit's `docker/base.Dockerfile` and `docker/agents.Dockerfile`, and the config's `dockerfile`) in the run record's `verify`, so the closing summary's re-gated line can say the new image is untested (`test/report-regate-image.test.ts`). A red verify also compares the base tip's tree with the tree each landing left (`landingOfTree`, `src/landing.ts`, over `LandContext.landed`; a landing's tree is the one its gates passed; with the files tracker a difference only under its ticket directory, the tracker's close and follow-up commits after the landing, still matches - `test/verify-same-tree-files-tracker.test.ts`): on a match with a fast-forward landing (its ticket's own sandbox) the run record's `verify.gatedTree` names that ticket, and the summary's re-gated line and first next step say the red is the sandbox's, not the merge's, instead of `RED TOGETHER`; on a match with a landing merged in a landing sandbox (`clean` on its `landed` entry), a clean sandbox like the verify's, `verify.cleanTree` names it and the summary says a test is likely flaky or order-dependent (`test/verify-same-tree.test.ts`). A red verify is run again once and the second result kept (`rerunRedVerify`, `src/gates.ts`; a ticket's first red gate and a landing's are re-run the same way), and one still red is judged for load (`likelyLoad`): each failing test a red gate's output names has a test-timeout line (`Test timed out in`, `Exceeded timeout of`, node:test's `test timed out after`) among its own lines, up to the next failing test (`onlyTimeouts`: node:test and vitest print each error twice, so a count of timeout lines would read one timeout beside an assertion as all timeouts), or a red gate ran at least three times (`LOAD_FACTOR`) its recorded time - the gate times of the landing sandbox that gated this tree, else the run's base gates when they ran. The run record's `verify.likelyLoad` is then set and the summary says "RED twice, likely load" and sends the operator to `sandcastle gates` on a quiet machine, instead of to the sandbox's git identity (`test/verify-rerun-load.test.ts`). The verify is **proof that the merged base is green in a clean gate-only sandbox**, not a clean re-gate on purpose: the green-base record (`.sandcastle/.run/base-gates.json`) holds the commit, the key (commit, image, plan and config), `by`, whose gates proved it (`#427` for a landing, `the base check`, `verify`) and `kind`, where they ran (`ProofKind`, `src/gates.ts`): `landing-sandbox` (a merge gated in its landing sandbox), `base` (the base check), `verify` (an earlier verify) or `ticket-sandbox` (a fast-forward of the tree the ticket's own gates passed on, in the sandbox its agent worked in). When `greenProofOfBase` finds the record at the base's current tip on the run's image and plan, **and its kind is one of the first three**, the verify does not run: the run record's `verify.skipped` carries the commit, `by` and `kind`, and the summary says `Merged main re-gated: green at <sha> already (gated with #427 in its landing sandbox) - not run again` (`verifySkippedLine`, `src/report.ts`). A `ticket-sandbox` proof never skips it, and it is due for one merged ticket as for several (`verifyPlan`, `src/gates.ts`: at least one ticket merged, or a merge regenerated files; a run that lands exactly one ticket as a fast-forward leaves a `ticket-sandbox` record, so its verify runs, while one merged in a landing sandbox leaves a gate-only record and skips it): that sandbox differs from a gate-only one (the agent's git identity in `~/.gitconfig`, for one), and a base red in a clean sandbox passed the ticket's own gates. A record from an older kit has no `kind` and is no proof either. The next turn's base check reads the record with `baseCacheHit`, whatever its kind. A missing record, or one at another commit (a landing's note is swallowed when it fails), runs the verify as before (`test/verify-skip-green-base.test.ts`). A landing's or verify's record keeps `hooks: true` (so the next base check opens no sandbox for the hook tests and the git-hook probe) only when the record before it had it, at a commit it names and the same key, and `git diff --name-only` between the two touches nothing under `core.hooksPath`, `.husky/` or `.git-hooks/`, no kept hook's command, no package manifest or lockfile and no protected path (`hookInputsChanged`, `src/gates.ts`; `test/hook-checks-kept-across-landings.test.ts`); anything else re-checks. The record also holds `hookRuns`, the commands of the kept hooks that ran cleanly (exit 0, or a block) in a passing hook test (`HookTestResult.clean`: a block test passes when any guard blocks, but vouches only for the guards that did not error), carried across such a landing with `hooks`; the lean hook check, which prints before the base gates, drops its unseen-import warning (`MODULES`, blind to a `sys.path.insert` made at run time) for those hooks only, when the record holds at the base's tip (`hooksThatRanClean`, `src/gates.ts`; `test/hook-check-vouched.test.ts`).
+The pipeline takes everything outside itself through one `PipelineContext`, as a landing takes its
+`LandContext`: its sandbox (`open`, whose `run` is every agent pass and `exec` every git command in
+it), its gate runs (`gate`, and `regate`: the gates from a named one on), the step timer (`timed`),
+and what the run keeps across a ticket's attempts (`requeuedAs`, `results`, `reds`, the heads record
+under the project root), the run's landings so far (`landed`: who a branch that no longer merges
+collides with), and the fix board it shares with the run's other pipelines (`fixes`,
+`src/schedule.ts`). `test/pipeline.test.ts` drives it over a temp repo with a worktree for the
+sandbox, scripted agents and scripted gate runs: a change to the pipeline is tested there, by what
+it does, not by matching the source of `src/burndown.ts`.
+An attempt's first red gate is run again once before any repair pass - and before the base check and
+the fix board are asked - from that gate on, in config order and stopping at the first red, in the
+same sandbox with no model (`regate`, built on `runGates`' `from`; a ticket's first gate run asks
+for the re-run itself, `runGates`' `rerunOnRed`, and runs it **inside the same gates slot** - one
+`withSlot("gates")` covers the run that went red and its one re-run, whose result carries the red
+run as `rerunOf`, so the re-run queues behind no other run's gates wait, records no `waitMs` of its
+own and the pipeline makes no `regate` call, while timings.jsonl still has the red run's line and
+then the re-run's (`timingLines`, `test/gates-rerun-timings.test.ts`: the ticket card's red pass,
+the closing summary's memory pressure); `regate` itself, with a slot of its own, is for a requeue
+after a red landing gate whose result carries no `rerunOf` (a port that ran no re-run at landing);
+one that did leaves `rerun: true` on its `RedLanding` (`ctx.reds`), and the requeue on the unmoved
+base makes no `regate` call and no gate run - its repair starts from the landing's output, the
+re-run's failure, with the line that the gate went red twice there; base, verify and landing gates
+are unchanged - `test/gates-rerun-keeps-slot.test.ts`; the gates before it passed on this tree, and
+a branch that holds the base's tip lands as a fast-forward on its own gate results, so a re-run of
+the red gate alone would leave the later gates never run).
+Green means the red was a flake: no repair pass, and the result's `gates` are the passes before the
+red gate followed by the re-run's, still a prefix of the configured gates (`gateResultLines`).
+Red again goes on to the repair loop from the re-run's failure - unless the re-run's failing tests
+(`failingTests`) share none with the first red's (`disjointReds`, `src/gates.ts`; both lists must be
+readable, so a lint or type gate never qualifies): that is a flake each time - only on the same
+gate: a re-run that passed the red gate and went red on a later one, which never ran before, goes to
+repair - and the gate runs once more from the re-run's red gate (a third run), with no repair pass.
+A ticket's own gates run that third run **inside the same gates slot** too (`runGates`'
+`thirdOnDisjoint`, asked together with `rerunOnRed`): a `regate` would queue behind every other
+run's gates again, the wait the in-slot re-run removed, and it would hit exactly the load flakes
+that move from test to test.
+The runs chain through `rerunOf` (the third run's result, its `rerunOf` the re-run with its `ms`,
+that one's `rerunOf` the first red, which holds the `waitMs`; `rewrote` is the union of the three),
+`timingLines` writes one line per run, oldest first, and `rememberFailed` walks the chain; the
+pipeline then makes no `regate` call (`earlier.length === 1` no longer holds).
+A port that ignores the in-slot runs, and the landing gate (a re-run only: `rerunOnRed` alone),
+still reach `regate` or stop at two runs.
+A landing gate that goes red and then green on its in-slot re-run keeps the red run's tests as the
+ticket's `flaked` (`landingFlaked`, written by burndown's landing `gate` port, so the closing
+summary's "Likely flaky" list has it), and `timedGate` writes the re-run as a `LANDING_GATES` line
+of its own after the red run's through `timingLines`, which marks every line after the first
+`rerun: true`: `timeLostFromTimings` counts a marked landing line as a re-run, and `typicalTimes`
+leaves it out of the landing-gates sum (a requeued ticket's second landing has no mark and is
+summed).
+Green on the third run goes on as after any green gate; red on it, on any tests, goes to repair as
+above, and the repair prompt opens with the failing tests of all three runs (`threeRunsNote`).
+A test id that went red on one run and green on a later one is kept on the ticket's run record as
+`flaked` (`flakedTests`: an id before a run with no readable test ids is left out, as is one red on
+the last run), whatever the ticket's ending (`test/pipeline-red-third-run.test.ts`).
+A red's failing tests are read from the gate's whole output, never from the clipped
+`Failure.output`: `runGates` parses them before `clip` into `Failure.tests`, and the sandbox's exec
+tail is raised to 8 MiB (`EXEC_TAIL_CHARS`, `dockerOptions` in `src/sandbox.ts`) so Sandcastle's 64
+KiB default cuts nothing; a stream over half of that cap may have been cut, so its run has no
+`tests` and is unreadable. `wholeTests` is what `flakedTests`, `disjointReds` and `threeRunsNote`
+read: `tests`, else the output's own ids when it holds no clip marker (a Failure built elsewhere),
+else none, which keeps the unreadable meaning above (no `flaked` entry from a run before it, never
+disjoint).
+The other readers of `failingTests(output)` keep the clipped output.
+It is not run for a timeout (exit 124), for `SANDCASTLE_TEST_RED_GATE`'s forced red, or for a red
+after a repair pass or a fix-board merge, and a pipeline given no `regate` repairs at once
+(`test/pipeline-red-rerun.test.ts`).
+A repair pass counts in the outcome's `repairs` only when the branch's tip moved over it; one that
+left the tip where it was is in `idleRepairs`, which a requeue carries as it does `repairs`
+(`firstAttemptIdleRepairs`), and the per-ticket line words (`repairWords`, `src/ledger.ts`) as
+`repaired=N` and `repair made no change` (`test/pipeline-repair-no-change.test.ts`).
+A repair pass that committed nothing and ends with `<verdict>outside-branch</verdict>`
+(`repairVerdict`; `prompts/repair.md` asks for it, with a `Flaky:` line of the tests it judges
+flaky) is followed by one gate run and no further pass, whatever `repair.attempts` leaves: green
+goes on as after any green gate, red ends the ticket red with the verdict's line in its note, and
+the tests are kept on the ticket's run record as `flaky`; the tag on a pass that committed is
+ignored (`test/pipeline-repair-verdict.test.ts`).
+The verify records the image it ran on - the run's own, built before any ticket landed - and the
+Dockerfiles the run's merges changed since (`changedDockerfiles`, `src/gates.ts`: the kit's
+`docker/base.Dockerfile` and `docker/agents.Dockerfile`, and the config's `dockerfile`) in the run
+record's `verify`, so the closing summary's re-gated line can say the new image is untested
+(`test/report-regate-image.test.ts`).
+A red verify also compares the base tip's tree with the tree each landing left (`landingOfTree`,
+`src/landing.ts`, over `LandContext.landed`; a landing's tree is the one its gates passed; with the
+files tracker a difference only under its ticket directory, the tracker's close and follow-up
+commits after the landing, still matches - `test/verify-same-tree-files-tracker.test.ts`): on a
+match with a fast-forward landing (its ticket's own sandbox) the run record's `verify.gatedTree`
+names that ticket, and the summary's re-gated line and first next step say the red is the sandbox's,
+not the merge's, instead of `RED TOGETHER`; on a match with a landing merged in a landing sandbox
+(`clean` on its `landed` entry), a clean sandbox like the verify's, `verify.cleanTree` names it and
+the summary says a test is likely flaky or order-dependent (`test/verify-same-tree.test.ts`).
+A red verify is run again once and the second result kept (`rerunRedVerify`, `src/gates.ts`; a
+ticket's first red gate and a landing's are re-run the same way), and one still red is judged for
+load (`likelyLoad`): each failing test a red gate's output names has a test-timeout line
+(`Test timed out in`, `Exceeded timeout of`, node:test's `test timed out after`) among its own
+lines, up to the next failing test (`onlyTimeouts`: node:test and vitest print each error twice, so
+a count of timeout lines would read one timeout beside an assertion as all timeouts), or a red gate
+ran at least three times (`LOAD_FACTOR`) its recorded time - the gate times of the landing sandbox
+that gated this tree, else the run's base gates when they ran.
+The run record's `verify.likelyLoad` is then set and the summary says "RED twice, likely load" and
+sends the operator to `sandcastle gates` on a quiet machine, instead of to the sandbox's git
+identity (`test/verify-rerun-load.test.ts`).
+The verify is **proof that the merged base is green in a clean gate-only sandbox**, not a clean
+re-gate on purpose: the green-base record (`.sandcastle/.run/base-gates.json`) holds the commit, the
+key (commit, image, plan and config), `by`, whose gates proved it (`#427` for a landing,
+`the base check`, `verify`) and `kind`, where they ran (`ProofKind`, `src/gates.ts`):
+`landing-sandbox` (a merge gated in its landing sandbox), `base` (the base check), `verify` (an
+earlier verify) or `ticket-sandbox` (a fast-forward of the tree the ticket's own gates passed on, in
+the sandbox its agent worked in).
+When `greenProofOfBase` finds the record at the base's current tip on the run's image and plan,
+**and its kind is one of the first three**, the verify does not run: the run record's
+`verify.skipped` carries the commit, `by` and `kind`, and the summary says
+`Merged main re-gated: green at <sha> already (gated with #427 in its landing sandbox) - not run again`
+(`verifySkippedLine`, `src/report.ts`).
+A `ticket-sandbox` proof never skips it, and it is due for one merged ticket as for several
+(`verifyPlan`, `src/gates.ts`: at least one ticket merged, or a merge regenerated files; a run that
+lands exactly one ticket as a fast-forward leaves a `ticket-sandbox` record, so its verify runs,
+while one merged in a landing sandbox leaves a gate-only record and skips it): that sandbox differs
+from a gate-only one (the agent's git identity in `~/.gitconfig`, for one), and a base red in a
+clean sandbox passed the ticket's own gates.
+A record from an older kit has no `kind` and is no proof either.
+The next turn's base check reads the record with `baseCacheHit`, whatever its kind.
+A missing record, or one at another commit (a landing's note is swallowed when it fails), runs the
+verify as before (`test/verify-skip-green-base.test.ts`).
+A landing's or verify's record keeps `hooks: true` (so the next base check opens no sandbox for the
+hook tests and the git-hook probe) only when the record before it had it, at a commit it names and
+the same key, and `git diff --name-only` between the two touches nothing under `core.hooksPath`,
+`.husky/` or `.git-hooks/`, no kept hook's command, no package manifest or lockfile and no protected
+path (`hookInputsChanged`, `src/gates.ts`; `test/hook-checks-kept-across-landings.test.ts`);
+anything else re-checks.
+The record also holds `hookRuns`, the commands of the kept hooks that ran cleanly (exit 0, or a
+block) in a passing hook test (`HookTestResult.clean`: a block test passes when any guard blocks,
+but vouches only for the guards that did not error), carried across such a landing with `hooks`; the
+lean hook check, which prints before the base gates, drops its unseen-import warning (`MODULES`,
+blind to a `sys.path.insert` made at run time) for those hooks only, when the record holds at the
+base's tip (`hooksThatRanClean`, `src/gates.ts`; `test/hook-check-vouched.test.ts`).
 
-The pipeline is called with the scheduler's attempt arguments (`pipeline(issue, at)`), and awaits `at.juncture(phase, park)` before every step that would start an agent pass: resolve, the narrow and the full review, cross-review, the repair (before the fix board is consulted, so a ticket parked there claims no failure for the others to wait on) and the review after it, and implement - each *before* its `timed` step, so the wait is no pass's time. The juncture returns at once unless a person has paused the run (below, under `src/schedule.ts`); then `park.suspend` records the ticket as `paused` (note `before <phase> at <short sha>`), reads the sandbox's peak, stops its container and makes the run's `.git` check and the worktree's records check (`checkBeforeClose`; a failure removes the container, stops the run and parks nothing), unlocks its worktree and closes the sandbox - every commit stays on the branch, and a worktree Sandcastle keeps for uncommitted files is locked again against a prune - and the burndown's attempt gives the ticket's slot back (`leaseSlot`); `park.resume` leases a slot again (a landing that waits for one goes first, `slotTurn`) and opens a fresh sandbox on the same branch (`timed(..., "setup", ...)`, which reuses a kept worktree), so the pass begins from the ticket's own state in the pipeline: the phases done, the changelog and unmet lines, the reviewers' reports are all still there, and nothing is run twice. The attempt begins in the slot its worker leased (slot first, `at.slot`) and asks for a juncture, `"start"`, before the pipeline opens a sandbox, giving the slot back while paused; with no slot (the run was paused as the attempt began, so the scheduler gave the worker's back) it leases its own after the juncture, and asks for the juncture again before it goes on, so a pause that came during that wait starts nothing. Gate runs are no juncture, and neither is a landing: a pause lets both go on. One more place parks a ticket, inside a pass: with `USAGE_PAUSE` set, the pipeline's `pass` - which every agent pass goes through - catches a pass that failed with the plan's limit (`passHitLimit`: the last lines of *that pass's own* readable log, only what the pass wrote after the log's size when it began, since a re-run appends to the same log and a re-run that fails early would else read the limit message of the pass before it - the attempt's `hitLimit` reads every log of the ticket, and one an earlier run left saying so would send a pass that failed for another reason into a pause and a rerun, again and again; not the cross-review, a second opinion that never stopped a run) and asks the context's `limitPause(phase)` (`createUsagePause(...).limit`, below, after a forced `usageWatch.poll(true)` so the newest reading is the pass's own last, not one up to 15 seconds old), which pauses the run until the window resets or answers false - when no reading says when that is, or the pause cannot be written - and then the error stands as it always did. A crashed attempt reads its ticket's logs with `planLimit` (`hitLimit` is its yes or no), and the reset time with `limitResets`, from the limit line (`You've hit your session limit · resets 2:10pm (UTC)`), which the `plan limit` cause carries: an attempt with that cause for its own ticket ends as `not begun` with `cutShort` (record `skipped`, "the plan's usage limit stopped it", written as it ends; the tickets the stop left unstarted still take the run's last words at the close), never `crashed`, and the closing summary's "Paused for usage" line gives the reset time and names `USAGE_PAUSE` when the run's record has none (`test/plan-session-limit.test.ts`, `test/plan-limit-ledger.test.ts`). Paused, the pass calls the same juncture - sandbox closed, branch and any uncommitted files kept, slot given back, a fresh sandbox on the same branch after the resume - and runs the *same* pass again in it (the ticket's note says so); a pass whose juncture did not park (nothing paused the run) fails rather than looping. The time parked inside a pass is that step's `waitMs` (the step line's `ms` and the ticket's usual time leave it out, as for a gates-slot wait) and is added to `waited` once, by `timed`. No wait for a machine-wide sandbox slot is a ticket's: its worker leased the slot before it took the ticket (slot first), so the per-ticket summary line (`ticketTime`) is the ticket's own time and the first `setup` line carries no slot wait; the run's waits are `createSlotWaits`' (`test/slot-wait-timings.test.ts`). A sent-back ticket's resolve wait, which also comes before the pipeline, is handed in as `at.resolveWaitMs`, and the first `setup` step takes it as `timed`'s `queuedMs`: `withQueued` (`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`, and not to `waited`, since `took` never held it.
+The pipeline is called with the scheduler's attempt arguments (`pipeline(issue, at)`), and awaits
+`at.juncture(phase, park)` before every step that would start an agent pass: resolve, the narrow and
+the full review, cross-review, the repair (before the fix board is consulted, so a ticket parked
+there claims no failure for the others to wait on) and the review after it, and implement - each
+*before* its `timed` step, so the wait is no pass's time.
+The juncture returns at once unless a person has paused the run (below, under `src/schedule.ts`);
+then `park.suspend` records the ticket as `paused` (note `before <phase> at <short sha>`), reads the
+sandbox's peak, stops its container and makes the run's `.git` check and the worktree's records
+check (`checkBeforeClose`; a failure removes the container, stops the run and parks nothing),
+unlocks its worktree and closes the sandbox - every commit stays on the branch, and a worktree
+Sandcastle keeps for uncommitted files is locked again against a prune - and the burndown's attempt
+gives the ticket's slot back (`leaseSlot`); `park.resume` leases a slot again (a landing that waits
+for one goes first, `slotTurn`) and opens a fresh sandbox on the same branch
+(`timed(..., "setup", ...)`, which reuses a kept worktree), so the pass begins from the ticket's own
+state in the pipeline: the phases done, the changelog and unmet lines, the reviewers' reports are
+all still there, and nothing is run twice.
+The attempt begins in the slot its worker leased (slot first, `at.slot`) and asks for a juncture,
+`"start"`, before the pipeline opens a sandbox, giving the slot back while paused; with no slot (the
+run was paused as the attempt began, so the scheduler gave the worker's back) it leases its own
+after the juncture, and asks for the juncture again before it goes on, so a pause that came during
+that wait starts nothing.
+Gate runs are no juncture, and neither is a landing: a pause lets both go on.
+One more place parks a ticket, inside a pass: with `USAGE_PAUSE` set, the pipeline's `pass` - which
+every agent pass goes through - catches a pass that failed with the plan's limit (`passHitLimit`:
+the last lines of *that pass's own* readable log, only what the pass wrote after the log's size when
+it began, since a re-run appends to the same log and a re-run that fails early would else read the
+limit message of the pass before it - the attempt's `hitLimit` reads every log of the ticket, and
+one an earlier run left saying so would send a pass that failed for another reason into a pause and
+a rerun, again and again; not the cross-review, a second opinion that never stopped a run) and asks
+the context's `limitPause(phase)` (`createUsagePause(...).limit`, below, after a forced
+`usageWatch.poll(true)` so the newest reading is the pass's own last, not one up to 15 seconds old),
+which pauses the run until the window resets or answers false - when no reading says when that is,
+or the pause cannot be written - and then the error stands as it always did.
+A crashed attempt reads its ticket's logs with `planLimit` (`hitLimit` is its yes or no), and the
+reset time with `limitResets`, from the limit line
+(`You've hit your session limit · resets 2:10pm (UTC)`), which the `plan limit` cause carries: an
+attempt with that cause for its own ticket ends as `not begun` with `cutShort` (record `skipped`,
+"the plan's usage limit stopped it", written as it ends; the tickets the stop left unstarted still
+take the run's last words at the close), never `crashed`, and the closing summary's "Paused for
+usage" line gives the reset time and names `USAGE_PAUSE` when the run's record has none
+(`test/plan-session-limit.test.ts`, `test/plan-limit-ledger.test.ts`).
+Paused, the pass calls the same juncture - sandbox closed, branch and any uncommitted files kept,
+slot given back, a fresh sandbox on the same branch after the resume - and runs the *same* pass
+again in it (the ticket's note says so); a pass whose juncture did not park (nothing paused the run)
+fails rather than looping.
+The time parked inside a pass is that step's `waitMs` (the step line's `ms` and the ticket's usual
+time leave it out, as for a gates-slot wait) and is added to `waited` once, by `timed`.
+No wait for a machine-wide sandbox slot is a ticket's: its worker leased the slot before it took the
+ticket (slot first), so the per-ticket summary line (`ticketTime`) is the ticket's own time and the
+first `setup` line carries no slot wait; the run's waits are `createSlotWaits`'
+(`test/slot-wait-timings.test.ts`).
+A sent-back ticket's resolve wait, which also comes before the pipeline, is handed in as
+`at.resolveWaitMs`, and the first `setup` step takes it as `timed`'s `queuedMs`: `withQueued`
+(`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`, and not to `waited`, since `took`
+never held it.
 
-**Sandbox CPUs** (`sandboxCpus` in `src/sandbox.ts`): one function decides a sandbox's `docker run --cpus` from its kind - a `ticket`'s (the VM's CPUs divided by the run's concurrency) or `gate`-only (divided by `maxGates`: the landing opener, the base, mid-run base and verify gates, `sandcastle gates` and `sandcastle land`; the landings are one at a time and set the run's end) - the VM's count from the start's one `docker info`, a numeric `cpus` in the config overriding both, cut to the VM's. `burndown()` resolves both once per turn and carries each on a copy of the project, as `sandboxConfig` reads it: `project` is the ticket's from there, and `gateProject` goes to `sandboxOpener`, `requireGreenBase` and `gateBase`, so `src/gates.ts` and `src/land.ts` take no argument for it. `gateOnly` in `src/cli.ts` does the same for `gates` and `land`. A new place that opens a gate-only sandbox takes the gate project, or its gates run on a ticket's share; `test/sandbox-cpus-commands.test.ts` runs both commands against a fake `docker` and reads the `--cpus` each container got.
+**Sandbox CPUs** (`sandboxCpus` in `src/sandbox.ts`): one function decides a sandbox's
+`docker run --cpus` from its kind - a `ticket`'s (the VM's CPUs divided by the run's concurrency) or
+`gate`-only (divided by `maxGates`: the landing opener, the base, mid-run base and verify gates,
+`sandcastle gates` and `sandcastle land`; the landings are one at a time and set the run's end) -
+the VM's count from the start's one `docker info`, a numeric `cpus` in the config overriding both,
+cut to the VM's. `burndown()` resolves both once per turn and carries each on a copy of the project,
+as `sandboxConfig` reads it: `project` is the ticket's from there, and `gateProject` goes to
+`sandboxOpener`, `requireGreenBase` and `gateBase`, so `src/gates.ts` and `src/land.ts` take no
+argument for it. `gateOnly` in `src/cli.ts` does the same for `gates` and `land`.
+A new place that opens a gate-only sandbox takes the gate project, or its gates run on a ticket's
+share; `test/sandbox-cpus-commands.test.ts` runs both commands against a fake `docker` and reads the
+`--cpus` each container got.
 
-**Gates leave the worktree as they found it** (`runGates`, `src/gates.ts`): `git status` before and after, and the paths the gates changed - a tracked file a build regenerated, a build left untracked - are put back, whatever was dirty before them is not touched. Sandcastle keeps a dirty worktree and its branch at close, so one rewritten file used to leak every worktree the kit gated in, and the branch delete after landing failed. The tracked files restored are the `GateRun`'s `rewrote` (after an in-slot re-run, the first run's and the re-run's together: the re-run starts at the red gate, so a gate before it that rewrote a file does not run again), which `burndown()` keeps in the run record's `gateRewrites` once each, and the closing summary names with the way to stop it (`.gitignore`, or `generated`). A gate-only sandbox (`gateBase`) resets hard before it closes, as `landInSandbox` does. `test/gate-rewrites-tracked-file.test.ts`.
+**Gates leave the worktree as they found it** (`runGates`, `src/gates.ts`): `git status` before and
+after, and the paths the gates changed - a tracked file a build regenerated, a build left untracked -
+are put back, whatever was dirty before them is not touched.
+Sandcastle keeps a dirty worktree and its branch at close, so one rewritten file used to leak every
+worktree the kit gated in, and the branch delete after landing failed.
+The tracked files restored are the `GateRun`'s `rewrote` (after an in-slot re-run, the first run's
+and the re-run's together: the re-run starts at the red gate, so a gate before it that rewrote a
+file does not run again), which `burndown()` keeps in the run record's `gateRewrites` once each, and
+the closing summary names with the way to stop it (`.gitignore`, or `generated`).
+A gate-only sandbox (`gateBase`) resets hard before it closes, as `landInSandbox` does.
+`test/gate-rewrites-tracked-file.test.ts`.
 
-**A carried branch over a rewritten base** (`staleBaseParents` and `ownCommits`, `src/sandbox.ts`; `rebuildOnBase`, `src/resolution.ts`; `test/carried-rewritten-base.test.ts`): the kit merges the base into a carried branch on each re-run, so a base rewritten between runs (a `git pull --rebase` that flattens the run's landing merges into copies, a reset that drops a landing) stays in the branch's history through those merges, and everything of it the base lacks reads as the branch's own work: landed as it stands, the branch brings back duplicates of what landed, or a commit someone removed on purpose, under a head record that vouches for them. The detector is the base-side parents of the merge commits in `base..branch`: one that is itself in `base..branch` is not an ancestor of the base (`git cherry` alone cannot see a reset: a commit the base dropped has no copy there and reads as the branch's own). `ownCommits` and `branchFiles` (the overlap hold's input) leave that old base out; `landOnlyHead`, `reviewedOnlyHead` and `narrowReviewBase` return nothing for such a branch, so no recorded head skips its implement or full review; `landOne` skips one that reaches it anyway (`not merged`, the next run re-creates it). At the start of the pipeline's attempt, before `carried` and the head records are read, `rebuildOnBase` re-creates the branch in the sandbox (never on the host) on the base's tip from its own non-merge commits - those in `base..branch` and not reachable from the old base - cherry-picked in order on a detached head and the branch moved only once every commit applied: the branch's head record is dropped (`forgetHead`), so the full implement, review and gates follow, and the run says why (`rebuiltLine`). A commit the base already has the work of is left out; one that does not apply holds the ticket for a person with the cause named (`rewrittenNote`, which starts `REWRITTEN_NOTE_START`; `heldResolution`'s outcome, the branch untouched - the old tip is also named in the note), and the closing summary advises a rebuild with `git rebase --onto` and a requeue for it, never a merge. The closing summary's push step warns that a plain `git pull --rebase` flattens the run's landing merges. A branch that never merged the base has no merge of its own to read the old base from, so the kit records the base tip it cuts an agent branch from (`addWorktree`, `src/guard.ts`; `recordFork`, `src/sandbox.ts`) in `.sandcastle/logs/forks.json` by branch name: a recorded fork point that `base..branch` holds - no longer an ancestor of the base, still one of the branch - is added to what `staleBaseParents` returns, so a reset and a flattening rebase are found whatever the lost commits were (squash landings, a person's direct commits). The record outlives the ticket's head record (`forgetHead` drops the verdict, not where the branch began), is replaced when `rebuildOnBase` rebuilds the branch (now forked from the tip it sits on) or the base check cuts it again, and goes with the branch (`forgetFork`: a landing's delete, `sandcastle land`, `sandcastle clean`). A branch made before the record existed has none and keeps the merge-commit detector alone (`test/carried-fork-point.test.ts`).
+**A carried branch over a rewritten base** (`staleBaseParents` and `ownCommits`, `src/sandbox.ts`;
+`rebuildOnBase`, `src/resolution.ts`; `test/carried-rewritten-base.test.ts`): the kit merges the
+base into a carried branch on each re-run, so a base rewritten between runs (a `git pull --rebase`
+that flattens the run's landing merges into copies, a reset that drops a landing) stays in the
+branch's history through those merges, and everything of it the base lacks reads as the branch's own
+work: landed as it stands, the branch brings back duplicates of what landed, or a commit someone
+removed on purpose, under a head record that vouches for them.
+The detector is the base-side parents of the merge commits in `base..branch`: one that is itself in
+`base..branch` is not an ancestor of the base (`git cherry` alone cannot see a reset: a commit the
+base dropped has no copy there and reads as the branch's own). `ownCommits` and `branchFiles` (the
+overlap hold's input) leave that old base out; `landOnlyHead`, `reviewedOnlyHead` and
+`narrowReviewBase` return nothing for such a branch, so no recorded head skips its implement or full
+review; `landOne` skips one that reaches it anyway (`not merged`, the next run re-creates it).
+At the start of the pipeline's attempt, before `carried` and the head records are read,
+`rebuildOnBase` re-creates the branch in the sandbox (never on the host) on the base's tip from its
+own non-merge commits - those in `base..branch` and not reachable from the old base - cherry-picked
+in order on a detached head and the branch moved only once every commit applied: the branch's head
+record is dropped (`forgetHead`), so the full implement, review and gates follow, and the run says
+why (`rebuiltLine`).
+A commit the base already has the work of is left out; one that does not apply holds the ticket for
+a person with the cause named (`rewrittenNote`, which starts `REWRITTEN_NOTE_START`;
+`heldResolution`'s outcome, the branch untouched - the old tip is also named in the note), and the
+closing summary advises a rebuild with `git rebase --onto` and a requeue for it, never a merge.
+The closing summary's push step warns that a plain `git pull --rebase` flattens the run's landing
+merges.
+A branch that never merged the base has no merge of its own to read the old base from, so the kit
+records the base tip it cuts an agent branch from (`addWorktree`, `src/guard.ts`; `recordFork`,
+`src/sandbox.ts`) in `.sandcastle/logs/forks.json` by branch name: a recorded fork point that
+`base..branch` holds - no longer an ancestor of the base, still one of the branch - is added to what
+`staleBaseParents` returns, so a reset and a flattening rebase are found whatever the lost commits
+were (squash landings, a person's direct commits).
+The record outlives the ticket's head record (`forgetHead` drops the verdict, not where the branch
+began), is replaced when `rebuildOnBase` rebuilds the branch (now forked from the tip it sits on) or
+the base check cuts it again, and goes with the branch (`forgetFork`: a landing's delete,
+`sandcastle land`, `sandcastle clean`).
+A branch made before the record existed has none and keeps the merge-commit detector alone
+(`test/carried-fork-point.test.ts`).
 
-**Kept worktrees of earlier runs** (`earlierKeptWorktrees`, `src/report.ts`; `test/report-kept-earlier.test.ts`): the run record's `keptWorktrees` lists only what this run kept, so the closing summary also reads `git worktree list` for every worktree under `.sandcastle/worktrees/` (`projectWorktrees`, `src/sandbox.ts`, the listing `cleanProject` removes by) that the record does not list - `Facts.earlierKept`. Whether one is merged is `clean`'s own rule for its branch (`branchFinished`: nothing on it that the base lacks, or a `sandcastle/*` scratch branch); its disk use is `du -sk`, said from 1 GB. Local state counts them; the Next step names `sandcastle clean` for the merged ones (and says it removes the unmerged ones with their uncommitted files too). A live run's partial summary leaves out the worktrees of its own tickets and its scratch branches, which are in flight, not kept. The worktrees an earlier turn of a drain run kept (`Facts.carried[].facts.keptWorktrees`, `test/report-drain-carry-kept.test.ts`) are named like the last turn's own, in Local state and in the look-then-clean step for a merged ticket, marked with their turn, and left out of that count.
+**Kept worktrees of earlier runs** (`earlierKeptWorktrees`, `src/report.ts`;
+`test/report-kept-earlier.test.ts`): the run record's `keptWorktrees` lists only what this run kept,
+so the closing summary also reads `git worktree list` for every worktree under
+`.sandcastle/worktrees/` (`projectWorktrees`, `src/sandbox.ts`, the listing `cleanProject` removes
+by) that the record does not list - `Facts.earlierKept`.
+Whether one is merged is `clean`'s own rule for its branch (`branchFinished`: nothing on it that the
+base lacks, or a `sandcastle/*` scratch branch); its disk use is `du -sk`, said from 1 GB.
+Local state counts them; the Next step names `sandcastle clean` for the merged ones (and says it
+removes the unmerged ones with their uncommitted files too).
+A live run's partial summary leaves out the worktrees of its own tickets and its scratch branches,
+which are in flight, not kept.
+The worktrees an earlier turn of a drain run kept (`Facts.carried[].facts.keptWorktrees`,
+`test/report-drain-carry-kept.test.ts`) are named like the last turn's own, in Local state and in
+the look-then-clean step for a merged ticket, marked with their turn, and left out of that count.
 
-An agent names a problem outside its ticket in a `<followup>title - evidence</followup>` line, never with a tracker write of its own: the pipeline's `pass`, which every agent pass goes through, reads them (own-line tags, as `<changelog>` is read) into the context's `followUps`, with the ticket and the phase. The context's `followUps` is the run's follow-up book (`createFollowUpBook`): each line goes into the run record's `followUps` as its pass ends, an unfiled entry (no `id`), so a run that stops before the filing - the schedule rejecting, or a safety stop - still has them for its closing summary and the next run; a title is listed once, and not at all when an earlier turn of the run filed it. After the run's notes are posted, the book's `file` files each entry still unfiled through `fileFollowUps` and the tracker's `create` on the host writer (a ticket file is a commit on the base, so `trackerMade` checks it), a title once per run; a dry run files none. What is named already from a ticket is shown to its agents and met across runs: the book's `namedFrom(ticket)` lists the issues earlier runs filed from it (`filedBefore`, read from `logs/history.jsonl` for the tickets the turn runs, without the issues the tracker says are closed (`Tracker.isClosed`; one it cannot read stays), and handed to `createFollowUpBook` as `earlier`, seeded into `places` as places with their issue ids) and the lines this run's passes named; `alreadyNamedView` renders it as the `{{FOLLOWUPS_NAMED}}` section (implement, review, rereview, remerge and repair prompts; empty when there is none, in the pipeline's default arguments, and filled by `pass` at every agent pass, so the review sees the implementer's lines), and a line that restates one - the same title from the same source ticket (`Seat.key`), or a match under the place rules - is a comment on that issue, not a new one (the history keeps no evidence, so an earlier filing is met by its title). `test/followup-already-named.test.ts`. The same argument carries two lists about the run's other tickets, appended by `runTicketsView` and each left out when empty: "Other tickets in this run" (ref and title of each ticket the turn may run, this one left out: the pipeline context's `tickets`, which `burndown()` fills from `candidates`) and "Named by other tickets this run" (the book's `namedByOthers(ticket)`: the lines this run's passes named from other tickets, as of the pass), filled at every agent pass. They only inform the agent, who judges the meaning: the dedupe stays per source ticket (`sameFinding` has no cross-ticket rule) and nothing is written to another ticket. `test/followup-run-tickets.test.ts`. A line naming the same place (`placeSeat`) as one already heard from the same source ticket is the same finding in other words. A place is a file of the base tree (`exists`, `onBase`: `git cat-file` on the base branch, so `api.example.com:443` is not one and a root-level `status.sh:40` is), or a bare file name (no `/`, not a root file) that is the base tree's only file of that name (`named`, `namedOnBase`: one `git ls-tree` of the base per run; two files of the name, or none, is no place; a caller that gives no `named` resolves no bare name). A finding has a place for every file it names, in its title or its evidence (`Seat.spots`, kept in `places` under each file), and two findings are one when any place of one matches a place of the other: a `path:line` in a title is used as it is (the same line, whatever the titles), while anything else - a place found only in the evidence, a file with no line, a bare name - counts only when the two titles also share at least two significant words (4+ letters, no stopword, every path the title names excluded; `sameFinding`). `test/followup-place-forms.test.ts`. A line that names no place of the base tree is the same finding as one of the same source ticket that names none either, or one that names a place, when the two titles share at least three significant words (`sameFinding`, a seat with an empty path; `placeOf` compares such a pair across the per-file buckets): a ticket's second session words the same gap again, one wording citing the file and the other not. `test/followup-reworded.test.ts`. Such a line: it is not listed, and once the first is filed `fileFollowUps` posts its evidence on that issue with the tracker's `comment` (`places`, the issue of each place, is shared by a run's turns like `seen`); a comment that fails is tried again by the next `file`, and a first that failed to file leaves it held, never filed as an issue of its own. The two stops file them too (`stopLanding`, before the summary is printed), except after a safety stop - the shared `.git` changed - where nothing is written to the tracker: each entry stays in the record as `failed` with that reason, which the report lists under Needs you as one to file by hand - the reason said once for the set (`followUpsWithheld`), live and in the summary, over bare bullets (a crash of the schedule is a safety stop when the host git refused a write, and otherwise the writer's own `.git` check refuses a write the fingerprint forbids). The run record's `followUps` keeps what each became, and the report lists them under Needs you - the filed ones, a dry run's and the issues opened during the run under a `### To triage` sub-heading after the run's own items - leaving the kit's own filings out of the issues "opened during this run". A review that names a gap in prose and files neither a `<followup>` nor an `<unmet>` line is caught by `gapOf` (the same pass of `createPipeline` reads it beside `ungatedOf`, for the full review, the cross-review and the review after a repair): the sentences with a gap word (`left alone`, `remains`, `gap`, `not fixed`, ...) that are not negated (`nothing remains`, `remains unchanged`), outside fences, tags, inline code and text in double quotes (a Markdown heading or a short bold label - at most six words, no sentence punctuation, no colon with words after it - is no sentence either; a bold sentence is read as prose, its bold markers dropped), become the pipeline result's `gap` (a sentence opening with `That`, `This`, `It`, `These`, `Those` or `Which` is quoted with the sentences before it in its paragraph, up to `UNGATED_MAX`; "remaining ..., which is correct", "found ... and fixed" (unless a gap is named after the fix) and "left alone, as the ticket asked" are negated too), the ticket record's `gap`, and for a merged ticket (`gapLines` in `src/report.ts`) a `Worth a glance - the reviewer's prose may name a gap: #N "..."` line in the summary's header: it is a guess at prose, so it is under neither Needs you nor the headline's `need you`, and adds no Next step (approving prose keeps finding phrasings the detector reads as a gap; `test/gap-in-prose-false.test.ts`).
+An agent names a problem outside its ticket in a `<followup>title - evidence</followup>` line, never
+with a tracker write of its own: the pipeline's `pass`, which every agent pass goes through, reads
+them (own-line tags, as `<changelog>` is read) into the context's `followUps`, with the ticket and
+the phase.
+The context's `followUps` is the run's follow-up book (`createFollowUpBook`): each line goes into
+the run record's `followUps` as its pass ends, an unfiled entry (no `id`), so a run that stops
+before the filing - the schedule rejecting, or a safety stop - still has them for its closing
+summary and the next run; a title is listed once, and not at all when an earlier turn of the run
+filed it.
+After the run's notes are posted, the book's `file` files each entry still unfiled through
+`fileFollowUps` and the tracker's `create` on the host writer (a ticket file is a commit on the
+base, so `trackerMade` checks it), a title once per run; a dry run files none.
+What is named already from a ticket is shown to its agents and met across runs: the book's
+`namedFrom(ticket)` lists the issues earlier runs filed from it (`filedBefore`, read from
+`logs/history.jsonl` for the tickets the turn runs, without the issues the tracker says are closed
+(`Tracker.isClosed`; one it cannot read stays), and handed to `createFollowUpBook` as `earlier`,
+seeded into `places` as places with their issue ids) and the lines this run's passes named;
+`alreadyNamedView` renders it as the `{{FOLLOWUPS_NAMED}}` section (implement, review, rereview,
+remerge and repair prompts; empty when there is none, in the pipeline's default arguments, and
+filled by `pass` at every agent pass, so the review sees the implementer's lines), and a line that
+restates one - the same title from the same source ticket (`Seat.key`), or a match under the place
+rules - is a comment on that issue, not a new one (the history keeps no evidence, so an earlier
+filing is met by its title). `test/followup-already-named.test.ts`.
+The same argument carries two lists about the run's other tickets, appended by `runTicketsView` and
+each left out when empty: "Other tickets in this run" (ref and title of each ticket the turn may
+run, this one left out: the pipeline context's `tickets`, which `burndown()` fills from
+`candidates`) and "Named by other tickets this run" (the book's `namedByOthers(ticket)`: the lines
+this run's passes named from other tickets, as of the pass), filled at every agent pass.
+They only inform the agent, who judges the meaning: the dedupe stays per source ticket
+(`sameFinding` has no cross-ticket rule) and nothing is written to another ticket.
+`test/followup-run-tickets.test.ts`.
+A line naming the same place (`placeSeat`) as one already heard from the same source ticket is the
+same finding in other words.
+A place is a file of the base tree (`exists`, `onBase`: `git cat-file` on the base branch, so
+`api.example.com:443` is not one and a root-level `status.sh:40` is), or a bare file name (no `/`,
+not a root file) that is the base tree's only file of that name (`named`, `namedOnBase`: one
+`git ls-tree` of the base per run; two files of the name, or none, is no place; a caller that gives
+no `named` resolves no bare name).
+A finding has a place for every file it names, in its title or its evidence (`Seat.spots`, kept in
+`places` under each file), and two findings are one when any place of one matches a place of the
+other: a `path:line` in a title is used as it is (the same line, whatever the titles), while
+anything else - a place found only in the evidence, a file with no line, a bare name - counts only
+when the two titles also share at least two significant words (4+ letters, no stopword, every path
+the title names excluded; `sameFinding`). `test/followup-place-forms.test.ts`.
+A line that names no place of the base tree is the same finding as one of the same source ticket
+that names none either, or one that names a place, when the two titles share at least three
+significant words (`sameFinding`, a seat with an empty path; `placeOf` compares such a pair across
+the per-file buckets): a ticket's second session words the same gap again, one wording citing the
+file and the other not. `test/followup-reworded.test.ts`.
+Such a line: it is not listed, and once the first is filed `fileFollowUps` posts its evidence on
+that issue with the tracker's `comment` (`places`, the issue of each place, is shared by a run's
+turns like `seen`); a comment that fails is tried again by the next `file`, and a first that failed
+to file leaves it held, never filed as an issue of its own.
+The two stops file them too (`stopLanding`, before the summary is printed), except after a safety
+stop - the shared `.git` changed - where nothing is written to the tracker: each entry stays in the
+record as `failed` with that reason, which the report lists under Needs you as one to file by hand -
+the reason said once for the set (`followUpsWithheld`), live and in the summary, over bare bullets
+(a crash of the schedule is a safety stop when the host git refused a write, and otherwise the
+writer's own `.git` check refuses a write the fingerprint forbids).
+The run record's `followUps` keeps what each became, and the report lists them under Needs you - the
+filed ones, a dry run's and the issues opened during the run under a `### To triage` sub-heading
+after the run's own items - leaving the kit's own filings out of the issues "opened during this
+run".
+A review that names a gap in prose and files neither a `<followup>` nor an `<unmet>` line is caught
+by `gapOf` (the same pass of `createPipeline` reads it beside `ungatedOf`, for the full review, the
+cross-review and the review after a repair): the sentences with a gap word (`left alone`, `remains`,
+`gap`, `not fixed`, ...) that are not negated (`nothing remains`, `remains unchanged`), outside
+fences, tags, inline code and text in double quotes (a Markdown heading or a short bold label - at
+most six words, no sentence punctuation, no colon with words after it - is no sentence either; a
+bold sentence is read as prose, its bold markers dropped), become the pipeline result's `gap` (a
+sentence opening with `That`, `This`, `It`, `These`, `Those` or `Which` is quoted with the sentences
+before it in its paragraph, up to `UNGATED_MAX`; "remaining ..., which is correct", "found ... and
+fixed" (unless a gap is named after the fix) and "left alone, as the ticket asked" are negated too),
+the ticket record's `gap`, and for a merged ticket (`gapLines` in `src/report.ts`) a
+`Worth a glance - the reviewer's prose may name a gap: #N "..."` line in the summary's header: it is
+a guess at prose, so it is under neither Needs you nor the headline's `need you`, and adds no Next
+step (approving prose keeps finding phrasings the detector reads as a gap;
+`test/gap-in-prose-false.test.ts`).
 
 ## `src/landing.ts`
 
-`landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a merge as it is when the branch holds the base's tip, otherwise git's own merge of the base tip and the head on the host - a conflict outside the `generated` paths is returned at once, before any sandbox slot is asked for - and then a merge gated in a sandbox, close) and what it returns - how it landed and the facts the run record keeps (the files a conflict or hold names, a red tree's failing tests, the paths beyond the Touches line, a close that failed twice, its error) - writing no verdict of its own, only the `landing` stage; `landingWork(ctx)`: the scheduler's land and host ports over one `LandContext`; the lines of a requeued ticket; `createHostGit`: the mutex through which every host git write goes and which moves the run's expected base; also the landing merge, its abort and the conflict line. What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it asks the ledger's `describe` for
+`landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a
+merge as it is when the branch holds the base's tip, otherwise git's own merge of the base tip and
+the head on the host - a conflict outside the `generated` paths is returned at once, before any
+sandbox slot is asked for - and then a merge gated in a sandbox, close) and what it returns - how it
+landed and the facts the run record keeps (the files a conflict or hold names, a red tree's failing
+tests, the paths beyond the Touches line, a close that failed twice, its error) - writing no verdict
+of its own, only the `landing` stage; `landingWork(ctx)`: the scheduler's land and host ports over
+one `LandContext`; the lines of a requeued ticket; `createHostGit`: the mutex through which every
+host git write goes and which moves the run's expected base; also the landing merge, its abort and
+the conflict line.
+What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it
+asks the ledger's `describe` for
 
 ## `src/ledger.ts`
 
 The ticket ledger: one place that turns each ending (`src/schedule.ts`) into everything a run says about its ticket.
 
-- **`describe(ending, context)`** is pure and exhaustive over the `Ending` kinds (the type checker holds it): the ticket state the run ends on, the **outcome** (kind, `with`, text), the view's word and whether it counts as landed, and the tracker's text (a close, a hold, or the one comment on a ticket that did not land). The context is what the ending does not carry: the base, the gates' names, the agents' report, a dry run, a kept worktree, a hold note (the ticket gets that note, never a second comment), the run's stop line. The agent's hand-back through the tracker's hold label is on the pipeline's result (`handedBack`), so the ending arrives complete. `test/ledger.test.ts` holds every ending's four sayings side by side.
-- **The writer** (`createLedger`) records what `describe` says as burndown's `tell` hands it each ending (`ledger.tell`): the ticket state the run ends on, the outcome and the view's word - it is the only writer of each, so neither `landOne`, the attempt nor the burndown after the schedule writes a verdict. Its `outcomes` port is `outcomesFile`, the one caller of `recordOutcomes`. `test/ledger-guard.test.ts` holds that: outside `src/ledger.ts` a run writes only progress - a phase, the landing stage, queued or blocked, a note, the pipeline's facts - spelt out in each `.ticket(...)` call, and nothing calls `recordOutcomes`. Each ending is recorded once, as it is told; a ticket the run's stop left unstarted waits for the run's last words (`close(endings, stopLine)`, after the schedule: the most severe cause, which a ticket told earlier could not know). Beside the endings, `ready` writes a green branch as it waits to land, with its outcome and what will hold it for a person at landing. Each ticket's entry is kept.
-- **A requeue** is a told change the writer records: the ticket written as queued with the line its second attempt's setup carries (`requeuedAs`), before it is pushed back. A conflict's line says where it was found (`Again.found`: `review` or `gates` from the pipeline's merge check, `landing`), which the closing summary's `Landed on a second attempt` line words from the run record (`test/requeue-where.test.ts`); a record from before that has no place and reads "after a conflict". A second collision's note names the tickets of both attempts (`describe`). `landOne` writes no verdict, so a requeued ticket whose second attempt never began has nothing to undo: it is recorded from the ending the scheduler makes of it (its first landing, or withdrawn - then said as not started, and its first pipeline's line dropped), its record no longer `requeued`; a conflict its pipeline found before landing is recorded the same way, from its `conflict` ending. `test/landing-requeue.test.ts` drives the scheduler with this writer over fake ports.
-- **`accountLanding(entries)`**: what the closing notification and the verify read - the merged list and the counts - from the entries.
-- **`partly-done`** is a landing ending: a branch an agent said leaves an acceptance criterion undone (its `<unmet>` line, read by `unmetOf` as `ungatedOf` reads `<ungated>`; the reviewers' word replaces the implementer's once a full review ran: the full review prompt shows the implementer's line as `{{IMPL_UNMET}}` - empty when there is none, and for a narrow review - and asks the reviewer to finish the criterion or restate it, so a line it does neither with is dropped from the ticket's leftovers; that prompt also shows the ticket's comments, as the implement prompt does, and the last paragraph of the implementer's final message as `{{IMPL_SAID}}` (`closingParagraphOf`, `implSaidView`), so a check the implementer says it did not make reaches the reviewer; the paragraph is kept in the head record's `implSaid`, as `unmet` is) merges, but the ticket is neither closed nor released to its dependants, and the ledger's comment names the criterion. Its merge subject says `part of` the ticket, not `closes` it (`mergeSubject`), so `mergedEarlier` does not close it on the next run, which picks up the remainder while the ticket stays queued (`Facts.partial`, read from the tracker by `gather`; `partialRerunnable` makes it re-runnable for the autonomy loop, and `drainStop` stops a drain that leaves the same ticket partly done twice). An `<unmet>` line that `needsDecision` reads as needing a person (the agent's explicit `<unmet who="person">` marker, which `unmetOf` keeps as a `needs a person: ` prefix on the note, else its words: a decision, a deploy, access it lacks, a file agents may not edit) is not re-runnable: the ledger comment and the report suggest the hold label instead.
-- Also the words themselves: `closeComment`, `partlyDoneComment`, `notLandedComment`, `pipelineOutcome`, `refusedRecord`, `withdrawnRecord`.
+- **`describe(ending, context)`** is pure and exhaustive over the `Ending` kinds (the type checker
+  holds it): the ticket state the run ends on, the **outcome** (kind, `with`, text), the view's word
+  and whether it counts as landed, and the tracker's text (a close, a hold, or the one comment on a
+  ticket that did not land).
+  The context is what the ending does not carry: the base, the gates' names, the agents' report, a
+  dry run, a kept worktree, a hold note (the ticket gets that note, never a second comment), the
+  run's stop line.
+  The agent's hand-back through the tracker's hold label is on the pipeline's result (`handedBack`),
+  so the ending arrives complete. `test/ledger.test.ts` holds every ending's four sayings side by
+  side.
+- **The writer** (`createLedger`) records what `describe` says as burndown's `tell` hands it each
+  ending (`ledger.tell`): the ticket state the run ends on, the outcome and the view's word - it is
+  the only writer of each, so neither `landOne`, the attempt nor the burndown after the schedule
+  writes a verdict.
+  Its `outcomes` port is `outcomesFile`, the one caller of `recordOutcomes`.
+  `test/ledger-guard.test.ts` holds that: outside `src/ledger.ts` a run writes only progress - a
+  phase, the landing stage, queued or blocked, a note, the pipeline's facts - spelt out in each
+  `.ticket(...)` call, and nothing calls `recordOutcomes`.
+  Each ending is recorded once, as it is told; a ticket the run's stop left unstarted waits for the
+  run's last words (`close(endings, stopLine)`, after the schedule: the most severe cause, which a
+  ticket told earlier could not know).
+  Beside the endings, `ready` writes a green branch as it waits to land, with its outcome and what
+  will hold it for a person at landing.
+  Each ticket's entry is kept.
+- **A requeue** is a told change the writer records: the ticket written as queued with the line its
+  second attempt's setup carries (`requeuedAs`), before it is pushed back.
+  A conflict's line says where it was found (`Again.found`: `review` or `gates` from the pipeline's
+  merge check, `landing`), which the closing summary's `Landed on a second attempt` line words from
+  the run record (`test/requeue-where.test.ts`); a record from before that has no place and reads
+  "after a conflict".
+  A second collision's note names the tickets of both attempts (`describe`). `landOne` writes no
+  verdict, so a requeued ticket whose second attempt never began has nothing to undo: it is recorded
+  from the ending the scheduler makes of it (its first landing, or withdrawn - then said as not
+  started, and its first pipeline's line dropped), its record no longer `requeued`; a conflict its
+  pipeline found before landing is recorded the same way, from its `conflict` ending.
+  `test/landing-requeue.test.ts` drives the scheduler with this writer over fake ports.
+- **`accountLanding(entries)`**: what the closing notification and the verify read - the merged list
+  and the counts - from the entries.
+- **`partly-done`** is a landing ending: a branch an agent said leaves an acceptance criterion
+  undone (its `<unmet>` line, read by `unmetOf` as `ungatedOf` reads `<ungated>`; the reviewers'
+  word replaces the implementer's once a full review ran: the full review prompt shows the
+  implementer's line as `{{IMPL_UNMET}}` - empty when there is none, and for a narrow review - and
+  asks the reviewer to finish the criterion or restate it, so a line it does neither with is dropped
+  from the ticket's leftovers; that prompt also shows the ticket's comments, as the implement prompt
+  does, and the last paragraph of the implementer's final message as `{{IMPL_SAID}}`
+  (`closingParagraphOf`, `implSaidView`), so a check the implementer says it did not make reaches
+  the reviewer; the paragraph is kept in the head record's `implSaid`, as `unmet` is) merges, but
+  the ticket is neither closed nor released to its dependants, and the ledger's comment names the
+  criterion.
+  Its merge subject says `part of` the ticket, not `closes` it (`mergeSubject`), so `mergedEarlier`
+  does not close it on the next run, which picks up the remainder while the ticket stays queued
+  (`Facts.partial`, read from the tracker by `gather`; `partialRerunnable` makes it re-runnable for
+  the autonomy loop, and `drainStop` stops a drain that leaves the same ticket partly done twice).
+  An `<unmet>` line that `needsDecision` reads as needing a person (the agent's explicit
+  `<unmet who="person">` marker, which `unmetOf` keeps as a `needs a person: ` prefix on the note,
+  else its words: a decision, a deploy, access it lacks, a file agents may not edit) is not
+  re-runnable: the ledger comment and the report suggest the hold label instead.
+- Also the words themselves: `closeComment`, `partlyDoneComment`, `notLandedComment`,
+  `pipelineOutcome`, `refusedRecord`, `withdrawnRecord`.
 
 ## `src/resolution.ts`
 
-`withObjectsOnly`, through which every host `git merge-tree` runs: a temp git directory with no config, no `info/` and no refs, borrowing the shared object store as an alternate (`GIT_ALTERNATE_OBJECT_DIRECTORIES`), removed in a `finally`. A sandbox can write the shared `.git` while its ticket runs, and a merge driver in `.git/config` mapped by `.git/info/attributes` would otherwise run on the host at the next merge-tree, before any fingerprint check; the objects git writes stay in the temp directory too. It never fetches (no remote, no promisor settings: the remote's address is read from the `.git/config` a sandbox can write, and a fetch would spend the operator's credentials), so in a partial clone a check that needs a missing object fails; `noteMissingObjects` recognises that, says so once and keeps a note for the run record's `mergeUnchecked` and the closing summary, and `sandcastle doctor` warns on a partial clone (`isPartialClone`; `test/partial-clone-merge-check.test.ts`). `rebuildOnBase` (a carried branch whose base was rewritten, re-created on the base's tip in the sandbox, see "A carried branch over a rewritten base" above); `mergeTree` and `mergeTreeSupported` (git's own merge through it, and its git 2.38 gate, which `landOne`'s conflict precheck and the pipeline's `conflictBefore` share; `plainMergeNote` in `src/land.ts` runs its merge through it too; `test/merge-driver.test.ts` plants a driver and holds all four); `strayChanges`: compares a conflict resolution with git's own automatic merge (`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly and that the base side could have put another ticket's lines in - a path `theirs` changed since the merge base (`merge-base --all`, a criss-cross history has several), or one the merge changed in `ours` (a rename of the branch's that received the base's edits to the old name) - so the land-only path holds the ticket instead of reviewing a resolution that dropped another ticket's lines; a new file the resolution adds, or one only the branch touched, can carry none and goes to the narrow review (`test/resolution-base-side.test.ts`); the resolver names each such file it had to change and why in a `<stray path="...">reason</stray>` line of its final message (`strayNamesOf`, `src/burndown.ts`), `splitStrays` sets those against the check's list, and only a path left unnamed holds the ticket (`strayNote` lists it, and the named ones apart) - the named ones go to the narrow review as `MERGE_STRAYS` (`namedStraysView`, in the `remerge` prompt) and the gates (`test/pipeline-named-strays.test.ts`)
+`withObjectsOnly`, through which every host `git merge-tree` runs: a temp git directory with no
+config, no `info/` and no refs, borrowing the shared object store as an alternate
+(`GIT_ALTERNATE_OBJECT_DIRECTORIES`), removed in a `finally`.
+A sandbox can write the shared `.git` while its ticket runs, and a merge driver in `.git/config`
+mapped by `.git/info/attributes` would otherwise run on the host at the next merge-tree, before any
+fingerprint check; the objects git writes stay in the temp directory too.
+It never fetches (no remote, no promisor settings: the remote's address is read from the
+`.git/config` a sandbox can write, and a fetch would spend the operator's credentials), so in a
+partial clone a check that needs a missing object fails; `noteMissingObjects` recognises that, says
+so once and keeps a note for the run record's `mergeUnchecked` and the closing summary, and
+`sandcastle doctor` warns on a partial clone (`isPartialClone`;
+`test/partial-clone-merge-check.test.ts`). `rebuildOnBase` (a carried branch whose base was
+rewritten, re-created on the base's tip in the sandbox, see "A carried branch over a rewritten base"
+above); `mergeTree` and `mergeTreeSupported` (git's own merge through it, and its git 2.38 gate,
+which `landOne`'s conflict precheck and the pipeline's `conflictBefore` share; `plainMergeNote` in
+`src/land.ts` runs its merge through it too; `test/merge-driver.test.ts` plants a driver and holds
+all four); `strayChanges`: compares a conflict resolution with git's own automatic merge
+(`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly
+and that the base side could have put another ticket's lines in - a path `theirs` changed since the
+merge base (`merge-base --all`, a criss-cross history has several), or one the merge changed in
+`ours` (a rename of the branch's that received the base's edits to the old name) - so the land-only
+path holds the ticket instead of reviewing a resolution that dropped another ticket's lines; a new
+file the resolution adds, or one only the branch touched, can carry none and goes to the narrow
+review (`test/resolution-base-side.test.ts`); the resolver names each such file it had to change and
+why in a `<stray path="...">reason</stray>` line of its final message (`strayNamesOf`,
+`src/burndown.ts`), `splitStrays` sets those against the check's list, and only a path left unnamed
+holds the ticket (`strayNote` lists it, and the named ones apart) - the named ones go to the narrow
+review as `MERGE_STRAYS` (`namedStraysView`, in the `remerge` prompt) and the gates
+(`test/pipeline-named-strays.test.ts`)
 
 ## `src/schedule.ts`
 
@@ -65,18 +546,26 @@ state.
   rule as one at landing (`sendBack`); not sent back, it ends as a `conflict` (`Ending`), and sent
   back with no next attempt, it ends on that conflict as a landing does on its own
   (`test/pipeline-conflict-before-landing.test.ts`, `test/ledger-conflict-before-landing.test.ts`).
-  The ticket is told before it is pushed back; a second collision is final. A red one is not gated in full again when the requeue's merge joins the base tip and branch head
+  The ticket is told before it is pushed back; a second collision is final.
+  A red one is not gated in full again when the requeue's merge joins the base tip and branch head
   that gate ran on (`repairFromRed`, `src/landing.ts`): the landing already re-ran its red gate in its slot (`rerun`), so
   no gate runs and the repair starts from the re-run's output; only a landing port that ran no re-run leaves the red gate
   to be re-run once here, from that gate on (`PipelineContext.regate`, below), with a repair only if it is red again. On a
-  moved base the gates run first. A landing gate's own red is run once more before it is called red, as a ticket's is (`landInSandbox`,
-  `src/land.ts`: the gate port's `rerunOnRed`, inside the same gates slot, and a second call with `from` for a port that ignores it; not after a
+  moved base the gates run first.
+  A landing gate's own red is run once more before it is called red, as a ticket's is
+  (`landInSandbox`,
+  `src/land.ts`: the gate port's `rerunOnRed`, inside the same gates slot, and a second call with
+  `from` for a port that ignores it; not after a
   timeout or a setup failure; `test/landing-red-rerun.test.ts`). A red landing is named with the landed tickets that touch
   its files or its failing tests, unless every failing test is one the branch's own ticket gates failed in this run
   (`LandContext.failedBefore`, kept by `rememberFailed` from `runGates`' ticket gates in `src/burndown.ts`, a flake that
-  went green on a re-run included, a test a later green run fixed after a repair commit not: it is kept by the head it went red on, `GateRun.head`,
-  and a green run drops the tests recorded on another head; a red run drops none, its list can be clipped; a run with no head counts as the same one;
-  `test/landing-failed-before-fixed.test.ts`): then `Landed.seen` is set, `with` is empty and the line says "as seen on the branch before". A conflicted ticket's
+  went green on a re-run included, a test a later green run fixed after a repair commit not: it is
+  kept by the head it went red on, `GateRun.head`,
+  and a green run drops the tests recorded on another head; a red run drops none, its list can be
+  clipped; a run with no head counts as the same one;
+  `test/landing-failed-before-fixed.test.ts`): then `Landed.seen` is set, `with` is empty and the
+  line says "as seen on the branch before".
+  A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
   is queued to land and no ticket still in its pipeline has touched the files it conflicted on
   (the tickets ahead of it when the wait begins, and only those: one that starts later is not
@@ -88,7 +577,9 @@ state.
   parks it as at the start; the run says `resolve waits` once the list has held for `RESOLVE_SETTLE_MS`
   (the log line once, a later change only the record's note; a ticket still in its pipeline is worded
   "lands or leaves the run", a queued branch "has landed") and `resolve starts` for a wait it said,
-  `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`, `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`). A second conflict is still final, unless it names a ticket
+  `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`,
+  `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`).
+  A second conflict is still final, unless it names a ticket
   that landed after the resolve began (the resolve's merge could not hold it): that one sends the
   ticket back again, with the same wait, and each such requeue needs a new landing, so it ends.
 - **Release of dependants.** The tickets held for a blocker that starts in this run: when one lands
@@ -102,7 +593,9 @@ state.
   unstarted tickets they became the run's last landings while slots sat idle. A ticket freed from a
   file it shared keeps its place with the unstarted. The run prints `#N released: its last blocker has
   landed; it starts at the next free slot` when a dependant is released (one freed from a
-  file reads `#N released: #M is done with the file they both change; it starts at the next free slot`), and the status view's queue position follows the same order (the hold
+  file reads
+  `#N released: #M is done with the file they both change; it starts at the next free slot`), and
+  the status view's queue position follows the same order (the hold
   record gives a requeued or released ticket an `order` below every unstarted one's).
   `test/schedule-start-order.test.ts`.
 - **Slot first.** The rank decides when a slot is granted, not only which ticket a free worker takes:
@@ -117,8 +610,11 @@ state.
   head - unless a landing of the run waits for a sandbox slot (`Work.landingWaits`, burndown's
   `slotWanted`): the kept slot never passed through `slotTurn`, so it goes back to the pool and the worker
   asks again, and the landing goes first (else it waited out the next ticket's whole pipeline, and the
-  resolve waited on it; `test/schedule-kept-slot-landing.test.ts`). A worker still asking then ends its wait once nothing is queued (`wanted()` again), or a run with no
-  demand left beside a hungry run would wait for ever (`test/schedule-slot-stale-ask.test.ts`). A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
+  resolve waited on it; `test/schedule-kept-slot-landing.test.ts`).
+  A worker still asking then ends its wait once nothing is queued (`wanted()` again), or a run with
+  no
+  demand left beside a hungry run would wait for ever (`test/schedule-slot-stale-ask.test.ts`).
+  A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
   `src/burndown.ts`: the run record's `waitsForShare` and `waitsFor`, which the status view's next-to-start rows say,
   and the heartbeat's `waiting for a sandbox slot`). The demand is counted as before, from the push.
   `test/schedule-slot-first.test.ts`.
@@ -128,7 +624,9 @@ state.
   flight is parked until that one lands or leaves the run. It is decided for the start as the
   schedule is made (`start`: the candidates in start order, each with its wait, before the run
   record exists) and told as the run goes (`started`, `waits`, `next run`). Mergeable shares are
-  only named: one line per shared file listing its tickets (`fileShareSummary`; README.md and CHANGELOG.md are one count), the pair list in `.sandcastle/logs/file-shares.log`. A ticket in flight has its branch's files read again before each comparison; a run
+  only named: one line per shared file listing its tickets (`fileShareSummary`; README.md and
+  CHANGELOG.md are one count), the pair list in `.sandcastle/logs/file-shares.log`.
+  A ticket in flight has its branch's files read again before each comparison; a run
   that starts nothing tells each parked ticket it waits for the next run; a dry run (no `files`)
   holds nothing.
 - **The fix board** (`createFixBoard`, `FixBoard`). Which ticket is repairing which failure
@@ -159,10 +657,89 @@ state.
   waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
   ticket that repaired before it waited keeps those commits under the review after repair.
   `test/fix-wait.test.ts`.
-- **The pause** (`Work.pause`, a `PauseSource`: `read()` answers the pause in force, `{ since }` in seconds, or none). The scheduler reads it at each juncture and every `pollMs` (1 s; the timer is not unref'd - with every ticket parked nothing else may keep the process alive - and ends with the schedule), and tells `{ kind: "paused", since, finishing }` as it begins (before the first demand, when it was asked for before the schedule began) and again whenever `finishing` changes, `{ kind: "resumed" }` as it ends. `finishing` are the tickets still doing something that is not a juncture: inside an attempt and not parked, or a green branch queued for landing or landing. A ticket that has not begun stays in the queue: no worker asks the pool for a slot while the run is paused, and a worker's wait for one ends (slot first, above). One a worker took as the pause began waits before its attempt does, its worker's slot given back first (`attempt` holds it at `"start"`, unless the run has a stop cause: then it is not begun, as before); a ticket inside an attempt reaches `at.juncture(phase, park)` (the attempt port's argument) before an agent pass, which returns at once while the run is not paused, and otherwise runs `park.suspend()`, waits for the resume, and runs `park.resume()`. Landing goes on: the landing worker, a requeue's second attempt (which waits at its start like any other) and the release of dependants are not paused, and the stop state is read as before. A stop cause that arrives while the run is paused wakes every parked ticket (`noticeStop`, at the poll or at any ending), since a pause that only a resume ends could outlast a run that can do nothing more - under a usage pause, until the window resets: a ticket parked at its start ends as not begun - and so does one woken at an attempt's `"start"` juncture before any other, with a requeued one's earlier landing as its ending (`test/schedule-attempt-count.test.ts`) - and one parked at a later juncture finds `stop.startsNothing` after `waitParked` and throws `StoppedWhileParked` instead of calling `park.resume()` - its sandbox stays closed, and `burndown()`'s pipeline skips closing it again (`closedWhileParked`) and lets the error through to the attempt, which throws it on with the `.git` check after the pipeline (`attempted`): the scheduler adds a failed one as a cause, as after any other attempt. The schedule ends it as `parked` (`Ending`; the ledger says nothing of it, so its record stays `paused` with the juncture's note) and the closing summary lists it on the `Runnable now` line, whatever stopped the run: one that is not live is not paused, so a ticket still `paused` was parked when it ended. A pause and a resume that end together is a resume, as before. The same notice tells `{ kind: "pause stopped" }` once, when a stop cause arrives while the run is paused, and `tellPaused` tells nothing after it (the finishing list changing is not a pause to record again; a resume read later tells no `resumed` either): `createPauseHandling` clears the run record's `paused` then, while the tickets in flight finish, so the Herdr sidebar and tab bar (`runCounts`) stop saying paused (`test/stop-clears-pause.test.ts`). `test/stop-while-paused.test.ts`, `test/stop-while-parked-check.test.ts`, `test/report-parked-usage-stop.test.ts`. The run's **demand** counts, while paused, only the tickets inside an attempt that are not parked (`active`), plus the one for a landing: nothing in flight is 0, which `burndown()` hands to `setDemand`, so the machine pool gives the run's share to the others (`test/pause-pool.test.ts`); a resume drops the parked tickets from the count before any of them asks for a slot again (it is told first, as every demand is). A resume wakes every parked ticket; one that is paused again before it continues parks again. A source may say why the run is paused: `read()` answers `{ since, usage? }`, `usage` (`UsagePaused`, `mod/hooks/run-record.ts`) set while the pause is the run's own, for its plan's usage (`USAGE_PAUSE`, below, `src/usage.ts`). The scheduler passes it to `tell` on the `paused` change and tells the pause again when it changes while in force - a later window to wait for, a person taking the pause over (`usage` gone, `since` kept) - since the key it compares is the finishing list and the cause together. A pause that ends by itself is the source's business, not the scheduler's: it answers undefined once its time has come, and the next read is the resume. `test/usage-pause.test.ts`. `test/pause-resume.test.ts` drives it with fake attempt and land ports and a pause source, and the pipeline under it over a temp repo.
+- **The pause** (`Work.pause`, a `PauseSource`: `read()` answers the pause in force, `{ since }` in
+  seconds, or none).
+  The scheduler reads it at each juncture and every `pollMs` (1 s; the timer is not unref'd - with
+  every ticket parked nothing else may keep the process alive - and ends with the schedule), and
+  tells `{ kind: "paused", since, finishing }` as it begins (before the first demand, when it was
+  asked for before the schedule began) and again whenever `finishing` changes, `{ kind: "resumed" }`
+  as it ends. `finishing` are the tickets still doing something that is not a juncture: inside an
+  attempt and not parked, or a green branch queued for landing or landing.
+  A ticket that has not begun stays in the queue: no worker asks the pool for a slot while the run
+  is paused, and a worker's wait for one ends (slot first, above).
+  One a worker took as the pause began waits before its attempt does, its worker's slot given back
+  first (`attempt` holds it at `"start"`, unless the run has a stop cause: then it is not begun, as
+  before); a ticket inside an attempt reaches `at.juncture(phase, park)` (the attempt port's
+  argument) before an agent pass, which returns at once while the run is not paused, and otherwise
+  runs `park.suspend()`, waits for the resume, and runs `park.resume()`.
+  Landing goes on: the landing worker, a requeue's second attempt (which waits at its start like any
+  other) and the release of dependants are not paused, and the stop state is read as before.
+  A stop cause that arrives while the run is paused wakes every parked ticket (`noticeStop`, at the
+  poll or at any ending), since a pause that only a resume ends could outlast a run that can do
+  nothing more - under a usage pause, until the window resets: a ticket parked at its start ends as
+  not begun - and so does one woken at an attempt's `"start"` juncture before any other, with a
+  requeued one's earlier landing as its ending (`test/schedule-attempt-count.test.ts`) - and one
+  parked at a later juncture finds `stop.startsNothing` after `waitParked` and throws
+  `StoppedWhileParked` instead of calling `park.resume()` - its sandbox stays closed, and
+  `burndown()`'s pipeline skips closing it again (`closedWhileParked`) and lets the error through to
+  the attempt, which throws it on with the `.git` check after the pipeline (`attempted`): the
+  scheduler adds a failed one as a cause, as after any other attempt.
+  The schedule ends it as `parked` (`Ending`; the ledger says nothing of it, so its record stays
+  `paused` with the juncture's note) and the closing summary lists it on the `Runnable now` line,
+  whatever stopped the run: one that is not live is not paused, so a ticket still `paused` was
+  parked when it ended.
+  A pause and a resume that end together is a resume, as before.
+  The same notice tells `{ kind: "pause stopped" }` once, when a stop cause arrives while the run is
+  paused, and `tellPaused` tells nothing after it (the finishing list changing is not a pause to
+  record again; a resume read later tells no `resumed` either): `createPauseHandling` clears the run
+  record's `paused` then, while the tickets in flight finish, so the Herdr sidebar and tab bar
+  (`runCounts`) stop saying paused (`test/stop-clears-pause.test.ts`).
+  `test/stop-while-paused.test.ts`, `test/stop-while-parked-check.test.ts`,
+  `test/report-parked-usage-stop.test.ts`.
+  The run's **demand** counts, while paused, only the tickets inside an attempt that are not parked
+  (`active`), plus the one for a landing: nothing in flight is 0, which `burndown()` hands to
+  `setDemand`, so the machine pool gives the run's share to the others (`test/pause-pool.test.ts`);
+  a resume drops the parked tickets from the count before any of them asks for a slot again (it is
+  told first, as every demand is).
+  A resume wakes every parked ticket; one that is paused again before it continues parks again.
+  A source may say why the run is paused: `read()` answers `{ since, usage? }`, `usage`
+  (`UsagePaused`, `mod/hooks/run-record.ts`) set while the pause is the run's own, for its plan's
+  usage (`USAGE_PAUSE`, below, `src/usage.ts`).
+  The scheduler passes it to `tell` on the `paused` change and tells the pause again when it changes
+  while in force - a later window to wait for, a person taking the pause over (`usage` gone, `since`
+  kept) - since the key it compares is the finishing list and the cause together.
+  A pause that ends by itself is the source's business, not the scheduler's: it answers undefined
+  once its time has come, and the next read is the resume. `test/usage-pause.test.ts`.
+  `test/pause-resume.test.ts` drives it with fake attempt and land ports and a pause source, and the
+  pipeline under it over a temp repo.
 - `createStopState`: the stop state, whose `add` only the scheduler holds.
-- **The `setup problem` cause**: a crashed attempt whose error is a failed prompt expansion (`promptExpansionLine`, `src/errors.ts`: a `PromptError` or `PromptExpansionTimeoutError`, the library's `(FiberFailure)` prefix and the `Error:` tag dropped, the command's stderr kept) is counted by failure (`sameExpansionFailure`: the same once the command, which names the ticket, and an elapsed time are set aside); the `SETUP_CRASHES`th (2nd) ticket to crash alike adds the cause and tells `{ kind: "setup problem", line }` once. Like a limit it is no safety stop: tickets in flight finish and green branches land, and each queued ticket ends as not begun. `burndown()` records `setupProblem` in the run record and prints the line; the closing summary's `Stopped starting tickets` line quotes the error once and its next step points at `sandcastle doctor --verify` instead of the per-ticket comment hint (`test/stop-on-setup-crash.test.ts`). The crashed ticket's note is `agentFailure`'s cleaning (cut at a word), and the pass's `catch` appends `! error: <line>` to the ticket's readable agent log (`logExpansionFailure`, `src/run.ts`), which otherwise ends at `Expanding shell expressions`.
-  The scheduler tells `{ kind: "stopped landing", cause }` once, the first time `landsNothing` holds - from an ending, a stage change or the poll, since the host's refused write is read live and no one adds it - so burndown prints `STOPPED landing: <what moved> - the run finishes what is in flight and lands nothing more; the closing summary says what to check.` (the guard's full message - commits, files, what to do - is said once, in the summary, which `reportedError` keeps `cli.ts` from printing again on exit) and records `stopped` (which the status view's RUN lane reads) as it happens, not in the closing summary. The words are `ledger.ts`'s `causeWords` and `stoppedLine`: a `.git` stop is a `GuardStop` (`guard.ts`: `what` in a few words, `detail` for a person), so a ticket the stop kept from starting reads `not started: main moved while sandboxes ran`. A `blocked` change carries `ended`, the candidates that ended without landing, which `blockedNote` words by each one's state (`ledger.endedAs`: `stopped`, `gate red`, `not started`): a blocker of the run is never "not in this run". `test/stop-announced.test.ts`.
+- **The `setup problem` cause**: a crashed attempt whose error is a failed prompt expansion
+  (`promptExpansionLine`, `src/errors.ts`: a `PromptError` or `PromptExpansionTimeoutError`, the
+  library's `(FiberFailure)` prefix and the `Error:` tag dropped, the command's stderr kept) is
+  counted by failure (`sameExpansionFailure`: the same once the command, which names the ticket, and
+  an elapsed time are set aside); the `SETUP_CRASHES`th (2nd) ticket to crash alike adds the cause
+  and tells `{ kind: "setup problem", line }` once.
+  Like a limit it is no safety stop: tickets in flight finish and green branches land, and each
+  queued ticket ends as not begun. `burndown()` records `setupProblem` in the run record and prints
+  the line; the closing summary's `Stopped starting tickets` line quotes the error once and its next
+  step points at `sandcastle doctor --verify` instead of the per-ticket comment hint
+  (`test/stop-on-setup-crash.test.ts`).
+  The crashed ticket's note is `agentFailure`'s cleaning (cut at a word), and the pass's `catch`
+  appends `! error: <line>` to the ticket's readable agent log (`logExpansionFailure`,
+  `src/run.ts`), which otherwise ends at `Expanding shell expressions`.
+  The scheduler tells `{ kind: "stopped landing", cause }` once, the first time `landsNothing` holds -
+  from an ending, a stage change or the poll, since the host's refused write is read live and no
+  one adds it - so burndown prints
+  `STOPPED landing: <what moved> - the run finishes what is in flight and lands nothing more; the closing summary says what to check.`
+  (the guard's full message - commits, files, what to do - is said once, in the summary, which
+  `reportedError` keeps `cli.ts` from printing again on exit) and records `stopped` (which the
+  status view's RUN lane reads) as it happens, not in the closing summary.
+  The words are `ledger.ts`'s `causeWords` and `stoppedLine`: a `.git` stop is a `GuardStop`
+  (`guard.ts`: `what` in a few words, `detail` for a person), so a ticket the stop kept from
+  starting reads `not started: main moved while sandboxes ran`.
+  A `blocked` change carries `ended`, the candidates that ended without landing, which `blockedNote`
+  words by each one's state (`ledger.endedAs`: `stopped`, `gate red`, `not started`): a blocker of
+  the run is never "not in this run". `test/stop-announced.test.ts`.
 - `createLanding`: the one worker that lands each green ticket, a carried branch first.
 - `createQueue<T>(rank?)`: the work queue of the pipeline fan-out and of the landing worker (`push`,
   `close`, `run(workers, fn)`). Workers wait while it is open and empty, so an item can be pushed
@@ -171,175 +748,1766 @@ state.
 
 ## `src/upgrading.ts`
 
-Whether a pulled kit has **Upgrading** notes a project has not had: the project's update record (`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`: the release, the notes acted on and `declined`, the update steps the user declined, each at its release: `declinedSteps`, written by `sandcastle updated --declined` and kept by every later `markUpdated`; an older record's kit commit is read through git, and declines none) against the kit's own notes, and the lines doctor and a run print. Also `changesLines` (`sandcastle changes`: the changelog entries of the releases after the record's, or `--since`, each cut to its bold lead; read-only), `changesDiffLines` (its second part, between the git tags of the two releases: the README Configuration tables' keys and defaults and the help text's commands and flags, added, removed or changed; a missing tag is said and the first part stands alone), `recordedRelease` (the record's release, an older record's read from the kit's `package.json` at its commit, read before `sandcastle updated` replaces it, so the update action reports "this project: <recorded release> -> <kit now>") and `kitVersion`, the version doctor and `--version` print, and a run's start line and record (`versions.kit`, read once per process in `burndown()`: a kit pulled between an autonomy run's turns is not named by a later one): `package.json`'s release, and in a clone past its tag, the distance and commit
+Whether a pulled kit has **Upgrading** notes a project has not had: the project's update record
+(`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`: the release, the notes
+acted on and `declined`, the update steps the user declined, each at its release: `declinedSteps`,
+written by `sandcastle updated --declined` and kept by every later `markUpdated`; an older record's
+kit commit is read through git, and declines none) against the kit's own notes, and the lines doctor
+and a run print.
+Also `changesLines` (`sandcastle changes`: the changelog entries of the releases after the record's,
+or `--since`, each cut to its bold lead; read-only), `changesDiffLines` (its second part, between
+the git tags of the two releases: the README Configuration tables' keys and defaults and the help
+text's commands and flags, added, removed or changed; a missing tag is said and the first part
+stands alone), `recordedRelease` (the record's release, an older record's read from the kit's
+`package.json` at its commit, read before `sandcastle updated` replaces it, so the update action
+reports "this project: <recorded release> -> <kit now>") and `kitVersion`, the version doctor and
+`--version` print, and a run's start line and record (`versions.kit`, read once per process in
+`burndown()`: a kit pulled between an autonomy run's turns is not named by a later one):
+`package.json`'s release, and in a clone past its tag, the distance and commit
 
 ## `src/herdr.ts`
 
-Herdr helpers and the run's view (the previous run's status pane is reused when the view record's `status` pane still exists with the recorded `terminal_id` (Herdr reuses pane ids across restarts), in this run's workspace and not the pane the run is typed in: its current tab (`pane get`) becomes the view's tab, `adopted` true unless that is the record's own kit-made tab, and what it runs is stopped first - the old status view or the plugin's report, by `pane send-keys ctrl+c` with the record rewritten without `status` so that the status view's INT handling (`markQuit` in `src/status-view.ts`, which only marks a record naming its pane) does not mark the new view quit; a bare shell is reused as is, a person's command is not (the pane is replaced, a tab created), and a pane that is still not a shell after 5 seconds is replaced too; a paused run says `paused` in the workspace row and the run agent's message, in place of "N working", unless a ticket needs you - `runCounts(tickets, paused)`, from the record's `paused`, and the tab bar's `lineText`; `refresh()` re-sends the tokens when the pause begins or ends): the tab (adopted only from a terminal), per-sandbox panes only with `herdr.panes: "all"` (otherwise the run is one agent on the status pane), agent-state reports, sidebar tokens, the workspace's run summary. While the run record holds a plan usage reading, the status pane also carries it as an `sc_usage` token (`usageText`: `5h 14% · wk 93%`, then ` ▲` from 75% and ` ■` from 90% on the worse window, which the plugin's sidebar row colours with `contains` rules: Herdr's rules match text, not numbers; with readings of both providers it is each one's name and weekly window, `claude wk 93% · codex wk 16%`, the mark that of the worst window of either, the 5-hour ones included; nothing is sent before a reading exists): in the run agent's own metadata call with no sandbox panes, and with `panes: "all"` (the status pane is no reported agent) in a metadata call of its own that is best-effort, so a Herdr that has no use for it cannot turn the view off. A status pane herdr no longer has (`pane_not_found` on a report to it, or on the first sandbox pane's split from it: closed by a person, moved, lost) is no broken view either: the run says once ``Herdr status pane closed - `sandcastle status` shows the run.``, the view record forgets its `status` (the tab bar then types nothing into it), no more is sent to it, no sandbox pane opens while none is open to split from (none is split from another pane, and the status pane is not reopened), and the workspace's token and the end notification go on. Any other herdr error still turns the view off once, with a line of herdr's own `message` and not its JSON. `test/herdr-status-pane-closed.test.ts` holds both. `openSandboxView` takes the record's usage as a getter, like its tickets. `reportInDeadTab(root)` is for a run that is no longer live: Herdr's cold restart leaves its tab as idle shells, so the status pane of the tab the kit opened (`herdr-view.json`: `adopted` false, the pane still in the recorded tab, and a bare shell by Herdr's process info (`runsBareShell`: one foreground process, a known shell, at most login or interactive flags) - never the status view, an editor, `claude` or a REPL) runs `sandcastle report`, and the record is marked `reported` so it is shown once. Two callers cannot both type it: the record is claimed by renaming it to a name of the caller's own before anything is typed, and written back marked (or unmarked, if herdr failed) afterwards. An adopted tab is a person's terminal and is never touched. A dead run's tab is acted on only by the server that holds it: `openSandboxView` records the kit it was started from as the record's `kit` (the status view's restart and the report run that checkout, not the one the plugin is linked from; a record without it, or with one that is not an absolute path to a checkout holding `bin/sandcastle`, uses the caller's; the kit is shell-quoted in what is typed), and `HERDR_SOCKET_PATH` as the record's `socket`, and a reader whose own differs (the runs directory is machine-wide, and pane ids mean something only to the server that made them) makes no herdr call, types nothing and leaves the record (`tellDeadTab` says `elsewhere`); `liveRuns` moves the run's file to the awaiting directory (below) for the right server, ahead of the removal rules below. A record without `socket`, or a reader without `HERDR_SOCKET_PATH`, acts as before. `liveRuns` in `src/herdr-plugin.ts` calls it (`tellDeadTab`) for each run file whose record says finished or dead (the tab bar's tick, and the actions' project lookup: the first reader to drop the file tells the tab). The tab bar's command runs the kit only while the runs directory has a file, so a dead run whose view record (`adopted` false, not `reported`) names a status pane in the recorded tab whose foreground still runs the status view (`runsStatus`) has its file moved to the awaiting directory (`awaitingDir`, beside the runs directory; `awaitReport`), out of that gate: kept in the runs directory, it started the kit on every tick for as long as the view ran, and for good on a server that never came back. The plugin's startup hook (`requeueAwaiting`) moves each awaiting file back to the runs directory, as a Herdr restart is what leaves the pane a bare shell, so a kill followed some time later by a restart is reported on the first tick after it, from the session Herdr restored; a tab still showing, or another server's, goes back to the awaiting directory on that tick (`wx`: a file a new run of the project wrote meanwhile is kept, and the awaiting one dropped). The tab bar's `line` also tells the awaiting tabs (`tellAwaiting`) after printing, only when it found a live run: with none, the gate starts nothing. Both drop an awaiting file whose run ended more than `AWAIT_REPORT_DAYS` (7) ago (`awaitedTooLong`: the record's `finishedAt`, else `run.json`'s mtime for a killed run, and no record reads as gone) and one whose project is running again (its record and tab are the new run's). In every other case - the report typed, the record marked for a quit view (below), the record `reported` or `adopted`, no record or no status pane, the pane in another tab, anything else in it - the file goes; a herdr error is `retry`, not that: nothing is known of the tab (the server not yet restored when the startup hook's first tick runs, a transient failure), so the file stays awaiting and the 7-day expiry ends it. A closed pane is such an error too (`pane_not_found`, which a server not yet restored may also answer), so a closed tab's file waits out the expiry as well. Before removing it the reader reads the project's `run.json` again and leaves the file if that changed since it judged the run dead: the file is named by the project, so a new run of it registers under the same name. A run's exit (a clean end, or a stop on SIGHUP, SIGINT or SIGTERM) moves its own file to the awaiting directory while its view record is `adopted` false and not `reported` (and the plugin is linked), so a run that ends after a restart, or is stopped by the restart's hangup, is reported by the same rule: on the tab bar's ticks while another run is live, and on the first tick after the next restart. While a run is live, the tab bar's tick hands each live run's root to `restartStatusView(root)`: a status pane in the recorded tab of an own (not adopted, not `reported`) record, on this server, that is a bare shell - the view died with a restarted server - gets the status view started again (`cd` to the root, then `statusCommand`, the command the run used), on every tick that finds it so, with no mark; a pane still running the view, or anything else, is left alone. A person quitting the view is told from a restart by the pane's Herdr `terminal_id` (`herdr pane get`), which Herdr keeps through anything run in the pane and changes on every server restart (a pane id may come back the same): `openSandboxView` records it as the record's `terminal_id`, and the status view's INT handling (`src/status-view.ts`) - Ctrl-C, not TERM, and not the HUP a server stop sends - marks the record `quit` when `HERDR_PANE_ID` is its status pane (one read and a rename: the pane may be torn down before a slow exit ends). With `quit` set and the pane's `terminal_id` the recorded one, `restartStatusView` leaves the pane alone (it is that person's shell until the run ends or Herdr restarts), and `tellDeadTab` marks the record `reported` with nothing typed and says `quit`, so the run's file goes. A different `terminal_id` is a restart: `restartStatusView` starts the view as above, clears `quit` and records the new id (as it does for a record without one), and `tellDeadTab` reports as before. A record without `terminal_id` (an older kit's) acts as before. The run's own rewrites of the record (a sandbox pane opening or closing, its exit) keep the file's `quit` and `terminal_id`, or a view quit mid-run would get the report once the run ended; its first write replaces an earlier run's record whole. A run that opens no view (outside Herdr, `SANDCASTLE_HERDR_VIEW=0`, no sandbox panes, or a herdr error before its own record is written) marks the earlier run's record `reported` at start (`retireViewRecord`), keeping its tab and pane ids so a later run inside Herdr still closes that tab: the record is otherwise only rewritten by a run that opens a view, and an earlier run's own, unreported tab would be acted on for this one (the tick typing the view into pane ids a restart may have given to someone's shell, `registerRun` moving the live-runs file to the awaiting directory at exit). `restartStatusView`, `tellDeadTab` and `registerRun` all ignore a `reported` record.
+Herdr helpers and the run's view (the previous run's status pane is reused when the view record's
+`status` pane still exists with the recorded `terminal_id` (Herdr reuses pane ids across restarts),
+in this run's workspace and not the pane the run is typed in: its current tab (`pane get`) becomes
+the view's tab, `adopted` true unless that is the record's own kit-made tab, and what it runs is
+stopped first - the old status view or the plugin's report, by `pane send-keys ctrl+c` with the
+record rewritten without `status` so that the status view's INT handling (`markQuit` in
+`src/status-view.ts`, which only marks a record naming its pane) does not mark the new view quit; a
+bare shell is reused as is, a person's command is not (the pane is replaced, a tab created), and a
+pane that is still not a shell after 5 seconds is replaced too; a paused run says `paused` in the
+workspace row and the run agent's message, in place of "N working", unless a ticket needs you -
+`runCounts(tickets, paused)`, from the record's `paused`, and the tab bar's `lineText`; `refresh()`
+re-sends the tokens when the pause begins or ends): the tab (adopted only from a terminal),
+per-sandbox panes only with `herdr.panes: "all"` (otherwise the run is one agent on the status
+pane), agent-state reports, sidebar tokens, the workspace's run summary.
+While the run record holds a plan usage reading, the status pane also carries it as an `sc_usage`
+token (`usageText`: `5h 14% · wk 93%`, then ` ▲` from 75% and ` ■` from 90% on the worse window,
+which the plugin's sidebar row colours with `contains` rules: Herdr's rules match text, not numbers;
+with readings of both providers it is each one's name and weekly window,
+`claude wk 93% · codex wk 16%`, the mark that of the worst window of either, the 5-hour ones
+included; nothing is sent before a reading exists): in the run agent's own metadata call with no
+sandbox panes, and with `panes: "all"` (the status pane is no reported agent) in a metadata call of
+its own that is best-effort, so a Herdr that has no use for it cannot turn the view off.
+A status pane herdr no longer has (`pane_not_found` on a report to it, or on the first sandbox
+pane's split from it: closed by a person, moved, lost) is no broken view either: the run says once
+``Herdr status pane closed - `sandcastle status` shows the run.``, the view record forgets its
+`status` (the tab bar then types nothing into it), no more is sent to it, no sandbox pane opens
+while none is open to split from (none is split from another pane, and the status pane is not
+reopened), and the workspace's token and the end notification go on.
+Any other herdr error still turns the view off once, with a line of herdr's own `message` and not
+its JSON. `test/herdr-status-pane-closed.test.ts` holds both. `openSandboxView` takes the record's
+usage as a getter, like its tickets. `reportInDeadTab(root)` is for a run that is no longer live:
+Herdr's cold restart leaves its tab as idle shells, so the status pane of the tab the kit opened
+(`herdr-view.json`: `adopted` false, the pane still in the recorded tab, and a bare shell by Herdr's
+process info (`runsBareShell`: one foreground process, a known shell, at most login or interactive
+flags) - never the status view, an editor, `claude` or a REPL) runs `sandcastle report`, and the
+record is marked `reported` so it is shown once.
+Two callers cannot both type it: the record is claimed by renaming it to a name of the caller's own
+before anything is typed, and written back marked (or unmarked, if herdr failed) afterwards.
+An adopted tab is a person's terminal and is never touched.
+A dead run's tab is acted on only by the server that holds it: `openSandboxView` records the kit it
+was started from as the record's `kit` (the status view's restart and the report run that checkout,
+not the one the plugin is linked from; a record without it, or with one that is not an absolute path
+to a checkout holding `bin/sandcastle`, uses the caller's; the kit is shell-quoted in what is
+typed), and `HERDR_SOCKET_PATH` as the record's `socket`, and a reader whose own differs (the runs
+directory is machine-wide, and pane ids mean something only to the server that made them) makes no
+herdr call, types nothing and leaves the record (`tellDeadTab` says `elsewhere`); `liveRuns` moves
+the run's file to the awaiting directory (below) for the right server, ahead of the removal rules
+below.
+A record without `socket`, or a reader without `HERDR_SOCKET_PATH`, acts as before. `liveRuns` in
+`src/herdr-plugin.ts` calls it (`tellDeadTab`) for each run file whose record says finished or dead
+(the tab bar's tick, and the actions' project lookup: the first reader to drop the file tells the
+tab).
+The tab bar's command runs the kit only while the runs directory has a file, so a dead run whose
+view record (`adopted` false, not `reported`) names a status pane in the recorded tab whose
+foreground still runs the status view (`runsStatus`) has its file moved to the awaiting directory
+(`awaitingDir`, beside the runs directory; `awaitReport`), out of that gate: kept in the runs
+directory, it started the kit on every tick for as long as the view ran, and for good on a server
+that never came back.
+The plugin's startup hook (`requeueAwaiting`) moves each awaiting file back to the runs directory,
+as a Herdr restart is what leaves the pane a bare shell, so a kill followed some time later by a
+restart is reported on the first tick after it, from the session Herdr restored; a tab still
+showing, or another server's, goes back to the awaiting directory on that tick (`wx`: a file a new
+run of the project wrote meanwhile is kept, and the awaiting one dropped).
+The tab bar's `line` also tells the awaiting tabs (`tellAwaiting`) after printing, only when it
+found a live run: with none, the gate starts nothing.
+Both drop an awaiting file whose run ended more than `AWAIT_REPORT_DAYS` (7) ago (`awaitedTooLong`:
+the record's `finishedAt`, else `run.json`'s mtime for a killed run, and no record reads as gone)
+and one whose project is running again (its record and tab are the new run's).
+In every other case - the report typed, the record marked for a quit view (below), the record
+`reported` or `adopted`, no record or no status pane, the pane in another tab, anything else in it -
+the file goes; a herdr error is `retry`, not that: nothing is known of the tab (the server not yet
+restored when the startup hook's first tick runs, a transient failure), so the file stays awaiting
+and the 7-day expiry ends it.
+A closed pane is such an error too (`pane_not_found`, which a server not yet restored may also
+answer), so a closed tab's file waits out the expiry as well.
+Before removing it the reader reads the project's `run.json` again and leaves the file if that
+changed since it judged the run dead: the file is named by the project, so a new run of it registers
+under the same name.
+A run's exit (a clean end, or a stop on SIGHUP, SIGINT or SIGTERM) moves its own file to the
+awaiting directory while its view record is `adopted` false and not `reported` (and the plugin is
+linked), so a run that ends after a restart, or is stopped by the restart's hangup, is reported by
+the same rule: on the tab bar's ticks while another run is live, and on the first tick after the
+next restart.
+While a run is live, the tab bar's tick hands each live run's root to `restartStatusView(root)`: a
+status pane in the recorded tab of an own (not adopted, not `reported`) record, on this server, that
+is a bare shell - the view died with a restarted server - gets the status view started again (`cd`
+to the root, then `statusCommand`, the command the run used), on every tick that finds it so, with
+no mark; a pane still running the view, or anything else, is left alone.
+A person quitting the view is told from a restart by the pane's Herdr `terminal_id`
+(`herdr pane get`), which Herdr keeps through anything run in the pane and changes on every server
+restart (a pane id may come back the same): `openSandboxView` records it as the record's
+`terminal_id`, and the status view's INT handling (`src/status-view.ts`) - Ctrl-C, not TERM, and not
+the HUP a server stop sends - marks the record `quit` when `HERDR_PANE_ID` is its status pane (one
+read and a rename: the pane may be torn down before a slow exit ends).
+With `quit` set and the pane's `terminal_id` the recorded one, `restartStatusView` leaves the pane
+alone (it is that person's shell until the run ends or Herdr restarts), and `tellDeadTab` marks the
+record `reported` with nothing typed and says `quit`, so the run's file goes.
+A different `terminal_id` is a restart: `restartStatusView` starts the view as above, clears `quit`
+and records the new id (as it does for a record without one), and `tellDeadTab` reports as before.
+A record without `terminal_id` (an older kit's) acts as before.
+The run's own rewrites of the record (a sandbox pane opening or closing, its exit) keep the file's
+`quit` and `terminal_id`, or a view quit mid-run would get the report once the run ended; its first
+write replaces an earlier run's record whole.
+A run that opens no view (outside Herdr, `SANDCASTLE_HERDR_VIEW=0`, no sandbox panes, or a herdr
+error before its own record is written) marks the earlier run's record `reported` at start
+(`retireViewRecord`), keeping its tab and pane ids so a later run inside Herdr still closes that
+tab: the record is otherwise only rewritten by a run that opens a view, and an earlier run's own,
+unreported tab would be acted on for this one (the tick typing the view into pane ids a restart may
+have given to someone's shell, `registerRun` moving the live-runs file to the awaiting directory at
+exit). `restartStatusView`, `tellDeadTab` and `registerRun` all ignore a `reported` record.
 
 ## `src/live-runs.ts`
 
-The machine-wide live-runs directory (`RUNS_DIR`, in `KIT_CACHE`: `sandcastle-kit` under `XDG_CACHE_HOME` or `~/.cache`, on Linux and macOS alike): `registerRun` writes a run's file (named by the resolved root) from `burndown()`, Herdr or not, and removes it at exit - unless the run's view record (`viewRecord`, defined here for that check) is a tab the kit opened (`adopted` false) not yet `reported`, whose file moves to the awaiting directory (`awaitingDir`, `awaitReport`) beside it, out of the tab bar's gate, and the plugin's readers remove it once the tab is told (`src/herdr.ts`) or `AWAIT_REPORT_DAYS` after the run ended (`awaitedTooLong`). The Herdr tab bar (`liveRuns` in `src/herdr-plugin.ts`) and the Claude Code mod (`REGISTRY_SCRIPT` in `mod/hooks/run-state.ts`) read it; the mod follows a run whose recorded `session` (`CLAUDE_CODE_SESSION_ID`) is its own. `commandOf` is the real process check that `liveness` is given: a signal of 0, then `ps -p <pid> -o command=`. `liveRunLines` (`src/doctor.ts`; `test/doctor-live-runs.test.ts`) is doctor's `warn` block listing these runs (through `liveRuns`, with `tabAwaitsReport` as `ended` so a run whose tab awaits its report is parked, not dropped) with a note to wait before pulling the kit: a live run keeps its code loaded but reads three kit paths from disk - `prompts/` (as each ticket's pass starts, `src/run.ts`), `container/` (mounted read-only into every sandbox as it opens) and `status.sh` and `src/status-*.ts` (each time a status view starts) - so a pull under it gives its later tickets newer templates than its own code expects; a run does not snapshot them, and `skill/update.md` checks for live runs before its pull. `PLUGIN_MARKER` (`herdr-plugin-linked`, beside it) is left by `sandcastle herdr configure` and removed by `--remove`; the status view decides once at start-up whether it is inside Herdr and on a terminal, and re-reads the marker on every redraw (a file test, at the loop's top level) to decide whether to emit ticket links and the click hint, as a Ctrl-click does nothing without the plugin: a view opened before `configure` shows them within one redraw of the link. Which key the hint names is `SANDCASTLE_CLICK_MOD` (`ctrl`, `cmd`, anything else the fallback), from `src/click-hint.ts`.
+The machine-wide live-runs directory (`RUNS_DIR`, in `KIT_CACHE`: `sandcastle-kit` under
+`XDG_CACHE_HOME` or `~/.cache`, on Linux and macOS alike): `registerRun` writes a run's file (named
+by the resolved root) from `burndown()`, Herdr or not, and removes it at exit - unless the run's
+view record (`viewRecord`, defined here for that check) is a tab the kit opened (`adopted` false)
+not yet `reported`, whose file moves to the awaiting directory (`awaitingDir`, `awaitReport`) beside
+it, out of the tab bar's gate, and the plugin's readers remove it once the tab is told
+(`src/herdr.ts`) or `AWAIT_REPORT_DAYS` after the run ended (`awaitedTooLong`).
+The Herdr tab bar (`liveRuns` in `src/herdr-plugin.ts`) and the Claude Code mod (`REGISTRY_SCRIPT`
+in `mod/hooks/run-state.ts`) read it; the mod follows a run whose recorded `session`
+(`CLAUDE_CODE_SESSION_ID`) is its own. `commandOf` is the real process check that `liveness` is
+given: a signal of 0, then `ps -p <pid> -o command=`. `liveRunLines` (`src/doctor.ts`;
+`test/doctor-live-runs.test.ts`) is doctor's `warn` block listing these runs (through `liveRuns`,
+with `tabAwaitsReport` as `ended` so a run whose tab awaits its report is parked, not dropped) with
+a note to wait before pulling the kit: a live run keeps its code loaded but reads three kit paths
+from disk - `prompts/` (as each ticket's pass starts, `src/run.ts`), `container/` (mounted read-only
+into every sandbox as it opens) and `status.sh` and `src/status-*.ts` (each time a status view
+starts) - so a pull under it gives its later tickets newer templates than its own code expects; a
+run does not snapshot them, and `skill/update.md` checks for live runs before its pull.
+`PLUGIN_MARKER` (`herdr-plugin-linked`, beside it) is left by `sandcastle herdr configure` and
+removed by `--remove`; the status view decides once at start-up whether it is inside Herdr and on a
+terminal, and re-reads the marker on every redraw (a file test, at the loop's top level) to decide
+whether to emit ticket links and the click hint, as a Ctrl-click does nothing without the plugin: a
+view opened before `configure` shows them within one redraw of the link.
+Which key the hint names is `SANDCASTLE_CLICK_MOD` (`ctrl`, `cmd`, anything else the fallback), from
+`src/click-hint.ts`.
 
 ## `src/click-hint.ts`
 
-The status view's click hint. `resolveClickHint` runs once when `sandcastle status` starts a view (`src/cli.ts` hands its `mod` to the view as `SANDCASTLE_CLICK_MOD`; never per redraw) and for `sandcastle doctor`'s and `sandcastle herdr configure`'s `info` line (`clickHintLine`). `SANDCASTLE_CLICK_HINT` wins over the personal `herdr.clickHint` (`auto`, `ctrl`, `cmd`; default `auto`); only `auto` senses, and only inside Herdr (`HERDR_SOCKET_PATH`). The sensor is one `ps` listing of this user's processes (`ps -E -ww` on macOS, which prints each environment; on Linux `ps` for the pids, then `/proc/<pid>/cmdline` and `environ`), kept to Herdr clients by `clientSession` (argv exactly `herdr`, `herdr --session NAME` or `herdr session attach NAME`: never `herdr server`, whose environment is the terminal that first started it, nor a remote client) and to the view's own server by `herdr session list --json` (a bare client is the default session's), only when a client was found. `terminalOf` and `sensedHint` are pure: iTerm2 is `cmd`, Terminal.app and Ghostty `ctrl`, anything else - named where known - and clients whose hints disagree or none at all the fallback. Any error, a bad value and an unreadable config.json give the fallback: the view opens whatever the settings hold, and doctor's machine-wide settings check (`herdrSettingProblem`) is where a bad value is told. `test/herdr-click-hint.test.ts` holds it, `test/status.test.sh` the three texts.
+The status view's click hint. `resolveClickHint` runs once when `sandcastle status` starts a view
+(`src/cli.ts` hands its `mod` to the view as `SANDCASTLE_CLICK_MOD`; never per redraw) and for
+`sandcastle doctor`'s and `sandcastle herdr configure`'s `info` line (`clickHintLine`).
+`SANDCASTLE_CLICK_HINT` wins over the personal `herdr.clickHint` (`auto`, `ctrl`, `cmd`; default
+`auto`); only `auto` senses, and only inside Herdr (`HERDR_SOCKET_PATH`).
+The sensor is one `ps` listing of this user's processes (`ps -E -ww` on macOS, which prints each
+environment; on Linux `ps` for the pids, then `/proc/<pid>/cmdline` and `environ`), kept to Herdr
+clients by `clientSession` (argv exactly `herdr`, `herdr --session NAME` or
+`herdr session attach NAME`: never `herdr server`, whose environment is the terminal that first
+started it, nor a remote client) and to the view's own server by `herdr session list --json` (a bare
+client is the default session's), only when a client was found. `terminalOf` and `sensedHint` are
+pure: iTerm2 is `cmd`, Terminal.app and Ghostty `ctrl`, anything else - named where known - and
+clients whose hints disagree or none at all the fallback.
+Any error, a bad value and an unreadable config.json give the fallback: the view opens whatever the
+settings hold, and doctor's machine-wide settings check (`herdrSettingProblem`) is where a bad value
+is told. `test/herdr-click-hint.test.ts` holds it, `test/status.test.sh` the three texts.
 
 ## `src/status-snapshot.ts`, `src/status-rows.ts`, `src/status-render.ts`, `src/status-view.ts`
 
-The status view is TypeScript (ADR 0003; it took over from the bash view in #707): `status.sh` is a wrapper of a few lines that `exec`s `src/status-view.ts` with its arguments, so `sandcastle status`, `status 0` and the Herdr popup all run it, with the exit codes 0 and 1 (no `.sandcastle`; the live view's below). `jq` is no host prerequisite (only the sandbox image has it, for `container/git-guard.sh`); the view reads its records itself, and a view open during a kit update keeps the code it loaded until it is reopened. The view draws a **snapshot** (`snapshotOf`: the run record, outcomes.json, the logs' names, times and last activity, each ticket's branch facts, the sandboxes, the pool's slots and the queue, and `sources`, where each source's reading stands), works out the rows from it (`ticketRows`, pure) and draws the frame (`renderFrame`, pure) in one write. Three rules hold it: the queue is `SANDCASTLE_BIN queue --json` in a child process, never the tracker imported (its code is synchronous); a ticket state's group and word are `mod/hooks/run-record.ts`'s `GROUPS` and `WORDS` and a run's liveness `mod/hooks/run-live.ts`'s, never a copy; and every fixture's `status 0` shows a ticket in each state in the group the shared table gives it (`test/status-facts.test.ts`, by the fact reader of `test/status-run.ts`).
+The status view is TypeScript (ADR 0003; it took over from the bash view in #707): `status.sh` is a
+wrapper of a few lines that `exec`s `src/status-view.ts` with its arguments, so `sandcastle status`,
+`status 0` and the Herdr popup all run it, with the exit codes 0 and 1 (no `.sandcastle`; the live
+view's below). `jq` is no host prerequisite (only the sandbox image has it, for
+`container/git-guard.sh`); the view reads its records itself, and a view open during a kit update
+keeps the code it loaded until it is reopened.
+The view draws a **snapshot** (`snapshotOf`: the run record, outcomes.json, the logs' names, times
+and last activity, each ticket's branch facts, the sandboxes, the pool's slots and the queue, and
+`sources`, where each source's reading stands), works out the rows from it (`ticketRows`, pure) and
+draws the frame (`renderFrame`, pure) in one write.
+Three rules hold it: the queue is `SANDCASTLE_BIN queue --json` in a child process, never the
+tracker imported (its code is synchronous); a ticket state's group and word are
+`mod/hooks/run-record.ts`'s `GROUPS` and `WORDS` and a run's liveness `mod/hooks/run-live.ts`'s,
+never a copy; and every fixture's `status 0` shows a ticket in each state in the group the shared
+table gives it (`test/status-facts.test.ts`, by the fact reader of `test/status-run.ts`).
 
-The snapshot's **collectors** (GLOSSARY.md; `createCollector`, and `createSources`, a project's five) read one source each: the run record and logs (the plan's usage is a field of the record, so it comes with it), git (after the record, for the tickets it names), Docker, the queue and the pool. A collector has at most one refresh in flight - asked again meanwhile, it starts none - and a deadline for it (`DEADLINES`: 10 s for the record and the pool, 30 s for git and Docker, 60 s for the queue): one still out then is given up, its signal aborted, which ends the whole process group of each command it started (TERM, then KILL 2 s later for a command that ignores it), and whatever it answers after is dropped. Every string a collector reads from the run record, the logs or the tracker loses its escape sequences and control characters as it comes in (`plainText`): an agent's log must not reach the terminal as a clipboard, title or screen-clearing code. A refresh that fails keeps the last good reading, `stale` with the error (`unavailable` with none yet); a source not yet answered is `loading`. A queue that fails says why under the band, its last tickets kept. The queue is asked at most once a minute (`QUEUE_CACHE_MS`, monotonic), and again as soon as the record's `startedAt`, `finishedAt`, `stage` or `pid` changes (a run starting or ending; the record's own change time moves every few seconds during a run, so it is no key). Every command runs in a process group of its own (`detached`), its output collected, never on the terminal. `status 0` reads every source once through the same collectors (`readSnapshot`) and draws.
+The snapshot's **collectors** (GLOSSARY.md; `createCollector`, and `createSources`, a project's
+five) read one source each: the run record and logs (the plan's usage is a field of the record, so
+it comes with it), git (after the record, for the tickets it names), Docker, the queue and the pool.
+A collector has at most one refresh in flight - asked again meanwhile, it starts none - and a
+deadline for it (`DEADLINES`: 10 s for the record and the pool, 30 s for git and Docker, 60 s for
+the queue): one still out then is given up, its signal aborted, which ends the whole process group
+of each command it started (TERM, then KILL 2 s later for a command that ignores it), and whatever
+it answers after is dropped.
+Every string a collector reads from the run record, the logs or the tracker loses its escape
+sequences and control characters as it comes in (`plainText`): an agent's log must not reach the
+terminal as a clipboard, title or screen-clearing code.
+A refresh that fails keeps the last good reading, `stale` with the error (`unavailable` with none
+yet); a source not yet answered is `loading`.
+A queue that fails says why under the band, its last tickets kept.
+The queue is asked at most once a minute (`QUEUE_CACHE_MS`, monotonic), and again as soon as the
+record's `startedAt`, `finishedAt`, `stage` or `pid` changes (a run starting or ending; the record's
+own change time moves every few seconds during a run, so it is no key).
+Every command runs in a process group of its own (`detached`), its output collected, never on the
+terminal. `status 0` reads every source once through the same collectors (`readSnapshot`) and draws.
 
-The **layout** has no fixed breakpoints, and no near-miss joints: a lane's rule meets a table bar exactly or stays at least 5 columns from every one, and a lane with no such column folds into the summary line. The header is the logo and the lanes (GLOSSARY.md) in priority order - RUN (state and start, turn and estimated end, tokens, and an API key's spend, red, so it shows at any width), MACHINE, MODELS (implement, review, repair; ids without `claude-`), SETTINGS, PLAN (left out without a reading) - each as wide as its widest row and its title. If the logo and three lanes fit side by side, the lanes follow it while the next fits; otherwise the logo takes a band of its own and the lanes go in a row under it while they fit. The lanes that do not fit share one summary line, `name  row · row` apart by `│`, cut with `…`; spare width is shared evenly across the band. The table's fixed columns have set widths that do not grow with the pane (TICKET the longest id shown + 2, 8 to 16; STATE 15, TIME 9, DIFF 13, CPU/MEM 13, TOKENS 14) and ACTIVITY takes the rest: when it would fall under 40, CPU/MEM, DIFF and TOKENS give way in that order, then STATE narrows to 11; below about 73 columns ACTIVITY takes what is left. DIFF is the lines added and removed on the ticket's branch against its base (`+96 −1159`, `-` without a branch), read by the snapshot's git step with `git diff --numstat`, never while drawing. TOKENS is `2.5M 94% 27k` - in, the share of it served from cache (amber under 70%), out - from the ticket's `cacheRead` in the run record over the input of its `tokens` text; a record without `cacheRead` shows `in/out`, and a cell wider than the column's 12 cells loses the space before out, then the share, never a figure. TIME is `6m ~4m` while a step is under its typical length (`typical` in the run record): the time in the step, then roughly what it usually has left (the space goes, then the left, when the whole would not fit 7 cells). A pane too short in rows folds a logo on a band of its own to one row. The fact reader (`readFacts`) reads lanes and labelled cells alike: the turn, repair and an API key's spend are run facts wherever a layout puts them, so `test/status-rows.test.ts` holds the two views to the same facts at 80, 120, 200 and 330 columns.
+The **layout** has no fixed breakpoints, and no near-miss joints: a lane's rule meets a table bar
+exactly or stays at least 5 columns from every one, and a lane with no such column folds into the
+summary line.
+The header is the logo and the lanes (GLOSSARY.md) in priority order - RUN (state and start, turn
+and estimated end, tokens, and an API key's spend, red, so it shows at any width), MACHINE, MODELS
+(implement, review, repair; ids without `claude-`), SETTINGS, PLAN (left out without a reading) -
+each as wide as its widest row and its title.
+If the logo and three lanes fit side by side, the lanes follow it while the next fits; otherwise the
+logo takes a band of its own and the lanes go in a row under it while they fit.
+The lanes that do not fit share one summary line, `name  row · row` apart by `│`, cut with `…`;
+spare width is shared evenly across the band.
+The table's fixed columns have set widths that do not grow with the pane (TICKET the longest id
+shown + 2, 8 to 16; STATE 15, TIME 9, DIFF 13, CPU/MEM 13, TOKENS 14) and ACTIVITY takes the rest:
+when it would fall under 40, CPU/MEM, DIFF and TOKENS give way in that order, then STATE narrows to
+11; below about 73 columns ACTIVITY takes what is left.
+DIFF is the lines added and removed on the ticket's branch against its base (`+96 −1159`, `-`
+without a branch), read by the snapshot's git step with `git diff --numstat`, never while drawing.
+TOKENS is `2.5M 94% 27k` - in, the share of it served from cache (amber under 70%), out - from the
+ticket's `cacheRead` in the run record over the input of its `tokens` text; a record without
+`cacheRead` shows `in/out`, and a cell wider than the column's 12 cells loses the space before out,
+then the share, never a figure.
+TIME is `6m ~4m` while a step is under its typical length (`typical` in the run record): the time in
+the step, then roughly what it usually has left (the space goes, then the left, when the whole would
+not fit 7 cells).
+A pane too short in rows folds a logo on a band of its own to one row.
+The fact reader (`readFacts`) reads lanes and labelled cells alike: the turn, repair and an API
+key's spend are run facts wherever a layout puts them, so `test/status-rows.test.ts` holds the two
+views to the same facts at 80, 120, 200 and 330 columns.
 
-The **live view** (any interval but 0, on a terminal or with `STATUS_FRAMES`) is the live loop: the alternate screen, the cursor hidden, line wrap and alternate scroll off, echo and line mode off with `isig` kept (`stty ... min 1`: a read of nothing is the end of input to Node), each frame in one write (cursor home, the lines cut to the pane with `\e[K` only after a shorter one, erase below). It never waits on a source to draw: the collectors refresh in the background on the interval, and a paint draws the snapshot as it stands, starting no process - when a reading changes, every second on the second (a tick: the clock and the times count up), once the pane has been still for 150 ms after a resize (a drag is one repaint, at the final size; nothing is painted meanwhile), and on any key in the Herdr popup (`SANDCASTLE_STATUS_KEYS`, which asks the sources again too), which q, Q or Esc alone close (0) and an arrow key does not. The first paint waits up to 150 ms for the sources on this machine (the record, git, the pool), never for Docker or the queue, which reads `queue: loading…` until it answers; before the record answers the run lane and the table say `loading…`. `STATUS_FRAMES` counts only the paints made once every source has answered. A paint that throws keeps the last frame and writes the error to `STATUS_ERRLOG`. Ctrl-C at a keyboard is INT; a Ctrl-C byte read from the terminal is taken as INT too. INT writes the quit mark (the view record's `quit`, when `HERDR_PANE_ID` is its `status`; one read and a rename) and exits 130, TERM exits 130 and HUP 129, neither with the mark, and every way out drains what is typed and hands the terminal back. The view's signal handlers run while a git, docker or queue call is in flight, and every way out stops the collectors, which end each command's whole process group (TERM), so nothing it started outlives it. A view in the background of its terminal sets and reads nothing of it (SIGTTIN, SIGTTOU would stop it). Herdr knows the view's pane by `status-view.ts` (or `status.sh`, a pane an older kit left open) in its foreground command line (`showsStatus`, `src/herdr.ts`), which `exec` keeps: the pane reuse's Ctrl-C, the dead tab's "showing" and the restart go by it (`test/herdr-status-pane.test.ts`, with the real view on a pty). `test/status-lifecycle.test.ts` and `test/herdr-view-quit.test.ts` hold its lifecycle and the quit mark, the former with the timed checks of the first paint, the resize repaint and the tick, and that a tick or a resize starts nothing; `test/status-collectors.test.ts` holds the collectors.
+The **live view** (any interval but 0, on a terminal or with `STATUS_FRAMES`) is the live loop: the
+alternate screen, the cursor hidden, line wrap and alternate scroll off, echo and line mode off with
+`isig` kept (`stty ... min 1`: a read of nothing is the end of input to Node), each frame in one
+write (cursor home, the lines cut to the pane with `\e[K` only after a shorter one, erase below).
+It never waits on a source to draw: the collectors refresh in the background on the interval, and a
+paint draws the snapshot as it stands, starting no process - when a reading changes, every second on
+the second (a tick: the clock and the times count up), once the pane has been still for 150 ms after
+a resize (a drag is one repaint, at the final size; nothing is painted meanwhile), and on any key in
+the Herdr popup (`SANDCASTLE_STATUS_KEYS`, which asks the sources again too), which q, Q or Esc
+alone close (0) and an arrow key does not.
+The first paint waits up to 150 ms for the sources on this machine (the record, git, the pool),
+never for Docker or the queue, which reads `queue: loading…` until it answers; before the record
+answers the run lane and the table say `loading…`. `STATUS_FRAMES` counts only the paints made once
+every source has answered.
+A paint that throws keeps the last frame and writes the error to `STATUS_ERRLOG`.
+Ctrl-C at a keyboard is INT; a Ctrl-C byte read from the terminal is taken as INT too.
+INT writes the quit mark (the view record's `quit`, when `HERDR_PANE_ID` is its `status`; one read
+and a rename) and exits 130, TERM exits 130 and HUP 129, neither with the mark, and every way out
+drains what is typed and hands the terminal back.
+The view's signal handlers run while a git, docker or queue call is in flight, and every way out
+stops the collectors, which end each command's whole process group (TERM), so nothing it started
+outlives it.
+A view in the background of its terminal sets and reads nothing of it (SIGTTIN, SIGTTOU would stop
+it).
+Herdr knows the view's pane by `status-view.ts` (or `status.sh`, a pane an older kit left open) in
+its foreground command line (`showsStatus`, `src/herdr.ts`), which `exec` keeps: the pane reuse's
+Ctrl-C, the dead tab's "showing" and the restart go by it (`test/herdr-status-pane.test.ts`, with
+the real view on a pty). `test/status-lifecycle.test.ts` and `test/herdr-view-quit.test.ts` hold its
+lifecycle and the quit mark, the former with the timed checks of the first paint, the resize repaint
+and the tick, and that a tick or a resize starts nothing; `test/status-collectors.test.ts` holds the
+collectors.
 
 ## `src/blockers.ts`
 
-What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), GitHub's native "blocked by" edges (the GitHub adapter reads `blockedBy` in its list and view calls, `declaredBlockers` returns them and `refsOf` joins them as `github` refs, a body ref to the same issue counting once, and one from another repository (`owner/repo#N`, told from this repository by the node's `repository.nameWithOwner`) as a `remote` ref: read from its own repository, shown by that name, never queued, never released by a landing here, open when gh cannot read it; a gh too old for the field is told once on stderr and the body is read alone), and comments a run would ignore; `blockerProblems`, the one list `queue`, `queue --lint`, `blockers` and the run's start print, which includes blockers listed under a `Blocked by` heading (the parser does not read them) and a queued ticket that a queued child names under a `## Parent` heading (`parentsOf`: `#12`, the issue URL or a ticket-file path, read from the body as plain text with no tracker call; the run does not skip the parent itself); `openBlockersNow`: the scheduler's blockers port, the open blockers of the tickets held for one that has just landed; `blockedNote`: the wording of what a held ticket waits for
+What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), GitHub's native "blocked
+by" edges (the GitHub adapter reads `blockedBy` in its list and view calls, `declaredBlockers`
+returns them and `refsOf` joins them as `github` refs, a body ref to the same issue counting once,
+and one from another repository (`owner/repo#N`, told from this repository by the node's
+`repository.nameWithOwner`) as a `remote` ref: read from its own repository, shown by that name,
+never queued, never released by a landing here, open when gh cannot read it; a gh too old for the
+field is told once on stderr and the body is read alone), and comments a run would ignore;
+`blockerProblems`, the one list `queue`, `queue --lint`, `blockers` and the run's start print, which
+includes blockers listed under a `Blocked by` heading (the parser does not read them) and a queued
+ticket that a queued child names under a `## Parent` heading (`parentsOf`: `#12`, the issue URL or a
+ticket-file path, read from the body as plain text with no tracker call; the run does not skip the
+parent itself); `openBlockersNow`: the scheduler's blockers port, the open blockers of the tickets
+held for one that has just landed; `blockedNote`: the wording of what a held ticket waits for
 
 ## `src/touches.ts`
 
-The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, `missingTouches` (the entries it keeps or drops silently, for `queue --lint`), and `unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree` per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a `Touches:` overrun, and `overrunPaths` (`src/report.ts`) folds the modified ones into a count, "+7 test files"), `isDocPath` (any `*.md`, and `docs/` and `skill/`: the docs a repo's rules have every change edit, folded by `overrunPaths` into "+2 docs files", so the listed paths are the source files a ticket missed; the close comment says "changed beyond its Touches line: ...", the report "<title> - beyond Touches: ..."), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out a file only a repair pass or a merge commit (a conflict resolution) changed: the repair commits are recorded as `repaired` in the ticket's head record (`heads.json`), across attempts. An overrun of only test and docs files stays in the run record, and `overrunNoted` (`src/report.ts`) keeps it out of the close comment and the report. A scheduling hint and warning source, never a guard
+The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree,
+`missingTouches` (the entries it keeps or drops silently, for `queue --lint`), and
+`unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree`
+per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a
+`Touches:` overrun, and `overrunPaths` (`src/report.ts`) folds the modified ones into a count, "+7
+test files"), `isDocPath` (any `*.md`, and `docs/` and `skill/`: the docs a repo's rules have every
+change edit, folded by `overrunPaths` into "+2 docs files", so the listed paths are the source files
+a ticket missed; the close comment says "changed beyond its Touches line: ...", the report "<title> -
+beyond Touches: ..."), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one
+is not an overrun when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out
+a file only a repair pass or a merge commit (a conflict resolution) changed: the repair commits are
+recorded as `repaired` in the ticket's head record (`heads.json`), across attempts.
+An overrun of only test and docs files stays in the run record, and `overrunNoted` (`src/report.ts`)
+keeps it out of the close comment and the report.
+A scheduling hint and warning source, never a guard
 
 ## `src/lint.ts`
 
-`lintQueue()`: the queue's shape for `sandcastle queue --lint` (given ticket numbers, it lints `namedTickets` of them, as the run does, with `named` set: only those count toward the chain, hot files and estimate, and a blocker outside them is listed as a wait) - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, tickets to consider splitting (large by the estimate's size rule, `sizeOf` in `src/run.ts`, imported rather than copied), hot and shared unmergeable files, tickets whose `Touches:` names a protected path (always held), `Touches:` paths absent from the base branch (`missingTouches`: a plain path with no match, unless the body names it beside "new" outside the `Touches:` line - that exception is for a plain path only - or a glob matching nothing, which gets its own line, as saying "new" changes nothing for a glob), `blockerProblems` (blockers listed under a heading, which the parser does not read, among them), a rough estimate. Read-only advice
+`lintQueue()`: the queue's shape for `sandcastle queue --lint` (given ticket numbers, it lints
+`namedTickets` of them, as the run does, with `named` set: only those count toward the chain, hot
+files and estimate, and a blocker outside them is listed as a wait) - longest `Blocked by` chain,
+edges that only order overlapping `Touches:`, wide tickets, tickets to consider splitting (large by
+the estimate's size rule, `sizeOf` in `src/run.ts`, imported rather than copied), hot and shared
+unmergeable files, tickets whose `Touches:` names a protected path (always held), `Touches:` paths
+absent from the base branch (`missingTouches`: a plain path with no match, unless the body names it
+beside "new" outside the `Touches:` line - that exception is for a plain path only - or a glob
+matching nothing, which gets its own line, as saying "new" changes nothing for a glob),
+`blockerProblems` (blockers listed under a heading, which the parser does not read, among them), a
+rough estimate.
+Read-only advice
 
 ## `src/detach.ts`
 
-`sandcastle run --detach`, `wait`, `stop`, `pause` and `resume`: `startDetached` (the run as a process of its own - `spawn` with `detached: true`, output to `.sandcastle/logs/run-output.log` - and the line printed once it is going), `livePid` (the run lock's pid, if it is a process of the kit), `waitForRun` (also waits for the pid run.json names while it has no end, and the one it last saw, to die: the lock goes before the record's `exitCode` is written), `recordedExitCode`; `pauseRun` and `resumeRun` (the run found through the run lock like `stop`'s) write and remove the pause's control file, `.sandcastle/.run/paused` (`PAUSE_FILE`, gitignored with the rest of `.run/`; whole and renamed in, as the run reads it every second): `{ pid, since }`, the pid of the run it was asked of, and `readPause(root, pid)` answers a pause only for that pid - a file a dead run left behind, or one that cannot be read, pauses nothing, and a `pause` of the live run replaces it. A run with `USAGE_PAUSE` writes the same file (`holdForUsage`, called by the run's usage pause) with the cause beside `pid` and `since`: `{ pid, since, cause: "usage", provider, window, percent, resumesAt }`, where `readPause(root, pid, now)` answers `{ since, usage }` for it and answers nothing once `resumesAt` has come (the file is left where it is and is never read as a pause again: removing it from the run's side would race a person's `sandcastle pause`), and a cause that cannot be read as a whole is a person's pause, which stays until `sandcastle resume`. `holdForUsage` writes nothing while a person's pause stands, and moves a usage pause on only to a window that resets later, keeping its `since`. `sandcastle pause` during a usage pause rewrites the file without the cause (`taken over`, `since` kept), so no timer resumes it; `sandcastle resume` removes it as ever and says it ended a usage pause. A pause of a paused run and a resume of a run that is not paused say so and change nothing; no live run is `No run is live.`, exit 0. `wait` is not changed: a paused run is a live one (its lock is held), so it waits through the pause, and `stop` is a SIGINT as ever. Every read-then-write of that file - `holdForUsage`, `pauseRun`, `resumeRun` - runs under `<paused>.lock` (`withLockSync`), so a person's `pause` landing between the usage timer's read and its write is never replaced (`test/pause-race.test.ts`).
+`sandcastle run --detach`, `wait`, `stop`, `pause` and `resume`: `startDetached` (the run as a
+process of its own - `spawn` with `detached: true`, output to `.sandcastle/logs/run-output.log` -
+and the line printed once it is going), `livePid` (the run lock's pid, if it is a process of the
+kit), `waitForRun` (also waits for the pid run.json names while it has no end, and the one it last
+saw, to die: the lock goes before the record's `exitCode` is written), `recordedExitCode`;
+`pauseRun` and `resumeRun` (the run found through the run lock like `stop`'s) write and remove the
+pause's control file, `.sandcastle/.run/paused` (`PAUSE_FILE`, gitignored with the rest of `.run/`;
+whole and renamed in, as the run reads it every second): `{ pid, since }`, the pid of the run it was
+asked of, and `readPause(root, pid)` answers a pause only for that pid - a file a dead run left
+behind, or one that cannot be read, pauses nothing, and a `pause` of the live run replaces it.
+A run with `USAGE_PAUSE` writes the same file (`holdForUsage`, called by the run's usage pause) with
+the cause beside `pid` and `since`:
+`{ pid, since, cause: "usage", provider, window, percent, resumesAt }`, where
+`readPause(root, pid, now)` answers `{ since, usage }` for it and answers nothing once `resumesAt`
+has come (the file is left where it is and is never read as a pause again: removing it from the
+run's side would race a person's `sandcastle pause`), and a cause that cannot be read as a whole is
+a person's pause, which stays until `sandcastle resume`. `holdForUsage` writes nothing while a
+person's pause stands, and moves a usage pause on only to a window that resets later, keeping its
+`since`. `sandcastle pause` during a usage pause rewrites the file without the cause (`taken over`,
+`since` kept), so no timer resumes it; `sandcastle resume` removes it as ever and says it ended a
+usage pause.
+A pause of a paused run and a resume of a run that is not paused say so and change nothing; no live
+run is `No run is live.`, exit 0. `wait` is not changed: a paused run is a live one (its lock is
+held), so it waits through the pause, and `stop` is a SIGINT as ever.
+Every read-then-write of that file - `holdForUsage`, `pauseRun`, `resumeRun` - runs under
+`<paused>.lock` (`withLockSync`), so a person's `pause` landing between the usage timer's read and
+its write is never replaced (`test/pause-race.test.ts`).
 
 ## `src/guard.ts`
 
-Host safety: git hooks, auto-gc and background maintenance off (on the host, `disableHostGitGc`, and in every sandbox too, by `GIT_CONFIG_*` pairs that `sandboxEnv` in `src/sandbox.ts` appends after any already set: the host's pairs never reach a container, and a commit or merge in a sandbox would otherwise start `git maintenance run --auto` and a detached `git gc --auto` repack and prune in the `.git` every sandbox shares, in a container that may be stopped before it ends; in the environment and not the image, so no rebuild, `test/sandbox-git-maintenance-off.test.ts`), command-running config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks; `info/refs` and `info/exclude` are left out: the first is a dumb-transport index `git repack` rewrites, the second holds ignore patterns only, runs nothing and is written by the operator's own tools mid-run (Claude Code's runtime block), while `info/attributes`, `grafts`, `sparse-checkout` and any new file stay watched, `test/guard-info-exclude.test.ts`; `.git/config` is also kept as its list of entries, and a change to it is compared by key, `configChange`: only `branch.<name>.remote` and `.merge` of a branch that is neither the base nor an `agent/issue-*` one, with a plain remote name or `.` and a `refs/` merge, is let through with one line, then taken as the new expectation, while any other key, `rebase` and `pushRemote` included, stops the run and is named in the stop, with old and new values except for command-running and config-loading keys and keys that carry credentials (`SECRET_KEY`: an `extraHeader`, `credential.*`, any key named for a password, token, secret or cookie), and with a URL's user, password or query token hidden in names and values alike, `test/guard-config-keys.test.ts`; its base is the one the run expects, which the landing worker moves only by its own writes; and the tips of `agent/issue-*`, which `HostGit.begin`, `settle` and `forget` in `src/landing.ts` keep: a ticket in flight may move its branch, any other tip that moves stops the run, and a branch that vanished is restored from the bare repo `.sandcastle/backup.git`, where a pipeline's end copies it, with the base branch under `refs/base` so a fetch is thin, and a landing drops it and, with no agent branch left, runs `gc --prune=now` in the backup alone, whose git calls turn background maintenance and cruft packs off so the prune is never refused by a detached auto gc; a branch the kit never landed - merged by hand, or deleted by a person - is dropped by `pruneBackup`, which `burndown()` calls once it holds the run lock and `sandcastle clean` after its branch deletes: an entry goes when its branch no longer exists or its tip is an ancestor of the base, one the test cannot decide stays, and the same prune follows when no entry is left), a deleted or moved base stops with the `update-ref` that restores it, a worktree record rewritten to a container path is named, a sandbox's own worktree record held to what git writes before each host git command in that worktree (below), protected paths and files over 50 MB held for a person, run lock
+Host safety: git hooks, auto-gc and background maintenance off (on the host, `disableHostGitGc`, and
+in every sandbox too, by `GIT_CONFIG_*` pairs that `sandboxEnv` in `src/sandbox.ts` appends after
+any already set: the host's pairs never reach a container, and a commit or merge in a sandbox would
+otherwise start `git maintenance run --auto` and a detached `git gc --auto` repack and prune in the
+`.git` every sandbox shares, in a container that may be stopped before it ends; in the environment
+and not the image, so no rebuild, `test/sandbox-git-maintenance-off.test.ts`), command-running
+config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks;
+`info/refs` and `info/exclude` are left out: the first is a dumb-transport index `git repack`
+rewrites, the second holds ignore patterns only, runs nothing and is written by the operator's own
+tools mid-run (Claude Code's runtime block), while `info/attributes`, `grafts`, `sparse-checkout`
+and any new file stay watched, `test/guard-info-exclude.test.ts`; `.git/config` is also kept as its
+list of entries, and a change to it is compared by key, `configChange`: only `branch.<name>.remote`
+and `.merge` of a branch that is neither the base nor an `agent/issue-*` one, with a plain remote
+name or `.` and a `refs/` merge, is let through with one line, then taken as the new expectation,
+while any other key, `rebase` and `pushRemote` included, stops the run and is named in the stop,
+with old and new values except for command-running and config-loading keys and keys that carry
+credentials (`SECRET_KEY`: an `extraHeader`, `credential.*`, any key named for a password, token,
+secret or cookie), and with a URL's user, password or query token hidden in names and values alike,
+`test/guard-config-keys.test.ts`; its base is the one the run expects, which the landing worker
+moves only by its own writes; and the tips of `agent/issue-*`, which `HostGit.begin`, `settle` and
+`forget` in `src/landing.ts` keep: a ticket in flight may move its branch, any other tip that moves
+stops the run, and a branch that vanished is restored from the bare repo `.sandcastle/backup.git`,
+where a pipeline's end copies it, with the base branch under `refs/base` so a fetch is thin, and a
+landing drops it and, with no agent branch left, runs `gc --prune=now` in the backup alone, whose
+git calls turn background maintenance and cruft packs off so the prune is never refused by a
+detached auto gc; a branch the kit never landed - merged by hand, or deleted by a person - is
+dropped by `pruneBackup`, which `burndown()` calls once it holds the run lock and `sandcastle clean`
+after its branch deletes: an entry goes when its branch no longer exists or its tip is an ancestor
+of the base, one the test cannot decide stays, and the same prune follows when no entry is left), a
+deleted or moved base stops with the `update-ref` that restores it, a worktree record rewritten to a
+container path is named, a sandbox's own worktree record held to what git writes before each host
+git command in that worktree (below), protected paths and files over 50 MB held for a person, run
+lock
 
-`landInSandbox` (`src/land.ts`) checks the fingerprint before its sandbox opens (against `expected`, below) and three times after: before its sandbox closes (with the worktree's records, `checkBeforeClose`, below), after it closes, and again straight before the fast-forward of the base. Other tickets' sandboxes keep writing the shared `.git` while the host reads and checks the merge (`checkLandingMerge`, `plainMergeNote`, a squash's `commit-tree`), and the fast-forward writes files out through smudge filters: a `filter.<x>.smudge` and an `info/attributes` line planted in that window would otherwise run on the host, because the config pin holds only the filters that existed at the run's start. The calls between the checks are synchronous, so nothing else of the run interleaves, and the second check (the same one `HostGit.write` makes before its write) is the last thing before `git merge --ff-only`; `sandcastle land`, which has no `HostGit`, gets it too (`test/landing-filter-before-ff.test.ts`).
+`landInSandbox` (`src/land.ts`) checks the fingerprint before its sandbox opens (against `expected`,
+below) and three times after: before its sandbox closes (with the worktree's records,
+`checkBeforeClose`, below), after it closes, and again straight before the fast-forward of the base.
+Other tickets' sandboxes keep writing the shared `.git` while the host reads and checks the merge
+(`checkLandingMerge`, `plainMergeNote`, a squash's `commit-tree`), and the fast-forward writes files
+out through smudge filters: a `filter.<x>.smudge` and an `info/attributes` line planted in that
+window would otherwise run on the host, because the config pin holds only the filters that existed
+at the run's start.
+The calls between the checks are synchronous, so nothing else of the run interleaves, and the second
+check (the same one `HostGit.write` makes before its write) is the last thing before
+`git merge --ff-only`; `sandcastle land`, which has no `HostGit`, gets it too
+(`test/landing-filter-before-ff.test.ts`).
 
-**Before every sandbox opens**: Sandcastle's open runs host git in the project - `git worktree prune` and `list`, then `git worktree add`, whose checkout writes every file out through the filters `.git/config` and `info/attributes` name, or, in a kit worktree it reuses, `git status` (and, unpatched, `git fetch` and `git merge --ff-only`, below) - so a filter another sandbox planted in the shared `.git` since the last check would run there, past the pins, which hold only the drivers configured at the start. The site's `.git` check is the last thing before every sandbox is created, after any wait for a slot, and a failure stops the run with nothing opened. The sites: a ticket's pipeline at its first open and at the resume after a pause (`openChecked`: a reused worktree's records, below, then `HostGit.check`; a failure is the ticket's `tampered`, and so is one the setup's cut of a stale branch finds, whose write checks first, so a change made before the setup began is named there, `before writing to the base branch`); the gate sandboxes (`gateBase`'s `beforeOpen`, its `check` but for one: the run's `HostGit.check` for the mid-run base check and the verify, `sandcastle gates`' own fingerprint, and for the base gates at a run's start a reading `burndown()` takes at its start (`atStart`), under the run lock once `reapOrphans` has stopped what a killed run left working, since the image build and preflight come between; that sandbox still closes behind a reading of its own, below, and the run's fingerprint is taken once it has closed); the landing sandbox (`landInSandbox`'s `expected`: the run's fingerprint, or the reading `landTicket` takes as `sandcastle land` starts, so its image build and its wait for a slot are covered). A change to the base or an agent branch since that reading stops the open too, as at any other check. `test/guard-before-open.test.ts` plants a smudge filter and its attribute between two opens at each site and holds that the second open never happens and the filter never runs.
+**Before every sandbox opens**: Sandcastle's open runs host git in the project -
+`git worktree prune` and `list`, then `git worktree add`, whose checkout writes every file out
+through the filters `.git/config` and `info/attributes` name, or, in a kit worktree it reuses,
+`git status` (and, unpatched, `git fetch` and `git merge --ff-only`, below) - so a filter another
+sandbox planted in the shared `.git` since the last check would run there, past the pins, which hold
+only the drivers configured at the start.
+The site's `.git` check is the last thing before every sandbox is created, after any wait for a
+slot, and a failure stops the run with nothing opened.
+The sites: a ticket's pipeline at its first open and at the resume after a pause (`openChecked`: a
+reused worktree's records, below, then `HostGit.check`; a failure is the ticket's `tampered`, and so
+is one the setup's cut of a stale branch finds, whose write checks first, so a change made before
+the setup began is named there, `before writing to the base branch`); the gate sandboxes
+(`gateBase`'s `beforeOpen`, its `check` but for one: the run's `HostGit.check` for the mid-run base
+check and the verify, `sandcastle gates`' own fingerprint, and for the base gates at a run's start a
+reading `burndown()` takes at its start (`atStart`), under the run lock once `reapOrphans` has
+stopped what a killed run left working, since the image build and preflight come between; that
+sandbox still closes behind a reading of its own, below, and the run's fingerprint is taken once it
+has closed); the landing sandbox (`landInSandbox`'s `expected`: the run's fingerprint, or the
+reading `landTicket` takes as `sandcastle land` starts, so its image build and its wait for a slot
+are covered).
+A change to the base or an agent branch since that reading stops the open too, as at any other
+check. `test/guard-before-open.test.ts` plants a smudge filter and its attribute between two opens
+at each site and holds that the second open never happens and the filter never runs.
 
-**`@ai-hero/sandcastle` is a patched dependency** (`patches/@ai-hero__sandcastle@0.12.0.patch`, `patchedDependencies` in `pnpm-workspace.yaml`): the kit adds each ticket's worktree itself, under the host-git mutex, so Sandcastle's `create` always takes its reuse path, which unpatched ends in `fastForwardFromOrigin` - a host `git fetch origin <branch>` and an `--ff-only` merge outside the mutex, with a 30 s limit that an origin which does not answer (off VPN, a locked SSH agent) spends on every open, and which moves a branch that is on origin beside landings. The patch drops that call: the worktree was just cut from the local branch, so origin's tip is never wanted. `test/sandcastle-no-origin-refresh.test.ts` reads the installed `dist` and fails if the call is back, so an upgrade that loses the patch is loud; make the patch again with `pnpm patch` and `pnpm patch-commit` on an upgrade, and remove it once Sandcastle has an option to skip the origin refresh.
+**`@ai-hero/sandcastle` is a patched dependency** (`patches/@ai-hero__sandcastle@0.12.0.patch`,
+`patchedDependencies` in `pnpm-workspace.yaml`): the kit adds each ticket's worktree itself, under
+the host-git mutex, so Sandcastle's `create` always takes its reuse path, which unpatched ends in
+`fastForwardFromOrigin` - a host `git fetch origin <branch>` and an `--ff-only` merge outside the
+mutex, with a 30 s limit that an origin which does not answer (off VPN, a locked SSH agent) spends
+on every open, and which moves a branch that is on origin beside landings.
+The patch drops that call: the worktree was just cut from the local branch, so origin's tip is never
+wanted. `test/sandcastle-no-origin-refresh.test.ts` reads the installed `dist` and fails if the call
+is back, so an upgrade that loses the patch is loud; make the patch again with `pnpm patch` and
+`pnpm patch-commit` on an upgrade, and remove it once Sandcastle has an option to skip the origin
+refresh.
 
-**Before every sandbox closes** (`checkBeforeClose`): Sandcastle's close stops the container, then runs `git status` on the host in the sandbox's worktree with the run's environment (and `git worktree remove` from the project), so a filter planted in the shared `.git/config` - the pins hold only the drivers configured at the start - would run there. Each close is preceded by a stop of the sandbox's container (`stopSandboxContainer`, `src/sandbox.ts`: found by its mount of the worktree, as `reapOrphans` finds one; `docker stop` with a 3 s grace before Docker's kill, which the base image's `STOPSIGNAL SIGKILL` never waits for), so nothing the sandbox left running there - an agent's background job, a server a gate started - writes `.git` after the check: such a process can watch the worktree's lock, which the kit removes just before the close. Then come the site's `.git` check and a check of that worktree's records; Sandcastle's own stop finds the container stopped, which Docker accepts. A container Docker refuses to stop (the stop fails and `docker ps` still lists it) fails the check; so does a Docker that gives no answer - a `docker ps` or `inspect` that fails or lists something that is not an id (`DockerAnswerError`), or a call that outlasts its limit (30 s for `ps` and `inspect`, the stop's 3 s grace plus 30 s for `stop`, the kit's own timer): a busy, restarting or hung daemon is not "nothing is running". A missing `docker` program (`ENOENT`) is no such failure: the kit started no container through it. The removal after a failed check (`removeSandboxContainer`) has the 30 s limit on each call too. A failure removes the container (`removeSandboxContainer`: found the same way), never calls the close, leaves the worktree for a person and stops the run. The worktree stays locked until the run exits, when `unlockAll` releases it with every other lock the kit took, so the clean-up command Sandcastle prints for it works as printed. The sites: a ticket's pipeline at its end (the settle's check, before the close and no longer after it) and at a pause (`HostGit.check`); the gate sandboxes (`gateBase`: the run's `HostGit.check` for the mid-run base check and the verify, `sandcastle gates`' own fingerprint, and for the base gates at a run's start - before any other sandbox of the run - a reading of its own taken once the sandbox is open, since git may write `extensions.relativeWorktrees` as it adds the worktree); the landing sandbox (`landInSandbox`'s fingerprint). A failed check in the mid-run base check ends the ticket that asked for it, as its own would. `test/guard-worktree-records.test.ts` drives each site with a close that runs that `git status`, `gateBase` with Sandcastle's own close over a fake `docker`, and holds the order at each - the stop, the check, the close - with a process the sandbox left running that writes the moment the worktree is unlocked; `test/guard-docker-unanswered.test.ts` holds a failing `ps` and a hanging `ps` and `stop` (the run stops, the close is not called); `test/guard.test.ts` holds the step itself.
+**Before every sandbox closes** (`checkBeforeClose`): Sandcastle's close stops the container, then
+runs `git status` on the host in the sandbox's worktree with the run's environment (and
+`git worktree remove` from the project), so a filter planted in the shared `.git/config` - the pins
+hold only the drivers configured at the start - would run there.
+Each close is preceded by a stop of the sandbox's container (`stopSandboxContainer`,
+`src/sandbox.ts`: found by its mount of the worktree, as `reapOrphans` finds one; `docker stop` with
+a 3 s grace before Docker's kill, which the base image's `STOPSIGNAL SIGKILL` never waits for), so
+nothing the sandbox left running there - an agent's background job, a server a gate started - writes
+`.git` after the check: such a process can watch the worktree's lock, which the kit removes just
+before the close.
+Then come the site's `.git` check and a check of that worktree's records; Sandcastle's own stop
+finds the container stopped, which Docker accepts.
+A container Docker refuses to stop (the stop fails and `docker ps` still lists it) fails the check;
+so does a Docker that gives no answer - a `docker ps` or `inspect` that fails or lists something
+that is not an id (`DockerAnswerError`), or a call that outlasts its limit (30 s for `ps` and
+`inspect`, the stop's 3 s grace plus 30 s for `stop`, the kit's own timer): a busy, restarting or
+hung daemon is not "nothing is running".
+A missing `docker` program (`ENOENT`) is no such failure: the kit started no container through it.
+The removal after a failed check (`removeSandboxContainer`) has the 30 s limit on each call too.
+A failure removes the container (`removeSandboxContainer`: found the same way), never calls the
+close, leaves the worktree for a person and stops the run.
+The worktree stays locked until the run exits, when `unlockAll` releases it with every other lock
+the kit took, so the clean-up command Sandcastle prints for it works as printed.
+The sites: a ticket's pipeline at its end (the settle's check, before the close and no longer after
+it) and at a pause (`HostGit.check`); the gate sandboxes (`gateBase`: the run's `HostGit.check` for
+the mid-run base check and the verify, `sandcastle gates`' own fingerprint, and for the base gates
+at a run's start - before any other sandbox of the run - a reading of its own taken once the sandbox
+is open, since git may write `extensions.relativeWorktrees` as it adds the worktree); the landing
+sandbox (`landInSandbox`'s fingerprint).
+A failed check in the mid-run base check ends the ticket that asked for it, as its own would.
+`test/guard-worktree-records.test.ts` drives each site with a close that runs that `git status`,
+`gateBase` with Sandcastle's own close over a fake `docker`, and holds the order at each - the stop,
+the check, the close - with a process the sandbox left running that writes the moment the worktree
+is unlocked; `test/guard-docker-unanswered.test.ts` holds a failing `ps` and a hanging `ps` and
+`stop` (the run stops, the close is not called); `test/guard.test.ts` holds the step itself.
 
-**A failed open** (`openOrAbandon`, `src/guard.ts`; the three sites that call Sandcastle's `createSandbox` - the ticket's pipeline, `gateBase` and the landing sandbox - go through it, `test/failed-open-cleanup.test.ts`): a container start that runs out of time throws with no handle to close, and the worktree hook has already locked the worktree, so Sandcastle's own clean-up of it fails. The container is removed first (`removeSandboxContainer`), then, unless `worktreeRefusal` says git must not run there, the worktree is unlocked and removed, and a scratch `sandcastle/*` branch with it. An `agent/*` branch stays (the run's fingerprint restores a vanished one, and a carried one holds work); a worktree that existed before the open (a carried ticket's) stays as it stands once its container is gone, since `git worktree remove` without `--force` would run `git status` on the host in it with no `.git` check before. Both the open's `git worktree add` (the kit makes the worktree itself, at the path and with the flags Sandcastle uses, and Sandcastle then reuses it; asynchronously and within Sandcastle's own 30 s limit, as Sandcastle's add ran, so a slow checkout holds no other pipeline and a hung one cannot hold the mutex for good, `test/worktree-add-async.test.ts`; a test that opens sandboxes on a loaded machine replaces the 30 s with `injectWorktreeLimit`, `test/worktree-limit-inject.test.ts`) and this clean-up run under `createHostGit`'s `exclusive` (`test/sandbox-open-serialised.test.ts`), so neither meets a landing's ref write; the container start between them stays outside it, so a landing never waits behind a start of up to 120 s. The base gates of a run's start and `sandcastle gates` and `land` have no other host git at the same moment, and pass none. A landing whose merge failed on an `index.lock` looks again after a few short waits (`LOCK_RECHECKS`, `src/landing.ts`) before it stops every landing (`test/landing-lock-recheck.test.ts`); so does a sandbox landing whose host fast-forward failed (the same re-check, no merge abort), so a lock that stays stops the landings once and does not cost each later ticket a sandbox and a gate run (`test/landing-sandbox-lock.test.ts`). What is left, `sandcastle clean` removes: `reapOrphans` stops a running container of any worktree under the project's `.sandcastle/worktrees/`, not only `agent-issue-*`. Its `docker ps`, `inspect` and `rm`, and those of `removeExitedSandboxes`, have the same 30 s limit (`dockerOrStop`): a daemon that gives no answer stops the run's start or `clean` with an `OperatorError` naming the call, since a container the kit could not ask about may still be running (`test/docker-hang.test.ts`).
+**A failed open** (`openOrAbandon`, `src/guard.ts`; the three sites that call Sandcastle's
+`createSandbox` - the ticket's pipeline, `gateBase` and the landing sandbox - go through it,
+`test/failed-open-cleanup.test.ts`): a container start that runs out of time throws with no handle
+to close, and the worktree hook has already locked the worktree, so Sandcastle's own clean-up of it
+fails.
+The container is removed first (`removeSandboxContainer`), then, unless `worktreeRefusal` says git
+must not run there, the worktree is unlocked and removed, and a scratch `sandcastle/*` branch with
+it.
+An `agent/*` branch stays (the run's fingerprint restores a vanished one, and a carried one holds
+work); a worktree that existed before the open (a carried ticket's) stays as it stands once its
+container is gone, since `git worktree remove` without `--force` would run `git status` on the host
+in it with no `.git` check before.
+Both the open's `git worktree add` (the kit makes the worktree itself, at the path and with the
+flags Sandcastle uses, and Sandcastle then reuses it; asynchronously and within Sandcastle's own 30
+s limit, as Sandcastle's add ran, so a slow checkout holds no other pipeline and a hung one cannot
+hold the mutex for good, `test/worktree-add-async.test.ts`; a test that opens sandboxes on a loaded
+machine replaces the 30 s with `injectWorktreeLimit`, `test/worktree-limit-inject.test.ts`) and this
+clean-up run under `createHostGit`'s `exclusive` (`test/sandbox-open-serialised.test.ts`), so
+neither meets a landing's ref write; the container start between them stays outside it, so a landing
+never waits behind a start of up to 120 s.
+The base gates of a run's start and `sandcastle gates` and `land` have no other host git at the same
+moment, and pass none.
+A landing whose merge failed on an `index.lock` looks again after a few short waits
+(`LOCK_RECHECKS`, `src/landing.ts`) before it stops every landing
+(`test/landing-lock-recheck.test.ts`); so does a sandbox landing whose host fast-forward failed (the
+same re-check, no merge abort), so a lock that stays stops the landings once and does not cost each
+later ticket a sandbox and a gate run (`test/landing-sandbox-lock.test.ts`).
+What is left, `sandcastle clean` removes: `reapOrphans` stops a running container of any worktree
+under the project's `.sandcastle/worktrees/`, not only `agent-issue-*`.
+Its `docker ps`, `inspect` and `rm`, and those of `removeExitedSandboxes`, have the same 30 s limit
+(`dockerOrStop`): a daemon that gives no answer stops the run's start or `clean` with an
+`OperatorError` naming the call, since a container the kit could not ask about may still be running
+(`test/docker-hang.test.ts`).
 
-**The worktree records and nested repositories** (`assertWorktreeRecords`): a sandbox works in a linked worktree, whose `.git` file names its record, `<common>/worktrees/<name>`, whose `commondir` names the directory whose config git reads (with `config.worktree` beside it under `extensions.worktreeConfig`). A sandbox can write all three, and a changed one has a host git in that worktree read config no check has seen. They are held to what git writes - the `.git` file is a file naming that record (a relative path, as `worktree.useRelativePaths` writes from git 2.48, resolves the same), neither directory is a symlink, `commondir` reads `../..` once its line end is stripped, as git strips it (no other whitespace: `../.. ` names a directory `.. `), and there is no `config.worktree` - not compared with a reading: a kept worktree can be an earlier run's, whose change a fingerprint taken at this run's start would read as its baseline. Held before every host git command in a sandbox's worktree: before each close (above), before the pipeline's cut of a stale branch in a kept worktree (`cutFromBase`'s `git status` and `git merge --ff-only`), and before Sandcastle's open reuses a kit worktree that holds the ticket's branch or sits at its path (its host `git status`; the `git fetch` and `git merge --ff-only` that follow it unpatched are patched out, above), at the setup and at a resume; a listed worktree whose directory is gone is no tampering, since no git runs there and Sandcastle's open prunes its record. The same check refuses a repository nested in the worktree (`nestedGit`): a host `git status` recurses into a gitlink - a nested `.git` directory, or a `.git` file naming a git directory under `.git/modules/` - and reads that repository's own config and attributes, past the pins, and a flag cannot be passed to Sandcastle's call (a `GIT_CONFIG_*` pin of `diff.ignoreSubmodules` does not hold against a `.gitmodules` the sandbox writes). `test/guard-nested-repository.test.ts` holds it, with a filter in the nested repository's config that must not run. A failure is the ticket's `tampered`, which stops the run. `sandcastle clean` (`cleanProject`) holds each kept worktree to it before `git worktree remove --force`, and a worktree that fails is left as it stands with its branch (git would refuse the branch's delete anyway), named with the reason, while the others are cleaned and the exit code is non-zero (`test/clean-checks.test.ts`); its start holds the baseline above before the pins.
+**The worktree records and nested repositories** (`assertWorktreeRecords`): a sandbox works in a
+linked worktree, whose `.git` file names its record, `<common>/worktrees/<name>`, whose `commondir`
+names the directory whose config git reads (with `config.worktree` beside it under
+`extensions.worktreeConfig`).
+A sandbox can write all three, and a changed one has a host git in that worktree read config no
+check has seen.
+They are held to what git writes - the `.git` file is a file naming that record (a relative path, as
+`worktree.useRelativePaths` writes from git 2.48, resolves the same), neither directory is a
+symlink, `commondir` reads `../..` once its line end is stripped, as git strips it (no other
+whitespace: `../.. ` names a directory `.. `), and there is no `config.worktree` - not compared with
+a reading: a kept worktree can be an earlier run's, whose change a fingerprint taken at this run's
+start would read as its baseline.
+Held before every host git command in a sandbox's worktree: before each close (above), before the
+pipeline's cut of a stale branch in a kept worktree (`cutFromBase`'s `git status` and
+`git merge --ff-only`), and before Sandcastle's open reuses a kit worktree that holds the ticket's
+branch or sits at its path (its host `git status`; the `git fetch` and `git merge --ff-only` that
+follow it unpatched are patched out, above), at the setup and at a resume; a listed worktree whose
+directory is gone is no tampering, since no git runs there and Sandcastle's open prunes its record.
+The same check refuses a repository nested in the worktree (`nestedGit`): a host `git status`
+recurses into a gitlink - a nested `.git` directory, or a `.git` file naming a git directory under
+`.git/modules/` - and reads that repository's own config and attributes, past the pins, and a flag
+cannot be passed to Sandcastle's call (a `GIT_CONFIG_*` pin of `diff.ignoreSubmodules` does not hold
+against a `.gitmodules` the sandbox writes). `test/guard-nested-repository.test.ts` holds it, with a
+filter in the nested repository's config that must not run.
+A failure is the ticket's `tampered`, which stops the run. `sandcastle clean` (`cleanProject`) holds
+each kept worktree to it before `git worktree remove --force`, and a worktree that fails is left as
+it stands with its branch (git would refuse the branch's delete anyway), named with the reason,
+while the others are cleaned and the exit code is non-zero (`test/clean-checks.test.ts`); its start
+holds the baseline above before the pins.
 
-**What a sandbox can change in the shared `.git`, and how each is covered** (the whole `.git` is mounted read-write in every sandbox):
+**What a sandbox can change in the shared `.git`, and how each is covered** (the whole `.git` is
+mounted read-write in every sandbox):
 
-Every entry is read by `entryHash`: a regular file by its content, a link by its target, a directory as one (its files listed apart), and anything else - a FIFO a sandbox planted - by its kind, never opened, since a blocking read would hang the whole run.
+Every entry is read by `entryHash`: a regular file by its content, a link by its target, a directory
+as one (its files listed apart), and anything else - a FIFO a sandbox planted - by its kind, never
+opened, since a blocking read would hang the whole run.
 
-- `config`, the main worktree's `config.worktree` (present or absent, and its content; compared by key as `config` is, with no key let through, `test/guard-config-worktree.test.ts`), `HEAD`, `info/*` (not `info/refs`, an index for the dumb HTTP transport that a repack rewrites, nor `info/exclude`, ignore patterns that run nothing - the host's fast-forwards pass `--no-overwrite-ignore`, so an untracked file a sandbox lists there is refused, not overwritten) and `hooks/*` and `modules/*`: fingerprinted (each regular file's content hash in `files`, and its executable bits as a separate field, `modes`, beside it: `chmod +x` on a disabled hook with the same content enables it, and the hash alone does not see that; a mode-only difference is named `(executable bit)` in the stop; `test/guard-hook-mode.test.ts`), and compared before every sandbox opens, before every sandbox closes, before each landing and before each host write; the command-running keys configured at the start are also pinned (`pinHostGitConfig`), and `core.hooksPath` and `core.fsmonitor` by environment.
-- The start baseline (`assertGitConfigBaseline`, `recordGitConfigStart`, `recordGitConfigEnd`, `src/guard.ts`; `test/guard-start-baseline.test.ts`, and `test/guard-start-baseline-coverage.test.ts` for each class of key, `config.worktree`, the hooks and the modules): the pins and the fingerprint both take the shared `.git` as they find it, so a filter or a hook a sandbox planted in a run killed before any check would be the next run's baseline. What makes git run a program or reach the network is recorded (`programState`): the keys of `PROGRAM_KEYS` in the shared `.git/config` and in the main worktree's `.git/config.worktree` (none when it is absent), each read with `git config --file`, so only the file a sandbox can write - every `filter.*`, `merge.*.driver`, `diff.*.textconv`/`.command`, `core.fsmonitor`/`hookspath`/`sshcommand`/`gitproxy`, `include*`, every key `pinHostGitConfig` pins (`COMMAND_KEYS`: a value planted in a killed run would otherwise be pinned, not refused), what a host `git fetch` reads (Sandcastle's reuse of a kept worktree runs one: `remote.*.url`/`pushurl`/`uploadpack`/`receivepack`/`proxy`, `url.*.insteadOf`/`pushInsteadOf`, `credential.*`, `protocol.*`, `http.*proxy`, `http.*sslCAInfo`/`sslCAPath`), `merge.verifySignatures` and `log.showSignature` (they run `gpg.program`), `extensions.*`, and what a person's own later git command runs (`alias.*`, which a repo-local alias overrides the user's with, and `MORE_PROGRAM_KEYS`: `pager.*`, `difftool.*.cmd`, `mergetool.*.cmd`, `submodule.*.update`, `interactive.diffFilter`, `gpg.ssh.defaultKeyCommand`, `core.alternateRefsCommand`, `lfs.*`; none of these shows its value), while `branch.*` and `remote.*.fetch` stay free - the hash of `info/attributes`, and every file under `hooks/` and `modules/` by its path, content hash and, for a regular file, executable bits (`modes`, `executableBits`; `treeFiles`, the walk `moduleFiles` makes, which leaves a module's data out), in `.sandcastle/.run/git-config-baseline.json`: at the start of `burndown()`, `land`, `gates` and `clean` under the run lock (`recordGitConfigStart`, `clean: false`), and at a clean end (`recordGitConfigEnd`, in `cli.ts` after the turns, and after `land`, `gates` and `clean`; a red `gates`, or a red `land` whose sandbox `.git` check passed, records it too, so the next start does not blame a sandbox for a change made since), which sets `clean` only when the present state equals the record, so a key planted after the last check is never laundered into the baseline. Each of those four starts takes the run lock and reaps what a killed run's sandboxes left working (`holdAndReap`: `lockRun`, then `reapOrphans`) before anything reads or pins the config, since a container still alive can write the shared `.git` until it is reaped, and a write between the check and the reap would be neither refused nor pinned (`test/guard-start-reap-order.test.ts`). The check (`assertGitConfigBaseline`) runs after that and before `pinHostGitConfig`, writes nothing and compares each config through `configChange`, so the words are the `.git` stop's, and the files through `changedFiles`; a difference is an `OperatorError` naming each key (under its file) and each file, and `--accept-git-config` (parsed by `parseRunArgs`; `land`, `gates` and `clean` read it from their arguments; passed to the first turn of `burndown()` only) records the present state instead. No record, or none that reads, is a first run. The record is versioned (`BASELINE_VERSION`, written beside it): one of an earlier version or none (an earlier kit's, with fewer keys, no `modes`, perhaps no `config.worktree` or files) is not compared, since it would name every remote's URL, every alias and every pager key as added; the start takes the present state again, once, with a printed line and no refusal (`readBaseline`'s `older`, `GitConfigStart.retaken`; the line is the first of `tookLines`, so a `--detach` parent's terminal shows it too). A hook whose bits changed with its content unchanged is a difference of its own (`executable bit changed`), which a hook manager's marker never excuses. After a clean end (`clean: true`) the check takes the changes that look like a person's own tooling, and only those (`differences`' `ownOnly`: every difference is one, and the previous run ended cleanly - a refusal that has one beside others takes none): a new remote (`remote.<name>.url` added, the record holding no `remote.<name>.*` key) whose URL is plain https or ssh (`PLAIN_URLS`: no credentials, query or `::`, a host and user that start with a letter or digit; not `http://`), `core.hooksPath` set (`ownConfigKey`, `trackedHooksPath`) to a relative path with no `..` or `.git` that is an existing directory inside the project and, or whose ancestor, holds files `git ls-files` lists (run with `core.fsmonitor=false`: it reads a config nobody has vetted yet; husky's `.husky/_` is ignored by its own `.gitignore`, so the ancestor counts), and a regular script directly under `hooks/` that carries a hook manager's marker (`HOOK_MANAGERS`, `hookManager`: lefthook, pre-commit, husky 4; a marker names the tool and proves nothing of the rest, which is why this is taken only after a clean end, when no sandbox can have written it). Filters, drivers, transport commands, `insteadOf`, a changed URL on an existing remote (origin included), a removed remote, a remote's other keys, `info/attributes` and any other hook are refused as before, as is everything after an unclean end. `assertGitConfigBaseline` returns the state with `took`, one line each, which `recordGitConfigStart` prints (`tookLines`) and strips before it records; the refusal says whether the last run ended cleanly and marks the changes that look like a person's own tooling (`looks like your own tooling: ...`) apart from the rest (`test/guard-start-own-changes.test.ts`). A record left unclean whose keys and files equal the present ones starts: there is nothing to name, and a refusal would cost `--accept-git-config` after every Ctrl-C. Git may write `extensions.relativeWorktrees` as it adds a worktree (`worktree.useRelativePaths`), after the record was taken, so with that setting the start after the first such run names that key once. A `--detach` parent checks too, so the refusal is on the terminal, and so are the lines of what the start took (`tookLines`), once the child is going.
-- The base branch and every `agent/issue-*` branch: the tips the run expects (`HostGit`), with the branches' copies in `.sandcastle/backup.git`.
-- `worktrees/<name>/gitdir` of the kit's worktrees (`agent-issue-*`, `sandcastle-*`): must name a host path under `.sandcastle/worktrees/` (`rewrittenWorktrees`, in every `.git` check), unless the worktree there names that record back - a person's own worktree in a folder named `sandcastle-*` has the kit's name form, but git wrote both ends of it.
-- A person's own linked worktrees' records (`personRecords`, `recordChanges`, `Fingerprint.records`; `test/guard-person-worktrees.test.ts`): every `worktrees/<name>/` that is not a kit sandbox's (`kitRecord`: an `agent-issue-*` or `sandcastle-*` name whose `gitdir` sits under `.sandcastle/worktrees/`), by name, with the record itself and the content of each of `commondir`, `gitdir` and `config.worktree` that exists (an absent file has no key). `assertGitUnchanged` compares them with the start: a change in a record present then, a file added, removed or rewritten, stops the run naming it (`worktrees/<name>/commondir changed`); a record gone passes (`git worktree remove`); a record added since passes only as `git worktree add` writes it - `commondir` reads `../..` and there is no `config.worktree` (read again a few times over a quarter of a second first, since git writes the files just after the directory, and expected from then on as it passed, not as first read) - and once nothing is named the records as they stand replace the expectation, so an added one is watched from then on and a name removed and added again is judged as added. A person's own `git worktree move` mid-run changes `gitdir` and so stops the run too: stopping is the safe side. The kit's own records keep `rewrittenWorktrees` and `assertWorktreeRecords`.
-- A sandbox's own record - `worktrees/<name>/commondir`, `worktrees/<name>/config.worktree` - and its worktree's `.git` file: held to what git writes before each host git command in that worktree (above).
-- The rest - `objects/`, `packed-refs`, other refs and logs, a record's `HEAD`, `index`, `logs/` and `refs/` - is what git reads as data and runs nothing from; objects and refs a sandbox removes are what the branch backup is for.
-- `modules/` (the git directories of submodules, which a host `git status` reads the config and attributes of as it looks into a gitlink): fingerprinted (`moduleFiles`), every file and directory under it by path and content hash except what git reads as data (`objects/`, `refs/`, `logs/`, `index`, `packed-refs`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` inside a module's git directory; a module named like one is still watched), so a `modules/` a sandbox created, or a config in one, differs from the run's start and stops the run, naming the path. Sandcastle never initialises a submodule, so the directory is absent in an ordinary run. And a repository nested in a sandbox's worktree: any `.git` entry (file, directory or link, in any case: a case-insensitive disk, macOS's default, has a host git read `.GIT` as `.git`) below the worktree's root other than its own `.git` file stops the run (`nestedGit`, inside `assertWorktreeRecords`, above), naming the path - the tree is walked, no git is run to find it, and nothing is excluded, `node_modules` included, since a sandbox can commit a gitlink to a path anywhere. Submodules are not supported in sandboxes. The kit's own `worktreeIsClean` also passes `--ignore-submodules=all`.
+- `config`, the main worktree's `config.worktree` (present or absent, and its content; compared by
+  key as `config` is, with no key let through, `test/guard-config-worktree.test.ts`), `HEAD`,
+  `info/*` (not `info/refs`, an index for the dumb HTTP transport that a repack rewrites, nor
+  `info/exclude`, ignore patterns that run nothing - the host's fast-forwards pass
+  `--no-overwrite-ignore`, so an untracked file a sandbox lists there is refused, not overwritten)
+  and `hooks/*` and `modules/*`: fingerprinted (each regular file's content hash in `files`, and its
+  executable bits as a separate field, `modes`, beside it: `chmod +x` on a disabled hook with the
+  same content enables it, and the hash alone does not see that; a mode-only difference is named
+  `(executable bit)` in the stop; `test/guard-hook-mode.test.ts`), and compared before every sandbox
+  opens, before every sandbox closes, before each landing and before each host write; the
+  command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
+  `core.hooksPath` and `core.fsmonitor` by environment.
+- The start baseline (`assertGitConfigBaseline`, `recordGitConfigStart`, `recordGitConfigEnd`,
+  `src/guard.ts`; `test/guard-start-baseline.test.ts`, and
+  `test/guard-start-baseline-coverage.test.ts` for each class of key, `config.worktree`, the hooks
+  and the modules): the pins and the fingerprint both take the shared `.git` as they find it, so a
+  filter or a hook a sandbox planted in a run killed before any check would be the next run's
+  baseline.
+  What makes git run a program or reach the network is recorded (`programState`): the keys of
+  `PROGRAM_KEYS` in the shared `.git/config` and in the main worktree's `.git/config.worktree` (none
+  when it is absent), each read with `git config --file`, so only the file a sandbox can write -
+  every `filter.*`, `merge.*.driver`, `diff.*.textconv`/`.command`,
+  `core.fsmonitor`/`hookspath`/`sshcommand`/`gitproxy`, `include*`, every key `pinHostGitConfig`
+  pins (`COMMAND_KEYS`: a value planted in a killed run would otherwise be pinned, not refused),
+  what a host `git fetch` reads (Sandcastle's reuse of a kept worktree runs one:
+  `remote.*.url`/`pushurl`/`uploadpack`/`receivepack`/`proxy`, `url.*.insteadOf`/`pushInsteadOf`,
+  `credential.*`, `protocol.*`, `http.*proxy`, `http.*sslCAInfo`/`sslCAPath`),
+  `merge.verifySignatures` and `log.showSignature` (they run `gpg.program`), `extensions.*`, and
+  what a person's own later git command runs (`alias.*`, which a repo-local alias overrides the
+  user's with, and `MORE_PROGRAM_KEYS`: `pager.*`, `difftool.*.cmd`, `mergetool.*.cmd`,
+  `submodule.*.update`, `interactive.diffFilter`, `gpg.ssh.defaultKeyCommand`,
+  `core.alternateRefsCommand`, `lfs.*`; none of these shows its value), while `branch.*` and
+  `remote.*.fetch` stay free - the hash of `info/attributes`, and every file under `hooks/` and
+  `modules/` by its path, content hash and, for a regular file, executable bits (`modes`,
+  `executableBits`; `treeFiles`, the walk `moduleFiles` makes, which leaves a module's data out), in
+  `.sandcastle/.run/git-config-baseline.json`: at the start of `burndown()`, `land`, `gates` and
+  `clean` under the run lock (`recordGitConfigStart`, `clean: false`), and at a clean end
+  (`recordGitConfigEnd`, in `cli.ts` after the turns, and after `land`, `gates` and `clean`; a red
+  `gates`, or a red `land` whose sandbox `.git` check passed, records it too, so the next start does
+  not blame a sandbox for a change made since), which sets `clean` only when the present state
+  equals the record, so a key planted after the last check is never laundered into the baseline.
+  Each of those four starts takes the run lock and reaps what a killed run's sandboxes left working
+  (`holdAndReap`: `lockRun`, then `reapOrphans`) before anything reads or pins the config, since a
+  container still alive can write the shared `.git` until it is reaped, and a write between the
+  check and the reap would be neither refused nor pinned (`test/guard-start-reap-order.test.ts`).
+  The check (`assertGitConfigBaseline`) runs after that and before `pinHostGitConfig`, writes
+  nothing and compares each config through `configChange`, so the words are the `.git` stop's, and
+  the files through `changedFiles`; a difference is an `OperatorError` naming each key (under its
+  file) and each file, and `--accept-git-config` (parsed by `parseRunArgs`; `land`, `gates` and
+  `clean` read it from their arguments; passed to the first turn of `burndown()` only) records the
+  present state instead.
+  No record, or none that reads, is a first run.
+  The record is versioned (`BASELINE_VERSION`, written beside it): one of an earlier version or none
+  (an earlier kit's, with fewer keys, no `modes`, perhaps no `config.worktree` or files) is not
+  compared, since it would name every remote's URL, every alias and every pager key as added; the
+  start takes the present state again, once, with a printed line and no refusal (`readBaseline`'s
+  `older`, `GitConfigStart.retaken`; the line is the first of `tookLines`, so a `--detach` parent's
+  terminal shows it too).
+  A hook whose bits changed with its content unchanged is a difference of its own
+  (`executable bit changed`), which a hook manager's marker never excuses.
+  After a clean end (`clean: true`) the check takes the changes that look like a person's own
+  tooling, and only those (`differences`' `ownOnly`: every difference is one, and the previous run
+  ended cleanly - a refusal that has one beside others takes none): a new remote
+  (`remote.<name>.url` added, the record holding no `remote.<name>.*` key) whose URL is plain https
+  or ssh (`PLAIN_URLS`: no credentials, query or `::`, a host and user that start with a letter or
+  digit; not `http://`), `core.hooksPath` set (`ownConfigKey`, `trackedHooksPath`) to a relative
+  path with no `..` or `.git` that is an existing directory inside the project and, or whose
+  ancestor, holds files `git ls-files` lists (run with `core.fsmonitor=false`: it reads a config
+  nobody has vetted yet; husky's `.husky/_` is ignored by its own `.gitignore`, so the ancestor
+  counts), and a regular script directly under `hooks/` that carries a hook manager's marker
+  (`HOOK_MANAGERS`, `hookManager`: lefthook, pre-commit, husky 4; a marker names the tool and proves
+  nothing of the rest, which is why this is taken only after a clean end, when no sandbox can have
+  written it).
+  Filters, drivers, transport commands, `insteadOf`, a changed URL on an existing remote (origin
+  included), a removed remote, a remote's other keys, `info/attributes` and any other hook are
+  refused as before, as is everything after an unclean end. `assertGitConfigBaseline` returns the
+  state with `took`, one line each, which `recordGitConfigStart` prints (`tookLines`) and strips
+  before it records; the refusal says whether the last run ended cleanly and marks the changes that
+  look like a person's own tooling (`looks like your own tooling: ...`) apart from the rest
+  (`test/guard-start-own-changes.test.ts`).
+  A record left unclean whose keys and files equal the present ones starts: there is nothing to
+  name, and a refusal would cost `--accept-git-config` after every Ctrl-C.
+  Git may write `extensions.relativeWorktrees` as it adds a worktree (`worktree.useRelativePaths`),
+  after the record was taken, so with that setting the start after the first such run names that key
+  once.
+  A `--detach` parent checks too, so the refusal is on the terminal, and so are the lines of what
+  the start took (`tookLines`), once the child is going.
+- The base branch and every `agent/issue-*` branch: the tips the run expects (`HostGit`), with the
+  branches' copies in `.sandcastle/backup.git`.
+- `worktrees/<name>/gitdir` of the kit's worktrees (`agent-issue-*`, `sandcastle-*`): must name a
+  host path under `.sandcastle/worktrees/` (`rewrittenWorktrees`, in every `.git` check), unless the
+  worktree there names that record back - a person's own worktree in a folder named `sandcastle-*`
+  has the kit's name form, but git wrote both ends of it.
+- A person's own linked worktrees' records (`personRecords`, `recordChanges`, `Fingerprint.records`;
+  `test/guard-person-worktrees.test.ts`): every `worktrees/<name>/` that is not a kit sandbox's
+  (`kitRecord`: an `agent-issue-*` or `sandcastle-*` name whose `gitdir` sits under
+  `.sandcastle/worktrees/`), by name, with the record itself and the content of each of `commondir`,
+  `gitdir` and `config.worktree` that exists (an absent file has no key). `assertGitUnchanged`
+  compares them with the start: a change in a record present then, a file added, removed or
+  rewritten, stops the run naming it (`worktrees/<name>/commondir changed`); a record gone passes
+  (`git worktree remove`); a record added since passes only as `git worktree add` writes it -
+  `commondir` reads `../..` and there is no `config.worktree` (read again a few times over a quarter
+  of a second first, since git writes the files just after the directory, and expected from then on
+  as it passed, not as first read) - and once nothing is named the records as they stand replace the
+  expectation, so an added one is watched from then on and a name removed and added again is judged
+  as added.
+  A person's own `git worktree move` mid-run changes `gitdir` and so stops the run too: stopping is
+  the safe side.
+  The kit's own records keep `rewrittenWorktrees` and `assertWorktreeRecords`.
+- A sandbox's own record - `worktrees/<name>/commondir`, `worktrees/<name>/config.worktree` - and
+  its worktree's `.git` file: held to what git writes before each host git command in that worktree
+  (above).
+- The rest - `objects/`, `packed-refs`, other refs and logs, a record's `HEAD`, `index`, `logs/` and
+  `refs/` - is what git reads as data and runs nothing from; objects and refs a sandbox removes are
+  what the branch backup is for.
+- `modules/` (the git directories of submodules, which a host `git status` reads the config and
+  attributes of as it looks into a gitlink): fingerprinted (`moduleFiles`), every file and directory
+  under it by path and content hash except what git reads as data (`objects/`, `refs/`, `logs/`,
+  `index`, `packed-refs`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` inside a module's git directory; a
+  module named like one is still watched), so a `modules/` a sandbox created, or a config in one,
+  differs from the run's start and stops the run, naming the path.
+  Sandcastle never initialises a submodule, so the directory is absent in an ordinary run.
+  And a repository nested in a sandbox's worktree: any `.git` entry (file, directory or link, in any
+  case: a case-insensitive disk, macOS's default, has a host git read `.GIT` as `.git`) below the
+  worktree's root other than its own `.git` file stops the run (`nestedGit`, inside
+  `assertWorktreeRecords`, above), naming the path - the tree is walked, no git is run to find it,
+  and nothing is excluded, `node_modules` included, since a sandbox can commit a gitlink to a path
+  anywhere.
+  Submodules are not supported in sandboxes.
+  The kit's own `worktreeIsClean` also passes `--ignore-submodules=all`.
 
-What remains after the checks is the moment between the last one and the host git call - Sandcastle's close's `git status`, its open's `git worktree prune`, `list` and `add`, its reuse's status, fetch and fast-forward, the cut's status and fast-forward - in which another sandbox still running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the time Sandcastle takes to remove the stopped container before its `git status`; elsewhere milliseconds, as between the landing's last check and its fast-forward (above).
+What remains after the checks is the moment between the last one and the host git call -
+Sandcastle's close's `git status`, its open's `git worktree prune`, `list` and `add`, its reuse's
+status, fetch and fast-forward, the cut's status and fast-forward - in which another sandbox still
+running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the
+time Sandcastle takes to remove the stopped container before its `git status`; elsewhere
+milliseconds, as between the landing's last check and its fast-forward (above).
 
 ## `src/pool.ts`
 
-The machine pool: sandbox and gate slots shared by every run on the machine, and the lock-file helper the run lock shares (`takeLock`: pid and token, guarded takeover; `withLock`, and `withLockSync` for a caller that cannot wait on a promise: it falls back to running unlocked after `timeoutMs`). A **slot** is a lock file `<pool>-<n>.lock` whose line reads `<pid> <token> run=<id> <label>`: the pid stays first because the status view reads it, and `run=` names the holding run (`RUN_ID`, one per process) so `slotsByRun` can count slots per live run. A lock from a kit that named no run reads as a run of its own pid.
+The machine pool: sandbox and gate slots shared by every run on the machine, and the lock-file
+helper the run lock shares (`takeLock`: pid and token, guarded takeover; `withLock`, and
+`withLockSync` for a caller that cannot wait on a promise: it falls back to running unlocked after
+`timeoutMs`).
+A **slot** is a lock file `<pool>-<n>.lock` whose line reads `<pid> <token> run=<id> <label>`: the
+pid stays first because the status view reads it, and `run=` names the holding run (`RUN_ID`, one
+per process) so `slotsByRun` can count slots per live run.
+A lock from a kit that named no run reads as a run of its own pid.
 
-`withSlot(pool, label, fn)` is `leaseSlot(pool, label)` with the release tied to `fn`'s end; `leaseSlot` hands the slot over (`release()`, once) for a ticket that closes its sandbox mid-way and takes a slot again later: a paused run's tickets (`src/burndown.ts` `attempt`).
+`withSlot(pool, label, fn)` is `leaseSlot(pool, label)` with the release tied to `fn`'s end;
+`leaseSlot` hands the slot over (`release()`, once) for a ticket that closes its sandbox mid-way and
+takes a slot again later: a paused run's tickets (`src/burndown.ts` `attempt`).
 
-A freed slot goes to the **longest wait, across runs**. `withSlot` writes a wait entry (`waits/<pool>-<since>-<run>-<n>.wait`, `<pid> <run> <since> <label>`, renamed into place whole) before its first try, and takes a free slot only when no other live run has an older entry for that pool (ties go to the lower run id), then removes the entry. Without it the run that has just freed a slot asks again at once and almost always wins, and a second project's run waits until the first drains. The rule is per pool, so a run holding a sandbox slot and waiting for a gates slot cannot deadlock on it. Within a run, a wait that asked for no priority yields to the run's other such waits that began earlier (`earlierAhead`: the earlier start, then the order they asked in), for either pool. A pipeline's wait names no ticket - its worker takes the head of the start queue once served (slot first, `src/schedule.ts`) - so this orders the run's workers and its tickets resuming after a pause, never one ticket's rank against another's. A run's landing asks for its sandbox slot with priority (below), so it goes before the tickets already waiting, and `slotTurn` (`src/landing.ts`) keeps the run's next pipeline from asking while it waits. The gates pool has one order inside a run, **landing first**: the one landing worker sets the run's end, and its gates waited for a gates slot behind the same run's ticket gates, minutes added to the serial path of each landing. `withSlot`'s last argument, `priority` (`leaseSlot`'s last too), marks a wait the run's end waits on: `landOne`'s wait for a landing sandbox passes it, and `runGates` passes it (its last argument) for a landing's gates (`LandContext.gate` in `src/burndown.ts`, and `sandcastle land`'s), the base gates at a run's start and the verify gates; a ticket's gate pass and the mid-run base check do not (`gateBase` runs that one in a ticket's own slot, `ownSlot` false). When a slot frees, the run is picked as before, by its longest wait; then a priority wait of that run takes it before the run's other waits for the pool. A priority wait counts from the oldest wait its run has for the pool (`countedFrom`), so it is not left behind another run that began waiting after its own run did, and any other wait of the run yields while one of the run's priority waits is waiting (`priorityAhead`). A run with no priority wait is served as it always was, and a run that has waited less than another is still behind it, priority or not. The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is this process's, and another run needs only a wait's start - and, for the pool's last free slot, whether it is a landing's, which the entry's file name says (a `-priority` before `.wait`; the content is unchanged). A landing's sandbox slot is **handed on, not freed**, when the run has another green branch queued behind it (`landOne`'s `at.behind`, the landing queue's size, passed through `createLanding`'s `ports.land(g, behind)` and `withSlot`'s last argument `onward`): the one landing worker asks for the next landing's slot only after the first ends, and the freed slot went to the longest wait across runs in between, so a branch queued behind a landing waited for another run's ticket to end (minutes). The lock stays this process's (`handOff` in `src/pool.ts`, counted in the run's `held`) and the run's next priority sandbox wait takes it at once, its label rewritten; `landingWork` drops one the next landing did not take (a conflict found on the host, a fast-forward), and a timer does after `HANDOFF_MS` (60 s). The pool's rule is unchanged - the demand is not raised, since landings run one at a time (ADR 0001); `test/pool-landing-handoff.test.ts`. A wait that yields to its run's priority wait can leave the slot idle for up to one poll, as a younger wait that yields to an older one does. A wait entry or slot whose process is gone (`holderRunning`, the run lock's rule) is ignored, a wait entry's removed when seen, a slot taken over by the next `takeLock`. A younger waiter does not take a free slot while an older one polls (every 5 s), so a freed slot can idle up to one poll. A run started by an older kit writes no entries and is not waited for.
+A freed slot goes to the **longest wait, across runs**. `withSlot` writes a wait entry
+(`waits/<pool>-<since>-<run>-<n>.wait`, `<pid> <run> <since> <label>`, renamed into place whole)
+before its first try, and takes a free slot only when no other live run has an older entry for that
+pool (ties go to the lower run id), then removes the entry.
+Without it the run that has just freed a slot asks again at once and almost always wins, and a
+second project's run waits until the first drains.
+The rule is per pool, so a run holding a sandbox slot and waiting for a gates slot cannot deadlock
+on it.
+Within a run, a wait that asked for no priority yields to the run's other such waits that began
+earlier (`earlierAhead`: the earlier start, then the order they asked in), for either pool.
+A pipeline's wait names no ticket - its worker takes the head of the start queue once served (slot
+first, `src/schedule.ts`) - so this orders the run's workers and its tickets resuming after a pause,
+never one ticket's rank against another's.
+A run's landing asks for its sandbox slot with priority (below), so it goes before the tickets
+already waiting, and `slotTurn` (`src/landing.ts`) keeps the run's next pipeline from asking while
+it waits.
+The gates pool has one order inside a run, **landing first**: the one landing worker sets the run's
+end, and its gates waited for a gates slot behind the same run's ticket gates, minutes added to the
+serial path of each landing. `withSlot`'s last argument, `priority` (`leaseSlot`'s last too), marks
+a wait the run's end waits on: `landOne`'s wait for a landing sandbox passes it, and `runGates`
+passes it (its last argument) for a landing's gates (`LandContext.gate` in `src/burndown.ts`, and
+`sandcastle land`'s), the base gates at a run's start and the verify gates; a ticket's gate pass and
+the mid-run base check do not (`gateBase` runs that one in a ticket's own slot, `ownSlot` false).
+When a slot frees, the run is picked as before, by its longest wait; then a priority wait of that
+run takes it before the run's other waits for the pool.
+A priority wait counts from the oldest wait its run has for the pool (`countedFrom`), so it is not
+left behind another run that began waiting after its own run did, and any other wait of the run
+yields while one of the run's priority waits is waiting (`priorityAhead`).
+A run with no priority wait is served as it always was, and a run that has waited less than another
+is still behind it, priority or not.
+The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is
+this process's, and another run needs only a wait's start - and, for the pool's last free slot,
+whether it is a landing's, which the entry's file name says (a `-priority` before `.wait`; the
+content is unchanged).
+A landing's sandbox slot is **handed on, not freed**, when the run has another green branch queued
+behind it (`landOne`'s `at.behind`, the landing queue's size, passed through `createLanding`'s
+`ports.land(g, behind)` and `withSlot`'s last argument `onward`): the one landing worker asks for
+the next landing's slot only after the first ends, and the freed slot went to the longest wait
+across runs in between, so a branch queued behind a landing waited for another run's ticket to end
+(minutes).
+The lock stays this process's (`handOff` in `src/pool.ts`, counted in the run's `held`) and the
+run's next priority sandbox wait takes it at once, its label rewritten; `landingWork` drops one the
+next landing did not take (a conflict found on the host, a fast-forward), and a timer does after
+`HANDOFF_MS` (60 s).
+The pool's rule is unchanged - the demand is not raised, since landings run one at a time (ADR
+0001); `test/pool-landing-handoff.test.ts`.
+A wait that yields to its run's priority wait can leave the slot idle for up to one poll, as a
+younger wait that yields to an older one does.
+A wait entry or slot whose process is gone (`holderRunning`, the run lock's rule) is ignored, a wait
+entry's removed when seen, a slot taken over by the next `takeLock`.
+A younger waiter does not take a free slot while an older one polls (every 5 s), so a freed slot can
+idle up to one poll.
+A run started by an older kit writes no entries and is not waited for.
 
-An **extra slot** (`withExtraSlot`) is a sandbox started inside a slot its run already holds: the mid-run base check (`gateBase(..., ownSlot=false)`), which would deadlock a pool of one if it waited for a slot of its own. It is a lock outside the numbered ones, `<pool>-extra-<run>-<n>.lock` with a slot's content, written at once and never waited for, released when its function ends and at exit like a held slot; one left by a killed holder counts for nothing and is removed by the next extra slot taken. `usage()`, `liveSlots` and the status view's slot count count it, so other runs see every live sandbox; `tryAcquire` takes only numbered slots, so it blocks none. Accepted while it lives: `usage()` can read 7/6 (the status view's gauge draws no free cell then), and `members()` counts it in its run's `held`, so that run's other tickets may wait for their share - the share arithmetic is left as it is, since hiding the slot there would hide it from the other runs too.
+An **extra slot** (`withExtraSlot`) is a sandbox started inside a slot its run already holds: the
+mid-run base check (`gateBase(..., ownSlot=false)`), which would deadlock a pool of one if it waited
+for a slot of its own.
+It is a lock outside the numbered ones, `<pool>-extra-<run>-<n>.lock` with a slot's content, written
+at once and never waited for, released when its function ends and at exit like a held slot; one left
+by a killed holder counts for nothing and is removed by the next extra slot taken. `usage()`,
+`liveSlots` and the status view's slot count count it, so other runs see every live sandbox;
+`tryAcquire` takes only numbered slots, so it blocks none.
+Accepted while it lives: `usage()` can read 7/6 (the status view's gauge draws no free cell then),
+and `members()` counts it in its run's `held`, so that run's other tickets may wait for their share -
+the share arithmetic is left as it is, since hiding the slot there would hide it from the other
+runs too.
 
-**A wait that holds a slot.** Code that waits while holding a pool slot must not wait on anything that needs another slot - a ticket keeping its sandbox slot while it waits for a fix, a landing or another ticket's attempt that needs a sandbox slot of its own. Once every slot is held by such a waiter, nothing frees one and the run deadlocks; a test with one or two slots shows it. Release the slot before such a wait, or wait before taking it. Waiting for a gates slot while holding a sandbox slot is the one sanctioned case, as no gates slot holder waits for a sandbox slot.
+**A wait that holds a slot.**
+Code that waits while holding a pool slot must not wait on anything that needs another slot - a
+ticket keeping its sandbox slot while it waits for a fix, a landing or another ticket's attempt that
+needs a sandbox slot of its own.
+Once every slot is held by such a waiter, nothing frees one and the run deadlocks; a test with one
+or two slots shows it.
+Release the slot before such a wait, or wait before taking it.
+Waiting for a gates slot while holding a sandbox slot is the one sanctioned case, as no gates slot
+holder waits for a sandbox slot.
 
-The base image's build is one more lock of the same kind, `withLock` on `<cache>/locks/base-image.lock`: `ensureImage` holds it across every image a project's sandbox starts from, in this order: the base (`sandcastle-base:<hash of docker/base.Dockerfile and the user ids>`, then `docker tag ... :latest`), the agents image (`sandcastle-agents:<hash of docker/agents.Dockerfile, the user ids and both agent versions>`, FROM the base), the project's layer when the config names one (`sandcastle-<name>:<hash of the base's tag and the layer file>`, FROM the base) and the final image (`sandcastle-<name>-run:<hash of its Dockerfile, which names its parent's tag and the agents image's>`), each with its own prune of unused tags of its repository. The final image is FROM the layer (the base when the project has none) and copies Claude Code and Codex in from the agents image, with `USER` and `PATH` set (`finalDockerfile`; what it copies is where `docker/agents.Dockerfile` installs them: Codex into the staging prefix `/opt/codex`, Claude Code into the agent user's `~/.local`); it is what `ensureImage` returns. The agents' versions are in the agents image's tag and nowhere below it, so a release rebuilds the agents image and a copy layer per project and leaves the base's and the layer's tags, and Docker's cache for the layer's steps, as they were; nothing in the layer's own build can run `claude` or `codex`, as the base holds neither. The agents image's tag does not hash the base's: what it holds does not depend on the base's content. The lock is held for any tag, not per tag. Projects with different Claude Code versions build different agents tags, kit checkouts on different commits different base tags, and one's prune would otherwise remove the other's fresh image before its `docker tag` or its `COPY --from`; two builds of one tag race the same way. A second build waits, polling every second while the owner lives, then finds the image built and reuses it. Prune removes only a tag with no use for `IMAGE_KEEP_DAYS` (14) and no live kit process in its stamp: docker keeps no last-used time, so `ensureImage` writes a JSON stamp (`{at, pids}`) per tag under `<cache>/image-use/`, and a tag with no stamp starts its days at the first prune that sees it; checkouts on different commits hash different Dockerfiles, and "every tag but its own" made each delete the others' images. `build` reads docker's plain BuildKit progress (`watchBuild`): output is held until a non-`FROM` step does real work, and a build that only re-tagged cached steps prints `Image <tag> re-tagged from cache`; output of another shape, or a failure, is shown whole. A `docker tag` or `image ls` failure is an `OperatorError` naming the call and docker's message. The project layer's build and its prune are inside the lock too: its `FROM` names the base tag, which another project's base build would otherwise prune before the layer's `docker build` resolved it, and so are the agents image's and the final image's, whose `FROM` and `COPY --from` name the tags the lock holds (`test/agents-image.test.ts`).
+The base image's build is one more lock of the same kind, `withLock` on
+`<cache>/locks/base-image.lock`: `ensureImage` holds it across every image a project's sandbox
+starts from, in this order: the base
+(`sandcastle-base:<hash of docker/base.Dockerfile and the user ids>`, then
+`docker tag ... :latest`), the agents image
+(`sandcastle-agents:<hash of docker/agents.Dockerfile, the user ids and both agent versions>`, FROM
+the base), the project's layer when the config names one
+(`sandcastle-<name>:<hash of the base's tag and the layer file>`, FROM the base) and the final image
+(`sandcastle-<name>-run:<hash of its Dockerfile, which names its parent's tag and the agents image's>`),
+each with its own prune of unused tags of its repository.
+The final image is FROM the layer (the base when the project has none) and copies Claude Code and
+Codex in from the agents image, with `USER` and `PATH` set (`finalDockerfile`; what it copies is
+where `docker/agents.Dockerfile` installs them: Codex into the staging prefix `/opt/codex`, Claude
+Code into the agent user's `~/.local`); it is what `ensureImage` returns.
+The agents' versions are in the agents image's tag and nowhere below it, so a release rebuilds the
+agents image and a copy layer per project and leaves the base's and the layer's tags, and Docker's
+cache for the layer's steps, as they were; nothing in the layer's own build can run `claude` or
+`codex`, as the base holds neither.
+The agents image's tag does not hash the base's: what it holds does not depend on the base's
+content.
+The lock is held for any tag, not per tag.
+Projects with different Claude Code versions build different agents tags, kit checkouts on different
+commits different base tags, and one's prune would otherwise remove the other's fresh image before
+its `docker tag` or its `COPY --from`; two builds of one tag race the same way.
+A second build waits, polling every second while the owner lives, then finds the image built and
+reuses it.
+Prune removes only a tag with no use for `IMAGE_KEEP_DAYS` (14) and no live kit process in its
+stamp: docker keeps no last-used time, so `ensureImage` writes a JSON stamp (`{at, pids}`) per tag
+under `<cache>/image-use/`, and a tag with no stamp starts its days at the first prune that sees it;
+checkouts on different commits hash different Dockerfiles, and "every tag but its own" made each
+delete the others' images. `build` reads docker's plain BuildKit progress (`watchBuild`): output is
+held until a non-`FROM` step does real work, and a build that only re-tagged cached steps prints
+`Image <tag> re-tagged from cache`; output of another shape, or a failure, is shown whole.
+A `docker tag` or `image ls` failure is an `OperatorError` naming the call and docker's message.
+The project layer's build and its prune are inside the lock too: its `FROM` names the base tag,
+which another project's base build would otherwise prune before the layer's `docker build` resolved
+it, and so are the agents image's and the final image's, whose `FROM` and `COPY --from` name the
+tags the lock holds (`test/agents-image.test.ts`).
 
-**Shares** (`docs/adr/0001`): live runs split the sandbox pool equally, up to each run's demand. A run registers with `joinPool` (`burndown()`, once per process: an autonomy run's next turn updates it) in `runs/<run>.run`, a JSON line written whole and renamed in: `pid`, `run`, `project`, `demand`, `concurrency`, `since` and `shares: true`, the mark of a kit that knows them. A registration whose process is gone (`holderRunning`) is ignored and removed when seen, and the file goes with its process. `members()` lists every live run that is registered or holds a sandbox slot, with its share: `splitShares` divides the limit (less the one slot kept for landing, from the second run that holds or wants slots: `shareable`) equally among the runs whose demand is above 0, a run that needs less than an equal part releasing the rest to the others, again equally, in whole slots (the earlier registration gets the odd one, so every run works out the same split from the same files). A run with slots and no registration is from an older kit (or a command that is no run): it is counted as wanting its concurrency, read from the run record that the live-runs directory and the record's `pid` lead to, or the slots it holds if that cannot be read, and takes no share on trust. The share is taken by `withSlot("sandboxes")` of a registered process only: a run at or above its share (`held` counts) takes no slot while another run below its share wants one - a registered run below its share does, whether or not it has a wait entry at that instant (its demand is what it asks for next, so a run between two of its tickets is not mistaken for one that wants nothing), and any other run does with a wait entry - and with no one wanting one a free slot is taken as before. The wait order skips waiters that are at or above their share, which cannot take a slot, so an older wait of such a run never idles a slot. A slot held is never taken back. The check and the take are one synchronous step, so a run's own waiters cannot both pass it. `withSlot`'s `onWait` is told why a wait waits (`slots`, `share` or `landing`, again when it changes), and `myShare` reads this run's demand, share and held slots. The gates pool has no shares. `inject` (`src/pool.ts`) replaces the pool's process check and clock, so `test/pool-sim.ts` can drive one run in the test's own process against other runs written as files (registrations, slot locks, wait entries) with a short poll: `test/pool-shares.test.ts` and `test/pool-cap.test.ts` run in about 2 s, where child processes polling in real time took 10-66 s a test under load. A registration going with its process, and the cap in it, is the one thing they still start a process for.
+**Shares** (`docs/adr/0001`): live runs split the sandbox pool equally, up to each run's demand.
+A run registers with `joinPool` (`burndown()`, once per process: an autonomy run's next turn updates
+it) in `runs/<run>.run`, a JSON line written whole and renamed in: `pid`, `run`, `project`,
+`demand`, `concurrency`, `since` and `shares: true`, the mark of a kit that knows them.
+A registration whose process is gone (`holderRunning`) is ignored and removed when seen, and the
+file goes with its process. `members()` lists every live run that is registered or holds a sandbox
+slot, with its share: `splitShares` divides the limit (less the one slot kept for landing, from the
+second run that holds or wants slots: `shareable`) equally among the runs whose demand is above 0, a
+run that needs less than an equal part releasing the rest to the others, again equally, in whole
+slots (the earlier registration gets the odd one, so every run works out the same split from the
+same files).
+A run with slots and no registration is from an older kit (or a command that is no run): it is
+counted as wanting its concurrency, read from the run record that the live-runs directory and the
+record's `pid` lead to, or the slots it holds if that cannot be read, and takes no share on trust.
+The share is taken by `withSlot("sandboxes")` of a registered process only: a run at or above its
+share (`held` counts) takes no slot while another run below its share wants one - a registered run
+below its share does, whether or not it has a wait entry at that instant (its demand is what it asks
+for next, so a run between two of its tickets is not mistaken for one that wants nothing), and any
+other run does with a wait entry - and with no one wanting one a free slot is taken as before.
+The wait order skips waiters that are at or above their share, which cannot take a slot, so an older
+wait of such a run never idles a slot.
+A slot held is never taken back.
+The check and the take are one synchronous step, so a run's own waiters cannot both pass it.
+`withSlot`'s `onWait` is told why a wait waits (`slots`, `share` or `landing`, again when it
+changes), and `myShare` reads this run's demand, share and held slots.
+The gates pool has no shares. `inject` (`src/pool.ts`) replaces the pool's process check and clock,
+so `test/pool-sim.ts` can drive one run in the test's own process against other runs written as
+files (registrations, slot locks, wait entries) with a short poll: `test/pool-shares.test.ts` and
+`test/pool-cap.test.ts` run in about 2 s, where child processes polling in real time took 10-66 s a
+test under load.
+A registration going with its process, and the cap in it, is the one thing they still start a
+process for.
 
-**Measured peaks** (`src/peaks.ts`, read by `src/size.ts`): `sandcastle size` sizes `maxSandboxes` and `maxGates` from what sandboxes used, not an assumed figure. `samplePeak` runs `cat /sys/fs/cgroup/memory.peak` through the sandbox's own `exec` (cgroup v2's high-water mark in bytes; no host-side `docker stats`, no container naming) after each `runGates` pass, which puts the largest reading so far on the `GateRun` as `peakMib` (a green `requireGreenBase` returns it too) - `timed()` in `src/burndown.ts` copies it to that step's `timings.jsonl` line, which `typicalTimes` and `estimate` never read - and `recordPeak` reads the peak once more just before the sandbox closes (a pipeline's `finally`, `gateBase` for the base and verify gates, and `landInSandbox` in `src/land.ts` for a landing's, filed under the run's `runId` from `LandContext`, or the time of a `sandcastle land`) and appends one `{ts, project, run, peakMib, sampled, anonMib?, agentMib?, agentAnonMib?}` line to `peaks.jsonl` in `KIT_CACHE`, beside `runs/` because that directory's files go once a run has ended (or, for a run whose own Herdr tab still awaits its report, once that report is typed). The largest reading of a sandbox, and each figure below, is kept in a `WeakMap` keyed by the sandbox. `project` is `projectId(root)`, a 12-character hash of the resolved root, and `run` the run's start time: no path or name is written (`test/peaks.test.ts` holds it), and a run is the lines that share `run`. Everything is best effort: a missing file, a failed or 10-second-late read or an unwritable cache records nothing and never fails a pass. `measuredPeak(peaks, now)` is the rule, pure: each project's figures over its last 5 runs (`RECENT_RUNS`), each the 90th percentile (`PERCENTILE`, nearest rank) of the samples (every line is one; `figureOf`), or the highest below 5 samples (`MIN_PERCENTILE_SAMPLES`) - so one outlier pass does not price every later pool - with `figures` carrying each one's sample count and highest, which `size` prints beside it, from the project with the highest peak of those whose newest run is within 30 days (`FRESH_DAYS`); it leaves out the two anon figures of a line without `sampled` (`SAMPLED`, 2: the readings below are taken only while a phase runs - an older line may hold the sandbox at rest, about 1 MiB, with nothing on it to say so, and its `peakMib` still counts), and any figure under `MIN_MEASURED_MIB` (256 MiB, the same sandbox at rest: it is not measured, so a gate with no anon figure is priced from `peakMib`, and a project whose `peakMib` is under it is not measured at all). `recommend(memory, cpus, peaks, now)` prices them, each plus 10% (`MARGIN`): a gate runs inside a sandbox, so `g` sandboxes are priced at the gate figure (`anonMib` when any run recorded it, else `peakMib`) and the rest at the agent baseline (`agentAnonMib` when the gate figure is anon and a run recorded it, else `agentMib`, else the gate figure). With `usable` the VM's memory less `HEADROOM_GIB`, `g = max(1, min(floor(cpus / CPUS_PER_GATE), floor(usable / gate)))`, sandboxes are `g + floor((usable - g x gate) / baseline)` clamped to 1 .. min(`MAX_SANDBOXES`, cpus), and gates `min(g, sandboxes)`; a VM whose `usable` is under one gate figure fits no gate sandbox, so its `byMemory` is 0 (never negative) and the output says it cannot fit one gate sandbox, while the pool keeps its least of 1 and 1; with nothing measured both figures are `PER_SANDBOX_GIB`, which the output says. Shares divide whatever limit is set. `memory.peak` includes page cache, so `memory.stat`'s `anon` (`readAnonMib`) is read too; it has no high-water mark, so only a reading taken *during* a phase describes it (after the gate loop the test workers have exited, so `samplePeak` reads only the peak, and at close the sandbox is at rest, so `recordPeak` reads no `anon`: a read after the pass counts towards neither figure, and was the whole of `anonMib` on a pass shorter than the interval). `sampling(sandbox, phase, fn)` reads it once as `fn` starts and every 10 s through the sandbox's own `exec` while `fn` runs, on an unref'd interval cleared in a `finally` (a periodic reading that answers after `fn` has ended is dropped, and the reads' own time limits are unref'd too, so nothing keeps the process alive; the first read, issued with the pass, is waited for when the pass ends before it answers, so a pass shorter than the interval still has a reading taken during it): `runGates` wraps its gate loop in it, and that is `anonMib`, the highest `anon` while a gate pass of this sandbox ran; a pipeline's `pass` wraps every agent pass (implement, review, cross-review, repair, resolve), the highest of which is `agentAnonMib`. `memory.peak` cannot be reset inside a sandbox (`/sys/fs/cgroup` is read-only there), so the agent baseline is read before the first gate: `agentBaseline` in the pipeline, between the review block and the gates step, once, and only when an agent pass ran there (a land-only re-run gives one only when a narrow review ran in its sandbox, after a resolve or for a carried merge), sets `agentMib`. Base, verify and landing sandboxes never set the agent fields, so a line without `agentMib` (every older line too) counts as a gate peak only. `poolWarnings` (doctor's `warn`, and `warning:` on a run's start line, both through `poolWarningsNow`) prices the effective limits the same way (`min(maxGates, maxSandboxes)` gates, the rest at the baseline) and warns when they need more than `usable`, only when the gate figure came from `anonMib` and the agent baseline is not `agentMib` (a baseline with no `agentAnonMib` stays priced from `memory.peak`, which `size` says includes page cache and may sit above the gate figure, as agents run the project's tests themselves): `memory.peak` counts page cache, and a pool it priced past the VM ran clean, so from it or the assumed figures doctor keeps its info pointer (`sizePointer`) and the start prints nothing. **Memory pressure** rides the same loop (`sampling` in `src/peaks.ts`): `readPressure` reads the sandbox's own `/sys/fs/cgroup/memory.pressure` beside `memory.stat`, and the highest `some` and `full` `avg10` (percent) is kept per sandbox in a `WeakMap` and, through `sampling`'s optional `pass` argument, per gate pass - `runGates` puts a pass's on the `GateRun` as `pressureSome` and `pressureFull` (only above 0), `timed()` and the landing gates' line copy them to `timings.jsonl`, `recordPeak` to the `peaks.jsonl` line (`readPeaks` accepts them), `measuredPeak` keeps the highest over the project's recent runs for `size` to show, and `pressureFromTimings` (`src/report.ts`) takes the run's highest for the closing summary's `Memory pressure` line. Both warn at `PRESSURE_WARN_FULL` (5% `full`); nothing prices a pool from it (the maintainer's decision on #382: per sandbox, warn only). An `avg10` reaches back 10 s, so a phase's first read can carry the end of the one before. `test/memory-pressure.test.ts` holds it.
+**Measured peaks** (`src/peaks.ts`, read by `src/size.ts`): `sandcastle size` sizes `maxSandboxes`
+and `maxGates` from what sandboxes used, not an assumed figure. `samplePeak` runs
+`cat /sys/fs/cgroup/memory.peak` through the sandbox's own `exec` (cgroup v2's high-water mark in
+bytes; no host-side `docker stats`, no container naming) after each `runGates` pass, which puts the
+largest reading so far on the `GateRun` as `peakMib` (a green `requireGreenBase` returns it too) -
+`timed()` in `src/burndown.ts` copies it to that step's `timings.jsonl` line, which `typicalTimes`
+and `estimate` never read - and `recordPeak` reads the peak once more just before the sandbox closes
+(a pipeline's `finally`, `gateBase` for the base and verify gates, and `landInSandbox` in
+`src/land.ts` for a landing's, filed under the run's `runId` from `LandContext`, or the time of a
+`sandcastle land`) and appends one
+`{ts, project, run, peakMib, sampled, anonMib?, agentMib?, agentAnonMib?}` line to `peaks.jsonl` in
+`KIT_CACHE`, beside `runs/` because that directory's files go once a run has ended (or, for a run
+whose own Herdr tab still awaits its report, once that report is typed).
+The largest reading of a sandbox, and each figure below, is kept in a `WeakMap` keyed by the
+sandbox. `project` is `projectId(root)`, a 12-character hash of the resolved root, and `run` the
+run's start time: no path or name is written (`test/peaks.test.ts` holds it), and a run is the lines
+that share `run`.
+Everything is best effort: a missing file, a failed or 10-second-late read or an unwritable cache
+records nothing and never fails a pass. `measuredPeak(peaks, now)` is the rule, pure: each project's
+figures over its last 5 runs (`RECENT_RUNS`), each the 90th percentile (`PERCENTILE`, nearest rank)
+of the samples (every line is one; `figureOf`), or the highest below 5 samples
+(`MIN_PERCENTILE_SAMPLES`) - so one outlier pass does not price every later pool - with `figures`
+carrying each one's sample count and highest, which `size` prints beside it, from the project with
+the highest peak of those whose newest run is within 30 days (`FRESH_DAYS`); it leaves out the two
+anon figures of a line without `sampled` (`SAMPLED`, 2: the readings below are taken only while a
+phase runs - an older line may hold the sandbox at rest, about 1 MiB, with nothing on it to say so,
+and its `peakMib` still counts), and any figure under `MIN_MEASURED_MIB` (256 MiB, the same sandbox
+at rest: it is not measured, so a gate with no anon figure is priced from `peakMib`, and a project
+whose `peakMib` is under it is not measured at all). `recommend(memory, cpus, peaks, now)` prices
+them, each plus 10% (`MARGIN`): a gate runs inside a sandbox, so `g` sandboxes are priced at the
+gate figure (`anonMib` when any run recorded it, else `peakMib`) and the rest at the agent baseline
+(`agentAnonMib` when the gate figure is anon and a run recorded it, else `agentMib`, else the gate
+figure).
+With `usable` the VM's memory less `HEADROOM_GIB`,
+`g = max(1, min(floor(cpus / CPUS_PER_GATE), floor(usable / gate)))`, sandboxes are
+`g + floor((usable - g x gate) / baseline)` clamped to 1 .. min(`MAX_SANDBOXES`, cpus), and gates
+`min(g, sandboxes)`; a VM whose `usable` is under one gate figure fits no gate sandbox, so its
+`byMemory` is 0 (never negative) and the output says it cannot fit one gate sandbox, while the pool
+keeps its least of 1 and 1; with nothing measured both figures are `PER_SANDBOX_GIB`, which the
+output says.
+Shares divide whatever limit is set. `memory.peak` includes page cache, so `memory.stat`'s `anon`
+(`readAnonMib`) is read too; it has no high-water mark, so only a reading taken *during* a phase
+describes it (after the gate loop the test workers have exited, so `samplePeak` reads only the peak,
+and at close the sandbox is at rest, so `recordPeak` reads no `anon`: a read after the pass counts
+towards neither figure, and was the whole of `anonMib` on a pass shorter than the interval).
+`sampling(sandbox, phase, fn)` reads it once as `fn` starts and every 10 s through the sandbox's own
+`exec` while `fn` runs, on an unref'd interval cleared in a `finally` (a periodic reading that
+answers after `fn` has ended is dropped, and the reads' own time limits are unref'd too, so nothing
+keeps the process alive; the first read, issued with the pass, is waited for when the pass ends
+before it answers, so a pass shorter than the interval still has a reading taken during it):
+`runGates` wraps its gate loop in it, and that is `anonMib`, the highest `anon` while a gate pass of
+this sandbox ran; a pipeline's `pass` wraps every agent pass (implement, review, cross-review,
+repair, resolve), the highest of which is `agentAnonMib`. `memory.peak` cannot be reset inside a
+sandbox (`/sys/fs/cgroup` is read-only there), so the agent baseline is read before the first gate:
+`agentBaseline` in the pipeline, between the review block and the gates step, once, and only when an
+agent pass ran there (a land-only re-run gives one only when a narrow review ran in its sandbox,
+after a resolve or for a carried merge), sets `agentMib`.
+Base, verify and landing sandboxes never set the agent fields, so a line without `agentMib` (every
+older line too) counts as a gate peak only. `poolWarnings` (doctor's `warn`, and `warning:` on a
+run's start line, both through `poolWarningsNow`) prices the effective limits the same way
+(`min(maxGates, maxSandboxes)` gates, the rest at the baseline) and warns when they need more than
+`usable`, only when the gate figure came from `anonMib` and the agent baseline is not `agentMib` (a
+baseline with no `agentAnonMib` stays priced from `memory.peak`, which `size` says includes page
+cache and may sit above the gate figure, as agents run the project's tests themselves):
+`memory.peak` counts page cache, and a pool it priced past the VM ran clean, so from it or the
+assumed figures doctor keeps its info pointer (`sizePointer`) and the start prints nothing.
+**Memory pressure** rides the same loop (`sampling` in `src/peaks.ts`): `readPressure` reads the
+sandbox's own `/sys/fs/cgroup/memory.pressure` beside `memory.stat`, and the highest `some` and
+`full` `avg10` (percent) is kept per sandbox in a `WeakMap` and, through `sampling`'s optional
+`pass` argument, per gate pass - `runGates` puts a pass's on the `GateRun` as `pressureSome` and
+`pressureFull` (only above 0), `timed()` and the landing gates' line copy them to `timings.jsonl`,
+`recordPeak` to the `peaks.jsonl` line (`readPeaks` accepts them), `measuredPeak` keeps the highest
+over the project's recent runs for `size` to show, and `pressureFromTimings` (`src/report.ts`) takes
+the run's highest for the closing summary's `Memory pressure` line.
+Both warn at `PRESSURE_WARN_FULL` (5% `full`); nothing prices a pool from it (the maintainer's
+decision on #382: per sandbox, warn only).
+An `avg10` reaches back 10 s, so a phase's first read can carry the end of the one before.
+`test/memory-pressure.test.ts` holds it.
 
-**The cap** (`sandcastle cap`, `parseCapArgs`, `setCap` and `standing` in `src/pool.ts`; the command in `src/cli.ts`, which handles it before the repository check so `--project <name>` works from any directory): a person's limit on one live run's share, the optional `cap` field of that run's registration, so it ends with the run (a new run has a new registration, and an autonomy run's next turn is the same run and keeps it). `cap N` writes it, `cap off` removes it, a bare `cap` reads `standing()`. The run is found by the `project` its registration records, so the name is `loadProject`'s `name`; no live run, or two of one name, is a refusal, and so is a number above the registration's `concurrency` (the most a run ever wants) or anything that is not a whole number of 1 or more. The cap is written whole and renamed in, like the registration, and the run reads it as `members()` reads every registration, before each slot request. `splitShares` takes each run's demand as the smaller of its demand and its cap, so a cap only lowers a share and what it frees goes to the others up to their demand. `overShare` adds one rule: a run that holds its cap takes no slot even when no other run wants one (held, not share: with a demand below the cap the share is below it too, and a run with no rival takes slots past its share). Nothing is taken back: a run above its cap keeps its slots. The cap is a person's and written from another process, so the run's own copy of its registration never holds one: `writeRegistration` (a new demand) reads the cap from the file and keeps it. A cap set in the instant the run rewrites its registration can be lost - the person sees the cap missing in the next read-out and sets it again. The run record carries `cap` beside `demand` and `share` (`burndown()` rewrites all three when any changes, a lifted cap leaving the record); the status view's machine cell appends `· cap N`, and the Herdr tab bar line shows each run's `share` from its record.
+**The cap** (`sandcastle cap`, `parseCapArgs`, `setCap` and `standing` in `src/pool.ts`; the command
+in `src/cli.ts`, which handles it before the repository check so `--project <name>` works from any
+directory): a person's limit on one live run's share, the optional `cap` field of that run's
+registration, so it ends with the run (a new run has a new registration, and an autonomy run's next
+turn is the same run and keeps it). `cap N` writes it, `cap off` removes it, a bare `cap` reads
+`standing()`.
+The run is found by the `project` its registration records, so the name is `loadProject`'s `name`;
+no live run, or two of one name, is a refusal, and so is a number above the registration's
+`concurrency` (the most a run ever wants) or anything that is not a whole number of 1 or more.
+The cap is written whole and renamed in, like the registration, and the run reads it as `members()`
+reads every registration, before each slot request. `splitShares` takes each run's demand as the
+smaller of its demand and its cap, so a cap only lowers a share and what it frees goes to the others
+up to their demand. `overShare` adds one rule: a run that holds its cap takes no slot even when no
+other run wants one (held, not share: with a demand below the cap the share is below it too, and a
+run with no rival takes slots past its share).
+Nothing is taken back: a run above its cap keeps its slots.
+The cap is a person's and written from another process, so the run's own copy of its registration
+never holds one: `writeRegistration` (a new demand) reads the cap from the file and keeps it.
+A cap set in the instant the run rewrites its registration can be lost - the person sees the cap
+missing in the next read-out and sets it again.
+The run record carries `cap` beside `demand` and `share` (`burndown()` rewrites all three when any
+changes, a lifted cap leaving the record); the status view's machine cell appends `· cap N`, and the
+Herdr tab bar line shows each run's `share` from its record.
 
-The start plan also names, under the ticket list, each ticket whose `Touches:` line names a protected path (`protectedPlanLines` in `src/guard.ts`, over `protectedTouches`: `#N will be held for a person to merge (paths)`): it still runs, only its merge is a person's; and the live line of a ticket held at landing carries the hold's reason (`#N: needs a human: human merge: <paths>.`, from the ledger's record note; `test/protected-plan.test.ts`). The start line (`burndown()`, before the estimate): `otherRuns()` lists the live runs other than this one that hold or want a sandbox slot, `splitAtStart(demand, others)` works out the share this run would get beside them and how many slots are free this moment, and `startLines(split, neighbours)` words it - each registered run's project, slots and demand, this run's share, and when no slot is free the wait for the first (`firstSlotWait` in `src/run.ts`: the other project's `typicalTimes().issue` less its working tickets' ages, a minute at least, found through `recordOfRun(pid)`, the live-runs directory and the run record's `attemptStarted`, the current attempt's start (else `started`, the first); left out with no history). A run with slots and no registration gets a line of its own that says it predates shares; the run still starts. No other run: no line. The estimate's divisor is `estimateSlots(workers, split)`: the workers within the run's whole share when another run is live (the one slot the pool keeps for any run's landing is outside every share), else within the machine limit, and `startLines(split, neighbours, landing)` says that one of the pool's slots is kept for any run's landing (`landing` is `!DRY_RUN`), so the run record's `concurrency` and `load.concurrency` are the tickets' slots (`test/start-split.test.ts`, `test/start-kept-slot.test.ts`). Beside another live run that figure is the share the run has at its start, which widens as the other run's tickets finish, so the estimate line names the assumption (`at this run's share now, N at a time; shorter as <project> finishes`): `burndown()` hands `estimate` `detail.beside`, from `estimateBeside` (the runs holding slots, named as `startLines` names them), only when `splitAtStart` ran; a run alone prints the line as before (`test/start-split.test.ts`). `estimate` prices the run's tickets as their summed figures over the slots, floored at the slowest single ticket's figure (at the median and at the high end alike), not as `ceil(tickets / slots)` whole rounds of the average ticket: a sixth ticket on five slots starts when the first frees, and tickets on one model get identical figures from history, so list scheduling would not tell them apart (`test/estimate-slots.test.ts`). The chain, gates and landing bounds sit beside it and the largest wins; the tickets' figure ends with one more landing (the last ticket's), and a chain's is each link's pipeline and its landing, as a dependant starts only once its blocker has landed. The median (and 80th percentile) `base gates` and `verify` lines of the window's runs are added to the winner. `from N ticket(s)` is the history tickets that priced some ticket of the run, not the window's count (`test/estimate-whole-run.test.ts`, which also holds that a ticket's wait for another's fix goes into the pipeline context's `waited`, beside the gates-slot waits, and so out of the run record's `typical`). `estimate` also takes `limit("gates")` as `detail.gateSlots`: each history ticket's summed `gates` and `landing gates` line time (the wait is `waitMs`, outside `ms`) over those slots is a third bound beside the sandbox figure and the chain, and the largest sets the time (`test/estimate-gates.test.ts`). A landing gate writes a line of its own phase (`LANDING_GATES`, `timedLandingGate` in `src/gates.ts`, wrapped round the landing port in `burndown()`), which `typicalTimes` and `estimate` keep out of a ticket's own pipeline time. So does every landing that came to its merge (`LANDING`, `writeLandingLine`, told by `landingWork` through `LandContext.timed`; a landing decided without a merge - taken back, withdrawn, held, a moved branch, a dry run - writes none): its `waitMs` is `landOne`'s wait for a landing sandbox slot (`at.slotWaited`; 0 for a fast-forward and for a conflict found on the host first), its `ms` the rest, and its `result` the kind of ending. It holds the landing gates' time, so `typicalTimes` and `estimate` skip it too, or the landing gates count twice. A requeued ticket's resolve wait (`resolveTurn`, without the time a pause parked it) reaches its attempt as `at.resolveWaitMs` and is added to the `waitMs` of that attempt's first `setup` line (`withQueued`); a ticket has no slot wait to add it to (slot first). The landings in a row (the history tickets' landing gates, none for one that landed without a gate, summed over the run's tickets: one worker, whatever the slots) are a fourth bound, a floor on the end, and the estimate says when they set it. The gate and landing-gate times are priced by load: each run record carries `load` (`{ concurrency, tickets }`: the sandboxes it ran at once, after the machine cap and its share, and its ticket count; `burndown()` writes the start's figure, then replaces it when the record finishes with the time-weighted mean, rounded, of the ticket slots the run could use - `createLoadMeter` in `src/run.ts`, sampled at every 5 s look at the pool share (another run beginning or ending moves the bound between the machine limit and the share with the share unchanged), counting only the time the run's demand covers all its startable tickets - the base gates at one slot and the demand-bound tail where the last tickets finish are left out of the mean by duration, not carried as a low sample (`test/load-meter-full-demand.test.ts`) - and read by `RunRecord.finishWith`'s hook, so a run that began beside others and later ran wider is priced as the load it ran at, as run.json's `concurrency` is; `test/run-load-recorded.test.ts` - and it reaches `history.jsonl`), `estimate` joins the window's runs to it by `startedAt`, and when at least two of them ran within 1 of this run's slots, only their tickets price `gateMs` and `landMs`, and each history ticket's own gate passes inside its pipeline time are swapped for that `gateMs` (the four bounds combine as before). Otherwise - too few such runs, or older lines with no `load`, which count as unknown - all the window's runs price them and the line ends `No history at N at a time ..., so it may be low.` (`test/estimate-load.test.ts`). A ticket re-run for what an earlier "part of" merge left (`isRemainder`: `mergedPartly` and no branch ahead of the base, read once at the start into `remainderAtStart`, handed to `estimate` as `detail.remainder` and written on its timings lines as `remainder`) is a third class beside carried and fresh, priced from past remainders and, with none, as a fresh ticket with the line saying it may be high (`test/estimate-remainder.test.ts`). Each ticket is also priced by its size: `burndown()` counts the paths of its `Touches:` line (`parseTouches`, 0 with none) and its body's length in characters, hands them to `estimate` as `detail.touches` and `detail.bodyChars` and writes them on each of its timings lines as `touches` and `bodyChars`. `sizeOf` (`src/run.ts`, exported for `queue --lint`) is the one rule, its thresholds named constants at the top of the size block: small is a body under `SMALL_BODY` (1,000) characters and at most `SMALL_PATHS` (2) paths, large a body of `LARGE_BODY` (2,500) or more or `LARGE_PATHS` (6) or more paths, medium the rest; a ticket with no `Touches:` line is sized by its body alone, and a line without `bodyChars` (an older one) by its path count alone (none: unknown, pricing no class). With at least `SIZE_HISTORY` (3) history tickets of its size among those that would price it (model and class split as above), only they do, and the line names the class and the signal (`SIZE_WORDS`). A line without `touches` is of unknown size and prices no class. With fewer, the ticket is priced as without, and when the known-size tickets of that pool are mostly a smaller or larger class the line says it may be high or low (`test/estimate-size.test.ts`, `test/estimate-size-body.test.ts`). The window also widens per model: a model with fewer than `SOLID_HISTORY` tickets in it is topped up to that many from its older tickets (newest run first, outside the window), the line says `priced from older runs` and its count adds `and N older`; only a model with no ticket anywhere is unknown (`test/estimate-model-older.test.ts`). A chain's bound sums its own tickets' prices (`detail.chainAt`), so a chain of large tickets is bounded above a chain of small ones (`test/estimate-chain-sizes.test.ts`). `typicalTimes` carries the same figure as `typical["landing gates"]` (the median ticket's landing gates, in seconds), from which the status view takes the later of the pipelines' end and now plus the tickets not yet landed times that figure for `ends ~HH:MM` (`test/landing-gate-timing.test.ts`).
+The start plan also names, under the ticket list, each ticket whose `Touches:` line names a
+protected path (`protectedPlanLines` in `src/guard.ts`, over `protectedTouches`:
+`#N will be held for a person to merge (paths)`): it still runs, only its merge is a person's; and
+the live line of a ticket held at landing carries the hold's reason
+(`#N: needs a human: human merge: <paths>.`, from the ledger's record note;
+`test/protected-plan.test.ts`).
+The start line (`burndown()`, before the estimate): `otherRuns()` lists the live runs other than
+this one that hold or want a sandbox slot, `splitAtStart(demand, others)` works out the share this
+run would get beside them and how many slots are free this moment, and
+`startLines(split, neighbours)` words it - each registered run's project, slots and demand, this
+run's share, and when no slot is free the wait for the first (`firstSlotWait` in `src/run.ts`: the
+other project's `typicalTimes().issue` less its working tickets' ages, a minute at least, found
+through `recordOfRun(pid)`, the live-runs directory and the run record's `attemptStarted`, the
+current attempt's start (else `started`, the first); left out with no history).
+A run with slots and no registration gets a line of its own that says it predates shares; the run
+still starts.
+No other run: no line.
+The estimate's divisor is `estimateSlots(workers, split)`: the workers within the run's whole share
+when another run is live (the one slot the pool keeps for any run's landing is outside every share),
+else within the machine limit, and `startLines(split, neighbours, landing)` says that one of the
+pool's slots is kept for any run's landing (`landing` is `!DRY_RUN`), so the run record's
+`concurrency` and `load.concurrency` are the tickets' slots (`test/start-split.test.ts`,
+`test/start-kept-slot.test.ts`).
+Beside another live run that figure is the share the run has at its start, which widens as the other
+run's tickets finish, so the estimate line names the assumption
+(`at this run's share now, N at a time; shorter as <project> finishes`): `burndown()` hands
+`estimate` `detail.beside`, from `estimateBeside` (the runs holding slots, named as `startLines`
+names them), only when `splitAtStart` ran; a run alone prints the line as before
+(`test/start-split.test.ts`). `estimate` prices the run's tickets as their summed figures over the
+slots, floored at the slowest single ticket's figure (at the median and at the high end alike), not
+as `ceil(tickets / slots)` whole rounds of the average ticket: a sixth ticket on five slots starts
+when the first frees, and tickets on one model get identical figures from history, so list
+scheduling would not tell them apart (`test/estimate-slots.test.ts`).
+The chain, gates and landing bounds sit beside it and the largest wins; the tickets' figure ends
+with one more landing (the last ticket's), and a chain's is each link's pipeline and its landing, as
+a dependant starts only once its blocker has landed.
+The median (and 80th percentile) `base gates` and `verify` lines of the window's runs are added to
+the winner. `from N ticket(s)` is the history tickets that priced some ticket of the run, not the
+window's count (`test/estimate-whole-run.test.ts`, which also holds that a ticket's wait for
+another's fix goes into the pipeline context's `waited`, beside the gates-slot waits, and so out of
+the run record's `typical`). `estimate` also takes `limit("gates")` as `detail.gateSlots`: each
+history ticket's summed `gates` and `landing gates` line time (the wait is `waitMs`, outside `ms`)
+over those slots is a third bound beside the sandbox figure and the chain, and the largest sets the
+time (`test/estimate-gates.test.ts`).
+A landing gate writes a line of its own phase (`LANDING_GATES`, `timedLandingGate` in
+`src/gates.ts`, wrapped round the landing port in `burndown()`), which `typicalTimes` and `estimate`
+keep out of a ticket's own pipeline time.
+So does every landing that came to its merge (`LANDING`, `writeLandingLine`, told by `landingWork`
+through `LandContext.timed`; a landing decided without a merge - taken back, withdrawn, held, a
+moved branch, a dry run - writes none): its `waitMs` is `landOne`'s wait for a landing sandbox slot
+(`at.slotWaited`; 0 for a fast-forward and for a conflict found on the host first), its `ms` the
+rest, and its `result` the kind of ending.
+It holds the landing gates' time, so `typicalTimes` and `estimate` skip it too, or the landing gates
+count twice.
+A requeued ticket's resolve wait (`resolveTurn`, without the time a pause parked it) reaches its
+attempt as `at.resolveWaitMs` and is added to the `waitMs` of that attempt's first `setup` line
+(`withQueued`); a ticket has no slot wait to add it to (slot first).
+The landings in a row (the history tickets' landing gates, none for one that landed without a gate,
+summed over the run's tickets: one worker, whatever the slots) are a fourth bound, a floor on the
+end, and the estimate says when they set it.
+The gate and landing-gate times are priced by load: each run record carries `load`
+(`{ concurrency, tickets }`: the sandboxes it ran at once, after the machine cap and its share, and
+its ticket count; `burndown()` writes the start's figure, then replaces it when the record finishes
+with the time-weighted mean, rounded, of the ticket slots the run could use - `createLoadMeter` in
+`src/run.ts`, sampled at every 5 s look at the pool share (another run beginning or ending moves the
+bound between the machine limit and the share with the share unchanged), counting only the time the
+run's demand covers all its startable tickets - the base gates at one slot and the demand-bound tail
+where the last tickets finish are left out of the mean by duration, not carried as a low sample
+(`test/load-meter-full-demand.test.ts`) - and read by `RunRecord.finishWith`'s hook, so a run that
+began beside others and later ran wider is priced as the load it ran at, as run.json's `concurrency`
+is; `test/run-load-recorded.test.ts` - and it reaches `history.jsonl`), `estimate` joins the
+window's runs to it by `startedAt`, and when at least two of them ran within 1 of this run's slots,
+only their tickets price `gateMs` and `landMs`, and each history ticket's own gate passes inside its
+pipeline time are swapped for that `gateMs` (the four bounds combine as before).
+Otherwise - too few such runs, or older lines with no `load`, which count as unknown - all the
+window's runs price them and the line ends `No history at N at a time ..., so it may be low.`
+(`test/estimate-load.test.ts`).
+A ticket re-run for what an earlier "part of" merge left (`isRemainder`: `mergedPartly` and no
+branch ahead of the base, read once at the start into `remainderAtStart`, handed to `estimate` as
+`detail.remainder` and written on its timings lines as `remainder`) is a third class beside carried
+and fresh, priced from past remainders and, with none, as a fresh ticket with the line saying it may
+be high (`test/estimate-remainder.test.ts`).
+Each ticket is also priced by its size: `burndown()` counts the paths of its `Touches:` line
+(`parseTouches`, 0 with none) and its body's length in characters, hands them to `estimate` as
+`detail.touches` and `detail.bodyChars` and writes them on each of its timings lines as `touches`
+and `bodyChars`. `sizeOf` (`src/run.ts`, exported for `queue --lint`) is the one rule, its
+thresholds named constants at the top of the size block: small is a body under `SMALL_BODY` (1,000)
+characters and at most `SMALL_PATHS` (2) paths, large a body of `LARGE_BODY` (2,500) or more or
+`LARGE_PATHS` (6) or more paths, medium the rest; a ticket with no `Touches:` line is sized by its
+body alone, and a line without `bodyChars` (an older one) by its path count alone (none: unknown,
+pricing no class).
+With at least `SIZE_HISTORY` (3) history tickets of its size among those that would price it (model
+and class split as above), only they do, and the line names the class and the signal (`SIZE_WORDS`).
+A line without `touches` is of unknown size and prices no class.
+With fewer, the ticket is priced as without, and when the known-size tickets of that pool are mostly
+a smaller or larger class the line says it may be high or low (`test/estimate-size.test.ts`,
+`test/estimate-size-body.test.ts`).
+The window also widens per model: a model with fewer than `SOLID_HISTORY` tickets in it is topped up
+to that many from its older tickets (newest run first, outside the window), the line says
+`priced from older runs` and its count adds `and N older`; only a model with no ticket anywhere is
+unknown (`test/estimate-model-older.test.ts`).
+A chain's bound sums its own tickets' prices (`detail.chainAt`), so a chain of large tickets is
+bounded above a chain of small ones (`test/estimate-chain-sizes.test.ts`). `typicalTimes` carries
+the same figure as `typical["landing gates"]` (the median ticket's landing gates, in seconds), from
+which the status view takes the later of the pipelines' end and now plus the tickets not yet landed
+times that figure for `ends ~HH:MM` (`test/landing-gate-timing.test.ts`).
 
-The demand comes from the scheduler (`src/schedule.ts`): the tickets from their push to the pipelines to the end of their attempt, plus one while a green branch waits to land or is landing, never more than `work.concurrency`, told as `{ kind: "demand" }` whenever it changes; `burndown()` hands it to `setDemand`. A ticket held for a blocker or a file adds nothing until it starts. The base gates (before the scheduler) and the verify run ask for one slot. Workers still start up to the smaller of concurrency and the machine limit: the share decides how many hold a slot. With landing on, `pipelineWorkers` leaves one slot of the machine limit out of the worker count, and beside another run (one that holds or wants a sandbox slot) the pool keeps **one slot for the whole pool's landings**, not one per run: from the second run that holds or wants sandbox slots `members` and `splitAtStart` split the limit less one slot (`shareable`; a pool of one slot keeps none), so a run's ticket pipelines use their whole share, and the slot left over is any run's landing's. A ticket pipeline's lease (`leaseSlot`'s `keep`, which `burndown()` sets unless it is a dry run) never takes the pool's last free sandbox slot while another run is live (`lastFreeSlot`: exactly one slot free); it waits with the reason `landing`, and its wait entry is out of the waits directory meanwhile, as a wait that cannot take the slot would make a landing of another run yield it. A landing's lease (priority) may take that slot whatever its run holds against its share, and any other free slot while its run holds no more than its share (`overShare`'s `landingOnLast`; a person's cap still applies): the run's tickets fill the whole share, so a landing held to it waited with slots free, and when two runs' landings want it at once the longest wait goes first (`olderWait` counts the other run's landing whatever that run holds: a wait entry's file name ends `-priority` for a landing's, so another run can tell it from a ticket's). While a landing runs, the slot it holds is not free, and a ticket that ends then frees the pool's last free slot again, so the tickets wait until the landing is done: the pool holds one slot for landing, and tickets use only the rest. Nothing is taken back from a running ticket (ADR 0001): a run over its share after the split keeps what it holds and shrinks as its tickets end. A run alone is unchanged: the whole pool as its share, nothing held back from its tickets, one slot of the machine left in its worker count. The start line and the estimate count the whole share as the tickets' (`estimateSlots`, `startLines`, `landingSlotNote`) and say one of the pool's slots is kept for any run's landing. At 3 slots between two runs that is 1 + 1 tickets and an idle slot, which a landing never waits for a ticket to end for; a pool of 6 between three runs of demand 5 is 2 + 2 + 1 tickets and one free slot. A registration's `since` is the process's first `joinPool`, not a turn's: an autonomy run's later turn writes a fresh run record with a new `startedAt` while the run stays in the pool, so a share line can name another run as live before its record's `startedAt` (`recordRun` runs before `joinPool` in the first turn, so the first turn's record never starts later than its registration). `test/landing-slot-share.test.ts`, `test/kept-slot-idle.test.ts`.
+The demand comes from the scheduler (`src/schedule.ts`): the tickets from their push to the
+pipelines to the end of their attempt, plus one while a green branch waits to land or is landing,
+never more than `work.concurrency`, told as `{ kind: "demand" }` whenever it changes; `burndown()`
+hands it to `setDemand`.
+A ticket held for a blocker or a file adds nothing until it starts.
+The base gates (before the scheduler) and the verify run ask for one slot.
+Workers still start up to the smaller of concurrency and the machine limit: the share decides how
+many hold a slot.
+With landing on, `pipelineWorkers` leaves one slot of the machine limit out of the worker count, and
+beside another run (one that holds or wants a sandbox slot) the pool keeps **one slot for the whole
+pool's landings**, not one per run: from the second run that holds or wants sandbox slots `members`
+and `splitAtStart` split the limit less one slot (`shareable`; a pool of one slot keeps none), so a
+run's ticket pipelines use their whole share, and the slot left over is any run's landing's.
+A ticket pipeline's lease (`leaseSlot`'s `keep`, which `burndown()` sets unless it is a dry run)
+never takes the pool's last free sandbox slot while another run is live (`lastFreeSlot`: exactly one
+slot free); it waits with the reason `landing`, and its wait entry is out of the waits directory
+meanwhile, as a wait that cannot take the slot would make a landing of another run yield it.
+A landing's lease (priority) may take that slot whatever its run holds against its share, and any
+other free slot while its run holds no more than its share (`overShare`'s `landingOnLast`; a
+person's cap still applies): the run's tickets fill the whole share, so a landing held to it waited
+with slots free, and when two runs' landings want it at once the longest wait goes first
+(`olderWait` counts the other run's landing whatever that run holds: a wait entry's file name ends
+`-priority` for a landing's, so another run can tell it from a ticket's).
+While a landing runs, the slot it holds is not free, and a ticket that ends then frees the pool's
+last free slot again, so the tickets wait until the landing is done: the pool holds one slot for
+landing, and tickets use only the rest.
+Nothing is taken back from a running ticket (ADR 0001): a run over its share after the split keeps
+what it holds and shrinks as its tickets end.
+A run alone is unchanged: the whole pool as its share, nothing held back from its tickets, one slot
+of the machine left in its worker count.
+The start line and the estimate count the whole share as the tickets' (`estimateSlots`,
+`startLines`, `landingSlotNote`) and say one of the pool's slots is kept for any run's landing.
+At 3 slots between two runs that is 1 + 1 tickets and an idle slot, which a landing never waits for
+a ticket to end for; a pool of 6 between three runs of demand 5 is 2 + 2 + 1 tickets and one free
+slot.
+A registration's `since` is the process's first `joinPool`, not a turn's: an autonomy run's later
+turn writes a fresh run record with a new `startedAt` while the run stays in the pool, so a share
+line can name another run as live before its record's `startedAt` (`recordRun` runs before
+`joinPool` in the first turn, so the first turn's record never starts later than its registration).
+`test/landing-slot-share.test.ts`, `test/kept-slot-idle.test.ts`.
 
 ## `src/usage.ts`
 
-The opt-in plan usage guard (`USAGE_CHECK=1`). `usageToken(env, platform, readers, now)` is the one function that picks what a reading is made with, and `LoginReaders` (`keychain()`, `file()`) are injected so a test needs no real keychain. The guard applies only while the sandboxes spend a subscription token: `usageToken` returns `{ source: "api key" }` (the start line says the guard does not apply, no reading, no stop) whenever `ANTHROPIC_API_KEY` is set, beside `CLAUDE_CODE_OAUTH_TOKEN` or not, and `undefined` with neither, and in neither case reads the host login; a key wins over a token, as in `credentialSource`, because Claude Code spends the key first (`src/api-key.ts` then has the run ask before it bills API credits). `usageWhose` words whose plan a reading is of (the login's account, or the token's), for the start line and `doctor --verify`; the kit cannot tell whether login and token are one account. The credential, then, is the host's Claude Code login: on macOS the keychain generic password `Claude Code-credentials` (`security find-generic-password -s ... -w`), or with `CLAUDE_CONFIG_DIR` set `Claude Code-credentials-<h>`, `<h>` the first 8 hex characters of the SHA-256 of its value with a trailing slash removed (`keychainService`), as Claude Code itself names it, elsewhere `.credentials.json` under `CLAUDE_CONFIG_DIR` (else `~/.claude`); the JSON's `claudeAiOauth.accessToken` and `expiresAt` (milliseconds) are what is read. A `claude setup-token` token is inference-only and the usage endpoint answers it HTTP 403; the login's access token carries `user:profile` and gets 200. Rules it keeps: it reads on the host only, in the orchestrator, at each usage reading (`usageLine`, `usageStop`), and never refreshes (a refresh rotates the token and could sign Claude Code out), so the login's own expiry (about 8 hours) ends it - an expired login is "no reading" (fail open, asked again before the next ticket) and does not fall back, since the setup token would only get the 403 that turns the guard off for the run; a missing or unreadable login (no entry, a reader that throws, malformed JSON, no access token) falls back to `CLAUDE_CODE_OAUTH_TOKEN`; the token is never written, never added to the env the run holds, never in `sandboxEnv` or `sandboxMounts` (`src/sandbox.ts`) and never printed - `sandcastle doctor --verify` reports which source the guard would use, where it looks for the login (`loginLocation`: the keychain service's name or the credentials file's path) and the endpoint's HTTP status only. `test/usage-login.test.ts`, `test/usage-plan-applies.test.ts` and `test/usage-keychain-service.test.ts` hold it.
+The opt-in plan usage guard (`USAGE_CHECK=1`). `usageToken(env, platform, readers, now)` is the one
+function that picks what a reading is made with, and `LoginReaders` (`keychain()`, `file()`) are
+injected so a test needs no real keychain.
+The guard applies only while the sandboxes spend a subscription token: `usageToken` returns
+`{ source: "api key" }` (the start line says the guard does not apply, no reading, no stop) whenever
+`ANTHROPIC_API_KEY` is set, beside `CLAUDE_CODE_OAUTH_TOKEN` or not, and `undefined` with neither,
+and in neither case reads the host login; a key wins over a token, as in `credentialSource`, because
+Claude Code spends the key first (`src/api-key.ts` then has the run ask before it bills API
+credits). `usageWhose` words whose plan a reading is of (the login's account, or the token's), for
+the start line and `doctor --verify`; the kit cannot tell whether login and token are one account.
+The credential, then, is the host's Claude Code login: on macOS the keychain generic password
+`Claude Code-credentials` (`security find-generic-password -s ... -w`), or with `CLAUDE_CONFIG_DIR`
+set `Claude Code-credentials-<h>`, `<h>` the first 8 hex characters of the SHA-256 of its value with
+a trailing slash removed (`keychainService`), as Claude Code itself names it, elsewhere
+`.credentials.json` under `CLAUDE_CONFIG_DIR` (else `~/.claude`); the JSON's
+`claudeAiOauth.accessToken` and `expiresAt` (milliseconds) are what is read.
+A `claude setup-token` token is inference-only and the usage endpoint answers it HTTP 403; the
+login's access token carries `user:profile` and gets 200.
+Rules it keeps: it reads on the host only, in the orchestrator, at each usage reading (`usageLine`,
+`usageStop`), and never refreshes (a refresh rotates the token and could sign Claude Code out), so
+the login's own expiry (about 8 hours) ends it - an expired login is "no reading" (fail open, asked
+again before the next ticket) and does not fall back, since the setup token would only get the 403
+that turns the guard off for the run; a missing or unreadable login (no entry, a reader that throws,
+malformed JSON, no access token) falls back to `CLAUDE_CODE_OAUTH_TOKEN`; the token is never
+written, never added to the env the run holds, never in `sandboxEnv` or `sandboxMounts`
+(`src/sandbox.ts`) and never printed - `sandcastle doctor --verify` reports which source the guard
+would use, where it looks for the login (`loginLocation`: the keychain service's name or the
+credentials file's path) and the endpoint's HTTP status only. `test/usage-login.test.ts`,
+`test/usage-plan-applies.test.ts` and `test/usage-keychain-service.test.ts` hold it.
 
-The plan's usage on screen is the same file's second job, and needs none of the above: no credential, no request, and it does not depend on `USAGE_CHECK`. Claude Code's stream-json output carries `rate_limit_event` lines (about three a pass) with both windows' `utilization` (a fraction) and `resetsAt` (seconds since the epoch), and every agent's raw stream is already in its `.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` (`agentLogging` in `src/run.ts`). `usageFromEvent(line, at)` turns one such line into a `UsageReading` - `{ provider: "claude", windows: { fiveHour, week }, at }` with each window `{ percent, resetsAt }`, the percent a whole number from 0 to 100 - and gives none for a malformed line, another type of line or an event without both windows; the kit stamps `at` itself (seconds, when it read the line: the stream has no time of its own and an agent's clock is not the host's). The reading is keyed by `provider`, and `USAGE_READERS` holds one reader per provider, so a later provider adds one function there and the record's `usage` already names whose it is. Codex's is `usageFromCodexEvent(line, at)`, over `usageFromRateLimits(limits, at)`: a session's `token_count` event (`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1791188474},"secondary":{...10080...}}}}`) gives `fiveHour` and `week` by `window_minutes` (300 and 10080), never by position, `used_percent` already a percentage and `resets_at` in seconds, and none unless both windows are there. `codex exec --json` prints no `rate_limits` (its events are `thread.started`, `turn.*`, `item.*` and `error`), and the session that has them is `~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl` inside the container (the kit runs Codex with `captureSessions: false`, so none is copied to the host's `~/.codex`, and the container takes it away), so `codexAgent` in `src/agents.ts` runs the pass's command as `<codex exec ...>; rc=$?; <CODEX_RATE_LIMITS_READOUT>; exit $rc`: the readout prints the last non-empty `rate_limits` of the newest rollout (one sandbox is one ticket's, its passes one after another) as one more stdout line, which Sandcastle's raw-line callback appends to the pass's `.jsonl` like any other, and codex's exit code stays the pass's. The readout matches unescaped JSON only, so a rollout line that merely quotes a session file (a tool result) is no reading. `test/usage-codex.test.ts` holds it, with a fake `codex` that writes the session the real one wrote (Codex 0.160.0, against a local stand-in server). `watchUsage({ logs, run, write, providers })` is the collector: while the run is live it looks every `USAGE_INTERVAL_MS` (15 s) at each `agent-issue-*.jsonl`, reads only what the file gained since the last look (an offset per file, reset when the file shrank or changed identity; a half-written line waits for its end; a line over 8 MiB is dropped, not buffered), and counts only lines after the run's own marker (`{"sandcastle":"run","run":<runId>}`, the first line `agentLogging` writes, so an earlier run's lines in a file kept across runs are not this run's). A line is read by the reader of each of `providers` (the ones the run shows). Where several files gained a reading in one look, the file written last (by modification time) holds each provider's newest; each provider's newest goes to `write` when one has come, at most once per interval (a reading that arrives sooner waits for the next look, and one that is unchanged since the last write is never written again), and `stop()` writes the last one whatever the interval says, which `burndown()` calls before it builds the closing summary. A failure to read or to write is no reading (a full disk must not fail a run). `showsPlanUsage({ apiKey, oauthToken, models })` is when a run has one: `projectApiKeySpend` says no API key is spent, `CLAUDE_CODE_OAUTH_TOKEN` is in the sandboxes' environment and at least one of the models implement, review and repair run on (the implement and review models and any ticket's `model:` override; repair uses the implementer's) is a Claude model (`isClaudeModel`: `claude-*`, or an alias Claude Code takes). `showsCodexUsage({ crossReview, apiKey, auth })` is when it has Codex's: `CROSS_REVIEW=1`, no `CODEX_API_KEY` in the sandboxes' environment, and `codexSignIn(auth)` says `plan` of the text of `~/.codex/auth.json` (`readCodexAuth`, the file `sandboxMounts` copies in; read on the host after preflight, its mode only - `auth_mode` `chatgpt`, or for an older Codex's file with no mode its tokens - and never printed): an API key, any other sign-in or no file has no plan to show. `burndown()` then writes `usage: [{ provider: "claude" }, { provider: "codex" }]`, each entry only if shown (the row says each waits for its first reading), starts the watch after the log archive with those providers and passes each reading to `run.update({ usage })`, the list with that provider's entry replaced; the record of a run that shows neither has no `usage`. `readPlanUsage` checks what a reader takes of one entry of a record (a file in a repository) and `readPlanUsages` of the whole field (a list, or the one object an older kit wrote; an entry of no known provider is left out), `usageBand` and `USAGE_AMBER`/`USAGE_RED` are the colour bands (normal below 75%, amber from 75%, red from 90%) that the status view draws by, and `USAGE_STALE_SECONDS` (15 minutes) is when it greys a reading. **The guard prefers the agents' readings.** `usageStop(env, readers, agent, now)` is given the newest Claude reading of the run (`agent`: its `usage` entry) and, when it is younger than `AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache), decides from it alone: no request and no credential read, the stop line naming the windows as the endpoint's reading does (`five_hour`, `seven_day`), a window whose reset has passed counted as spent no more, and `usageReadingLost()` false. Before the first reading, and once the newest is older than that, the endpoint answers exactly as before. `test/usage-pause.test.ts`.
+The plan's usage on screen is the same file's second job, and needs none of the above: no
+credential, no request, and it does not depend on `USAGE_CHECK`.
+Claude Code's stream-json output carries `rate_limit_event` lines (about three a pass) with both
+windows' `utilization` (a fraction) and `resetsAt` (seconds since the epoch), and every agent's raw
+stream is already in its `.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` (`agentLogging` in
+`src/run.ts`). `usageFromEvent(line, at)` turns one such line into a `UsageReading` -
+`{ provider: "claude", windows: { fiveHour, week }, at }` with each window `{ percent, resetsAt }`,
+the percent a whole number from 0 to 100 - and gives none for a malformed line, another type of line
+or an event without both windows; the kit stamps `at` itself (seconds, when it read the line: the
+stream has no time of its own and an agent's clock is not the host's).
+The reading is keyed by `provider`, and `USAGE_READERS` holds one reader per provider, so a later
+provider adds one function there and the record's `usage` already names whose it is.
+Codex's is `usageFromCodexEvent(line, at)`, over `usageFromRateLimits(limits, at)`: a session's
+`token_count` event
+(`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1791188474},"secondary":{...10080...}}}}`)
+gives `fiveHour` and `week` by `window_minutes` (300 and 10080), never by position, `used_percent`
+already a percentage and `resets_at` in seconds, and none unless both windows are there.
+`codex exec --json` prints no `rate_limits` (its events are `thread.started`, `turn.*`, `item.*` and
+`error`), and the session that has them is `~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl` inside
+the container (the kit runs Codex with `captureSessions: false`, so none is copied to the host's
+`~/.codex`, and the container takes it away), so `codexAgent` in `src/agents.ts` runs the pass's
+command as `<codex exec ...>; rc=$?; <CODEX_RATE_LIMITS_READOUT>; exit $rc`: the readout prints the
+last non-empty `rate_limits` of the newest rollout (one sandbox is one ticket's, its passes one
+after another) as one more stdout line, which Sandcastle's raw-line callback appends to the pass's
+`.jsonl` like any other, and codex's exit code stays the pass's.
+The readout matches unescaped JSON only, so a rollout line that merely quotes a session file (a tool
+result) is no reading. `test/usage-codex.test.ts` holds it, with a fake `codex` that writes the
+session the real one wrote (Codex 0.160.0, against a local stand-in server).
+`watchUsage({ logs, run, write, providers })` is the collector: while the run is live it looks every
+`USAGE_INTERVAL_MS` (15 s) at each `agent-issue-*.jsonl`, reads only what the file gained since the
+last look (an offset per file, reset when the file shrank or changed identity; a half-written line
+waits for its end; a line over 8 MiB is dropped, not buffered), and counts only lines after the
+run's own marker (`{"sandcastle":"run","run":<runId>}`, the first line `agentLogging` writes, so an
+earlier run's lines in a file kept across runs are not this run's).
+A line is read by the reader of each of `providers` (the ones the run shows).
+Where several files gained a reading in one look, the file written last (by modification time) holds
+each provider's newest; each provider's newest goes to `write` when one has come, at most once per
+interval (a reading that arrives sooner waits for the next look, and one that is unchanged since the
+last write is never written again), and `stop()` writes the last one whatever the interval says,
+which `burndown()` calls before it builds the closing summary.
+A failure to read or to write is no reading (a full disk must not fail a run).
+`showsPlanUsage({ apiKey, oauthToken, models })` is when a run has one: `projectApiKeySpend` says no
+API key is spent, `CLAUDE_CODE_OAUTH_TOKEN` is in the sandboxes' environment and at least one of the
+models implement, review and repair run on (the implement and review models and any ticket's
+`model:` override; repair uses the implementer's) is a Claude model (`isClaudeModel`: `claude-*`, or
+an alias Claude Code takes). `showsCodexUsage({ crossReview, apiKey, auth })` is when it has
+Codex's: `CROSS_REVIEW=1`, no `CODEX_API_KEY` in the sandboxes' environment, and `codexSignIn(auth)`
+says `plan` of the text of `~/.codex/auth.json` (`readCodexAuth`, the file `sandboxMounts` copies
+in; read on the host after preflight, its mode only - `auth_mode` `chatgpt`, or for an older Codex's
+file with no mode its tokens - and never printed): an API key, any other sign-in or no file has no
+plan to show. `burndown()` then writes `usage: [{ provider: "claude" }, { provider: "codex" }]`,
+each entry only if shown (the row says each waits for its first reading), starts the watch after the
+log archive with those providers and passes each reading to `run.update({ usage })`, the list with
+that provider's entry replaced; the record of a run that shows neither has no `usage`.
+`readPlanUsage` checks what a reader takes of one entry of a record (a file in a repository) and
+`readPlanUsages` of the whole field (a list, or the one object an older kit wrote; an entry of no
+known provider is left out), `usageBand` and `USAGE_AMBER`/`USAGE_RED` are the colour bands (normal
+below 75%, amber from 75%, red from 90%) that the status view draws by, and `USAGE_STALE_SECONDS`
+(15 minutes) is when it greys a reading.
+**The guard prefers the agents' readings.** `usageStop(env, readers, agent, now)` is given the
+newest Claude reading of the run (`agent`: its `usage` entry) and, when it is younger than
+`AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache), decides from it
+alone: no request and no credential read, the stop line naming the windows as the endpoint's reading
+does (`five_hour`, `seven_day`), a window whose reset has passed counted as spent no more, and
+`usageReadingLost()` false.
+Before the first reading, and once the newest is older than that, the endpoint answers exactly as
+before. `test/usage-pause.test.ts`.
 
-**`sandcastle usage`** (`usageCommand(env, recorded, readers, now)`) prints the plan's usage between runs and writes nothing. `recordedUsage(logs)` gives each provider's newest reading in `logs/run.json` and the last 50 lines of `logs/history.jsonl`; a Claude reading younger than `AGENT_READING_FRESH_SECONDS` is printed with its age and nothing is asked, as the guard prefers it. Otherwise the endpoint is asked once through `usageToken`'s credential and `read` (rate-limited, so never a second time), and a failure says why, with any stale reading below it, and exits 1. `env` is `claudeCredentials(project)` (`src/sandbox.ts`: the two credentials files without `credentials()`'s checks), so an API key in use says the sandboxes spend API credits, whatever a record holds. Codex's newest reading is added with its age. `test/usage-command.test.ts`.
+**`sandcastle usage`** (`usageCommand(env, recorded, readers, now)`) prints the plan's usage between
+runs and writes nothing. `recordedUsage(logs)` gives each provider's newest reading in
+`logs/run.json` and the last 50 lines of `logs/history.jsonl`; a Claude reading younger than
+`AGENT_READING_FRESH_SECONDS` is printed with its age and nothing is asked, as the guard prefers it.
+Otherwise the endpoint is asked once through `usageToken`'s credential and `read` (rate-limited, so
+never a second time), and a failure says why, with any stale reading below it, and exits 1. `env` is
+`claudeCredentials(project)` (`src/sandbox.ts`: the two credentials files without `credentials()`'s
+checks), so an API key in use says the sandboxes spend API credits, whatever a record holds.
+Codex's newest reading is added with its age. `test/usage-command.test.ts`.
 
-**`USAGE_PAUSE`** (`parseUsagePause(env, config)`: unset or empty is off, a value outside 1 to 100 is an `OperatorError` named like `USAGE_STOP`'s, from `resolveSettings` before anything runs; the project's `usagePause` is checked by `checkShape` in `src/config.ts` and the environment beats it) is the same readings acted on. `createUsagePause(threshold, ports)` is the run's controller, over the control file and a clock it is given (`standing`, `hold`, `now`): `reading(usage)` is called with every provider's newest reading as `watchUsage` writes one, and `usagePauseFor` chooses the window - of those at or above the threshold that have not reset (`resetsAt` plus `USAGE_RESUME_GRACE_SECONDS`, 60, still ahead: a stale reading says nothing of a window open again since), the one that resets last, since resuming at an earlier reset would only pause again - and holds the pause until a minute after its reset; `limit(usage, provider)` is the pipeline's `limitPause`, for an agent that hit the limit anyway (`usageLimitPauseFor`: the open window nearest to spent, the later reset on a tie, recorded at 100% whatever the last reading said, of the provider whose agent it was; nothing when no reading names an open window at `min(threshold, USAGE_RED)` percent or more - a limit message with every window well short of it is some other limit, one model's own cap, and days of waiting for the wrong window is worse than the old stop - which is also how a run on an API key, or one before its first reading, keeps stopping as it did). `source.read()` (`observe`, which `reading` and `limit` call first too, so a reading that comes in the second after a person's resume cannot write the pause again before the resume was noticed) is the schedule's pause source: it passes the control file's answer through, remembers the usage pause it has seen, and when that pause is gone before its time - a person ran `sandcastle resume` - remembers the windows then at or above the threshold by provider, window and reset time (`windowKey`) so that `reading` does not pause for them again; a pause that is gone because its time came remembers nothing, and the next window has a new reset time and pauses at the threshold as any. The controller is made only when a threshold is set, so a run without one reads the control file as before. `burndown()` prints the start line (`usagePauseLine`: `Usage pause: at 90%, resumes at the window's reset`, or that the run reads no plan usage and never pauses for it), hands `reading` each reading in `watchUsage`'s `write` (a failure there is dropped: the next reading asks again), and says each pause and resume once as the scheduler tells them (`createPauseHandling`, over injected ports for the record, keep-awake, view and log, so `test/pause-handling.test.ts` drives it with fakes). An attempt reads the pause before the guard decides (`waitOutPause`: while `paused()`, it waits at its `start` juncture holding nothing), so the guard's stop at an equal `USAGE_STOP` cannot win a race of a second against the schedule's own poll; with `USAGE_STOP` below `USAGE_PAUSE` the guard still stops the queue first, as it was told to. The setting is in `ResolvedSettings` (`usagePause`) but not in the record's `settings` group: the record says what a run is paused for in `paused`, and the status view's SETTINGS lane is as it was.
+**`USAGE_PAUSE`** (`parseUsagePause(env, config)`: unset or empty is off, a value outside 1 to 100
+is an `OperatorError` named like `USAGE_STOP`'s, from `resolveSettings` before anything runs; the
+project's `usagePause` is checked by `checkShape` in `src/config.ts` and the environment beats it)
+is the same readings acted on. `createUsagePause(threshold, ports)` is the run's controller, over
+the control file and a clock it is given (`standing`, `hold`, `now`): `reading(usage)` is called
+with every provider's newest reading as `watchUsage` writes one, and `usagePauseFor` chooses the
+window - of those at or above the threshold that have not reset (`resetsAt` plus
+`USAGE_RESUME_GRACE_SECONDS`, 60, still ahead: a stale reading says nothing of a window open again
+since), the one that resets last, since resuming at an earlier reset would only pause again - and
+holds the pause until a minute after its reset; `limit(usage, provider)` is the pipeline's
+`limitPause`, for an agent that hit the limit anyway (`usageLimitPauseFor`: the open window nearest
+to spent, the later reset on a tie, recorded at 100% whatever the last reading said, of the provider
+whose agent it was; nothing when no reading names an open window at `min(threshold, USAGE_RED)`
+percent or more - a limit message with every window well short of it is some other limit, one
+model's own cap, and days of waiting for the wrong window is worse than the old stop - which is also
+how a run on an API key, or one before its first reading, keeps stopping as it did). `source.read()`
+(`observe`, which `reading` and `limit` call first too, so a reading that comes in the second after
+a person's resume cannot write the pause again before the resume was noticed) is the schedule's
+pause source: it passes the control file's answer through, remembers the usage pause it has seen,
+and when that pause is gone before its time - a person ran `sandcastle resume` - remembers the
+windows then at or above the threshold by provider, window and reset time (`windowKey`) so that
+`reading` does not pause for them again; a pause that is gone because its time came remembers
+nothing, and the next window has a new reset time and pauses at the threshold as any.
+The controller is made only when a threshold is set, so a run without one reads the control file as
+before. `burndown()` prints the start line (`usagePauseLine`:
+`Usage pause: at 90%, resumes at the window's reset`, or that the run reads no plan usage and never
+pauses for it), hands `reading` each reading in `watchUsage`'s `write` (a failure there is dropped:
+the next reading asks again), and says each pause and resume once as the scheduler tells them
+(`createPauseHandling`, over injected ports for the record, keep-awake, view and log, so
+`test/pause-handling.test.ts` drives it with fakes).
+An attempt reads the pause before the guard decides (`waitOutPause`: while `paused()`, it waits at
+its `start` juncture holding nothing), so the guard's stop at an equal `USAGE_STOP` cannot win a
+race of a second against the schedule's own poll; with `USAGE_STOP` below `USAGE_PAUSE` the guard
+still stops the queue first, as it was told to.
+The setting is in `ResolvedSettings` (`usagePause`) but not in the record's `settings` group: the
+record says what a run is paused for in `paused`, and the status view's SETTINGS lane is as it was.
 
-The same collector carries a ticket's tokens to the status view's TOKENS column, with or without a plan to show (`burndown()` always starts the watch; `providers` is empty without one). On the same tick it counts, for each file `logOwner` names a ticket's, the `usage` of the assistant lines of this run's current pass - from the run's marker line to the next one, a message once by its id however many lines (content blocks) carry it - and hands the ticket's live figure to `liveTokenWriter` (`src/run.ts`), which writes `tokens` as the ticket's finished passes (`spent`, the results' own figures) plus the live one, and `cacheRead` (the same passes' cache-read input tokens, `ticketTokens` in `src/run.ts`) beside it for the TypeScript status view's cache share. A pass that returns is counted by its result and not by its log: `timed` calls `settle(issue)` in its `finally` (the watch reads what the log gained first, then stops counting every pass of that ticket so far, whatever it reads of them later), in the same synchronous step that adds the result to `spent`, so a tick can never see a pass in both. A Codex pass has no assistant lines and shows when it ends. `test/ticket-live-tokens.test.ts` holds it. The same count keeps each pass's **`peakContext`**: the largest `input + cacheWrite + cacheRead` of one assistant message (`contextOf`, `src/usage.ts`), which `settle(issue)` returns; `timed` writes it on the pass's timings line as `peakContext` and on the ticket's run record as `peakContext`, an object of the largest per kind of pass (`implement`, `review`, `repair`; `peakContexts` in `src/run.ts`). The closing summary (`contextLines`, `src/report.ts`) gives a ticket a `Large context:` line for each pass whose peak is over `PEAK_CONTEXT_WARN` (150,000 tokens). `test/peak-context.test.ts` holds it.
+The same collector carries a ticket's tokens to the status view's TOKENS column, with or without a
+plan to show (`burndown()` always starts the watch; `providers` is empty without one).
+On the same tick it counts, for each file `logOwner` names a ticket's, the `usage` of the assistant
+lines of this run's current pass - from the run's marker line to the next one, a message once by its
+id however many lines (content blocks) carry it - and hands the ticket's live figure to
+`liveTokenWriter` (`src/run.ts`), which writes `tokens` as the ticket's finished passes (`spent`,
+the results' own figures) plus the live one, and `cacheRead` (the same passes' cache-read input
+tokens, `ticketTokens` in `src/run.ts`) beside it for the TypeScript status view's cache share.
+A pass that returns is counted by its result and not by its log: `timed` calls `settle(issue)` in
+its `finally` (the watch reads what the log gained first, then stops counting every pass of that
+ticket so far, whatever it reads of them later), in the same synchronous step that adds the result
+to `spent`, so a tick can never see a pass in both.
+A Codex pass has no assistant lines and shows when it ends. `test/ticket-live-tokens.test.ts` holds
+it.
+The same count keeps each pass's **`peakContext`**: the largest `input + cacheWrite + cacheRead` of
+one assistant message (`contextOf`, `src/usage.ts`), which `settle(issue)` returns; `timed` writes
+it on the pass's timings line as `peakContext` and on the ticket's run record as `peakContext`, an
+object of the largest per kind of pass (`implement`, `review`, `repair`; `peakContexts` in
+`src/run.ts`).
+The closing summary (`contextLines`, `src/report.ts`) gives a ticket a `Large context:` line for
+each pass whose peak is over `PEAK_CONTEXT_WARN` (150,000 tokens). `test/peak-context.test.ts` holds
+it.
 
-`test/usage-readings.test.ts` holds the Claude parser, the collector and the record, `test/usage-codex.test.ts` Codex's reader, readout and when it is shown, `test/status.test.sh` and `test/status-usage.test.ts` the row, `test/herdr-usage.test.ts` and `test/herdr-usage-codex.test.ts` the token and `test/report-usage.test.ts` and `test/report-usage-codex.test.ts` the summary line.
+`test/usage-readings.test.ts` holds the Claude parser, the collector and the record,
+`test/usage-codex.test.ts` Codex's reader, readout and when it is shown, `test/status.test.sh` and
+`test/status-usage.test.ts` the row, `test/herdr-usage.test.ts` and `test/herdr-usage-codex.test.ts`
+the token and `test/report-usage.test.ts` and `test/report-usage-codex.test.ts` the summary line.
 
 ## `src/run.ts`
 
-Preconditions, run arguments, keep-awake, preflight, prompt rendering, agent logs (with the raw `.jsonl` sidecar), run record and history, typical times and the estimate, recorded heads, outcomes (`outcomes.json`: each entry's kind from the closed set, the tickets it collided with and its line; a reader decides on the kind, never the line, and `test/outcome-kinds.test.ts` fails on one that matches the line; `OUTCOME_STATE` in `src/status-rows.ts` is a `Record<OutcomeKind, string>`, so `tsc` holds the status view to the kinds, both ways), log archive, status pane
+Preconditions, run arguments, keep-awake, preflight, prompt rendering, agent logs (with the raw
+`.jsonl` sidecar), run record and history, typical times and the estimate, recorded heads, outcomes
+(`outcomes.json`: each entry's kind from the closed set, the tickets it collided with and its line;
+a reader decides on the kind, never the line, and `test/outcome-kinds.test.ts` fails on one that
+matches the line; `OUTCOME_STATE` in `src/status-rows.ts` is a `Record<OutcomeKind, string>`, so
+`tsc` holds the status view to the kinds, both ways), log archive, status pane
 
-The run record's `estimate` (`RunEstimate` in `mod/hooks/run-record.ts`) is the start estimate as figures, written by `burndown()` with the record it creates at each turn's start from `priceRun` in `src/run.ts` (`estimate` is its text alone): `ms` (`mid` and `high`, milliseconds, base gates and verify included), `tokensIn` and `tokensOut` (`mid` and `high`), `slots` (the divisor the line used) and `tickets` (the tickets it priced). They are the figures the printed line rounds, so `history.jsonl` holds the estimate beside the run's actual; a turn that printed no estimate (no history to price from) has no field (`test/estimate-record.test.ts`). The record also keeps what the closing summary needs to say why a run took far longer than that estimate: `sharedMs` (the time another run was live in the pool while this run's `share` was under its `demand`, `createSharedMeter` and `sharedBelowAsk` in `src/pool.ts`, sampled at the pool watch's five-second look) and `sandboxWaitMs` (the time with at least one worker waiting for a sandbox slot, the union and not the sum over workers: `createSlotWaits`' `waitedMs`), both rewritten as they grow and at the turn's end, absent at zero, and `pausedMs` (the time the run spent paused, a person's `sandcastle pause` or a pause for the plan's usage: `createPauseHandling` in `src/usage.ts` sums each span from the `since` the scheduler tells with `paused` to the `resumed` or `pause stopped` change, or to `end()` for a run that ends paused, a `paused` told again with the same `since` being the same span, and hands the total to `burndown()`, which writes it as each pause ends and at the turn's end, absent at zero). `## 🏁 Run finished` (`estimateLines`, `flakyLines` in `src/report.ts`; `test/report-slow-run.test.ts`, `test/run-time-lost-recorded.test.ts`) sets the time and tokens beside the estimate when either is more than twice off, and for a run that took more than twice its estimate names the causes of a minute or more, largest first: `pausedMs`, `sharedMs`, the gates-slot waits summed from the timings lines' `waitMs` (`timeLostFromTimings`), `sandboxWaitMs`, the landings' waits for a sandbox slot (the `landing` lines' `waitMs`, which `sandboxWaitMs` does not hold), and the gate re-runs and repair passes counted from the timings lines. It lists each likely flaky test once with the tickets it hit, from both fields that name one: a ticket's `flaked` (red on one run of a gate, green on a later one) and its `flaky` (a repair pass's verdict). The run record's `paused` (`{ since, finishing }` in `mod/hooks/run-record.ts`: seconds since the epoch, and the ids of the tickets still finishing a pass, a gate run or a landing) is present while a person has the run paused (`sandcastle pause`), written by `burndown()` from the scheduler's `paused` and `resumed` changes and dropped when a stop cause is noticed (`pause stopped`), when the schedule ends or the run stops. A ticket parked at a juncture has the ticket state `paused` (group queued, word `paused`; its note says `before <phase> at <sha>`), which the report places in its working section: a run that ends while paused (stopped by any cause, which wakes the parked tickets, crashed or killed) lists such a ticket on the `Runnable now` line, with where it stood, instead of among the tickets it cut short, and the next step names it. A paused run is live (the process runs, the record has not finished), so `mod/hooks/run-live.ts` and every view treat it so. Keep-awake follows the pause: `keepAwake` remembers the inhibitor it started, `releaseAwake` ends it once a pause has nothing in flight (`finishing` empty), and `holdAwake` starts it again on the resume - only if a pause released it. The status view reads `paused` for the run lane (`PAUSED since 15:40` with `finishing #12 review, #14 landing` on the next row; a green branch waiting for the landing worker reads `landing`; `since` as seconds, milliseconds or an ISO time; no end estimate) and for the queued tickets' `waits for the resume`; a `paused` that is not an object is ignored. A pause the run took for its plan's usage adds `cause: "usage"`, `provider`, `window` (`fiveHour` or `week`), `percent` and `resumesAt` (seconds since the epoch: a minute after the window's reset) to it (`UsagePaused`; the record keeps what `paused` told, a person's pause leaves them out). `paused_cell` then reads `PAUSED - weekly usage 95%, resumes Wed 06:01` (`Codex` before the window for Codex's, `5-hour` for the short one) with the tickets finishing on the row below, and in a pane too narrow for that the cause alone on the first row and `resumes Wed 06:01` on the second, shortening to `PAUSED - usage 95%` when even the window's words do not fit; a cause that is not stated with numbers is drawn as a person's pause. Keep-awake needs nothing of its own: the usage pause is told as every pause is, so the inhibitor ends once nothing is in flight and starts again on the resume.
+The run record's `estimate` (`RunEstimate` in `mod/hooks/run-record.ts`) is the start estimate as
+figures, written by `burndown()` with the record it creates at each turn's start from `priceRun` in
+`src/run.ts` (`estimate` is its text alone): `ms` (`mid` and `high`, milliseconds, base gates and
+verify included), `tokensIn` and `tokensOut` (`mid` and `high`), `slots` (the divisor the line used)
+and `tickets` (the tickets it priced).
+They are the figures the printed line rounds, so `history.jsonl` holds the estimate beside the run's
+actual; a turn that printed no estimate (no history to price from) has no field
+(`test/estimate-record.test.ts`).
+The record also keeps what the closing summary needs to say why a run took far longer than that
+estimate: `sharedMs` (the time another run was live in the pool while this run's `share` was under
+its `demand`, `createSharedMeter` and `sharedBelowAsk` in `src/pool.ts`, sampled at the pool watch's
+five-second look) and `sandboxWaitMs` (the time with at least one worker waiting for a sandbox slot,
+the union and not the sum over workers: `createSlotWaits`' `waitedMs`), both rewritten as they grow
+and at the turn's end, absent at zero, and `pausedMs` (the time the run spent paused, a person's
+`sandcastle pause` or a pause for the plan's usage: `createPauseHandling` in `src/usage.ts` sums
+each span from the `since` the scheduler tells with `paused` to the `resumed` or `pause stopped`
+change, or to `end()` for a run that ends paused, a `paused` told again with the same `since` being
+the same span, and hands the total to `burndown()`, which writes it as each pause ends and at the
+turn's end, absent at zero). `## 🏁 Run finished` (`estimateLines`, `flakyLines` in `src/report.ts`;
+`test/report-slow-run.test.ts`, `test/run-time-lost-recorded.test.ts`) sets the time and tokens
+beside the estimate when either is more than twice off, and for a run that took more than twice its
+estimate names the causes of a minute or more, largest first: `pausedMs`, `sharedMs`, the gates-slot
+waits summed from the timings lines' `waitMs` (`timeLostFromTimings`), `sandboxWaitMs`, the
+landings' waits for a sandbox slot (the `landing` lines' `waitMs`, which `sandboxWaitMs` does not
+hold), and the gate re-runs and repair passes counted from the timings lines.
+It lists each likely flaky test once with the tickets it hit, from both fields that name one: a
+ticket's `flaked` (red on one run of a gate, green on a later one) and its `flaky` (a repair pass's
+verdict).
+The run record's `paused` (`{ since, finishing }` in `mod/hooks/run-record.ts`: seconds since the
+epoch, and the ids of the tickets still finishing a pass, a gate run or a landing) is present while
+a person has the run paused (`sandcastle pause`), written by `burndown()` from the scheduler's
+`paused` and `resumed` changes and dropped when a stop cause is noticed (`pause stopped`), when the
+schedule ends or the run stops.
+A ticket parked at a juncture has the ticket state `paused` (group queued, word `paused`; its note
+says `before <phase> at <sha>`), which the report places in its working section: a run that ends
+while paused (stopped by any cause, which wakes the parked tickets, crashed or killed) lists such a
+ticket on the `Runnable now` line, with where it stood, instead of among the tickets it cut short,
+and the next step names it.
+A paused run is live (the process runs, the record has not finished), so `mod/hooks/run-live.ts` and
+every view treat it so.
+Keep-awake follows the pause: `keepAwake` remembers the inhibitor it started, `releaseAwake` ends it
+once a pause has nothing in flight (`finishing` empty), and `holdAwake` starts it again on the
+resume - only if a pause released it.
+The status view reads `paused` for the run lane (`PAUSED since 15:40` with
+`finishing #12 review, #14 landing` on the next row; a green branch waiting for the landing worker
+reads `landing`; `since` as seconds, milliseconds or an ISO time; no end estimate) and for the
+queued tickets' `waits for the resume`; a `paused` that is not an object is ignored.
+A pause the run took for its plan's usage adds `cause: "usage"`, `provider`, `window` (`fiveHour` or
+`week`), `percent` and `resumesAt` (seconds since the epoch: a minute after the window's reset) to
+it (`UsagePaused`; the record keeps what `paused` told, a person's pause leaves them out).
+`paused_cell` then reads `PAUSED - weekly usage 95%, resumes Wed 06:01` (`Codex` before the window
+for Codex's, `5-hour` for the short one) with the tickets finishing on the row below, and in a pane
+too narrow for that the cause alone on the first row and `resumes Wed 06:01` on the second,
+shortening to `PAUSED - usage 95%` when even the window's words do not fit; a cause that is not
+stated with numbers is drawn as a person's pause.
+Keep-awake needs nothing of its own: the usage pause is told as every pause is, so the inhibitor
+ends once nothing is in flight and starts again on the resume.
 
-The run record's `usage` field (`PlanUsage` in `mod/hooks/run-record.ts`) holds the plan's usage while the run shows it, a list with one entry per provider shown (`showsPlanUsage` and `showsCodexUsage` in `src/usage.ts`; an older kit wrote the one entry as an object, which every reader still takes): `{ provider: "claude" }` from the start of the agent passes, `{ provider: "codex" }` while cross-review runs on a ChatGPT plan, then each `{ provider, windows: { fiveHour, week }, at }` with each window `{ percent, resetsAt }` and `at` the seconds since the epoch at which the kit read the newest `rate_limit_event` (or Codex's `rate_limits`) of that provider across the run's agent logs. Like `demand` and `share` it is a live value, not a setting: `watchUsage` rewrites it when a newer reading has come, at most every 15 seconds, and a run that shows none (an API key and no cross-review, no Claude model and no cross-review, an older kit) leaves the field out. Readers check it (`readPlanUsages`): the status view draws a line for each provider's entry for a live record only (the `claude` line none when `settings.apiKey` is true, the `codex` line none when `settings.crossReview` is false, whatever `usage` holds; the names padded to one width, a provider that has no reading yet saying it waits for one - the agent's for Claude, the cross-review's for Codex), the Herdr view sends the `sc_usage` token from it, and `gather` hands Claude's entry to the closing summary's `Plan usage at the end:` line under `Settings:` and Codex's, when it has a reading, to a `Codex plan usage at the end:` line beside it (`so far` for a live run; no Codex reading, no line).
+The run record's `usage` field (`PlanUsage` in `mod/hooks/run-record.ts`) holds the plan's usage
+while the run shows it, a list with one entry per provider shown (`showsPlanUsage` and
+`showsCodexUsage` in `src/usage.ts`; an older kit wrote the one entry as an object, which every
+reader still takes): `{ provider: "claude" }` from the start of the agent passes,
+`{ provider: "codex" }` while cross-review runs on a ChatGPT plan, then each
+`{ provider, windows: { fiveHour, week }, at }` with each window `{ percent, resetsAt }` and `at`
+the seconds since the epoch at which the kit read the newest `rate_limit_event` (or Codex's
+`rate_limits`) of that provider across the run's agent logs.
+Like `demand` and `share` it is a live value, not a setting: `watchUsage` rewrites it when a newer
+reading has come, at most every 15 seconds, and a run that shows none (an API key and no
+cross-review, no Claude model and no cross-review, an older kit) leaves the field out.
+Readers check it (`readPlanUsages`): the status view draws a line for each provider's entry for a
+live record only (the `claude` line none when `settings.apiKey` is true, the `codex` line none when
+`settings.crossReview` is false, whatever `usage` holds; the names padded to one width, a provider
+that has no reading yet saying it waits for one - the agent's for Claude, the cross-review's for
+Codex), the Herdr view sends the `sc_usage` token from it, and `gather` hands Claude's entry to the
+closing summary's `Plan usage at the end:` line under `Settings:` and Codex's, when it has a
+reading, to a `Codex plan usage at the end:` line beside it (`so far` for a live run; no Codex
+reading, no line).
 
-The run record's `settings` group (`RunSettings` in `mod/hooks/run-record.ts`) holds the run's settings as one turn wrote them: `autonomy` (the level, resolved once per run), `turn` (this record's, 1-based), `cap` (the level's most turns: 1 for level 0, the level for 2 and 3, `DRAIN_CAP` for `drain`, and none for level 1, which asks after every turn), `repair` (the attempts a ticket gets after a red gate, 0 for off), `concurrency` with `asked` (the tickets at once the run takes after the machine-wide sandbox cap, and the value `--concurrency`, `CONCURRENCY` or the config asked for; the view adds `(asked N)` only when they differ), and `crossReview` (on or off, resolved once per run) with `crossReviewModel` and `crossReviewEffort`, written only when it is on, and the usage guard: `usageGuard` (was `USAGE_CHECK=1` asked for), `usageStop` (its threshold, only while it is on) and `usageReading`, and `usagePause` (the percent at which the run pauses itself for its plan, `USAGE_PAUSE`; only when it is on, drawn `● usage-pause 90%`). The reading is a fact beside the setting, never a change to it: `unavailable` when the guard's last attempt got none (`usageReadingLost()` in `src/usage.ts`: a 403, a rate limit, no token or an expired Claude Code login), written by `burndown()` after the start line and after each ticket's check, and cleared when a reading comes back - the only settings field that changes during a turn. A record without the guard's fields shows nothing about it. The cap is `poolLimit` in `src/pool.ts`, the pure form of `limit`, over the resolver's own environment and machine settings; effective concurrency is before the ticket count, so a short queue is not drawn as a clamp. The run record's top-level `concurrency` (the sandboxes at once, after the ticket count) is separate and still feeds the view's ETA and free-slot maths. The view shows `repair 1` or, greyed, `○ repair` (in the MODELS lane), `concurrency 4` or `concurrency 6 (asked 8)`, and `● cross-review <model> <effort>` or, greyed, `○ cross-review`, and `● usage-guard 90%` or `○ usage-guard` (greyed; with no reading, `● usage-guard 90% (no reading - not guarding)` in the warning colour) in the SETTINGS lane; for a record that carries `crossReview`, the status view drops the `cross-review` part of the models string so the models cell holds only models, and an older record's string is shown as written. `burndown()` writes it when `cli.ts` hands it a turn, and each turn's fresh record carries its own `turn`. Beside `settings`, the record keeps two live values, `demand` and `share` (the run's demand for sandbox slots and its share of the machine pool, `src/pool.ts`): `burndown()` rewrites them whenever either changes (a demand told by the scheduler, or a share that moved as another run began or ended, read every 5 seconds; the timer stops once the record is finished, `finished`), and they are no run setting, so they are not in the group. The status view's MACHINE lane shows them as `this run  wants 4 · share 3` (with a cap, `wants 4 · share 2 · cap 2`) while the run is live (the gates queue moves to the gates row then), and while one of the run's waits for a sandbox slot is held back by its share (the record's `waitsForShare` and `waitsFor`, written by `createSlotWaits` in `src/burndown.ts`), the tickets next to start show `waits for the run's share` as their activity - as does a queued ticket whose note says so, from a kit before slot first. `waitsFor` is `share` or `landing`: the pool's wait reason (`WaitReason` in `src/pool.ts`) is `landing`, not `share`, for a ticket's wait held back by the pool's last free slot, kept for any run's landing (`lastFreeSlot`), and the view then says `waits: slot kept to land`; `waitsForShare` stays true for both, so an older view still reads it, and a record with only the boolean reads as `share` (`test/status-landing-wait.test.ts`). An older kit's record has neither, and the view then draws the cell as before. The status view's settings lane reads only these fields (its record type is `RunRecord`, which `tsc` checks), draws nothing from a record without the group, and never fills a field the record lacks. Idle, `sandcastle status` resolves the next run's settings with the same resolver and passes the group as `SANDCASTLE_SETTINGS` (`{}` when they cannot be resolved), with the whole lane prefixed `next run:` (an ended run's report holds the settings it recorded, which this lane is not); a bare `sandcastle status` with nothing passed falls back to the last run's record, marked `(last run)`. The settings are the SETTINGS lane of the header (the turn is in RUN, repair in MODELS): when the lanes do not all fit beside the logo the ones that do not fold into a summary line, cut with `…` where the pane ends.
+The run record's `settings` group (`RunSettings` in `mod/hooks/run-record.ts`) holds the run's
+settings as one turn wrote them: `autonomy` (the level, resolved once per run), `turn` (this
+record's, 1-based), `cap` (the level's most turns: 1 for level 0, the level for 2 and 3, `DRAIN_CAP`
+for `drain`, and none for level 1, which asks after every turn), `repair` (the attempts a ticket
+gets after a red gate, 0 for off), `concurrency` with `asked` (the tickets at once the run takes
+after the machine-wide sandbox cap, and the value `--concurrency`, `CONCURRENCY` or the config asked
+for; the view adds `(asked N)` only when they differ), and `crossReview` (on or off, resolved once
+per run) with `crossReviewModel` and `crossReviewEffort`, written only when it is on, and the usage
+guard: `usageGuard` (was `USAGE_CHECK=1` asked for), `usageStop` (its threshold, only while it is
+on) and `usageReading`, and `usagePause` (the percent at which the run pauses itself for its plan,
+`USAGE_PAUSE`; only when it is on, drawn `● usage-pause 90%`).
+The reading is a fact beside the setting, never a change to it: `unavailable` when the guard's last
+attempt got none (`usageReadingLost()` in `src/usage.ts`: a 403, a rate limit, no token or an
+expired Claude Code login), written by `burndown()` after the start line and after each ticket's
+check, and cleared when a reading comes back - the only settings field that changes during a turn.
+A record without the guard's fields shows nothing about it.
+The cap is `poolLimit` in `src/pool.ts`, the pure form of `limit`, over the resolver's own
+environment and machine settings; effective concurrency is before the ticket count, so a short queue
+is not drawn as a clamp.
+The run record's top-level `concurrency` (the sandboxes at once, after the ticket count) is separate
+and still feeds the view's ETA and free-slot maths.
+The view shows `repair 1` or, greyed, `○ repair` (in the MODELS lane), `concurrency 4` or
+`concurrency 6 (asked 8)`, and `● cross-review <model> <effort>` or, greyed, `○ cross-review`, and
+`● usage-guard 90%` or `○ usage-guard` (greyed; with no reading,
+`● usage-guard 90% (no reading - not guarding)` in the warning colour) in the SETTINGS lane; for a
+record that carries `crossReview`, the status view drops the `cross-review` part of the models
+string so the models cell holds only models, and an older record's string is shown as written.
+`burndown()` writes it when `cli.ts` hands it a turn, and each turn's fresh record carries its own
+`turn`.
+Beside `settings`, the record keeps two live values, `demand` and `share` (the run's demand for
+sandbox slots and its share of the machine pool, `src/pool.ts`): `burndown()` rewrites them whenever
+either changes (a demand told by the scheduler, or a share that moved as another run began or ended,
+read every 5 seconds; the timer stops once the record is finished, `finished`), and they are no run
+setting, so they are not in the group.
+The status view's MACHINE lane shows them as `this run  wants 4 · share 3` (with a cap,
+`wants 4 · share 2 · cap 2`) while the run is live (the gates queue moves to the gates row then),
+and while one of the run's waits for a sandbox slot is held back by its share (the record's
+`waitsForShare` and `waitsFor`, written by `createSlotWaits` in `src/burndown.ts`), the tickets next
+to start show `waits for the run's share` as their activity - as does a queued ticket whose note
+says so, from a kit before slot first. `waitsFor` is `share` or `landing`: the pool's wait reason
+(`WaitReason` in `src/pool.ts`) is `landing`, not `share`, for a ticket's wait held back by the
+pool's last free slot, kept for any run's landing (`lastFreeSlot`), and the view then says
+`waits: slot kept to land`; `waitsForShare` stays true for both, so an older view still reads it,
+and a record with only the boolean reads as `share` (`test/status-landing-wait.test.ts`).
+An older kit's record has neither, and the view then draws the cell as before.
+The status view's settings lane reads only these fields (its record type is `RunRecord`, which `tsc`
+checks), draws nothing from a record without the group, and never fills a field the record lacks.
+Idle, `sandcastle status` resolves the next run's settings with the same resolver and passes the
+group as `SANDCASTLE_SETTINGS` (`{}` when they cannot be resolved), with the whole lane prefixed
+`next run:` (an ended run's report holds the settings it recorded, which this lane is not); a bare
+`sandcastle status` with nothing passed falls back to the last run's record, marked `(last run)`.
+The settings are the SETTINGS lane of the header (the turn is in RUN, repair in MODELS): when the
+lanes do not all fit beside the logo the ones that do not fold into a summary line, cut with `…`
+where the pane ends.
 
 ## `src/run-settings.ts`
 
-The run settings (GLOSSARY.md): `resolveSettings({ env, project, machine })`, the one pure resolver of what a run is told at its start - the autonomy level, cross-review (`crossReviewSetting` in `src/agents.ts`: `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT`, the same reading `agents.ts` itself uses), the repair attempts, concurrency (asked and effective) and the usage guard (`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts` and refused when bad only while the guard is on) and the usage pause (`usagePause`, from `USAGE_PAUSE` or the project's key through `parseUsagePause`, refused when bad, and absent when off; not part of `settingsGroup`) and `keepWarm` (whether the session that started the run keeps its prompt cache warm: false when the personal `config.json` says `"keepWarm": false`, else the project's value, else true; always in `settingsGroup`, true or false, so the mod and the skill read one value from the run record and a record without it, from an older kit, reads as true; the status view's row does not draw it), with the unchanged precedence of environment over project config over default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and `test/run-settings-cross-review.test.ts` hold it
+The run settings (GLOSSARY.md): `resolveSettings({ env, project, machine })`, the one pure resolver
+of what a run is told at its start - the autonomy level, cross-review (`crossReviewSetting` in
+`src/agents.ts`: `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT`, the same reading
+`agents.ts` itself uses), the repair attempts, concurrency (asked and effective) and the usage guard
+(`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts`
+and refused when bad only while the guard is on) and the usage pause (`usagePause`, from
+`USAGE_PAUSE` or the project's key through `parseUsagePause`, refused when bad, and absent when off;
+not part of `settingsGroup`) and `keepWarm` (whether the session that started the run keeps its
+prompt cache warm: false when the personal `config.json` says `"keepWarm": false`, else the
+project's value, else true; always in `settingsGroup`, true or false, so the mod and the skill read
+one value from the run record and a record without it, from an older kit, reads as true; the status
+view's row does not draw it), with the unchanged precedence of environment over project config over
+default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and
+`sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a
+field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and
+`test/run-settings-cross-review.test.ts` hold it
 
 ## `src/versions.ts`
 
-Which Claude Code and Codex the image gets: Claude Code's `stable` channel by default (`claudeCode` or `CLAUDE_CODE_VERSION` picks `latest` or an exact version), the newest plain Codex release on npm at least 72 hours old (from the packument's `time`, skipping a deprecated or unpublished release and any above `dist-tags.latest`; or `CODEX_VERSION`), resolved on the host, cached six hours, with `docker/agents.Dockerfile`'s `ARG` defaults as the offline fallback (`dockerfileDefaults` reads them there); the versions are part of the agents image's tag (`agentsImage`, `src/sandbox.ts`) and not of the base's (`baseImage`), so a release does not rebuild a project's layer
+Which Claude Code and Codex the image gets: Claude Code's `stable` channel by default (`claudeCode`
+or `CLAUDE_CODE_VERSION` picks `latest` or an exact version), the newest plain Codex release on npm
+at least 72 hours old (from the packument's `time`, skipping a deprecated or unpublished release and
+any above `dist-tags.latest`; or `CODEX_VERSION`), resolved on the host, cached six hours, with
+`docker/agents.Dockerfile`'s `ARG` defaults as the offline fallback (`dockerfileDefaults` reads them
+there); the versions are part of the agents image's tag (`agentsImage`, `src/sandbox.ts`) and not of
+the base's (`baseImage`), so a release does not rebuild a project's layer
 
 ## `prompts/`
 
-Implement, review, repair and resolve (a re-run's conflicted base merge) templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{TICKET}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` ``
+Implement, review, repair and resolve (a re-run's conflicted base merge) templates.
+The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{TICKET}}`, `{{SOURCE_BRANCH}}`,
+`{{TARGET_BRANCH}}` and `` !`cmd` ``
 
 About 20 test files pin the templates' wording, few of them named `prompt-*`. Before changing a template, run them all:
 `grep -lE '"prompts"|(implement|review|repair|resolve)\.md' test/*.ts`.
 
 ## `container/`
 
-Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `src/sandbox.ts`): `managed-settings.json` registers `git-guard.sh`, a `PreToolUse` hook on the Bash, Write and Edit tools that refuses commands and writes that damage the shared `.git` (`test/git-guard.test.ts`). Managed settings sit above project settings, so a branch cannot disable it. `update-ref`, `gc`, `prune` and `stash` (whose list every worktree shares; `stash list` and `show` always pass) pass when every `git -C <path>` of the command is absolute and resolves (`rev-parse --git-common-dir`) to a common dir other than the shared one (that of the dir Claude Code started in, `CLAUDE_PROJECT_DIR`, since the shell's cwd moves with a `cd`; without it they stay refused), so a scratch repository under the temp dir is usable and a worktree of the shared repo is not; a command with no `-C` (a leading `cd` is not parsed), a relative `-C` (git resolves it from the shell's cwd at run time, which a `cd` in the same line moves), a `GIT_DIR`, `GIT_COMMON_DIR` or `GIT_WORK_TREE` assignment anywhere in the line, or a path git cannot resolve is refused (a plain quoted path is unquoted first), variable assignments before `git` do not hide it from any rule, and `push` is refused wherever it runs, since its danger is the destination. `worktree add` follows the same `-C` rule (it writes a record with the container's path into the shared `.git`, which a pass killed before its cleanup leaves behind), so a scratch repository may add one and the project may not; the refusal names `git show <base>:<path>` and `git archive <base> | tar -x -C <dir>` as the way to read the base (`test/git-guard-worktree-add.test.ts`). The file-write rule and the `rm`/`mv` rule refuse the common dir of the hook's cwd and that of `CLAUDE_PROJECT_DIR`, so a `cd` into a scratch repository or out of every repository does not let a write reach the project's shared `.git` (`test/git-guard-project-common.test.ts`). Every refusal that a scratch repository would have passed says how (`SCRATCH_HOW`): create the repository in an earlier command, then use `git -C /literal/absolute/path`, since the rule reads the command string before it runs and so cannot resolve a path the same command creates, or a variable (`test/git-guard-scratch-repo.test.ts`; `prompts/implement.md` and `prompts/review.md` say it too). The guard is not a security boundary, as its header says: a script file (`bash /tmp/x.sh`, a file the agent has just written) or `sh -c` gets past a command-string match, and it does not try to scan them - that would be a second parser for any shell, and the host's check of `.git` is what protects the repo. Needs bash and `jq` in the image.
+Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `src/sandbox.ts`):
+`managed-settings.json` registers `git-guard.sh`, a `PreToolUse` hook on the Bash, Write and Edit
+tools that refuses commands and writes that damage the shared `.git` (`test/git-guard.test.ts`).
+Managed settings sit above project settings, so a branch cannot disable it. `update-ref`, `gc`,
+`prune` and `stash` (whose list every worktree shares; `stash list` and `show` always pass) pass
+when every `git -C <path>` of the command is absolute and resolves (`rev-parse --git-common-dir`) to
+a common dir other than the shared one (that of the dir Claude Code started in,
+`CLAUDE_PROJECT_DIR`, since the shell's cwd moves with a `cd`; without it they stay refused), so a
+scratch repository under the temp dir is usable and a worktree of the shared repo is not; a command
+with no `-C` (a leading `cd` is not parsed), a relative `-C` (git resolves it from the shell's cwd
+at run time, which a `cd` in the same line moves), a `GIT_DIR`, `GIT_COMMON_DIR` or `GIT_WORK_TREE`
+assignment anywhere in the line, or a path git cannot resolve is refused (a plain quoted path is
+unquoted first), variable assignments before `git` do not hide it from any rule, and `push` is
+refused wherever it runs, since its danger is the destination. `worktree add` follows the same `-C`
+rule (it writes a record with the container's path into the shared `.git`, which a pass killed
+before its cleanup leaves behind), so a scratch repository may add one and the project may not; the
+refusal names `git show <base>:<path>` and `git archive <base> | tar -x -C <dir>` as the way to read
+the base (`test/git-guard-worktree-add.test.ts`).
+The file-write rule and the `rm`/`mv` rule refuse the common dir of the hook's cwd and that of
+`CLAUDE_PROJECT_DIR`, so a `cd` into a scratch repository or out of every repository does not let a
+write reach the project's shared `.git` (`test/git-guard-project-common.test.ts`).
+Every refusal that a scratch repository would have passed says how (`SCRATCH_HOW`): create the
+repository in an earlier command, then use `git -C /literal/absolute/path`, since the rule reads the
+command string before it runs and so cannot resolve a path the same command creates, or a variable
+(`test/git-guard-scratch-repo.test.ts`; `prompts/implement.md` and `prompts/review.md` say it too).
+The guard is not a security boundary, as its header says: a script file (`bash /tmp/x.sh`, a file
+the agent has just written) or `sh -c` gets past a command-string match, and it does not try to scan
+them - that would be a second parser for any shell, and the host's check of `.git` is what protects
+the repo.
+Needs bash and `jq` in the image.
 
-The same file carries `permissions.deny` for `Monitor`, `ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList` and `RemoteTrigger` (`test/managed-settings-deny.test.ts`), and for the tools that cannot work in an unattended sandbox or that write to the shared `.git` unseen by the guard, whose matcher is Bash, Write and Edit: `EnterWorktree` and `ExitWorktree`, `Workflow`, `DesignSync` and `PushNotification` (`test/managed-settings-deny-unattended.test.ts`). A sandbox agent otherwise has Claude Code's whole tool set, and these are the ones that let it wait: a run once held a backgrounded suite for tens of minutes with `Monitor` ticks, doubling its tokens and loading the machine's shared gate slots for every other sandbox. The agent's turn is the unit of work here, so a pass that starts something long ends its turn and says what is still running. An agent may wait for a non-gate job it put in the background with one bounded foreground command (`timeout 600 bash -c 'until <check>; do sleep 5; done'`), which costs one tool call, not a tick per poll (`test/prompt-background-wait.test.ts`); nothing in a sandbox schedules a later wake-up, a recurring job or a remote run. Sandboxes run with permission prompts off (`--dangerously-skip-permissions`); a deny rule is checked before that mode and, as managed settings, outranks a branch's own settings, so it holds there. A new tool a sandbox should not have goes in this list, not in the prompts alone.
+The same file carries `permissions.deny` for `Monitor`, `ScheduleWakeup`, `CronCreate`,
+`CronDelete`, `CronList` and `RemoteTrigger` (`test/managed-settings-deny.test.ts`), and for the
+tools that cannot work in an unattended sandbox or that write to the shared `.git` unseen by the
+guard, whose matcher is Bash, Write and Edit: `EnterWorktree` and `ExitWorktree`, `Workflow`,
+`DesignSync` and `PushNotification` (`test/managed-settings-deny-unattended.test.ts`).
+A sandbox agent otherwise has Claude Code's whole tool set, and these are the ones that let it wait:
+a run once held a backgrounded suite for tens of minutes with `Monitor` ticks, doubling its tokens
+and loading the machine's shared gate slots for every other sandbox.
+The agent's turn is the unit of work here, so a pass that starts something long ends its turn and
+says what is still running.
+An agent may wait for a non-gate job it put in the background with one bounded foreground command
+(`timeout 600 bash -c 'until <check>; do sleep 5; done'`), which costs one tool call, not a tick per
+poll (`test/prompt-background-wait.test.ts`); nothing in a sandbox schedules a later wake-up, a
+recurring job or a remote run.
+Sandboxes run with permission prompts off (`--dangerously-skip-permissions`); a deny rule is checked
+before that mode and, as managed settings, outranks a branch's own settings, so it holds there.
+A new tool a sandbox should not have goes in this list, not in the prompts alone.
 
-It also sets `env.BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` to 15 minutes (`test/managed-settings-env.test.ts`). Claude Code moves a Bash command that runs past its default 2-minute timeout to the background, and an agent that ran the full suite without passing a `timeout` then could not see it finish, would not claim the gates green and ended without `<promise>COMPLETE</promise>`, so the kit started a second implement session that re-checked the work and ran the suite again (about 10-17 min each, twice in one 22-ticket run). 15 minutes is above the 10 minutes (`timeout: 600000`) the prompts tell an agent to pass, so a suite run with or without an explicit `timeout` stays in the foreground; the prompts' advice stays, as the one that also works where a sandbox's settings are not these. The maximum is raised with the default because Claude Code's own maximum is 10 minutes and a default above it may be clamped to it.
+It also sets `env.BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` to 15 minutes
+(`test/managed-settings-env.test.ts`).
+Claude Code moves a Bash command that runs past its default 2-minute timeout to the background, and
+an agent that ran the full suite without passing a `timeout` then could not see it finish, would not
+claim the gates green and ended without `<promise>COMPLETE</promise>`, so the kit started a second
+implement session that re-checked the work and ran the suite again (about 10-17 min each, twice in
+one 22-ticket run). 15 minutes is above the 10 minutes (`timeout: 600000`) the prompts tell an agent
+to pass, so a suite run with or without an explicit `timeout` stays in the foreground; the prompts'
+advice stays, as the one that also works where a sandbox's settings are not these.
+The maximum is raised with the default because Claude Code's own maximum is 10 minutes and a default
+above it may be clamped to it.
 
-It sets `disableBundledSkills: true` (`test/managed-settings-bundled-skills.test.ts`). Claude Code lists about 19 bundled skills in every session (`schedule`, `loop`, `design-sync`, `workflow-authoring`, `deep-research` and others), which cost prompt tokens in every pass and invite actions that make no sense unattended; the setting switches them all off and leaves the repo's own skills, the ones the lean plan keeps. Managed settings outrank a branch's own, so it holds there. The lean line printed at the start (`Lean: hiding N item(s) ...; keeping skill:<the repo's>`) counts the repo's items only and says `Claude Code's bundled skills off`, so the two lists are not read as one.
+It sets `disableBundledSkills: true` (`test/managed-settings-bundled-skills.test.ts`).
+Claude Code lists about 19 bundled skills in every session (`schedule`, `loop`, `design-sync`,
+`workflow-authoring`, `deep-research` and others), which cost prompt tokens in every pass and invite
+actions that make no sense unattended; the setting switches them all off and leaves the repo's own
+skills, the ones the lean plan keeps.
+Managed settings outrank a branch's own, so it holds there.
+The lean line printed at the start (`Lean: hiding N item(s) ...; keeping skill:<the repo's>`) counts
+the repo's items only and says `Claude Code's bundled skills off`, so the two lists are not read as
+one.
 
-The managed settings do not choose the pass's tools. Each Claude pass gets its allow-list in `claude()` (`src/agents.ts`): `withTools` inserts `--tools '<list>'` before the closing ` -p -` of Sandcastle's command and throws when the command no longer starts with `claude ` and ends with ` -p -`, so a Sandcastle update cannot run passes without the cut (an unknown name in `--tools` is ignored silently by Claude Code). `toolsFor(lean.keep)` is `BASE_TOOLS` (Bash, Read, Edit, Write, TaskStop), plus Skill for a kept `skill:` or `command:` and ToolSearch for a kept `mcp:`, then the name of each kept `tool:<Name>`, once (`loadProject` refuses one that `src/claude-tools.ts` does not list, or that the managed settings deny); `configureTools` sets it from `loadProject`, as `configureModels` sets the models. `claude()` also sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the agent's environment (`test/claude-tools-allow-list.test.ts`). The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does not govern, and `git-guard.sh` is unchanged.
+The managed settings do not choose the pass's tools.
+Each Claude pass gets its allow-list in `claude()` (`src/agents.ts`): `withTools` inserts
+`--tools '<list>'` before the closing ` -p -` of Sandcastle's command and throws when the command no
+longer starts with `claude ` and ends with ` -p -`, so a Sandcastle update cannot run passes without
+the cut (an unknown name in `--tools` is ignored silently by Claude Code). `toolsFor(lean.keep)` is
+`BASE_TOOLS` (Bash, Read, Edit, Write, TaskStop), plus Skill for a kept `skill:` or `command:` and
+ToolSearch for a kept `mcp:`, then the name of each kept `tool:<Name>`, once (`loadProject` refuses
+one that `src/claude-tools.ts` does not list, or that the managed settings deny); `configureTools`
+sets it from `loadProject`, as `configureModels` sets the models. `claude()` also sets
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the agent's environment
+(`test/claude-tools-allow-list.test.ts`).
+The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does
+not govern, and `git-guard.sh` is unchanged.
 
 ## `test/*.test.ts`
 
-One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Two preloads (`--import`, from `pnpm test`, `test:shard`, `test:file`, `test:related`, `test:weights` and `test/run-shards.sh`) shape every test file's process: `test/hermetic-env.ts` gives each the same environment - `TMPDIR` the realpath of `os.tmpdir()` (a macOS `/var/...` against git's `/private/var/...`), the running node's directory first on `PATH` (a mise or asdf shim fails in a temp cwd) with a no-op `docker` (`exit 0`, lists nothing) right after it, so no test reaches the machine's real Docker (a slow daemon on a Mac, a stopped one on Linux, a `docker stop` on a live run's containers; a test that needs its own puts it ahead, `test/docker-stub.ts`), and no `HERDR_*`, `TMUX*`, `SANDCASTLE_*` (but `SANDCASTLE_TEST_*` stays) or setting and credential name `src/` reads, so a test that needs one sets it itself, and no inherited git identity (`GIT_CONFIG_GLOBAL` an empty file, `GIT_CONFIG_NOSYSTEM=1`, no `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, and `user.useConfigOnly=true` appended to the `GIT_CONFIG_*` pairs, so a fixture repo sets its own identity and fails here, not only in a gate-only sandbox), and `maintenance.auto=false` beside it (a commit's detached `git maintenance run --auto` holds `.git/objects/maintenance.lock` and can outlive the call, so a before-and-after snapshot of a fixture repo differs; no `gc.auto` pair, which would hide a broken `disableHostGitGc` from `test/landing-queue.test.ts`); `test/hermetic-env.test.ts` fails when `src/` reads a name that is neither scrubbed (`SCRUBBED`) nor on its keep list, so a new setting needs a line in one of them - and `test/no-stray.ts` fails a file that prints outside `quietly`. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and pointers, each action file's steps and brief, run.md's seven headings against `src/report.ts`, update.md's step references and AGENTS.md's Layout row for `skill/`
+One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split`
+...), against temp repos, made-up records and fake sandboxes.
+Two preloads (`--import`, from `pnpm test`, `test:shard`, `test:file`, `test:related`,
+`test:weights` and `test/run-shards.sh`) shape every test file's process: `test/hermetic-env.ts`
+gives each the same environment - `TMPDIR` the realpath of `os.tmpdir()` (a macOS `/var/...` against
+git's `/private/var/...`), the running node's directory first on `PATH` (a mise or asdf shim fails
+in a temp cwd) with a no-op `docker` (`exit 0`, lists nothing) right after it, so no test reaches
+the machine's real Docker (a slow daemon on a Mac, a stopped one on Linux, a `docker stop` on a live
+run's containers; a test that needs its own puts it ahead, `test/docker-stub.ts`), and no `HERDR_*`,
+`TMUX*`, `SANDCASTLE_*` (but `SANDCASTLE_TEST_*` stays) or setting and credential name `src/` reads,
+so a test that needs one sets it itself, and no inherited git identity (`GIT_CONFIG_GLOBAL` an empty
+file, `GIT_CONFIG_NOSYSTEM=1`, no `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, and `user.useConfigOnly=true`
+appended to the `GIT_CONFIG_*` pairs, so a fixture repo sets its own identity and fails here, not
+only in a gate-only sandbox), and `maintenance.auto=false` beside it (a commit's detached
+`git maintenance run --auto` holds `.git/objects/maintenance.lock` and can outlive the call, so a
+before-and-after snapshot of a fixture repo differs; no `gc.auto` pair, which would hide a broken
+`disableHostGitGc` from `test/landing-queue.test.ts`); `test/hermetic-env.test.ts` fails when `src/`
+reads a name that is neither scrubbed (`SCRUBBED`) nor on its keep list, so a new setting needs a
+line in one of them - and `test/no-stray.ts` fails a file that prints outside `quietly`.
+Some read the docs: the `skill*` tests check SKILL.md's frontmatter and pointers, each action file's
+steps and brief, run.md's seven headings against `src/report.ts`, update.md's step references and
+AGENTS.md's Layout row for `skill/`
 
 ## `skill/`
 
-The skill serves three harnesses. The directory (not the file - `src/setup.ts` links the directory) is symlinked into `~/.claude/skills/sandcastle` (Claude Code, also scanned by OpenCode) and `~/.agents/skills/sandcastle` (Codex). `SKILL.md` works in all three because each ignores frontmatter it does not know. Keep it portable:
+The skill serves three harnesses.
+The directory (not the file - `src/setup.ts` links the directory) is symlinked into
+`~/.claude/skills/sandcastle` (Claude Code, also scanned by OpenCode) and
+`~/.agents/skills/sandcastle` (Codex). `SKILL.md` works in all three because each ignores
+frontmatter it does not know.
+Keep it portable:
 
 - `name` stays `sandcastle`, matching the directory the user links it as.
-- `description` stays under 1,024 characters (OpenCode rejects longer) and carries every trigger: Codex and OpenCode never see Claude Code's `when_to_use`.
+- `description` stays under 1,024 characters (OpenCode rejects longer) and carries every trigger:
+  Codex and OpenCode never see Claude Code's `when_to_use`.
 - `argument-hint` and `arguments: [action]` are Claude Code's; the body handles an unfilled `$action` for the other two.
-- Name harness-specific tools by what they do, with the Claude Code name as an example ("the harness's question tool (`AskUserQuestion` in Claude Code)").
-- `SKILL.md` loads whole for every action, so it stays a router: each action's steps live in a sibling file that `SKILL.md` names in prose, and reference two actions share lives once, in the file of the action that owns it (queue.md's "Writing a ticket body") ("read run.md in this skill's directory") - Codex and OpenCode do not fill `$action`, so they find the file from the text.
+- Name harness-specific tools by what they do, with the Claude Code name as an example ("the
+  harness's question tool (`AskUserQuestion` in Claude Code)").
+- `SKILL.md` loads whole for every action, so it stays a router: each action's steps live in a
+  sibling file that `SKILL.md` names in prose, and reference two actions share lives once, in the
+  file of the action that owns it (queue.md's "Writing a ticket body") ("read run.md in this skill's
+  directory") - Codex and OpenCode do not fill `$action`, so they find the file from the text.
 
 ## `mod/`
 
-The optional Claude Code mod, a plugin linked as `~/.claude/skills/sandcastle-mod`: `hooks/register.tsx` (the hooks: watch `run.json`, the band above the prompt, the needs-you line and notice, the prompt when the run's process is gone, `/sandcastle-status`, `/sandcastle-mark`), `hooks/run-live.ts` (pure, imports nothing: the one rule for "is this run live" - a run is live when its record has not finished and its pid is a process whose command line contains `RUN_COMMAND`; `liveness` answers `live`, `finished` (with its exit code), `own` (the asking process itself, which is not "another live run") or `dead` from the record, the run lock's pid and an injected process check, and EPERM is the check's business: a process that exists is read like any other. `src/report.ts`, `src/herdr-plugin.ts` and `src/detach.ts` pass `commandOf` from `src/live-runs.ts`; the mod passes `ps`; the status view imports it (`test/run-live-contract.test.ts` holds that). A run a person has paused (`sandcastle pause`, the record's `paused`) is live by this rule: its process runs and its record has not finished, so no view offers the end prompt for it (`test/pause-resume.test.ts`). The mod alone ignores `finishedAt`, since every turn of one run writes one and the run goes on; the run lock and the machine-wide slot locks in `src/pool.ts` judge their owner by the same command-line check (`holderRunning`), with one difference: when `ps` cannot answer for a pid that exists, the lock is kept, since a live run misread as gone would let a second one take its project; the status view's slot count follows it), `hooks/run-record.ts` (pure, imports nothing: the run record and ticket record types, the closed list of ticket states, the derived states, the tables from ticket state to group and word, and the closed list of outcome kinds; the kit's own `src/` imports it too, so every write is typed by it, `readTickets` passes each state read from disk through the guard, and `readOutcomes` (`src/run.ts`) each outcome kind through `isOutcomeKind`), and `hooks/run-state.ts` (pure: the record read as groups, glyphs and colours, the palette and castle, `endPrompt(root, run)` - the end prompt's text, naming the run by numbers only: the exit code, the pid when a whole number and the start time re-rendered as local `HH:MM` when `startedAt` parses as a date, anything else left out, since the prompt is read when the session is idle and a later run may be live by then (`test/mod-end-prompt.test.ts`) - and the band cut to its width - `test/mod.test.ts` holds both to `src/run.ts` and the status view) and `hooks/idle.ts` (pure, imports nothing: the idle mark, one row of sand above the prompt between runs in a set-up project. `markText(input)` is the line or undefined to clear it, as `{ text, parts }` - the plain text and the same line as coloured parts (`name`, `hint`, `muted`; joined by a space they are the text); its one input object is the set-up flag, the machine switch, the project's hidden flag, the dismissed ids, the cache `Entry`, the cached version read (`versionRead`) and the time. `sandcastle · N ready - /sandcastle run` shows N only while the last good read is under `COUNT_MS` (an hour) old, else the bare mark. The version facts are `sandcastle --version --json` (`src/upgrading.ts`'s `versionFacts`: `kit` `{ version, release, past }`, `newestRelease` - null until the kit reads one, and the mark says nothing of it yet - and `project`: null when the git root of the working directory has no `.sandcastle/config.ts` plain file, else `{ recorded, release, pendingNotes }`, `recorded` false for no usable update record and `release` null when a usable record names none; plain `--version` is unchanged). With them the name carries the kit's release plus `+N` for a clone N commits past its release's own tag (`sandcastle 0.16.0+3`; the commit and local changes only in the `/sandcastle-mark` report), and one hint may follow the count: `update needed` (notes not had, no record or an unreadable one; bold in `SAND.top`, the call to action `/sandcastle update`) before `project on X` (the recorded release is numerically older than the kit's, `0.10.0` newer than `0.9.0`, with nothing pending; `SAND.muted`, the call to action stays `/sandcastle run`, none with no ready ticket) before the version alone. The facts are read as the count is: `VersionEntry` (`afterVersionRead`, `parseVersionEntry`, `parseVersionFacts`) in one `$.store` key per project root (`version:<root>`), through `due` on the same `tried` rule and the same triggers - both reads see a trigger before either consumes it, so the end of a skill's turn re-reads both - with its own one-at-a-time flag in `register.tsx` (`refreshVersion`), the kit command resolved for the queue, a 20 s timeout, never awaited by a look or a render, none in a project that is not set up, while the mark is hidden or while the machine switch is off; a failed or garbled read keeps the last good facts, which are shown for an hour as the count is. The band draws each part as its own `Text` in a row (`TONES` in `register.tsx`), and `mod/tests/version.test.ts` holds the hooks, `test/idle-mark-version.test.ts` the text and `test/version-json.test.ts` the command. The ready count: `readyIds(stdout)` takes `sandcastle queue --json` and returns the ids with an empty `blockedOn`, or undefined for anything that is not a list of such tickets (a failed read, never 0); `due(entry, now, trigger)` says to read when there is no entry, the last attempt (`tried`) is `READ_MS` (10 minutes) old or more, or a trigger fired (`run-ended`: a run of the session root's project, or one the session followed elsewhere - perhaps a second clone burning down the same tracker - was seen to end; `skill`: the sandcastle skill was used, and again when the turn that used it ends - its `turn.complete` hook, counting the main thread's turn and never a subagent's - since triaging labels tickets long after the skill starts) - a session's start needs none, its first look applies the age rule at once; `afterRead` makes the next entry, and a failed read keeps the last good `ids` and `at` and moves only `tried`, so a tracker that cannot be reached is tried every 10 minutes, not at every look; `parseEntry` checks what the shared store holds. In `register.tsx` the entry is one `$.store` key per project root (`ready:<root>`, apart from the session entry under the bare root), shared by every session on the machine; at most one tracker read per project every 10 minutes while nothing changes. The idle look reads the entry and the clock and starts `refresh` unawaited - never inside a render hook, and a look never waits for it - so a slow or hung tracker holds nothing up, and the count a read brings shows at the next look (15 s). `refresh` runs one read at a time per session (a trigger that fires during one earns one more read after it; a look that is merely due again does not), `$.process.run` with a 20 s timeout in the project root, the kit's own `bin/sandcastle` beside the mod's resolved folder when it is a plain file there, else the `sandcastle` on PATH. Two sessions racing to one stale entry may both read, which is accepted. Set up is `.sandcastle/config.ts` being a plain file, one `stat` on the 15 s idle look, never `sandcastle doctor`; the switch is `"idleMark": false` in the personal `config.json`, read through `SETTINGS_SCRIPT` with `XDG_CONFIG_HOME` honoured as `USER_CONFIG` is, and never written - `machineSwitch` leaves the mark on for anything but `false`, and `sandcastle doctor`'s machine-wide settings check reports a value that is not a boolean. In `register.tsx` the two are drawn apart: the status line (`$.ui.status`, which Claude Code gives a warning triangle and its notice colour, neither of which a mod can change) holds only the needs-you text while a live run needs a person, and the mark is the `sandcastle.mark` state that the `AbovePrompt` band draws as a row of `Text` parts in the status view's sand (`SAND.name`, with the hints' tones) above the castle, absent while any run the band draws is alive - the session root's own or a followed one elsewhere - since a mark above a castle reads as a second, stale queue; its count is always the session root's project's. A person's choices are `/sandcastle-mark` (`markAction`, answered by a `command.run` with text and no model turn): `hide` and `show` set the hidden flag, `dismiss` records the ids of a count that is current (`choiceAfter`; a count too old to show was not seen, so it records none), `show` clears both, no argument is `markReport` (the state, the cached count and its age, and the last version facts: the full kit version, the recorded release and the pending notes, or that none are held, or that none were read) and any other word is `MARK_USAGE`. The choices are one `Choice` in `$.store` under `mark:<root>`, beside `ready:<root>`: machine-local, kept across a restart, never in the repository, checked by `parseChoice`. `markText` gives no line when hidden, and no count while a dismissal holds - the current ready ids all within the dismissed ones (`dismissalEnded` is the other case: an id not in them, and an id leaving ends nothing); the idle look also clears the stored dismissal when it ends, so it is over for good, not only while the new id is ready. A hidden mark makes no queue or version read. A choice made while the mark is what the line shows redraws it at once (`idling`), not at the next look. `test/idle-mark.test.ts`, `test/idle-mark-choice.test.ts` and `test/idle-ready.test.ts` hold the module, `mod/tests/ready.test.ts` the count's hooks, `mod/tests/skill-turn-end.test.ts` the read at the end of the skill's turn, `mod/tests/mark.test.ts` the command's) and `hooks/keep-warm.ts` (pure, imports nothing: the cache refresh. While a run this session started or follows is live, the session sits idle and Claude Code's prompt cache lapses after an hour of silence (5 minutes on overage), so the turn that closes the run would re-read the whole conversation at the full input price; a *cache refresh* is one tool-less `$.model.fork` request over the main thread's transcript (not Claude Code's `/fork` command: no new session, nothing in the conversation) that reads it from the cache at about a tenth of that price. `keepWarm(input)` returns `{ refresh, mode, nextAt?, band? }` from `enabled` (the run record's `settings.keepWarm`, which `parse` in `run-state.ts` reads; absent is on), `live` (a paused run is live), `lastActivity` (the later of the main thread's last turn end and the last refresh; `activity` adds the run's start as a floor, since a reload forgets the turns), `last` (the last refresh's `at`, `cacheRead` and `contextTokens`), the miss count, the plan's `rateLimits` and `now`. It refreshes when `now - lastActivity >= INTERVAL_MS` (55 minutes, under the hour with margin). A window at `percentUsed >= 100` (overage) or a last refresh that read under half its context (`missed`: the cache had lapsed) means a 5-minute cache, which is left alone - about 13 refreshes an hour cost about 1.3x the input price against one cold re-write at about 1.25x - and the band says `cache 5m · not warmed (a cold restart costs less)`; a main-thread turn after a miss clears it (`afterTurn`: one more try at 55 minutes), and a second miss in a run turns the refresh off for it. No plan windows (an API key, a gateway) assume nothing: the first refresh's measured read decides. `settle` records a refresh, and a fork that is not answered (`api-error`, `aborted`) is a miss. The band's row is `cache warm · refresh in 12m` or `cache refreshed HH:MM · 157k read`. In `register.tsx` a `$.clock.every(60_000)` tick runs while `round` finds a live run this session started, followed, or (recording no session) closes; it reads `$.session.usage()`, calls `$.model.fork` when `refresh` is set, keeps `Warmth` in `$.state` (`sandcastle.warmth`, which a reload keeps and module variables do not; a different run's `startedAt` starts its misses over), logs an unanswered fork with `$.ui.log` and draws the row as one more `Text` under the castle in the `AbovePrompt` band (`sandcastle.warm`). The main thread's `turn.complete` (never a subagent's) records the turn's end. The status line stays the needs-you text's alone, and the skill note the mod appends says the mod keeps the cache warm. `test/keep-warm.test.ts` holds the rule, `mod/tests/keep-warm.test.ts` the hook). It runs inside Claude Code, not under the kit's Node, and imports nothing from `src/`; its own imports name the `.ts` extension, so the kit's tests can import `hooks/run-state.ts` under Node too. Its own tests are `mod/tests/`, run by `claude plugin test mod`
+The optional Claude Code mod, a plugin linked as `~/.claude/skills/sandcastle-mod`:
+`hooks/register.tsx` (the hooks: watch `run.json`, the band above the prompt, the needs-you line and
+notice, the prompt when the run's process is gone, `/sandcastle-status`, `/sandcastle-mark`),
+`hooks/run-live.ts` (pure, imports nothing: the one rule for "is this run live" - a run is live when
+its record has not finished and its pid is a process whose command line contains `RUN_COMMAND`;
+`liveness` answers `live`, `finished` (with its exit code), `own` (the asking process itself, which
+is not "another live run") or `dead` from the record, the run lock's pid and an injected process
+check, and EPERM is the check's business: a process that exists is read like any other.
+`src/report.ts`, `src/herdr-plugin.ts` and `src/detach.ts` pass `commandOf` from `src/live-runs.ts`;
+the mod passes `ps`; the status view imports it (`test/run-live-contract.test.ts` holds that).
+A run a person has paused (`sandcastle pause`, the record's `paused`) is live by this rule: its
+process runs and its record has not finished, so no view offers the end prompt for it
+(`test/pause-resume.test.ts`).
+The mod alone ignores `finishedAt`, since every turn of one run writes one and the run goes on; the
+run lock and the machine-wide slot locks in `src/pool.ts` judge their owner by the same command-line
+check (`holderRunning`), with one difference: when `ps` cannot answer for a pid that exists, the
+lock is kept, since a live run misread as gone would let a second one take its project; the status
+view's slot count follows it), `hooks/run-record.ts` (pure, imports nothing: the run record and
+ticket record types, the closed list of ticket states, the derived states, the tables from ticket
+state to group and word, and the closed list of outcome kinds; the kit's own `src/` imports it too,
+so every write is typed by it, `readTickets` passes each state read from disk through the guard, and
+`readOutcomes` (`src/run.ts`) each outcome kind through `isOutcomeKind`), and `hooks/run-state.ts`
+(pure: the record read as groups, glyphs and colours, the palette and castle, `endPrompt(root, run)` -
+the end prompt's text, naming the run by numbers only: the exit code, the pid when a whole number
+and the start time re-rendered as local `HH:MM` when `startedAt` parses as a date, anything else
+left out, since the prompt is read when the session is idle and a later run may be live by then
+(`test/mod-end-prompt.test.ts`) - and the band cut to its width - `test/mod.test.ts` holds both to
+`src/run.ts` and the status view) and `hooks/idle.ts` (pure, imports nothing: the idle mark, one row
+of sand above the prompt between runs in a set-up project. `markText(input)` is the line or
+undefined to clear it, as `{ text, parts }` - the plain text and the same line as coloured parts
+(`name`, `hint`, `muted`; joined by a space they are the text); its one input object is the set-up
+flag, the machine switch, the project's hidden flag, the dismissed ids, the cache `Entry`, the
+cached version read (`versionRead`) and the time.
+`sandcastle · N ready - /sandcastle run` shows N only while the last good read is under `COUNT_MS`
+(an hour) old, else the bare mark.
+The version facts are `sandcastle --version --json` (`src/upgrading.ts`'s `versionFacts`: `kit`
+`{ version, release, past }`, `newestRelease` - null until the kit reads one, and the mark says
+nothing of it yet - and `project`: null when the git root of the working directory has no
+`.sandcastle/config.ts` plain file, else `{ recorded, release, pendingNotes }`, `recorded` false for
+no usable update record and `release` null when a usable record names none; plain `--version` is
+unchanged).
+With them the name carries the kit's release plus `+N` for a clone N commits past its release's own
+tag (`sandcastle 0.16.0+3`; the commit and local changes only in the `/sandcastle-mark` report), and
+one hint may follow the count: `update needed` (notes not had, no record or an unreadable one; bold
+in `SAND.top`, the call to action `/sandcastle update`) before `project on X` (the recorded release
+is numerically older than the kit's, `0.10.0` newer than `0.9.0`, with nothing pending;
+`SAND.muted`, the call to action stays `/sandcastle run`, none with no ready ticket) before the
+version alone.
+The facts are read as the count is: `VersionEntry` (`afterVersionRead`, `parseVersionEntry`,
+`parseVersionFacts`) in one `$.store` key per project root (`version:<root>`), through `due` on the
+same `tried` rule and the same triggers - both reads see a trigger before either consumes it, so the
+end of a skill's turn re-reads both - with its own one-at-a-time flag in `register.tsx`
+(`refreshVersion`), the kit command resolved for the queue, a 20 s timeout, never awaited by a look
+or a render, none in a project that is not set up, while the mark is hidden or while the machine
+switch is off; a failed or garbled read keeps the last good facts, which are shown for an hour as
+the count is.
+The band draws each part as its own `Text` in a row (`TONES` in `register.tsx`), and
+`mod/tests/version.test.ts` holds the hooks, `test/idle-mark-version.test.ts` the text and
+`test/version-json.test.ts` the command.
+The ready count: `readyIds(stdout)` takes `sandcastle queue --json` and returns the ids with an
+empty `blockedOn`, or undefined for anything that is not a list of such tickets (a failed read,
+never 0); `due(entry, now, trigger)` says to read when there is no entry, the last attempt (`tried`)
+is `READ_MS` (10 minutes) old or more, or a trigger fired (`run-ended`: a run of the session root's
+project, or one the session followed elsewhere - perhaps a second clone burning down the same
+tracker - was seen to end; `skill`: the sandcastle skill was used, and again when the turn that used
+it ends - its `turn.complete` hook, counting the main thread's turn and never a subagent's - since
+triaging labels tickets long after the skill starts) - a session's start needs none, its first look
+applies the age rule at once; `afterRead` makes the next entry, and a failed read keeps the last
+good `ids` and `at` and moves only `tried`, so a tracker that cannot be reached is tried every 10
+minutes, not at every look; `parseEntry` checks what the shared store holds.
+In `register.tsx` the entry is one `$.store` key per project root (`ready:<root>`, apart from the
+session entry under the bare root), shared by every session on the machine; at most one tracker read
+per project every 10 minutes while nothing changes.
+The idle look reads the entry and the clock and starts `refresh` unawaited - never inside a render
+hook, and a look never waits for it - so a slow or hung tracker holds nothing up, and the count a
+read brings shows at the next look (15 s). `refresh` runs one read at a time per session (a trigger
+that fires during one earns one more read after it; a look that is merely due again does not),
+`$.process.run` with a 20 s timeout in the project root, the kit's own `bin/sandcastle` beside the
+mod's resolved folder when it is a plain file there, else the `sandcastle` on PATH.
+Two sessions racing to one stale entry may both read, which is accepted.
+Set up is `.sandcastle/config.ts` being a plain file, one `stat` on the 15 s idle look, never
+`sandcastle doctor`; the switch is `"idleMark": false` in the personal `config.json`, read through
+`SETTINGS_SCRIPT` with `XDG_CONFIG_HOME` honoured as `USER_CONFIG` is, and never written -
+`machineSwitch` leaves the mark on for anything but `false`, and `sandcastle doctor`'s machine-wide
+settings check reports a value that is not a boolean.
+In `register.tsx` the two are drawn apart: the status line (`$.ui.status`, which Claude Code gives a
+warning triangle and its notice colour, neither of which a mod can change) holds only the needs-you
+text while a live run needs a person, and the mark is the `sandcastle.mark` state that the
+`AbovePrompt` band draws as one `Text` in the status view's sand (`SAND.name`) above the castle,
+absent while any run the band draws is alive - the session root's own or a followed one elsewhere -
+since a mark above a castle reads as a second, stale queue; its count is always the session root's
+project's.
+A person's choices are `/sandcastle-mark` (`markAction`, answered by a `command.run` with text and
+no model turn): `hide` and `show` set the hidden flag, `dismiss` records the ids of a count that is
+current (`choiceAfter`; a count too old to show was not seen, so it records none), `show` clears
+both, no argument is `markReport` (the state, the cached count and its age) and any other word is
+`MARK_USAGE`.
+The choices are one `Choice` in `$.store` under `mark:<root>`, beside `ready:<root>`: machine-local,
+kept across a restart, never in the repository, checked by `parseChoice`. `markText` gives no line
+when hidden, and no count while a dismissal holds - the current ready ids all within the dismissed
+ones (`dismissalEnded` is the other case: an id not in them, and an id leaving ends nothing); the
+idle look also clears the stored dismissal when it ends, so it is over for good, not only while the
+new id is ready.
+A hidden mark makes no queue read.
+A choice made while the mark is what the line shows redraws it at once (`idling`), not at the next
+look. `test/idle-mark.test.ts`, `test/idle-mark-choice.test.ts` and `test/idle-ready.test.ts` hold
+the module, `mod/tests/ready.test.ts` the count's hooks, `mod/tests/skill-turn-end.test.ts` the read
+at the end of the skill's turn, `mod/tests/mark.test.ts` the command's) and `hooks/keep-warm.ts`
+(pure, imports nothing: the cache refresh.
+While a run this session started or follows is live, the session sits idle and Claude Code's prompt
+cache lapses after an hour of silence (5 minutes on overage), so the turn that closes the run would
+re-read the whole conversation at the full input price; a *cache refresh* is one tool-less
+`$.model.fork` request over the main thread's transcript (not Claude Code's `/fork` command: no new
+session, nothing in the conversation) that reads it from the cache at about a tenth of that price.
+`keepWarm(input)` returns `{ refresh, mode, nextAt?, band? }` from `enabled` (the run record's
+`settings.keepWarm`, which `parse` in `run-state.ts` reads; absent is on), `live` (a paused run is
+live), `lastActivity` (the later of the main thread's last turn end and the last refresh; `activity`
+adds the run's start as a floor, since a reload forgets the turns), `last` (the last refresh's `at`,
+`cacheRead` and `contextTokens`), the miss count, the plan's `rateLimits` and `now`.
+It refreshes when `now - lastActivity >= INTERVAL_MS` (55 minutes, under the hour with margin).
+A window at `percentUsed >= 100` (overage) or a last refresh that read under half its context
+(`missed`: the cache had lapsed) means a 5-minute cache, which is left alone - about 13 refreshes an
+hour cost about 1.3x the input price against one cold re-write at about 1.25x - and the band says
+`cache 5m · not warmed (a cold restart costs less)`; a main-thread turn after a miss clears it
+(`afterTurn`: one more try at 55 minutes), and a second miss in a run turns the refresh off for it.
+No plan windows (an API key, a gateway) assume nothing: the first refresh's measured read decides.
+`settle` records a refresh, and a fork that is not answered (`api-error`, `aborted`) is a miss.
+The band's row is `cache warm · refresh in 12m` or `cache refreshed HH:MM · 157k read`.
+In `register.tsx` a `$.clock.every(60_000)` tick runs while `round` finds a live run this session
+started, followed, or (recording no session) closes; it reads `$.session.usage()`, calls
+`$.model.fork` when `refresh` is set, keeps `Warmth` in `$.state` (`sandcastle.warmth`, which a
+reload keeps and module variables do not; a different run's `startedAt` starts its misses over),
+logs an unanswered fork with `$.ui.log` and draws the row as one more `Text` under the castle in the
+`AbovePrompt` band (`sandcastle.warm`).
+The main thread's `turn.complete` (never a subagent's) records the turn's end.
+The status line stays the needs-you text's alone, and the skill note the mod appends says the mod
+keeps the cache warm. `test/keep-warm.test.ts` holds the rule, `mod/tests/keep-warm.test.ts` the
+hook).
+It runs inside Claude Code, not under the kit's Node, and imports nothing from `src/`; its own
+imports name the `.ts` extension, so the kit's tests can import `hooks/run-state.ts` under Node too.
+Its own tests are `mod/tests/`, run by `claude plugin test mod`
 
-Verifying a change to it needs Claude Code 2.1.287 or newer on PATH: `pnpm test` then runs `claude plugin validate` and the mod's own tests (`test/mod.test.ts`), and skips them without it, as CI does; the kit's own sandboxes get it from `claudeCode: "latest"` in `.sandcastle/config.ts`, since the `stable` channel is older. That checks the hooks and the tree they return, never the paint: look at a changed drawing in a real session, `claude --plugin-dir mod` from a project with a run record. The mod's API is early access, and its types are the authority, not memory. That session writes them to `mod/.claude-plugin/types/` with a `mod/tsconfig.json` (both gitignored; they are absent until then, and `mod/types/index.d.ts` holds only the band's own types); from then on `pnpm test` type-checks the mod too, which the kit's own `tsc` does not cover. Grep the types for the member you need rather than reading them: they run to thousands of lines. `claude plugin test mod` reporting "hooks modules are turned off" is Claude Code's rollout switch, not the mod.
+Verifying a change to it needs Claude Code 2.1.287 or newer on PATH: `pnpm test` then runs
+`claude plugin validate` and the mod's own tests (`test/mod.test.ts`), and skips them without it, as
+CI does; the kit's own sandboxes get it from `claudeCode: "latest"` in `.sandcastle/config.ts`,
+since the `stable` channel is older.
+That checks the hooks and the tree they return, never the paint: look at a changed drawing in a real
+session, `claude --plugin-dir mod` from a project with a run record.
+The mod's API is early access, and its types are the authority, not memory.
+That session writes them to `mod/.claude-plugin/types/` with a `mod/tsconfig.json` (both gitignored;
+they are absent until then, and `mod/types/index.d.ts` holds only the band's own types); from then
+on `pnpm test` type-checks the mod too, which the kit's own `tsc` does not cover.
+Grep the types for the member you need rather than reading them: they run to thousands of lines.
+`claude plugin test mod` reporting "hooks modules are turned off" is Claude Code's rollout switch,
+not the mod.
 
 ## `site/`
 
-The project website on GitHub Pages: static HTML, CSS and plain scripts (not modules, so it also opens from disk), no build step. `js/status.js` plays a made-up run: it hands `js/status-render.js` the snapshot and rows the view would read, and turns the frame it draws into coloured text; `js/sand.js` draws the castle, dunes and grains. `js/status-render.js` is not written by hand: `scripts/site-renderer.mjs` (`pnpm site:renderer`) strips the types from `src/status-grid.ts` and `src/status-render.ts` with Node's own type stripping, adds the few declarations the renderer imports from modules that need Node (named in the script's `EXTERNALS`) and commits the result, so the demo draws the view's own frames with no build in the deploy. A change to either source file needs `pnpm site:renderer` run and its output committed; `test/site-renderer-copy.test.ts` fails when the copy differs from what the script writes, and holds the demo's frames to the view's at the widths it offers. A new import in the renderer fails the script until `EXTERNALS` names it. `.github/workflows/pages.yml` deploys it
+The project website on GitHub Pages: static HTML, CSS and plain scripts (not modules, so it also
+opens from disk), no build step. `js/status.js` plays a made-up run: it hands `js/status-render.js`
+the snapshot and rows the view would read, and turns the frame it draws into coloured text;
+`js/sand.js` draws the castle, dunes and grains. `js/status-render.js` is not written by hand:
+`scripts/site-renderer.mjs` (`pnpm site:renderer`) strips the types from `src/status-grid.ts` and
+`src/status-render.ts` with Node's own type stripping, adds the few declarations the renderer
+imports from modules that need Node (named in the script's `EXTERNALS`) and commits the result, so
+the demo draws the view's own frames with no build in the deploy.
+A change to either source file needs `pnpm site:renderer` run and its output committed;
+`test/site-renderer-copy.test.ts` fails when the copy differs from what the script writes, and holds
+the demo's frames to the view's at the widths it offers.
+A new import in the renderer fails the script until `EXTERNALS` names it.
+`.github/workflows/pages.yml` deploys it
 
 `scripts/version.mjs` synchronises the current release fields from `package.json`: the Herdr
 manifest, site's footer and software metadata, and README release and minimum Node badges.
