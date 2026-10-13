@@ -13,8 +13,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 // Importing run.ts must not touch the real slots.
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { estimate, carriedKind, recordHead } = await import("../src/run.ts");
+const { carriedKindAtStart } = await import("../src/burndown.ts");
 type Project = Parameters<typeof estimate>[0];
 
 const MIN = 60_000;
@@ -107,9 +109,36 @@ test("a carried branch is carried work only when a recorded head vouches for it"
   assert.equal(carriedKind(root, "main", "9"), undefined);
 });
 
+test("a land-only branch with a person's comment since its review is priced as one to review", () => {
+  const root = mkdtempSync(join(tmpdir(), "sandcastle-carried-late-"));
+  git(root, "init", "-q", "-b", "main");
+  git(root, "config", "user.email", "t@example.invalid");
+  git(root, "config", "user.name", "t");
+  git(root, "config", "commit.gpgsign", "false");
+  writeFileSync(join(root, "a"), "a\n");
+  git(root, "add", "a");
+  git(root, "commit", "-q", "-m", "init");
+  git(root, "checkout", "-q", "-b", "agent/issue-1");
+  writeFileSync(join(root, "f1"), "x\n");
+  git(root, "add", "f1");
+  git(root, "commit", "-q", "-m", "work 1");
+  const tip = git(root, "rev-parse", "HEAD");
+  git(root, "checkout", "-q", "main");
+  // One comment when the head was recorded: the agent's report.
+  recordHead(root, "1", { branch: "agent/issue-1", reviewed: tip, green: tip, comments: 1 }, "run");
+  const report = "The implementer's report.";
+  assert.equal(carriedKindAtStart(root, "main", { id: "1", comments: [report] }), "carried");
+  // The kit's own comment since is no one's question: still land-only.
+  assert.equal(carriedKindAtStart(root, "main", { id: "1", comments: [report, "Sandcastle held this ticket: a red gate."] }), "carried");
+  // A person's comment since sends it to a full review: a whole ticket's cost.
+  assert.equal(carriedKindAtStart(root, "main", { id: "1", comments: [report, "Please also cover the empty case."] }), "unreviewed");
+  // No branch ahead of the base is no carried work, whatever its comments.
+  assert.equal(carriedKindAtStart(root, "main", { id: "2", comments: ["A question."] }), undefined);
+});
+
 test("a run records an unreviewed branch on its timings lines in place of carried, and prices its estimate by it", () => {
   const source = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(source, /const carriedKinds = new Map\(candidates\.map\(\(i\) => \[i\.id, carriedKind\(project\.root, project\.baseBranch, i\.id\)\] as const\)\)/);
+  assert.match(source, /const carriedKinds = new Map\(candidates\.map\(\(i\) => \[i\.id, carriedKindAtStart\(project\.root, project\.baseBranch, i\)\] as const\)\)/);
   assert.match(source, /const carriedAtStart = new Set\(candidates\.filter\(\(i\) => carriedKinds\.get\(i\.id\) === "carried"\)/);
   assert.match(source, /const unreviewedAtStart = new Set\(candidates\.filter\(\(i\) => carriedKinds\.get\(i\.id\) === "unreviewed"\)/);
   assert.match(source, /unreviewed: candidates\.map\(\(i\) => unreviewedAtStart\.has\(i\.id\)\)/);

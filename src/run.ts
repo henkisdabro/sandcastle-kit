@@ -1013,6 +1013,10 @@ export const SIZE_WORDS: Record<TicketSize, string> = {
  * resolve on (resolve, narrow review, gates) a carried one: a carried branch's attempt is not its
  * ticket's first one.
  *
+ * `detail.unreviewed` says which carried branches get a full review all the same (`carriedKind`: no recorded head lets them
+ * skip it). Such a ticket is priced as a fresh one and counted apart in the line (`N to review`); a history ticket whose lines
+ * say `unreviewed` is a fresh sample, so the carried history stays land-only.
+ *
  * `detail.remainder` says which tickets are re-runs for what an earlier "part of" merge left (`isRemainder`; a carried one
  * is a carried branch, not this). A remainder is the third class: a `remainder` field on its lines, priced from past
  * remainders, which are no longer counted among the fresh tickets. With none in the window it is priced as a fresh ticket

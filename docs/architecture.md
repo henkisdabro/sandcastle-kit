@@ -1836,6 +1836,13 @@ branch ahead of the base, read once at the start into `remainderAtStart`, handed
 `detail.remainder` and written on its timings lines as `remainder`) is a third class beside carried
 and fresh, priced from past remainders and, with none, as a fresh ticket with the line saying it may
 be high (`test/estimate-remainder.test.ts`).
+A carried branch counts as carried only when a recorded head lets it skip the full review
+(`carriedKind`: `landOnlyHead` or `reviewedOnlyHead` finds one).
+One that gets a full review all the same - no such head, or a person's comment since its review
+(`carriedKindAtStart` in `src/burndown.ts`) - is read into `unreviewedAtStart`, handed to `estimate`
+as `detail.unreviewed`, priced as a fresh ticket and counted apart in the line (`N to review`).
+Its timings lines say `unreviewed` in place of `carried`, and a history ticket with such lines is a
+fresh sample, so the carried history stays land-only (`test/estimate-carried-unreviewed.test.ts`).
 Each ticket is also priced by its size: `burndown()` counts the paths of its `Touches:` line
 (`parseTouches`, 0 with none) and its body's length in characters, hands them to `estimate` as
 `detail.touches` and `detail.bodyChars` and writes them on each of its timings lines as `touches`

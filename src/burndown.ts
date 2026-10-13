@@ -1034,6 +1034,16 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
   });
 
 /**
+ * A carried branch as the start estimate and the timings lines class it (`carriedKind`). A land-only branch with a
+ * person's comment since its review gets the full review all the same (the pipeline's `lateComment`), so it costs a
+ * whole ticket and is priced as one to review. The comments are those the queue read, which the pipeline falls back to.
+ */
+export const carriedKindAtStart = (root: string, base: string, issue: Pick<Issue, "id" | "comments">): "carried" | "unreviewed" | undefined => {
+  const kind = carriedKind(root, base, issue.id);
+  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments).length > 0 ? "unreviewed" : kind;
+};
+
+/**
  * What a ticket's gates run is called in the pool's wait line. It names the project, as the landing
  * label does: with several projects' runs on one machine, "#252 gates" says nothing of which run waits.
  */
@@ -2872,8 +2882,8 @@ export const burndown = async (
   });
   for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, neighbours, !DRY_RUN, project.name, project.root)) console.log(line);
   // Carried branches, read before any agent touches them: a land-only or narrowly reviewed one is dearer than a fresh ticket's landing,
-  // so the estimate and the timings say so; one with no reviewed head gets a full review and is priced as a fresh ticket (`carriedKind`).
-  const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKind(project.root, project.baseBranch, i.id)] as const));
+  // so the estimate and the timings say so; one that gets a full review is priced as a fresh ticket (`carriedKindAtStart`).
+  const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i)] as const));
   const carriedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "carried").map((i) => i.id));
   const unreviewedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "unreviewed").map((i) => i.id));
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
