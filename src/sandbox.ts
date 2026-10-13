@@ -1056,7 +1056,9 @@ export const withContainerCpus = async <T>(
   let id = "";
   try {
     const r = await sandbox.exec("hostname");
-    id = r.exitCode === 0 ? r.stdout.trim() : "";
+    // Read inside the sandbox, where an agent can put its own `hostname` on PATH: only a container id reaches the host's
+    // `docker update`, never another name or a flag.
+    id = r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
   } catch {
     /* said below */
   }

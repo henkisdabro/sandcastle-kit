@@ -26,8 +26,8 @@ process.env.PATH = [dir, process.env.PATH ?? ""].join(delimiter);
 
 const project = { name: "fixture", gates: [{ name: "test", command: "run-tests" }] } as Parameters<typeof runGates>[0];
 
-/** A sandbox whose container id is `abc123`; its gate logs `gate`, and is red (exit 1) or throws when asked. */
-const sandbox = (how: "green" | "red" | "throws", hostname = "abc123\n") => ({
+/** A sandbox whose container id is `abc123def456`; its gate logs `gate`, and is red (exit 1) or throws when asked. */
+const sandbox = (how: "green" | "red" | "throws", hostname = "abc123def456\n") => ({
   exec: async (cmd: string) => {
     if (cmd === "hostname") return { exitCode: hostname ? 0 : 1, stdout: hostname, stderr: "" };
     if (!cmd.includes("run-tests")) return { exitCode: 0, stdout: "", stderr: "" };
@@ -55,20 +55,20 @@ test("a ticket's green gate runs at the gate share and the limit goes back to th
   fresh();
   const run = await runGates(project, sandbox("green"), "ticket", false, asTicket);
   assert.equal(run.failure, undefined);
-  assert.deepEqual(seen(), ["docker update --cpus 4 abc123", "gate", "docker update --cpus 2 abc123"]);
+  assert.deepEqual(seen(), ["docker update --cpus 4 abc123def456", "gate", "docker update --cpus 2 abc123def456"]);
 });
 
 test("a ticket's red gate puts the limit back too", async () => {
   fresh();
   const run = await runGates(project, sandbox("red"), "ticket", false, asTicket);
   assert.equal(run.failure?.name, "test");
-  assert.deepEqual(seen(), ["docker update --cpus 4 abc123", "gate", "docker update --cpus 2 abc123"]);
+  assert.deepEqual(seen(), ["docker update --cpus 4 abc123def456", "gate", "docker update --cpus 2 abc123def456"]);
 });
 
 test("a gate that throws puts the limit back before the error leaves", async () => {
   fresh();
   await assert.rejects(runGates(project, sandbox("throws"), "ticket", false, asTicket), /the sandbox died/);
-  assert.deepEqual(seen(), ["docker update --cpus 4 abc123", "gate", "docker update --cpus 2 abc123"]);
+  assert.deepEqual(seen(), ["docker update --cpus 4 abc123def456", "gate", "docker update --cpus 2 abc123def456"]);
 });
 
 test("a gate run with no limit to move (cpus: false, or a landing's sandbox) makes no update", async () => {
@@ -88,7 +88,7 @@ test("a failed update says one line, leaves the limit as it was and the gate run
   process.env.FAKE_DOCKER_FAIL = "1";
   const run = await runGates(project, sandbox("green"), "ticket", false, asTicket);
   assert.equal(run.failure, undefined);
-  assert.deepEqual(seen(), ["docker update --cpus 4 abc123", "gate"]);
+  assert.deepEqual(seen(), ["docker update --cpus 4 abc123def456", "gate"]);
   assert.equal(said.filter((l) => l.includes("CPU limit")).length, 1);
 });
 
@@ -98,6 +98,16 @@ test("an unreadable container id says one line and the gate runs without an upda
   assert.equal(run.failure, undefined);
   assert.deepEqual(seen(), ["gate"]);
   assert.equal(said.filter((l) => l.includes("container id")).length, 1);
+});
+
+test("a hostname that is not a container id (a name, a flag) reaches no docker update", async () => {
+  for (const hostname of ["--memory=6m\n", "other-box\n", "abc123\n"]) {
+    fresh();
+    const run = await runGates(project, sandbox("green", hostname), "ticket", false, asTicket);
+    assert.equal(run.failure, undefined);
+    assert.deepEqual(seen(), ["gate"], hostname);
+    assert.equal(said.filter((l) => l.includes("container id")).length, 1);
+  }
 });
 
 // burndown() needs Docker, so no test drives it: the call site is held by its text.

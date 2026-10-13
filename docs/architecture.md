@@ -281,7 +281,8 @@ run at half the gate share with one gates slot: `runGates` (`src/gates.ts`) take
 slot's lease, `withContainerCpus` (`src/sandbox.ts`) raises the container to the gate share with
 `docker update --cpus` and puts it back to the ticket share when the lease ends - after a red, a
 throw or a timeout too, the in-slot re-runs inside the one raise.
-The container's id is the sandbox's own `hostname` (the kit holds no name for it).
+The container's id is the sandbox's own `hostname` (the kit holds no name for it), taken only when it
+reads as a container id: an agent can put its own `hostname` on the sandbox's PATH.
 Nothing is raised when `cpus: false` leaves no limit, or when the gate share is no larger than the
 ticket's (a numeric `cpus`, or `maxGates` above the concurrency).
 A failed read or update says one line and leaves the limit as it was; it never fails the gate.
