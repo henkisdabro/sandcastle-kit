@@ -29,7 +29,7 @@ import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, forgetFork, sh, staleBaseParents } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, ownCommitList, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
@@ -305,6 +305,8 @@ export type Landable = {
   status: string;
   commits: number;
   repairs: number;
+  /** The review's commits, one `<short hash> <subject>` line each (`reviewCommitLines`): the merge comment lists them. */
+  reviewLog?: string[];
   head?: string;
   unreviewed?: boolean;
   /** An acceptance criterion an agent knowingly left undone: the branch lands, the ticket stays open. */
@@ -999,6 +1001,23 @@ export const rebuiltLine = (who: string, base: string, r: { was: string; picked:
 export const firstAttemptReviewCommits = (results: readonly PromiseSettledResult<{ issue: string; reviewCommits: number }>[], id: string) => {
   const first = results.find((r) => r.status === "fulfilled" && r.value.issue === id);
   return first?.status === "fulfilled" ? first.value.reviewCommits : 0;
+};
+
+/** The `reviewLog` a requeued ticket's first attempt made, kept for the same reason as `firstAttemptReviewCommits`. */
+export const firstAttemptReviewLog = (results: readonly PromiseSettledResult<{ issue: string; reviewLog?: string[] }>[], id: string): string[] => {
+  const first = results.find((r) => r.status === "fulfilled" && r.value.issue === id);
+  return first?.status === "fulfilled" ? (first.value.reviewLog ?? []) : [];
+};
+
+/**
+ * The branch's own commits that are not in `before` (its commit list taken ahead of a review pass), oldest first, as
+ * `<short hash> <subject>` lines. Merges are left out, as `ownCommits` leaves them, so a base merge-in is no review commit.
+ */
+export const reviewCommitLines = (before: readonly string[], base: string, branch: string, cwd: string): string[] => {
+  const had = new Set(before);
+  return ownCommitList(base, branch, cwd)
+    .filter((sha) => !had.has(sha))
+    .map((sha) => sh("git", ["log", "-1", "--format=%h %s", sha], cwd));
 };
 
 /**

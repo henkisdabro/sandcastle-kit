@@ -47,7 +47,7 @@ import {
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
@@ -60,7 +60,7 @@ import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -92,6 +92,8 @@ type Outcome = {
   /** The branch tip the gates passed on; landing refuses a branch that moved since. */
   head?: string;
   reviewCommits: number;
+  /** The review commits as `<short hash> <subject>` lines (`reviewCommitLines`): the merge comment lists them. */
+  reviewLog?: string[];
   /** The repair passes that committed: one that changed nothing (the repairer judged the red a flake) is `idleRepairs`. */
   repairs: number;
   idleRepairs?: number;
@@ -2106,6 +2108,12 @@ export const createPipeline = (ctx: PipelineContext) => {
       // A pass's own commits, counted as `commits` is (no merges): a pass's commit list includes the
       // base commits its merge brought in, which read as `commits=1 (review=14)`.
       const ownNow = () => ownCommits(base, branch, project.root);
+      // The same commits by name, for the merge comment: `ownList()` ahead of a pass, `noteReviewed(before)` after it.
+      let reviewLog = landOnly && requeued ? firstAttemptReviewLog(results, issue.id) : [];
+      const ownList = () => ownCommitList(base, branch, project.root);
+      const noteReviewed = (before: string[]) => {
+        reviewLog = [...reviewLog, ...reviewCommitLines(before, base, branch, project.root)];
+      };
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       // A land-only branch runs no review: what its reviewers said stands from its head record, as `unmet` does.
       const ungated: string[] = landOnly ? [readHeads(project.root)[issue.id]?.ungated ?? ""].filter(Boolean) : [];
@@ -2155,6 +2163,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         await juncture("review");
         let reviewModel: string | undefined;
         const beforeReview = ownNow();
+        const listBefore = ownList();
         const review = await timed(
           issue.id,
           "review",
@@ -2197,6 +2206,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             if (said) addReport(issue.id, who, said);
           }
         }
+        noteReviewed(listBefore);
         return ownNow() - beforeReview;
       };
       if (landOnly && lateComment) {
@@ -2213,9 +2223,11 @@ export const createPipeline = (ctx: PipelineContext) => {
         // resolution. A clean land-only merge of the base needs no review.
         console.log(`${ref(issue.id)}: ${mergeConflicted ? "conflict resolved" : "merge carried from an earlier run"} - reviewing the resolution only.`);
         const beforeResolved = ownNow();
+        const listResolved = ownList();
         const resolved = await narrowReview(greenHead, "after conflict resolution", namedStrays);
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
         reviewCommits += ownNow() - beforeResolved;
+        noteReviewed(listResolved);
         noteChangelog(resolved.stdout, true);
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
@@ -2276,9 +2288,11 @@ export const createPipeline = (ctx: PipelineContext) => {
         } else if (since !== undefined) {
           console.log(`${ref(issue.id)}: only a base merge since its review at ${since.slice(0, 7)} - reviewing the merge only.`);
           const beforeMerged = ownNow();
+          const listMerged = ownList();
           const merged = await narrowReview(since, "after base merge");
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits = ownNow() - beforeMerged;
+          noteReviewed(listMerged);
           noteChangelog(merged.stdout, true);
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
@@ -2554,6 +2568,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         await juncture("review");
         let afterModel: string | undefined;
         const beforeAfter = ownNow();
+        const listAfter = ownList();
         const after = await timed(
           issue.id,
           "review",
@@ -2574,6 +2589,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (after) {
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits += ownNow() - beforeAfter;
+          noteReviewed(listAfter);
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
           const g = gapOf(after.stdout);
@@ -2602,6 +2618,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         // report 0 commits while shipping its work. Without the kit's base merge-ins.
         commits: ownCommits(base, branch, project.root),
         reviewCommits,
+        ...(reviewLog.length ? { reviewLog } : {}),
         repairs: earlierRepairs + repairs - idle,
         idleRepairs: earlierIdle + idle,
         ...(outside && { outside }),
