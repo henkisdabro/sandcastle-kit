@@ -18,7 +18,7 @@ import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, G
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
-import { sandboxConfig, sh } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -26,7 +26,9 @@ import { shq } from "./generated.ts";
 
 // `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
-export type Failure = { name: string; command: string; exitCode: number; output: string };
+// `output` is clipped (`clip`). `tests`: the failing-test ids of the gate's whole output, before the clip; unset when
+// either stream may have been cut by the sandbox's exec tail, and on a Failure built elsewhere (`wholeTests`).
+export type Failure = { name: string; command: string; exitCode: number; output: string; tests?: string[] };
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
@@ -163,7 +165,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // between a branch and the base.
         if (log && r.stderr) {
           const stderr = stripVTControlCharacters(r.stderr);
-          appendFileSync(log, `# stderr of ${g.name} (at most its last 64 KiB):\n${stderr.endsWith("\n") ? stderr : stderr + "\n"}`);
+          appendFileSync(log, `# stderr of ${g.name} (at most its last 8 MiB):\n${stderr.endsWith("\n") ? stderr : stderr + "\n"}`);
         }
         if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
@@ -171,10 +173,11 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // Without the colour codes a test runner prints into a pipe (vitest does, with no TTY and no TERM): the repair
         // prompt, `failureKey` and `failingTests` read plain text. The gates log is stripped as it is written, too: a
         // `grep "Test Files"` over colour-coded lines misses or garbles them.
-        const output = clip(
-          stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim(),
-        );
-        failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
+        const whole = stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim();
+        // The exec tail drops whole items, so after any drop more than half of its cap remains: a stream over half
+        // may have been cut, and a test missing from it is not known to be green.
+        const mayBeCut = r.stdout.length > EXEC_TAIL_CHARS / 2 || r.stderr.length > EXEC_TAIL_CHARS / 2;
+        failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output: clip(whole), ...(mayBeCut ? {} : { tests: failingTests(whole, Infinity) }) });
         // A timed-out gate may still be running in this container (or Docker
         // may not be answering): a later gate would run beside it, or wait out
         // its own timeout too.
@@ -551,13 +554,22 @@ export const failingTests = (output: string, limit = FAILING_TESTS_SHOWN) => {
 };
 
 /**
+ * The failing tests of one red run, for judging a flake: never from a clipped output, where a test missing from the
+ * list may only be in the part that was cut. `tests` when `runGates` read them from the whole output; else the
+ * output's own when it holds no clip marker (a Failure built elsewhere: a setup failure, a forced red); else none,
+ * which the readers below treat as unreadable.
+ */
+export const wholeTests = (f: Failure): string[] =>
+  f.tests ?? (f.output.split("\n").some((line) => CLIPPED.test(line)) ? [] : failingTests(f.output, Infinity));
+
+/**
  * Whether a red re-run failed on tests the first red did not name at all: a flake each time, so the gate is run once
  * more rather than repaired. Both lists must be readable (a gate with no test ids, lint or types, says nothing about
  * flakiness) and share no test.
  */
 export const disjointReds = (first: Failure, rerun: Failure) => {
-  const a = failingTests(first.output, Infinity);
-  const b = failingTests(rerun.output, Infinity);
+  const a = wholeTests(first);
+  const b = wholeTests(rerun);
   return a.length > 0 && b.length > 0 && !a.some((t) => b.includes(t));
 };
 
@@ -567,7 +579,7 @@ export const disjointReds = (first: Failure, rerun: Failure) => {
  * it, so the ids before an unreadable red are left out: only what is known is kept.
  */
 export const flakedTests = (reds: Failure[], greenAfter: boolean) => {
-  const runs = reds.map((f) => failingTests(f.output, Infinity));
+  const runs = reds.map(wholeTests);
   const flaked: string[] = [];
   for (const [i, ids] of runs.entries()) {
     const later = runs.slice(i + 1);
@@ -582,7 +594,7 @@ export const flakedTests = (reds: Failure[], greenAfter: boolean) => {
 export const threeRunsNote = (name: string, reds: Failure[]) => {
   const cap = 20;
   const lines = reds.map((f, i) => {
-    const ids = failingTests(f.output, Infinity);
+    const ids = wholeTests(f);
     // A third red with no readable test ids (a crash, a load failure) still gets its line, said as such.
     if (!ids.length) return `- run ${i + 1}: no test ids in its output`;
     return `- run ${i + 1}: ${ids.slice(0, cap).join(", ")}${ids.length > cap ? `, and ${ids.length - cap} more` : ""}`;
