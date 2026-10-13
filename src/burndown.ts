@@ -1126,10 +1126,10 @@ const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${
 
 /**
  * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
- * it says one), the sent-back tickets waiting to resolve, the green tickets queued for the landing worker, then the run's wait for a sandbox slot (`slotWait`, when
- * its oldest open wait began; `createSlotWaits`) once it is longer than a typical issue takes (`typicalMs`; with
- * no history nothing is said, as the estimate says nothing then). The wait is the run's, not a ticket's: a worker
- * leases its slot before it takes a ticket. No line when none of these is in flight.
+ * it says one), the sent-back tickets waiting to resolve, the green tickets queued for the landing worker, then the
+ * run's wait for a sandbox slot (`slotWait`, when its oldest open wait began; `createSlotWaits`) once it is longer
+ * than a typical issue takes (`typicalMs`; with no history nothing is said, as the estimate says nothing then). The wait
+ * is the run's, not a ticket's: a worker leases its slot before it takes a ticket. No line when none of these is in flight.
  */
 export const heartbeatLine = (o: {
   now: number;
