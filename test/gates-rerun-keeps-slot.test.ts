@@ -139,3 +139,113 @@ test("a red run that was not asked to re-run makes no second pass", async () => 
   assert.equal(result.failure?.name, "test");
   assert.equal(result.rerunOf, undefined);
 });
+
+/**
+ * A fake sandbox whose `test` gate (`run-tests`) answers each run with the next of `outputs`: a string is a red run
+ * printing it, `null` a green one, `{ timeout }` a gate stopped at its limit. Each run of the gate rewrites its own
+ * tracked file (`f1.ts`, `f2.ts`, ...), which the gates put back. Another run waits for the pool from a minute ago.
+ */
+const scripted = (outputs: (string | null | { timeout: true })[], lintRedOnRun?: number) => {
+  const ran: string[] = [];
+  const seen: { gate: string; locks: number; waits: number }[] = [];
+  let tests = 0;
+  let lints = 0;
+  let dirty: string | undefined;
+  let rival = false;
+  return {
+    ran,
+    seen,
+    exec: async (cmd: string) => {
+      if (cmd.startsWith("git status")) return { exitCode: 0, stdout: dirty ? ` M ${dirty}\0` : "", stderr: "" };
+      if (cmd.startsWith("git checkout HEAD --")) {
+        dirty = undefined;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      const gate = CONFIGURED.find((g) => cmd.includes(g.command));
+      if (!gate) return { exitCode: 0, stdout: "", stderr: "" };
+      if (!rival) {
+        rival = true;
+        other("rival", { demand: 1 });
+        mkdirSync(waitsDir, { recursive: true });
+        const since = Date.now() - 60_000;
+        writeFileSync(join(waitsDir, `gates-${since}-rival-0.wait`), `${process.pid} rival ${since} another run's gates\n`);
+      }
+      ran.push(gate.name);
+      seen.push({ gate: gate.name, ...mineInGates() });
+      if (gate.name === "lint") return { exitCode: ++lints === lintRedOnRun ? 1 : 0, stdout: "", stderr: lints === lintRedOnRun ? "lint boom" : "" };
+      const out = outputs[tests++] ?? null;
+      dirty = `f${tests}.ts`;
+      if (out === null) return { exitCode: 0, stdout: "", stderr: "" };
+      if (typeof out === "object") return { exitCode: 124, stdout: "", stderr: "" };
+      return { exitCode: 1, stdout: out, stderr: "" };
+    },
+  };
+};
+
+test("a re-run red on other tests than the first red gets a third pass in the same slot, with no second wait", async () => {
+  const box = scripted(["FAILED tests/a.py::x - boom", "FAILED tests/b.py::y - boom", null]);
+  const again: string[] = [];
+  const result = await runGates(project, box, "fixture gates", false, { again: (name) => void again.push(name) }, false, undefined, true, true);
+  assert.deepEqual(box.ran, ["lint", "test", "test", "test"]);
+  assert.deepEqual(again, ["test", "test"]);
+  // One lease for all three passes, and no wait of this run's behind the rival's older one.
+  assert.deepEqual(box.seen.map((s) => [s.gate, s.locks, s.waits]), [["lint", 1, 0], ["test", 1, 0], ["test", 1, 0], ["test", 1, 0]]);
+  assert.deepEqual(mineInGates(), { locks: 0, waits: 0 });
+  // The result is the third run's; the chain runs back through the re-run to the first red.
+  assert.equal(result.failure, undefined);
+  assert.deepEqual(result.gates.map((g) => [g.name, g.pass]), [["lint", true], ["test", true]]);
+  const second = result.rerunOf;
+  const first = second?.rerunOf;
+  assert.match(second?.failure?.output ?? "", /tests\/b\.py::y/);
+  assert.equal(typeof second?.ms, "number");
+  assert.match(first?.failure?.output ?? "", /tests\/a\.py::x/);
+  assert.equal(typeof first?.ms, "number");
+  assert.equal(first?.rerunOf, undefined);
+  assert.deepEqual(first?.gates.map((g) => [g.name, g.pass]), [["lint", true], ["test", false]]);
+  // The wait is the first run's alone.
+  assert.equal(result.waitMs, first?.waitMs);
+  assert.equal(second?.waitMs, undefined);
+  // The files all three runs' gates rewrote.
+  assert.deepEqual([...(result.rewrote ?? [])].sort(), ["f1.ts", "f2.ts", "f3.ts"]);
+});
+
+test("a ticket gate asked for a re-run alone, as a landing does, makes two passes on the same reds", async () => {
+  const box = scripted(["FAILED tests/a.py::x - boom", "FAILED tests/b.py::y - boom", null]);
+  const result = await runGates(project, box, "fixture gates", false, {}, false, undefined, true);
+  assert.deepEqual(box.ran, ["lint", "test", "test"]);
+  assert.equal(result.failure?.name, "test");
+  assert.equal(result.rerunOf?.rerunOf, undefined);
+});
+
+test("a re-run red on a later gate makes no third pass", async () => {
+  // The re-run of `lint` passes it and goes red on `test`, which never ran before: a first red there, not a flake.
+  const box = scripted(["FAILED tests/b.py::y - boom"], 1);
+  const result = await runGates(project, box, "fixture gates", false, {}, false, undefined, true, true);
+  assert.deepEqual(box.ran, ["lint", "lint", "test"]);
+  assert.equal(result.failure?.name, "test");
+  assert.equal(result.rerunOf?.rerunOf, undefined);
+});
+
+test("a re-run that timed out makes no third pass", async () => {
+  const box = scripted(["FAILED tests/a.py::x - boom", { timeout: true }, null]);
+  const result = await runGates(project, box, "fixture gates", false, {}, false, undefined, true, true);
+  assert.deepEqual(box.ran, ["lint", "test", "test"]);
+  assert.equal(result.failure?.exitCode, 124);
+  assert.equal(result.rerunOf?.rerunOf, undefined);
+});
+
+test("a re-run red on some of the same tests makes no third pass", async () => {
+  const box = scripted(["FAILED tests/a.py::x - boom", "FAILED tests/a.py::x - boom\nFAILED tests/b.py::y - boom", null]);
+  const result = await runGates(project, box, "fixture gates", false, {}, false, undefined, true, true);
+  assert.deepEqual(box.ran, ["lint", "test", "test"]);
+  assert.equal(result.rerunOf?.rerunOf, undefined);
+});
+
+test("a third run that is red too returns its failure with all three runs chained", async () => {
+  const box = scripted(["FAILED tests/a.py::x - boom", "FAILED tests/b.py::y - boom", "FAILED tests/c.py::z - boom"]);
+  const result = await runGates(project, box, "fixture gates", false, {}, false, undefined, true, true);
+  assert.deepEqual(box.ran, ["lint", "test", "test", "test"]);
+  assert.match(result.failure?.output ?? "", /tests\/c\.py::z/);
+  assert.match(result.rerunOf?.failure?.output ?? "", /tests\/b\.py::y/);
+  assert.match(result.rerunOf?.rerunOf?.failure?.output ?? "", /tests\/a\.py::x/);
+});

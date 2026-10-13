@@ -360,7 +360,10 @@ export type LandContext = {
 
 /** Keeps the test ids a ticket gate run failed (`LandContext.failedBefore`), its first run and its re-run alike: the run went red on them even where the re-run was green. */
 export const rememberFailed = <R extends Pick<GateRun, "failures" | "rerunOf">>(failedBefore: Map<string, Set<string>>, id: string, run: R): R => {
-  for (const f of [...run.failures, ...(run.rerunOf?.failures ?? [])]) {
+  // Every run of the chain (`GateRun.rerunOf`): the third run's result, the re-run, the first red.
+  const failures: GateRun["failures"] = [];
+  for (let r: Pick<GateRun, "failures" | "rerunOf"> | undefined = run; r; r = r.rerunOf) failures.push(...r.failures);
+  for (const f of failures) {
     const tests = failingTests(f.output, Infinity);
     if (!tests.length) continue;
     const known = failedBefore.get(id) ?? new Set<string>();

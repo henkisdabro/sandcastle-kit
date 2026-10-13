@@ -358,3 +358,39 @@ test("a third red that names no tests is said as such in the repair prompt", asy
   const repairs = h.passes.filter((p) => p.name === `repair-${ID}`);
   assert.match(repairs[0].args.GATE_OUTPUT, /run 3: no test ids in its output\n/);
 });
+
+// A gate result that already holds the third run (`rerunOf.rerunOf`, from `thirdOnDisjoint`): the same decisions as
+// the regate path, with no `regate` call - the gates ran three times inside one slot.
+const chained = (third: GateRun, second: GateRun, first: GateRun): GateRun => ({ ...third, rerunOf: { ...second, rerunOf: first } });
+
+test("a gate result holding three runs, the third green, makes no regate call and keeps the flaked tests", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.gates.push(chained(green("lint", "test"), red("test", specRed("beta")), red("test", specRed("alpha"), ["lint"])));
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate"]);
+  assert.equal(o.status, "green");
+  assert.equal(o.repairs, 0);
+  assert.deepEqual(o.gates.map((g) => [g.name, g.pass]), [["lint", true], ["test", true]]);
+  assert.deepEqual(o.flaked, [id("alpha"), id("beta")]);
+  assert.ok(o.said.some((l) => /test red on different tests from the first red - a flake each time, gating once more with no repair pass/.test(l)), o.said.join("\n"));
+  assert.ok(o.said.some((l) => /test red twice on different tests, then green on a third run - a flake, no repair pass/.test(l)), o.said.join("\n"));
+});
+
+test("a gate result holding three red runs goes to one repair pass that names the failing tests of all three, with no regate call", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push(chained(red("test", specRed("gamma", "delta")), red("test", specRed("beta")), red("test", specRed("alpha"), ["lint"])));
+  h.gates.push(BOTH);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "repair", "gate", "review"]);
+  const repairs = h.passes.filter((p) => p.name === `repair-${ID}`);
+  assert.equal(repairs.length, 1);
+  const prompt = repairs[0].args.GATE_OUTPUT;
+  assert.match(prompt, /run 1: test\/x\.test\.ts::alpha\n/);
+  assert.match(prompt, /run 2: test\/x\.test\.ts::beta\n/);
+  assert.match(prompt, /run 3: test\/x\.test\.ts::gamma, test\/x\.test\.ts::delta\n/);
+  assert.equal(o.status, "green");
+  assert.deepEqual(o.flaked, [id("alpha"), id("beta")], "gamma and delta are still red when the repair starts");
+});

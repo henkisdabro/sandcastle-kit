@@ -46,6 +46,8 @@ export type GateRun = {
   /**
    * Set when `runGates` ran the red gate again inside the same slot (`rerunOnRed`): the run that went red, and its `ms`, the
    * time it held the slot. This result is the re-run's, its `gates` the passes before the red gate and then the re-run's.
+   * With a third run (`thirdOnDisjoint`) the runs chain: this result is the third run's, its `rerunOf` the re-run (with its
+   * `ms`) and that one's `rerunOf` the first red run, which holds the `waitMs`.
    */
   rerunOf?: GateRun & { ms?: number };
 };
@@ -134,7 +136,7 @@ const restoreGateChanges = async (sandbox: Parameters<typeof execGate>[0], befor
 // `from` names the gate to start at, the first by default: a red gate's re-run (`PipelineContext.regate`) goes on
 // from the red one, in config order, since the gates before it already passed on this tree. The log and the
 // progress keep the configured numbering (`gate 2/3`), and a name that is no gate starts at the first.
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false) => {
+export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false) => {
   const asked = Date.now();
   const startAt = (name?: string) => Math.max(0, project.gates.findIndex((g) => g.name === name));
   const log = progress.log;
@@ -198,7 +200,20 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     // wait is the first run's, so the re-run records none. Not after a timeout, which is never re-run or repaired.
     if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return { ...first, waitMs };
     progress.again?.(red.name);
+    const rerunBegan = Date.now();
     const rerun = await pass(startAt(red.name));
+    const rerunMs = Date.now() - rerunBegan;
+    const second = rerun.failure;
+    // The third run, for a ticket's own gates (`thirdOnDisjoint`): the re-run is red on the same gate, not a timeout, on
+    // tests the first red did not name (`PipelineContext.gate`). Run here, in the lease this run holds - the pipeline's
+    // `regate` would queue behind every other run's gates again, the wait that the re-run in the slot was made to remove.
+    if (thirdOnDisjoint && second && second.name === red.name && second.exitCode !== 124 && disjointReds(red, second)) {
+      progress.again?.(second.name);
+      const third = await pass(startAt(second.name));
+      const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? []), ...(third.rewrote ?? [])])];
+      // The chain: the third run's result, then the re-run (with its `ms`), then the first red run (with the wait).
+      return { ...third, gates: [...first.gates.slice(0, redAt), ...third.gates], waitMs, rerunOf: { ...rerun, ms: rerunMs, rerunOf: { ...first, waitMs, ms: firstMs } }, ...(rewrote.length ? { rewrote } : {}) };
+    }
     // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
     // A file the first run's gates rewrote is reported too: the re-run starts at the red gate, so the gate that
     // rewrote it may not run again, and the run's `gateRewrites` line would lose it.
@@ -646,24 +661,32 @@ export const gateRed = (result: unknown): string[] | undefined => {
 /**
  * A gate step's timings lines: one, or for a run that re-ran its red gate inside its slot (`rerunOf`), the red run's
  * line and then the re-run's, as two separate runs wrote them. One line for both read as a single green pass: the
- * ticket card lost the red run, and the closing summary the memory pressure read while it went red. The wait is the
- * red run's, and the re-run's line has only its own gates.
+ * ticket card lost the red run, and the closing summary the memory pressure read while it went red. A third run in the
+ * same slot (`rerunOf.rerunOf`) is a line of its own, oldest first. The wait is the first run's, and each later line has
+ * only its own gates; the lines' `ms` sum to the step's.
  */
 export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, result: unknown): Record<string, unknown>[] => {
   const r = result as GateRun | undefined;
-  const red = r?.rerunOf;
-  if (!red || typeof red.ms !== "number" || !Array.isArray(r?.gates)) return [line];
-  const ms = Math.min(Math.max(0, Math.round(red.ms)), line.ms);
-  const redAt = red.failure ? red.gates.findIndex((g) => g.name === red.failure!.name) : -1;
+  if (!r?.rerunOf || !Array.isArray(r.gates)) return [line];
+  // The earlier runs, oldest first, then the result itself.
+  const runs: (GateRun & { ms?: number })[] = [];
+  for (let run: (GateRun & { ms?: number }) | undefined = r.rerunOf; run; run = run.rerunOf) runs.unshift(run);
+  if (runs.some((run) => typeof run.ms !== "number")) return [line];
   const { waitMs, ...rest } = line;
-  // The re-run's figures, which the red run's line must not carry: absent there unless the red run has its own.
+  // The later runs' figures, which an earlier run's line must not carry: absent there unless that run has its own.
   const { gates: _gates, peakMib: _peak, pressureSome: _some, pressureFull: _full, red: _red, ...common } = rest as Record<string, unknown>;
-  const redGates = gateRed(red);
+  let left = line.ms;
   // Undefined values are left out of the line by `JSON.stringify`.
-  return [
-    { ...common, ms, ...(waitMs ? { waitMs } : {}), ok: false, gates: gateMs(red), peakMib: peakOf(red), ...pressureFields(pressureOf(red)), red: redGates?.length ? redGates : undefined },
-    { ...rest, ms: line.ms - ms, gates: gateMs({ gates: r.gates.slice(Math.max(0, redAt)) }) },
-  ];
+  const lines: Record<string, unknown>[] = runs.map((run, i) => {
+    const ms = Math.min(Math.max(0, Math.round(run.ms!)), left);
+    left -= ms;
+    const redGates = gateRed(run);
+    return { ...common, ms, ...(i === 0 && waitMs ? { waitMs } : {}), ok: false, gates: gateMs(run), peakMib: peakOf(run), ...pressureFields(pressureOf(run)), red: redGates?.length ? redGates : undefined };
+  });
+  // The result's own gates: from the red gate on, the passes before it are the first run's.
+  const first = runs[0];
+  const redAt = first.failure ? first.gates.findIndex((g) => g.name === first.failure!.name) : -1;
+  return [...lines, { ...rest, ms: left, gates: gateMs({ gates: r.gates.slice(Math.max(0, redAt)) }) }];
 };
 
 /**

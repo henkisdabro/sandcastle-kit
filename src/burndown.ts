@@ -1319,7 +1319,10 @@ export type PipelineContext = {
    * One run of the project's gates in the ticket's sandbox. With `rerunOnRed` it runs a red gate again once, from that
    * gate on, inside the same gates slot (the result is the re-run's, its `rerunOf` the run that went red): the
    * pipeline then makes no `regate` call of its own, which would queue for a second slot. A port that ignores it is
-   * followed by `regate`.
+   * followed by `regate`. The ticket's gates, asked with `rerunOnRed`, also run a third time in that same slot when the
+   * re-run is red on the same gate on tests disjoint from the first red's (`runGates`' `thirdOnDisjoint`): the result is
+   * then the third run's, its `rerunOf` the re-run and that one's `rerunOf` the first red, and the pipeline makes no
+   * `regate` call for it either. The landing port asks for neither, so a landing runs at most twice.
    */
   gate: (box: PipelineBox, id: string, rerunOnRed?: boolean) => Promise<GateRun>;
   /**
@@ -2258,10 +2261,21 @@ export const createPipeline = (ctx: PipelineContext) => {
       const redAt = first ? gated.gates.findIndex((g) => g.name === first.name) : -1;
       // The red runs of the gate so far, before the one `gated` holds: the first red, then a red re-run's.
       const earlier: Failure[] = [];
+      // Set by a third run, wherever it ran: in the gates slot of the run that went red, or by `regate` below.
+      let threeRuns: { red: Failure; note: string } | undefined;
       if (gated.rerunOf) {
         // The gate port ran the re-run inside the slot of the run that went red (`rerunOnRed`).
-        if (gated.rerunOf.failure) earlier.push(gated.rerunOf.failure);
-        if (!gated.failure) console.log(`${ref(issue.id)}: ${gated.rerunOf.failure?.name ?? "a gate"} red, then green on a re-run - a flake, no repair pass`);
+        // With a third run (`thirdOnDisjoint`) the chain holds all three: the first red, then the re-run's, then `gated` itself.
+        const secondRun = gated.rerunOf.rerunOf ? gated.rerunOf : undefined;
+        const firstRun = secondRun?.rerunOf ?? gated.rerunOf;
+        if (firstRun.failure) earlier.push(firstRun.failure);
+        if (secondRun?.failure) {
+          earlier.push(secondRun.failure);
+          console.log(`${ref(issue.id)}: ${secondRun.failure.name} red on different tests from the first red - a flake each time, gating once more with no repair pass`);
+          if (!gated.failure) console.log(`${ref(issue.id)}: ${secondRun.failure.name} red twice on different tests, then green on a third run - a flake, no repair pass`);
+          // The note says the gate ran three times: only true when the third run went red on that same gate.
+          else if (gated.failure.name === secondRun.failure.name) threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
+        } else if (!gated.failure) console.log(`${ref(issue.id)}: ${firstRun.failure?.name ?? "a gate"} red, then green on a re-run - a flake, no repair pass`);
       } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
         const again = ctx.regate;
         const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, first.name));
@@ -2274,7 +2288,6 @@ export const createPipeline = (ctx: PipelineContext) => {
       // runs a third time. Red again, on any tests, goes to repair with all three runs' tests named; unreadable test
       // ids (a lint or type gate) keep the re-run's result as it was. Only the same gate: a re-run that passed the red
       // gate and went red on a later one (which never ran before) is a first red there, not a flake.
-      let threeRuns: { red: Failure; note: string } | undefined;
       const second = gated.failure;
       if (ctx.regate && second && earlier.length === 1 && earlier[0].name === second.name && second.exitCode !== 124 && disjointReds(earlier[0], second)) {
         const again = ctx.regate;
@@ -3070,7 +3083,7 @@ export const burndown = async (
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
   // `from`: a red gate's re-run, which starts at that gate (`gatesIn`'s own).
   // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
-  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false) => {
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false) => {
     const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
@@ -3101,7 +3114,7 @@ export const burndown = async (
         appendFileSync(gatesLog(project, id), rerunNote(name));
       },
       log: gatesLog(project, id),
-    }, priority, from, rerunOnRed);
+    }, priority, from, rerunOnRed, thirdOnDisjoint);
     // A ticket's gates only (the landing's own red is judged against these): the first run's failures and a re-run's alike.
     // Not a requeued ticket's: its gates run on a tree the base was merged into, so a test a landed ticket broke
     // there would read as the branch's own, and a second red at landing would name no ticket.
@@ -3288,7 +3301,7 @@ export const burndown = async (
     prompts,
     overrides,
     open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }), host.exclusive),
-    gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed),
+    gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>
       timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () =>
