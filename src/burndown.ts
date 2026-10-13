@@ -2208,8 +2208,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // they passed - `exitCode` is returned rather than thrown.
       // A requeue after a red landing gate, on a base that has not moved and a branch no agent has touched since
       // the merge: that merge is the tree the landing gate ran, so a gate run would return the same red. No full
-      // gate run, then: the red gate is re-run once below (the gates before it passed on this tree in the landing's
-      // sandbox), and the repair starts from the landing gate's own output when it is red again.
+      // gate run, then. A landing that already re-ran its red gate (`rerun`) leaves nothing to re-run: the repair
+      // starts from its output. Otherwise the red gate is re-run once below (the gates before it passed on this tree
+      // in the landing's sandbox), and the repair starts from the landing gate's own output when it is red again.
       const redAtLanding = requeued && joined && sh("git", ["rev-parse", branch], project.root) === joined.merge ? repairFromRed(reds.get(issue.id), joined) : undefined;
       reds.delete(issue.id);
       let gated: GateRun;
