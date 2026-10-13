@@ -174,7 +174,8 @@ directory, never in a real project.
 - Wrap prose in `docs/*.md` at about 100 columns, a sentence to start a line, and never keep a
   paragraph on one line: a grep or diff of a 10,000-character line overflows an agent's tool output,
   and two tickets that append to it conflict on it. `test/docs-line-length.test.ts` refuses a line
-  over 400 characters outside tables and fenced code.
+  over 400 characters outside tables and fenced code. A wrapped line never starts with a spaced
+  hyphen ( - ): Markdown reads it as a list item; the hyphen ends the line before.
 - Commit messages: `type: subject` (Conventional Commits), imperative, body says why.
 - A change made by hand goes on a `feature/`, `fix/`, `docs/` or `refactor/` branch cut from
   `origin/main`, and reaches main through a pull request the maintainer merges. A run's own

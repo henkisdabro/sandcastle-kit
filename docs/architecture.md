@@ -276,8 +276,8 @@ share; `test/sandbox-cpus-commands.test.ts` runs both commands against a fake `d
 `--cpus` each container got.
 
 **Gates leave the worktree as they found it** (`runGates`, `src/gates.ts`): `git status` before and
-after, and the paths the gates changed - a tracked file a build regenerated, a build left untracked
-- are put back, whatever was dirty before them is not touched.
+after, and the paths the gates changed - a tracked file a build regenerated, a build left untracked -
+are put back, whatever was dirty before them is not touched.
 Sandcastle keeps a dirty worktree and its branch at close, so one rewritten file used to leak every
 worktree the kit gated in, and the branch delete after landing failed.
 The tracked files restored are the `GateRun`'s `rewrote` (after an in-slot re-run, the first run's
@@ -727,8 +727,8 @@ state.
   The crashed ticket's note is `agentFailure`'s cleaning (cut at a word), and the pass's `catch`
   appends `! error: <line>` to the ticket's readable agent log (`logExpansionFailure`,
   `src/run.ts`), which otherwise ends at `Expanding shell expressions`.
-  The scheduler tells `{ kind: "stopped landing", cause }` once, the first time `landsNothing` holds
-  - from an ending, a stage change or the poll, since the host's refused write is read live and no
+  The scheduler tells `{ kind: "stopped landing", cause }` once, the first time `landsNothing` holds -
+  from an ending, a stage change or the poll, since the host's refused write is read live and no
   one adds it - so burndown prints
   `STOPPED landing: <what moved> - the run finishes what is in flight and lands nothing more; the closing summary says what to check.`
   (the guard's full message - commits, files, what to do - is said once, in the summary, which
@@ -1049,8 +1049,8 @@ per commit), and `isTestPath` (conventional test names; a test file a branch add
 `Touches:` overrun, and `overrunPaths` (`src/report.ts`) folds the modified ones into a count, "+7
 test files"), `isDocPath` (any `*.md`, and `docs/` and `skill/`: the docs a repo's rules have every
 change edit, folded by `overrunPaths` into "+2 docs files", so the listed paths are the source files
-a ticket missed; the close comment says "changed beyond its Touches line: ...", the report "<title>
-- beyond Touches: ..."), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one
+a ticket missed; the close comment says "changed beyond its Touches line: ...", the report "<title> -
+beyond Touches: ..."), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one
 is not an overrun when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out
 a file only a repair pass or a merge commit (a conflict resolution) changed: the repair commits are
 recorded as `repaired` in the ticket's head record (`heads.json`), across attempts.
@@ -1511,8 +1511,8 @@ by a killed holder counts for nothing and is removed by the next extra slot take
 `liveSlots` and the status view's slot count count it, so other runs see every live sandbox;
 `tryAcquire` takes only numbered slots, so it blocks none.
 Accepted while it lives: `usage()` can read 7/6 (the status view's gauge draws no free cell then),
-and `members()` counts it in its run's `held`, so that run's other tickets may wait for their share
-- the share arithmetic is left as it is, since hiding the slot there would hide it from the other
+and `members()` counts it in its run's `held`, so that run's other tickets may wait for their share -
+the share arithmetic is left as it is, since hiding the slot there would hide it from the other
 runs too.
 
 **A wait that holds a slot.**
@@ -2359,8 +2359,8 @@ ticket record types, the closed list of ticket states, the derived states, the t
 state to group and word, and the closed list of outcome kinds; the kit's own `src/` imports it too,
 so every write is typed by it, `readTickets` passes each state read from disk through the guard, and
 `readOutcomes` (`src/run.ts`) each outcome kind through `isOutcomeKind`), and `hooks/run-state.ts`
-(pure: the record read as groups, glyphs and colours, the palette and castle, `endPrompt(root, run)`
-- the end prompt's text, naming the run by numbers only: the exit code, the pid when a whole number
+(pure: the record read as groups, glyphs and colours, the palette and castle, `endPrompt(root, run)` -
+the end prompt's text, naming the run by numbers only: the exit code, the pid when a whole number
 and the start time re-rendered as local `HH:MM` when `startedAt` parses as a date, anything else
 left out, since the prompt is read when the session is idle and a later run may be live by then
 (`test/mod-end-prompt.test.ts`) - and the band cut to its width - `test/mod.test.ts` holds both to
