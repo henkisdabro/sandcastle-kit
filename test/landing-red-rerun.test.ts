@@ -223,3 +223,12 @@ test("the requeue the schedule tells, the outcome and the tracker comment of a r
   assert.match(said.tracker?.text ?? "", /already failing on this branch's own ticket gates in this run, so no landed ticket is named\./);
   assert.doesNotMatch(said.tracker?.text ?? "", /on the merged tree/);
 });
+
+test("the tests of all three runs of a ticket gate are kept, the first run's included", () => {
+  const kept = new Map<string, Set<string>>();
+  const run: GateRun = { ...GREEN, rerunOf: { ...redOn("test", "b.test.ts"), rerunOf: redOn("test", "a.test.ts") } };
+  assert.equal(rememberFailed(kept, "7", run), run);
+  assert.deepEqual([...kept.get("7")!].sort(), ["a.test.ts", "b.test.ts"]);
+  rememberFailed(kept, "9", { ...redOn("test", "z.test.ts"), rerunOf: { ...redOn("test", "y.test.ts"), rerunOf: redOn("test", "x.test.ts") } });
+  assert.deepEqual([...kept.get("9")!].sort(), ["x.test.ts", "y.test.ts", "z.test.ts"]);
+});
