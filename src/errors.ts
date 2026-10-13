@@ -73,14 +73,15 @@ export const githubServerError = (line: string): string | undefined => /\bHTTP (
 /**
  * Whether two prompt-expansion lines are the same failure: equal once the command (which names the ticket) and an
  * elapsed time are set aside. The command's own output stays: a 404 and a 500 are two failures. Every HTTP 5xx is
- * one failure, status and reason phrase alike: a 502 and then a 504 are the same GitHub outage.
+ * one failure, whatever follows the status: a 502 and then a 504 are the same GitHub outage.
  */
 export const sameExpansionFailure = (a: string, b: string): boolean => {
   const key = (line: string) =>
     line
       .replace(/`[^`]*`/g, "``")
       .replace(/\d+ms/g, "#ms")
-      .replace(/\bHTTP 5\d\d(?::\s*[A-Za-z]+(?: [A-Za-z]+){0,2})?/g, "HTTP 5xx");
+      // From the status on: `gh` words the rest by the response (`502 Bad Gateway`, a JSON message, the URL called).
+      .replace(/\bHTTP 5\d\d\b.*$/s, "HTTP 5xx");
   return key(a) === key(b);
 };
 

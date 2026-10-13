@@ -776,8 +776,8 @@ state.
   (`promptExpansionLine`, `src/errors.ts`: a `PromptError` or `PromptExpansionTimeoutError`, the
   library's `(FiberFailure)` prefix and the `Error:` tag dropped, the command's stderr kept) is
   counted by failure (`sameExpansionFailure`: the same once the command, which names the ticket, and
-  an elapsed time are set aside, and every `HTTP 5xx` with its reason phrase is one failure, so a
-  502 and then a 504 count together); the `SETUP_CRASHES`th (2nd) ticket to crash alike adds the
+  an elapsed time are set aside, and every `HTTP 5xx` is one failure whatever `gh` words after the
+  status, so a 502 and then a 504 count together); the `SETUP_CRASHES`th (2nd) ticket to crash alike adds the
   cause and tells `{ kind: "setup problem", line }` once.
   A line with an HTTP 5xx (`githubServerError`) is GitHub's failure, not the setup's: the stop line
   and the next step name the status and githubstatus.com instead of `doctor --verify`, and the next
@@ -785,7 +785,8 @@ state.
   Like a limit it is no safety stop: tickets in flight finish and green branches land, and each
   queued ticket ends as not begun. `burndown()` records `setupProblem` in the run record and prints
   the line; the closing summary's `Stopped starting tickets` line quotes the error once and its next
-  step points at `sandcastle doctor --verify` instead of the per-ticket comment hint
+  step points at `sandcastle doctor --verify` (githubstatus.com for a 5xx) instead of the per-ticket
+  comment hint
   (`test/stop-on-setup-crash.test.ts`).
   The crashed ticket's note is `agentFailure`'s cleaning (cut at a word), and the pass's `catch`
   appends `! error: <line>` to the ticket's readable agent log (`logExpansionFailure`,

@@ -28,6 +28,12 @@ test("a 502 and then a 504 are the same expansion failure, a 404 or a 500 beside
   assert.ok(!sameExpansionFailure(line("1", "HTTP 401: Bad credentials"), line("2", "HTTP 403: Forbidden")));
 });
 
+test("a 5xx is one failure whatever gh words after the status: the status repeated, a JSON message, the URL called", () => {
+  assert.ok(sameExpansionFailure(line("1", "HTTP 502: 502 Bad Gateway (https://api.example.com/graphql)"), line("2", "HTTP 504: 504 Gateway Timeout (https://api.example.com/graphql)")));
+  assert.ok(sameExpansionFailure(line("1", "HTTP 502: Bad Gateway (https://api.example.com/graphql)"), line("2", "HTTP 504: We couldn't respond to your request in time (https://api.example.com/repos/o/r/issues/2)")));
+  assert.ok(!sameExpansionFailure(line("1", "HTTP 502: Bad Gateway"), line("2", "HTTP 404: Not Found")));
+});
+
 test("a 502 then a 504 stop the run after the second ticket, as one failure", async () => {
   const started: string[] = [];
   const { stop } = await createSchedule<{ id: string }, { issue: string }, unknown, string>({ tickets: ["1", "2", "3"].map((id) => ({ id })) }).run({
