@@ -66,7 +66,7 @@ test("the attempt takes its worker's slot, and the summary line labels the ticke
   assert.match(src, /slot: \(wanted\) => sandboxSlot\("next ticket", \(\) => !wanted\(\)\)/);
   assert.match(src, /let lease: SlotLease \| undefined = slot;/);
   assert.match(src, /for \(await juncture\("start", start\); !lease; await juncture\("start", start\)\) await take\(\);/);
-  assert.match(src, /pipeline\(issue, \{ juncture: [^\n]*, paused, resolveWaitMs \}\)/);
+  assert.match(src, /pipeline\(issue, \{ juncture: [^\n]*, paused, gates, resolveWaitMs \}\)/);
   assert.match(src, /times = withQueued\(times, queuedMs\)/);
   assert.match(src, /const time = ticketTime\(took\.get\(o\.issue\), waited\.get\(o\.issue\), final\[o\.issue\]\?\.state === "merged" \? landingMs\.get\(o\.issue\) : undefined\)/);
   assert.match(src, /landingMs\.set\(id, \(landingMs\.get\(id\) \?\? 0\) \+ took\.elapsed\)/);

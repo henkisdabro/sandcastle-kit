@@ -1293,6 +1293,9 @@ export const createHoldRecord = (o: {
           run.ticket(c.id, { note });
           return;
         }
+        case "resolve queued":
+          run.ticket(c.id, { note: "waits for a free slot to resolve its conflict" });
+          return;
         case "resolve starts":
           o.say(`  ${o.ref(c.id)} resolves its conflict now: the tickets it waited for have landed or left the run`);
           run.ticket(c.id, { note: null });
@@ -1302,7 +1305,7 @@ export const createHoldRecord = (o: {
 };
 
 /**
- * A resolve wait's note: the branches queued to land have landed, and a ticket still in its pipeline "lands or
+ * A resolve wait's note: the branches queued to land have landed, and a ticket still in its gates "lands or
  * leaves the run" - it may never reach a landing, so "has landed" would promise one.
  */
 export const resolveWaitNote = (ref: (id: string) => string, c: { for: string[]; running: string[] }): string => {
@@ -1699,10 +1702,11 @@ export const createPipeline = (ctx: PipelineContext) => {
   };
 
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
-  // `at.resolveWaitMs`: a sent-back ticket's wait for the tickets ahead of its resolve, which came before the attempt:
-  // the first `setup` step records it as its `waitMs`. No wait for a sandbox slot is a ticket's: its worker held the
+  // `at.gates`: told as the ticket is past its review and goes to its gates, which a conflicted ticket's resolve waits for.
+  // `at.resolveWaitMs`: a sent-back ticket's wait, from its requeue to the attempt (for the tickets ahead of its resolve,
+  // and for a free slot after), which came before the attempt: the first `setup` step records it as its `waitMs`. No wait for a sandbox slot is a ticket's: its worker held the
   // slot before it took the ticket (slot first).
-  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; resolveWaitMs?: number }): Promise<Outcome> => {
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; gates?(): void; resolveWaitMs?: number }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -2302,6 +2306,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       // in the landing's sandbox), and the repair starts from the landing gate's own output when it is red again.
       const redAtLanding = requeued && joined && sh("git", ["rev-parse", branch], project.root) === joined.merge ? repairFromRed(reds.get(issue.id), joined) : undefined;
       reds.delete(issue.id);
+      // Past its review: a conflicted ticket's resolve that shares its files waits for it from here (the scheduler's `ahead`).
+      at?.gates?.();
       let gated: GateRun;
       if (redAtLanding) {
         const name = redAtLanding.failure.name;
@@ -3470,7 +3476,7 @@ export const burndown = async (
   };
   // One attempt of a ticket (schedule.ts runs it), in the sandbox slot its worker leased (`slot`): the usage check and
   // the tracker's word before it, then its pipeline.
-  const attempt = async (issue: Issue, { last, juncture, paused, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
+  const attempt = async (issue: Issue, { last, juncture, paused, gates, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
     // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
     // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
     let lease: SlotLease | undefined = slot;
@@ -3513,7 +3519,7 @@ export const burndown = async (
         // A pause gives the slot back and waits; the ticket then leases its own, in the time parked. Its worker's slot
         // was gone too when the run was paused as the attempt began.
         for (await juncture("start", start); !lease; await juncture("start", start)) await take();
-        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, resolveWaitMs });
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, gates, resolveWaitMs });
       } finally {
         give();
       }
@@ -3621,6 +3627,8 @@ export const burndown = async (
       case "resolve waits":
         // The heartbeat's wait counts from the first telling; a later one only changes the list.
         if (!resolving.has(c.id)) resolving.set(c.id, Date.now());
+        return holds.tell(run, c);
+      case "resolve queued":
         return holds.tell(run, c);
       case "resolve starts":
         resolving.delete(c.id);
