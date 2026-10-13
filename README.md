@@ -612,13 +612,12 @@ ask the same, and take `--api-key` as well. Red only on a terminal and without `
 say it either way.
 
 When another run is live and holds or wants sandbox slots, the start also says how the machine is
-split, before the estimate: `webshop is live (6 slots, demand 5): this run's share is 3, its tickets 2
-at a time (one slot is kept for landing); it starts as webshop's tickets finish, the first likely in ~12m`. The wait comes from that project's usual
+split, before the estimate: `webshop is live (6 slots, demand 5): this run's share is 2
+(one of the pool's slots is kept for any run's landing); it starts as webshop's tickets finish, the first likely in ~12m`. The wait comes from that project's usual
 time for an issue and the ages of its working tickets, so it is left out where that project has no
 history. A run from an older kit is named as one that ignores shares (`webshop's run predates
 shares: it keeps taking free slots until it ends`); the run still starts. Nothing is asked: the
-split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share less the
-slot kept for landing (from a share of 2; a dry run keeps none), not the machine limit, and its line says so: `at this run's share now, 1 at a time; shorter as webshop finishes` (a run alone prints neither). In a detached run the line is in `.sandcastle/logs/run-output.log`. A run that shares its project's name with another (a second checkout, say) is named with its folder (`site (site-review)`), or its pid (`site (pid 4242)`) where the folder is unknown or alike.
+split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share (the one slot kept for landing is outside it), not the machine limit, and its line says so: `at this run's share now, 1 at a time; shorter as webshop finishes` (a run alone prints neither). In a detached run the line is in `.sandcastle/logs/run-output.log`. A run that shares its project's name with another (a second checkout, say) is named with its folder (`site (site-review)`), or its pid (`site (pid 4242)`) where the folder is unknown or alike.
 
 **While it runs.** The status view opens first, before the slow checks, and its RUN lane names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
@@ -721,7 +720,7 @@ Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside i
 | `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person (a held branch you then merged by hand reads `merged`, "closes on push" until the merge is on `origin`'s base branch; merged with a "part of" merge it reads `merged by hand, partly done: stays open`, pushed or not); `uncommitted`: the agent's work is in its kept worktree, not committed |
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
-| `queued` `blocked` | Not started, in this run: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots (or that a slot of it is kept for landing), or what it waits for and whether this run holds that blocker. With no run live, every labelled ticket reads `queued` (`for the next run`). A `requeued` line marks a second attempt this run, after a conflict or a red at landing, or a conflict its pipeline found before its review or gates |
+| `queued` `blocked` | Not started, in this run: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots (or that the pool's last free slot is kept for a landing), or what it waits for and whether this run holds that blocker. With no run live, every labelled ticket reads `queued` (`for the next run`). A `requeued` line marks a second attempt this run, after a conflict or a red at landing, or a conflict its pipeline found before its review or gates |
 | `later` | A labelled ticket outside the live run (a run that names its tickets, or one queued after the start), queued or blocked: `next run`, or `waits for #N to close`. Grey, after `merged` and before `left over` in the list, and counted apart in the legend: `queued` and `blocked` count this run's tickets only. The collapsing view (`sandcastle status`, the Herdr status pane) draws no row for it and counts them in one line at the table's foot, `43 for a later run (#382-#609), 2 blocked`, so a long queue never pushes the run's rows off the pane; `sandcastle status all` and `status 0` list each as a row |
 | `paused` | Parked between two phases of a [paused](#-pausing-a-run) run: its sandbox is closed and its branch kept, and the note names the phase it resumes at and the commit (`before review at a1b2c3d`) |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early. This run's landings are listed above earlier runs' merged rows |
@@ -1702,24 +1701,25 @@ waits to land, never more than its concurrency; a ticket held for a blocker adds
 blocker lands, and a run that has drained its queue asks for none, nor does a [paused](#-pausing-a-run)
 run once the passes in flight have ended (its tickets give their slots back). The pool is divided equally
 between the runs that ask for slots, and a run that needs less than an equal part releases the rest
-to the others, again equally. A run's share is its part: with two runs wanting 5 each on 6 slots,
-each gets 3; a run wanting 1 leaves 5 to the other; a run alone gets everything it asks for, as
+to the others, again equally. A run's share is its part of the pool less the one slot kept for landing (below): with two runs
+wanting 5 each on 6 slots, they get 3 and 2 (the earlier gets the odd one); a run wanting 1 leaves 4 to the other; a run alone gets everything it asks for, as
 before. A run at or above its share (the slots it holds count) takes no new slot while another run
 below its share wants one; with no one wanting one, a free slot is taken as usual. Nothing is stopped:
 a run over its share keeps every slot it holds and shrinks as its tickets finish, so a second run
 that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
-fills up, and when a run ends the others grow back. A landing comes out of the run's own share,
-and still goes before a new ticket within it: while the share is 2 or more, the run's tickets hold
-one slot fewer than the share, which is kept for landing (a run alone keeps one of the machine's
-slots the same way); at a share of 1 the slot is a ticket's, and a landing waits for it to free.
-While no landing of the run waits, another run at or above its own share may use the kept slot, so
-it does not sit idle; the run's landing then takes the next slot that frees, ahead of that run's
-tickets (a third run below its share that has waited longer still goes first).
+fills up, and when a run ends the others grow back. One slot of the pool is kept for any run's landing, not one per run: beside another run the shares
+split the pool less that slot, so a run's tickets use their whole share, and no ticket takes the pool's
+last free slot while another run is live. A landing may take it, whatever its run holds against its
+share, and when two runs' landings want it, the longer wait goes first (a run alone keeps one of the
+machine's slots the same way, in its worker count). With two runs wanting 5 each on 6 slots that is
+3 + 2 tickets and a free slot for landing; with three, 2 + 2 + 1; with four, 2 + 1 + 1 + 1; on 3 slots
+between two runs, 1 + 1. While a landing runs, a ticket that ends does not hand its slot to a new
+ticket until the landing is done.
 Gate slots have no shares: they go to the longest wait.
 The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
 Herdr tab bar shows each live run's share, and while the run waits for a slot its share holds back, the
-tickets next to start say `waits for the run's share` (or `waits: slot kept to land`, when the last slot of
-its share is kept for a landing). A run started by an older kit knows no shares and
+tickets next to start say `waits for the run's share` (or `waits: slot kept to land`, when the pool's last free
+slot is kept for a landing). A run started by an older kit knows no shares and
 ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit (a session or weekly limit message in its log) stops that run's queue; the
 tickets it cut short end as not started and runnable again, not as crashes, and the closing summary gives the

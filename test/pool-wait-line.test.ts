@@ -29,7 +29,7 @@ const looks = () => sleep(30);
 
 test("a wait whose reason flips prints one line, then one more after 15 minutes naming the current reason", async () => {
   joinPool("alpha", 6, 6);
-  other("beta", { demand: 6, held: 3 });
+  other("beta", { demand: 6, held: 3, since: Date.now() + 60_000 });
   setHeld(RUN_ID, 3);
   const t = ticket("flipper");
   await until(() => t.why.length === 1, "the first reason");
@@ -37,10 +37,10 @@ test("a wait whose reason flips prints one line, then one more after 15 minutes 
   assert.equal(lines().length, 1);
   assert.match(lines()[0]!, /flipper: waiting for a machine-wide sandboxes slot \(6 in use\)/);
 
-  // The other run waits below its share while this one holds its own: "share", then back to "slots", and again.
+  // The other run (share 2 of the 5 slots beside this one) waits below its share while this one holds its own: "share", then back to "slots", and again.
   const flip = async (to: "share" | "slots") => {
     if (to === "share") waiting("beta", Date.now());
-    setHeld("beta", to === "share" ? 2 : 3);
+    setHeld("beta", to === "share" ? 1 : 3);
     const before = t.why.length;
     await until(() => t.why.length > before, `the reason to change to ${to}`);
     assert.equal(t.why.at(-1), to);
@@ -66,7 +66,7 @@ test("a wait whose reason flips prints one line, then one more after 15 minutes 
 
 test("waits under one label for the same reason print one line: each worker's next ticket is a wait of its own", async () => {
   joinPool("alpha", 6, 6);
-  other("beta", { demand: 6, held: 3 });
+  other("beta", { demand: 6, held: 3, since: Date.now() + 60_000 });
   setHeld(RUN_ID, 3);
   const first = ticket("alpha next ticket");
   await until(() => first.why.length === 1, "the first wait's reason");
