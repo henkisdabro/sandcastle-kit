@@ -2057,15 +2057,30 @@ id however many lines (content blocks) carry it - and hands the ticket's live fi
 `liveTokenWriter` (`src/run.ts`), which writes `tokens` as the ticket's finished passes (`spent`,
 the results' own figures) plus the live one, and `cacheRead` (the same passes' cache-read input
 tokens, `ticketTokens` in `src/run.ts`) beside it for the TypeScript status view's cache share.
-A pass that returns is counted by its result and not by its log: `timed` calls `settle(issue)` in
-its `finally` (the watch reads what the log gained first, then stops counting every pass of that
+A pass that returns is counted by its result and not by its log: `timed` calls `settled` of the
+run's token count (`createTokenCount`, `src/run.ts`) in its `finally`, which calls the watch's
+`settle(issue)` (the watch reads what the log gained first, then stops counting every pass of that
 ticket so far, whatever it reads of them later), in the same synchronous step that adds the result
-to `spent`, so a tick can never see a pass in both.
+to `spent` (`ended`), so a tick can never see a pass in both.
+`settle` returns what each pass it settles spent, oldest first, beside the peak context; a pass the
+stream showed no usage for has no figure.
+A pass that did not return has no result, so the figure its stream showed is kept instead: the result
+covers the step's last pass, and every pass before it (a review that threw before its fallback model
+ran, which writes the same log under a second marker) and every pass of a step that returned no figure
+(a failed cross-review, which `crossReview` swallows) is a failed one.
+Its tokens go into `spent`, the ticket's and the run's `tokens`, and the timings line of the step.
+The ticket's and the run's record carry `tokensNote`: `incomplete` when a failed pass is in the
+figure (it may have spent more than its stream showed), `unknown` when a pass failed with no usage in
+its stream and the ticket has no other figure (`tokens` is then absent, never zero).
+The closing summary words them (`tokenNoteLines`, `src/report.ts`); the status view's TOKENS column
+only reads `tokens`.
+A failed pass's tokens are on its step's timings line, so the per-model line puts a failed review's
+under the model the step ended on.
 A Codex pass has no assistant lines and shows when it ends. `test/ticket-live-tokens.test.ts` holds
-it.
+it, and `test/tokens-thrown-pass.test.ts` the failed passes' figures.
 The same count keeps each pass's **`peakContext`**: the largest `input + cacheWrite + cacheRead` of
-one assistant message (`contextOf`, `src/usage.ts`), which `settle(issue)` returns; `timed` writes
-it on the pass's timings line as `peakContext` and on the ticket's run record as `peakContext`, an
+one assistant message (`contextOf`, `src/usage.ts`), which `settle(issue)` returns as `peakContext`;
+`timed` writes it on the pass's timings line as `peakContext` and on the ticket's run record as `peakContext`, an
 object of the largest per kind of pass (`implement`, `review`, `repair`; `peakContexts` in
 `src/run.ts`).
 The closing summary (`contextLines`, `src/report.ts`) gives a ticket a `Large context:` line for

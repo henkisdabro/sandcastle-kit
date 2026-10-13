@@ -152,6 +152,8 @@ export type TicketRecord = {
   tokens?: string;
   /** Input tokens served from the cache, of the ticket's passes so far (the same passes as `tokens`): the status view shows its share of the input. Absent in an older record. */
   cacheRead?: number;
+  /** Set when an agent pass of the ticket threw: `incomplete` - `tokens` is a floor, the pass may have spent more than its stream showed - or `unknown` - it threw before its stream showed any usage, so `tokens` is absent (never zero). Absent when no pass threw. */
+  tokensNote?: "incomplete" | "unknown";
   /** The largest context one turn of the ticket's passes held (input + cache write + cache read tokens of one assistant message), by the pass that held it (`implement`, `review`, `repair`): the closing summary flags a pass over `PEAK_CONTEXT_WARN`. Absent in an older record and for a Codex pass. */
   peakContext?: Record<string, number>;
   minutes?: number;
@@ -354,6 +356,8 @@ export type RunRecord = {
   waitsFor?: "share" | "landing";
   typical?: unknown;
   tokens?: string;
+  /** The same note for the run's `tokens`, set when any ticket's carries one (`incomplete`; `unknown` when no figure at all). */
+  tokensNote?: "incomplete" | "unknown";
   /** Why the run stopped before the end of its queue. */
   stopped?: string;
   /** The stop's cause in a few words (`main moved while sandboxes ran`), beside `stopped`: the summary words its next step by it. */

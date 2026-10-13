@@ -42,12 +42,12 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
@@ -60,7 +60,7 @@ import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -92,6 +92,8 @@ type Outcome = {
   /** The branch tip the gates passed on; landing refuses a branch that moved since. */
   head?: string;
   reviewCommits: number;
+  /** The review commits as `<short hash> <subject>` lines (`reviewCommitLines`): the merge comment lists them. */
+  reviewLog?: string[];
   /** The repair passes that committed: one that changed nothing (the repairer judged the red a flake) is `idleRepairs`. */
   repairs: number;
   idleRepairs?: number;
@@ -1126,10 +1128,10 @@ const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${
 
 /**
  * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
- * it says one), the sent-back tickets waiting to resolve, then the run's wait for a sandbox slot (`slotWait`, when
- * its oldest open wait began; `createSlotWaits`) once it is longer than a typical issue takes (`typicalMs`; with
- * no history nothing is said, as the estimate says nothing then). The wait is the run's, not a ticket's: a worker
- * leases its slot before it takes a ticket. No line when none of these is in flight.
+ * it says one), the sent-back tickets waiting to resolve, the green tickets queued for the landing worker, then the
+ * run's wait for a sandbox slot (`slotWait`, when its oldest open wait began; `createSlotWaits`) once it is longer
+ * than a typical issue takes (`typicalMs`; with no history nothing is said, as the estimate says nothing then). The wait
+ * is the run's, not a ticket's: a worker leases its slot before it takes a ticket. No line when none of these is in flight.
  */
 export const heartbeatLine = (o: {
   now: number;
@@ -1137,6 +1139,7 @@ export const heartbeatLine = (o: {
   working: { ref: string; phase: string; since: number }[];
   landing?: { ref: string; phase?: string; since: number }[];
   resolving?: { ref: string; since: number }[];
+  queued?: { ref: string; since: number }[];
   slotWait?: number;
   typicalMs?: number;
 }): string | undefined => {
@@ -1145,6 +1148,7 @@ export const heartbeatLine = (o: {
   if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.queued?.length) parts.push(`queued to land: ${o.queued.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}`);
   return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
 };
@@ -2106,6 +2110,12 @@ export const createPipeline = (ctx: PipelineContext) => {
       // A pass's own commits, counted as `commits` is (no merges): a pass's commit list includes the
       // base commits its merge brought in, which read as `commits=1 (review=14)`.
       const ownNow = () => ownCommits(base, branch, project.root);
+      // The same commits by name, for the merge comment: `ownList()` ahead of a pass, `noteReviewed(before)` after it.
+      let reviewLog = landOnly && requeued ? firstAttemptReviewLog(results, issue.id) : [];
+      const ownList = () => ownCommitList(base, branch, project.root);
+      const noteReviewed = (before: string[]) => {
+        reviewLog = [...reviewLog, ...reviewCommitLines(before, base, branch, project.root)];
+      };
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       // A land-only branch runs no review: what its reviewers said stands from its head record, as `unmet` does.
       const ungated: string[] = landOnly ? [readHeads(project.root)[issue.id]?.ungated ?? ""].filter(Boolean) : [];
@@ -2155,6 +2165,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         await juncture("review");
         let reviewModel: string | undefined;
         const beforeReview = ownNow();
+        const listBefore = ownList();
         const review = await timed(
           issue.id,
           "review",
@@ -2197,6 +2208,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             if (said) addReport(issue.id, who, said);
           }
         }
+        noteReviewed(listBefore);
         return ownNow() - beforeReview;
       };
       if (landOnly && lateComment) {
@@ -2213,9 +2225,11 @@ export const createPipeline = (ctx: PipelineContext) => {
         // resolution. A clean land-only merge of the base needs no review.
         console.log(`${ref(issue.id)}: ${mergeConflicted ? "conflict resolved" : "merge carried from an earlier run"} - reviewing the resolution only.`);
         const beforeResolved = ownNow();
+        const listResolved = ownList();
         const resolved = await narrowReview(greenHead, "after conflict resolution", namedStrays);
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
         reviewCommits += ownNow() - beforeResolved;
+        noteReviewed(listResolved);
         noteChangelog(resolved.stdout, true);
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
@@ -2276,9 +2290,11 @@ export const createPipeline = (ctx: PipelineContext) => {
         } else if (since !== undefined) {
           console.log(`${ref(issue.id)}: only a base merge since its review at ${since.slice(0, 7)} - reviewing the merge only.`);
           const beforeMerged = ownNow();
+          const listMerged = ownList();
           const merged = await narrowReview(since, "after base merge");
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits = ownNow() - beforeMerged;
+          noteReviewed(listMerged);
           noteChangelog(merged.stdout, true);
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
@@ -2554,6 +2570,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         await juncture("review");
         let afterModel: string | undefined;
         const beforeAfter = ownNow();
+        const listAfter = ownList();
         const after = await timed(
           issue.id,
           "review",
@@ -2574,6 +2591,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (after) {
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits += ownNow() - beforeAfter;
+          noteReviewed(listAfter);
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
           const g = gapOf(after.stdout);
@@ -2602,6 +2620,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         // report 0 commits while shipping its work. Without the kit's base merge-ins.
         commits: ownCommits(base, branch, project.root),
         reviewCommits,
+        ...(reviewLog.length ? { reviewLog } : {}),
         repairs: earlierRepairs + repairs - idle,
         idleRepairs: earlierIdle + idle,
         ...(outside && { outside }),
@@ -2991,10 +3010,14 @@ export const burndown = async (
   // The heartbeat's other tickets in flight: a landing (its step, once it says one) and a sent-back ticket's wait to resolve (since it was told).
   const landing = new Map<string, { phase?: string; since: number }>();
   const resolving = new Map<string, number>();
+  // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
+  const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
-  const spent = new Map<string, Tokens>();
+  // The run's own count of tokens (`createTokenCount`), settled against the usage watch, which is made below.
+  const count = createTokenCount(run, (issue) => usageWatch?.settle(issue));
+  const spent = count.spent;
   const keptWorktrees: { issue: string; path: string }[] = [];
   // Tracked files a gate rewrote, named once for the run however many worktrees it was gated in.
   const gateRewrites = new Set<string>();
@@ -3013,6 +3036,7 @@ export const burndown = async (
     } else run.update({ stage: phase });
     let ok = false;
     let tokens: Tokens | undefined;
+    let counted = false;
     let gateTimes: Record<string, number> | undefined;
     let peakMib: number | undefined;
     let pressure: ReturnType<typeof pressureOf>;
@@ -3034,16 +3058,17 @@ export const burndown = async (
       // `ok` is pass/fail: a gate run with a red gate is not ok, though it ran.
       ok = !red?.length;
       if (tokens) {
-        spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
-        run.update({ tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) });
-        if (issue) run.ticket(issue, { ...ticketTokens(spent.get(issue)!) });
+        count.ended(issue, tokens);
+        counted = true;
       }
       return result;
     } finally {
       // The pass is over, and its result carries its own figure (in `spent` above, with nothing in between that a
-      // tick could interleave with): what its log showed stops counting as live. A pass that threw has none, and nothing of it is kept.
+      // tick could interleave with): what its log showed stops counting as live. A pass that threw has no result, so
+      // what its log showed is kept instead (`kept`, noted `incomplete`, or `unknown` with no usage in the stream), as is
+      // that of a review that threw before its fallback ran, and of a cross-review that failed and was swallowed.
       // Its largest turn's context (`peakContext`) goes to the timings line and the ticket's record, even when the pass threw.
-      const peakContext = issue ? usageWatch?.settle(issue) : undefined;
+      const { peakContext, kept, note: tokensNote } = count.settled(issue, counted);
       if (issue && peakContext) run.ticket(issue, { peakContext: peakContexts(run.tickets()[issue]?.peakContext, phase, peakContext) });
       active.delete(issue);
       const m = model?.();
@@ -3055,7 +3080,8 @@ export const burndown = async (
         ...(touchPaths.has(issue) ? { touches: touchPaths.get(issue) } : {}),
         ...(bodyChars.has(issue) ? { bodyChars: bodyChars.get(issue) } : {}),
         ...(m ? { model: m } : {}),
-        ...(tokens ? { tokens } : {}),
+        ...(tokens || kept ? { tokens: addTokens(tokens ?? NO_TOKENS, kept ?? NO_TOKENS) } : {}),
+        ...(tokensNote ? { tokensNote } : {}),
         ...(peakContext ? { peakContext } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
         ...(peakMib ? { peakMib } : {}),
@@ -3118,7 +3144,7 @@ export const burndown = async (
     providers: planUsage.map((u) => u.provider),
     // A record the next turn replaced is not this watch's to write.
     finished: () => run.finished,
-    tokens: { owner: logOwner, write: liveTokenWriter(run, spent) },
+    tokens: { owner: logOwner, write: liveTokenWriter(run, spent, count.noteOf) },
     write: (reading) => {
       if (run.finished) return;
       planUsage[planUsage.findIndex((u) => u.provider === reading.provider)] = reading;
@@ -3261,6 +3287,7 @@ export const burndown = async (
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
       landing: [...landing].map(([n, l]) => ({ ref: ref(n), ...(l.phase ? { phase: l.phase } : {}), since: l.since })),
       resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
+      queued: [...queuedToLand].map(([n, since]) => ({ ref: ref(n), since })),
       slotWait: slotWaits.since,
       typicalMs: typicalIssueMs(typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)))),
     });
@@ -3549,11 +3576,10 @@ export const burndown = async (
       const value = ended.value;
       const report = attempted(issue.id, ended, check);
       bookkeep(issue.id, () => {
-        const tokens = spent.get(issue.id);
         run.ticket(issue.id, {
           commits: value.commits,
           minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
-          ...(tokens ? ticketTokens(tokens) : {}),
+          ...count.fields(issue.id),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.flaked?.length ? { flaked: value.flaked } : {}),
           ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
@@ -3573,7 +3599,10 @@ export const burndown = async (
         view.finish(issue.id, word, check !== undefined || last());
       });
       // Its outcome now, not only at its landing: a branch waiting for landing had none for this run.
-      if (report.kind === "green") bookkeep(issue.id, () => ledger.ready(issue.id, value, heldAtLanding(value)));
+      if (report.kind === "green") {
+        queuedToLand.set(issue.id, Date.now());
+        bookkeep(issue.id, () => ledger.ready(issue.id, value, heldAtLanding(value)));
+      }
       // To the landing worker as it ends, not when the slowest pipeline does.
       return report;
     }
@@ -3604,6 +3633,7 @@ export const burndown = async (
   const landings: typeof landingPorts = {
     ...landingPorts,
     land: async (o, behind) => {
+      queuedToLand.delete(o.issue);
       landing.set(o.issue, { since: Date.now() });
       try {
         return await landingPorts.land(o, behind);
@@ -3640,6 +3670,7 @@ export const burndown = async (
       case "ended":
         // A wait the run's stop cut short is told no "resolve starts".
         resolving.delete(c.id);
+        queuedToLand.delete(c.id);
         // Its label refuses it, found as it would have started: that ticket only, never the run.
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
         // How each ticket's part in the run ended: the ledger records it.
@@ -3839,9 +3870,13 @@ export const burndown = async (
   // state: "shipped" once sat on every branch, held ones included.
   console.log("\n--- per ticket ---");
   const final = run.tickets();
+  const tokenCost = (id: string) => {
+    const note = count.noteOf(id);
+    return spent.has(id) || note ? `  tokens ${spent.has(id) ? tokenLine(spent.get(id)!) : "unknown"}${note ? ` (${tokensNoteWords(note)})` : ""}` : "";
+  };
   for (const r of results) {
     if (r.status === "rejected") {
-      const cost = r.issue && spent.has(r.issue) ? `  tokens ${tokenLine(spent.get(r.issue)!)}` : "";
+      const cost = r.issue ? tokenCost(r.issue) : "";
       console.log(`  ${r.issue ? `${ref(r.issue)} ` : ""}CRASHED  ${String(r.reason).split("\n")[0].slice(0, 200)}${cost}`);
       continue;
     }
@@ -3849,11 +3884,12 @@ export const burndown = async (
     const state = final[o.issue]?.state === "red" ? "gate red" : (final[o.issue]?.state ?? o.status);
     const repaired = repairWords(o);
     const time = ticketTime(took.get(o.issue), waited.get(o.issue), final[o.issue]?.state === "merged" ? landingMs.get(o.issue) : undefined);
-    const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
+    const cost = tokenCost(o.issue);
     console.log(`  ${ref(o.issue)} ${state.padEnd(10)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${gateLine(o.gates)}${time}  ${o.branch}${cost}`);
   }
   const total = [...spent.values()].reduce(addTokens, NO_TOKENS);
-  if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
+  const totalNote = count.runNote();
+  if (spent.size || totalNote) console.log(`  all agents: tokens ${spent.size ? tokenLine(total) : "unknown"}${totalNote ? ` (${tokensNoteWords(totalNote)})` : ""} (per phase in .sandcastle/logs/timings.jsonl)`);
   console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (a merged branch's logs move to logs/archive/ at the next run or `sandcastle clean`)");
   if (stopLine) console.log(`\nSTOPPED EARLY: ${stopLine}; ${notStarted} queued ticket(s) were not started.`);
   let dryRunCheck: string | undefined;

@@ -218,6 +218,8 @@ This continues SKILL.md: run its "Before every action" first.
       says the VM ran short of memory at that pool size: relay it with the pass it names and its fix.
       A `Large context:` line names a ticket with an agent pass whose largest turn held over 150,000
       tokens of context: relay it with the pass and the peak it names.
+      A `Tokens:` line (and `(incomplete)` or `tokens unknown` in the headline) names tickets with an
+      agent pass that failed: their figure is a floor, or missing when the pass showed no usage. Relay it.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.

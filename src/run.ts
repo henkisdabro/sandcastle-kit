@@ -18,6 +18,7 @@ import { OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
+import type { Settled } from "./usage.ts";
 import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunEstimate, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
@@ -1607,10 +1608,80 @@ export const peakContexts = (held: Record<string, number> | undefined, phase: st
  * becomes what its finished passes spent (`spent`, the run's own count of the results' figures) plus that live figure.
  * A pass that has ended is in `spent` and no longer live (`UsageWatch.settle`), so it is never in both.
  */
-export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: ReturnType<typeof ticketTokens>): void }, spent: Map<string, Tokens>) =>
+export const liveTokenWriter = (
+  run: { finished: boolean; ticket(id: string, fields: ReturnType<typeof ticketTokens> & { tokensNote?: TokensNote }): void },
+  spent: Map<string, Tokens>,
+  noteOf: (issue: string) => TokensNote | undefined = () => undefined,
+) =>
   (issue: string, live: Tokens) => {
-    if (!run.finished) run.ticket(issue, { ...ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)) });
+    if (!run.finished) run.ticket(issue, { ...ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)), tokensNote: noteOf(issue) });
   };
+
+/**
+ * How far a figure of tokens can be trusted, when an agent pass threw: `incomplete` is a figure with a thrown pass's
+ * stream in it (the pass may have spent more than its stream showed), `unknown` is no figure at all because the pass
+ * threw before its stream showed any usage. Never a zero.
+ */
+export type TokensNote = "incomplete" | "unknown";
+
+/** How the closing summary and the per-ticket lines word a `TokensNote`. */
+export const tokensNoteWords = (note: TokensNote | undefined) =>
+  note === "incomplete" ? "incomplete: a pass that failed may have spent more than its log showed" : note === "unknown" ? "unknown: a pass failed before its log showed any usage" : "";
+
+/**
+ * The run's own count of the tokens each ticket's steps spent (`spent`, which `liveTokenWriter` adds the running pass's
+ * figure to), written to the run record as `burndown()`'s `timed` goes. A step that returns is counted by its result's
+ * figure (`ended`); an agent pass that threw has none, so `settled` keeps what the usage watch read of its stream,
+ * and notes the ticket's and the run's tokens `incomplete` (or `unknown`, with nothing to count).
+ */
+export const createTokenCount = (
+  run: { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void },
+  settle: (issue: string) => Settled | undefined,
+) => {
+  const spent = new Map<string, Tokens>();
+  // Tickets with an agent pass that threw: whatever they spent is a floor.
+  const thrown = new Set<string>();
+  const noteOf = (issue: string): TokensNote | undefined => (thrown.has(issue) ? (spent.has(issue) ? "incomplete" : "unknown") : undefined);
+  const runNote = (): TokensNote | undefined => (thrown.size ? (spent.size ? "incomplete" : "unknown") : undefined);
+  const write = (issue: string) => {
+    const note = runNote();
+    if (spent.size || note) run.update({ ...(spent.size ? { tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) } : {}), tokensNote: note });
+    if (issue) run.ticket(issue, { ...(spent.has(issue) ? ticketTokens(spent.get(issue)!) : {}), tokensNote: noteOf(issue) });
+  };
+  return {
+    spent,
+    noteOf,
+    /** The note for the run's total. */
+    runNote,
+    /** What a ticket's record holds of its tokens now (nothing for a ticket with neither a figure nor a note). */
+    fields: (issue: string): TicketRecord => ({ ...(spent.has(issue) ? ticketTokens(spent.get(issue)!) : {}), ...(noteOf(issue) ? { tokensNote: noteOf(issue) } : {}) }),
+    /** A step returned and its result carries `tokens`. */
+    ended(issue: string, tokens: Tokens) {
+      spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
+      write(issue);
+    },
+    /**
+     * The step is over (in its `finally`): the watch stops counting the ticket's passes as live. `counted` says a result's
+     * figure was added by `ended`, which covers the step's last pass; every pass before it (a review that threw, then
+     * ran again with the fallback model) and every pass of a step that did not return (or whose failure the step
+     * swallowed, a cross-review) is one that failed, and what its stream showed is kept. Called in the same synchronous
+     * step as `ended`, so a tick never sees a pass both live and counted.
+     */
+    settled(issue: string, counted: boolean): { peakContext?: number; kept?: Tokens; note?: TokensNote } {
+      const settledNow = issue ? settle(issue) : undefined;
+      if (!settledNow) return {};
+      const failed = counted ? settledNow.passes.slice(0, -1) : settledNow.passes;
+      const shown = failed.flatMap((p) => (p.tokens ? [p.tokens] : []));
+      const kept = shown.length ? shown.reduce(addTokens, NO_TOKENS) : undefined;
+      if (failed.length) {
+        thrown.add(issue);
+        if (kept) spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, kept));
+        write(issue);
+      }
+      return { ...(settledNow.peakContext ? { peakContext: settledNow.peakContext } : {}), ...(kept ? { kept } : {}), ...(failed.length ? { note: kept ? ("incomplete" as const) : ("unknown" as const) } : {}) };
+    },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent

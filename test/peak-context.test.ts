@@ -59,18 +59,18 @@ test("a pass's peak context is the largest input + cache write + cache read of o
   const impl = pass(p, "7", "impl-7", "run-1");
   // By hand: 27,000 (a), 452,300 = 300 + 2,000 + 450,000 (b, on three lines), 120,000 (c, a later and smaller turn).
   impl.say(...message("msg_a", 1000, 6000, 20_000), ...message("msg_b", 300, 2000, 450_000, 3), ...message("msg_c", 10, 0, 119_990));
-  assert.equal(watch.settle("7"), 452_300);
+  assert.equal(watch.settle("7").peakContext, 452_300);
 });
 
 test("settle gives each pass its own peak, and none for a ticket whose pass showed no message", () => {
   const p = project();
   const watch = watching(p);
   pass(p, "7", "impl-7", "run-1").say(...message("msg_a", 0, 0, 90_000));
-  assert.equal(watch.settle("7"), 90_000);
+  assert.equal(watch.settle("7").peakContext, 90_000);
   pass(p, "7", "review-7", "run-1").say(...message("msg_b", 0, 0, 40_000));
-  assert.equal(watch.settle("7"), 40_000, "the review pass does not inherit the implement pass's peak");
-  assert.equal(watch.settle("7"), undefined, "nothing since");
-  assert.equal(watch.settle("8"), undefined);
+  assert.equal(watch.settle("7").peakContext, 40_000, "the review pass does not inherit the implement pass's peak");
+  assert.equal(watch.settle("7").peakContext, undefined, "nothing since");
+  assert.equal(watch.settle("8").peakContext, undefined);
 });
 
 test("a message from another run's pass in the same log is not this run's peak", () => {
@@ -78,7 +78,7 @@ test("a message from another run's pass in the same log is not this run's peak",
   const watch = watching(p);
   pass(p, "7", "impl-7", "run-0").say(...message("msg_old", 0, 0, 300_000));
   pass(p, "7", "impl-7", "run-1").say(...message("msg_new", 0, 0, 50_000));
-  assert.equal(watch.settle("7"), 50_000);
+  assert.equal(watch.settle("7").peakContext, 50_000);
 });
 
 test("a ticket's record keeps the largest peak of each kind of pass", () => {
@@ -93,10 +93,10 @@ test("a ticket's record keeps the largest peak of each kind of pass", () => {
 test("burndown writes the peak to the timings line and the ticket's record from the step that settles the pass", () => {
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   const timed = src.slice(src.indexOf("const timed = "), src.indexOf("const image = await timed("));
-  assert.match(timed, /const peakContext = issue \? usageWatch\?\.settle\(issue\) : undefined;/);
+  assert.match(timed, /const \{ peakContext, kept, note: tokensNote \} = count\.settled\(issue, counted\);/);
   assert.match(timed, /run\.ticket\(issue, \{ peakContext: peakContexts\(run\.tickets\(\)\[issue\]\?\.peakContext, phase, peakContext\) \}\)/);
   assert.match(timed, /\.\.\.\(peakContext \? \{ peakContext \} : \{\}\),/, "on the timings line");
-  assert.ok(timed.lastIndexOf("finally {", timed.indexOf("settle(issue)")) > 0, "in the `finally`, so a pass that threw has its peak too");
+  assert.ok(timed.lastIndexOf("finally {", timed.indexOf("count.settled(issue")) > 0, "in the `finally`, so a pass that threw has its peak too");
 });
 
 const facts = (tickets: Facts["tickets"]): Facts => ({
