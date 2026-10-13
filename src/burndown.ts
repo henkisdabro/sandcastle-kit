@@ -50,7 +50,7 @@ import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
@@ -195,10 +195,10 @@ export const attempted = (issue: string, result: PromiseSettledResult<Outcome>, 
  * human read as a ticket that needed no work. Work left uncommitted is a refused commit, not a
  * hand-back; a dry run's agents write nothing; an unreadable tracker leaves it "no change".
  */
-export const handBack = (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get">, at: { uncommitted: boolean; dryRun: boolean }): Outcome => {
+export const handBack = async (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get" | "getAsync">, at: { uncommitted: boolean; dryRun: boolean }): Promise<Outcome> => {
   if (!tracker.agentsWrite || at.dryRun || o.status !== "nochange" || at.uncommitted) return o;
   try {
-    return tracker.get(o.issue).held ? { ...o, handedBack: true } : o;
+    return (await readTicketState(tracker, o.issue)).held ? { ...o, handedBack: true } : o;
   } catch {
     return o;
   }
@@ -1617,9 +1617,9 @@ export const createPipeline = (ctx: PipelineContext) => {
     reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
 
   /** The ticket's comments now; undefined when the tracker cannot be read (a head record then keeps its last count, which at worst sends a carried branch to a full review it did not need). */
-  const ticketComments = (id: string): string[] | undefined => {
+  const ticketComments = async (id: string): Promise<string[] | undefined> => {
     try {
-      return tracker.get(id).comments;
+      return (await readTicketState(tracker, id)).comments;
     } catch {
       return undefined;
     }
@@ -1628,12 +1628,12 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[] }) => {
+  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[] }) => {
     if (dryRun) return;
     try {
       // The comment count is read now, after the pass that wrote these fields: an agent's own comment (a repair's report)
       // is then inside it, and only a person's later comment reads as new at the next carry.
-      const comments = "reviewed" in fields || "green" in fields || "repaired" in fields ? ticketComments(id) : undefined;
+      const comments = "reviewed" in fields || "green" in fields || "repaired" in fields ? await ticketComments(id) : undefined;
       recordHead(project.root, id, { branch, ...fields, ...(comments ? { comments: commentCount(comments) } : {}) }, runId);
     } catch (error) {
       console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
@@ -1956,7 +1956,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // after any merge resolution, in place of the narrow one or none at all.
       const lateComment =
         greenHead !== undefined &&
-        personCommentsSince(ticketComments(issue.id) ?? issue.comments ?? [], readHeads(project.root)[issue.id]?.comments).length > 0;
+        personCommentsSince((await ticketComments(issue.id)) ?? issue.comments ?? [], readHeads(project.root)[issue.id]?.comments).length > 0;
       // A tip past the head is merge commits only (landOnlyHead): a resolution a hold left
       // on the branch was never reviewed, unless a narrow review has since recorded the tip.
       const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch], project.root) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch], project.root);
@@ -2212,7 +2212,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               () => CROSS_REVIEW_MODEL,
             )
           : undefined;
-        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
         reviewed = true;
         for (const r of [review, cross]) {
           const u = r && ungatedOf(r.stdout);
@@ -2223,7 +2223,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           const m = r && unmetOf(r.stdout);
           if (m) unmet.push(m);
         }
-        noteHead(issue.id, branch, agentsSaid());
+        await noteHead(issue.id, branch, agentsSaid());
         if (!tracker.agentsWrite) {
           for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
             const said = r && tags(r.stdout).report;
@@ -2249,7 +2249,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const beforeResolved = ownNow();
         const listResolved = ownList();
         const resolved = await narrowReview(greenHead, "after conflict resolution", namedStrays);
-        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
         reviewCommits += ownNow() - beforeResolved;
         noteReviewed(listResolved);
         noteChangelog(resolved.stdout, true);
@@ -2257,7 +2257,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
         const u = unmetOf(resolved.stdout);
         if (u) unmet.push(u);
-        noteHead(issue.id, branch, agentsSaid());
+        await noteHead(issue.id, branch, agentsSaid());
       }
       if (!landOnly) {
         await juncture("implement");
@@ -2314,7 +2314,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           const beforeMerged = ownNow();
           const listMerged = ownList();
           const merged = await narrowReview(since, "after base merge");
-          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+          await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits = ownNow() - beforeMerged;
           noteReviewed(listMerged);
           noteChangelog(merged.stdout, true);
@@ -2322,7 +2322,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
           const u = unmetOf(merged.stdout);
           if (u) unmet.push(u);
-          noteHead(issue.id, branch, agentsSaid());
+          await noteHead(issue.id, branch, agentsSaid());
         } else {
           reviewCommits = await fullReview();
         }
@@ -2359,7 +2359,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
       // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
       // the tip looking reviewed with no gate result, and a re-run would only gate it again.
-      if (gated.failure) noteHead(issue.id, branch, { red: sh("git", ["rev-parse", branch], project.root) });
+      if (gated.failure) await noteHead(issue.id, branch, { red: sh("git", ["rev-parse", branch], project.root) });
       // The forced red is named as such everywhere it shows: "ruff red" for a
       // gate that passed sent a reader looking for a ruff failure.
       let forced = false;
@@ -2577,7 +2577,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       if (repairs) {
         const earlier = readHeads(project.root)[issue.id];
         const made = sh("git", ["rev-list", "--no-merges", `${preRepair}..${branch}`], project.root).split("\n").filter(Boolean);
-        if (made.length) noteHead(issue.id, branch, { repaired: [...new Set([...(earlier?.branch === branch ? (earlier.repaired ?? []) : []), ...made])] });
+        if (made.length) await noteHead(issue.id, branch, { repaired: [...new Set([...(earlier?.branch === branch ? (earlier.repaired ?? []) : []), ...made])] });
       }
 
       // A repair works against a red gate, and the easy way to green is to
@@ -2611,7 +2611,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           return undefined;
         });
         if (after) {
-          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+          await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits += ownNow() - beforeAfter;
           noteReviewed(listAfter);
           const u = ungatedOf(after.stdout);
@@ -2621,7 +2621,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           noteChangelog(after.stdout, true);
           const m = unmetOf(after.stdout);
           if (m) unmet.push(m);
-          noteHead(issue.id, branch, agentsSaid());
+          await noteHead(issue.id, branch, agentsSaid());
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
           if (after.commits.length) gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
@@ -2631,9 +2631,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       const head = sh("git", ["rev-parse", branch], project.root);
       const { unmet: unmetNote, implSaid: implSaidNote, changelog: changelogNote, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: drops.count || undefined, changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote });
+      if (!gated.failure && !unreviewed) await noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: drops.count || undefined, changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote });
       // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
-      else if (gated.failure) noteHead(issue.id, branch, { red: head });
+      else if (gated.failure) await noteHead(issue.id, branch, { red: head });
       return {
         issue: issue.id,
         branch,
@@ -3319,8 +3319,8 @@ export const burndown = async (
   // called off, and again before landing, so none of it merges. A `TICKETS=`
   // ticket that never carried the label started with no status, so its status
   // is not checked.
-  const withdrawal = (id: string): { held: boolean; reason: string } | undefined => {
-    const now = tracker.get(id);
+  const withdrawal = async (id: string): Promise<{ held: boolean; reason: string } | undefined> => {
+    const now = await readTicketState(tracker, id);
     const startedAs = candidates.find((i) => i.id === id)?.status;
     if (now.held) return { held: true, reason: "marked for a human during the run" };
     if (!now.open) return { held: false, reason: "ticket closed during the run" };
@@ -3544,9 +3544,9 @@ export const burndown = async (
     noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
     // A tracker that cannot be read is no reason to skip: the check before landing asks again.
-    const called = (() => {
+    const called = await (async () => {
       try {
-        return withdrawal(issue.id);
+        return await withdrawal(issue.id);
       } catch {
         return undefined;
       }
@@ -3584,7 +3584,7 @@ export const burndown = async (
       return attempted(issue.id, result, check);
     }
     // Its ending arrives complete: an agent's hand-back is read now, not patched in after the schedule.
-    const ended = result.status === "fulfilled" ? { ...result, value: handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
+    const ended = result.status === "fulfilled" ? { ...result, value: await handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
     // A requeued ticket's second pipeline replaces its first in the per-issue lines.
     dropFirstResult(issue.id);
     results.push(ended.status === "rejected" ? { ...ended, issue: issue.id } : ended);
