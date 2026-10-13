@@ -2208,8 +2208,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // they passed - `exitCode` is returned rather than thrown.
       // A requeue after a red landing gate, on a base that has not moved and a branch no agent has touched since
       // the merge: that merge is the tree the landing gate ran, so a gate run would return the same red. No full
-      // gate run, then: the red gate is re-run once below (the gates before it passed on this tree in the landing's
-      // sandbox), and the repair starts from the landing gate's own output when it is red again.
+      // gate run, then. A landing that already re-ran its red gate (`rerun`) leaves nothing to re-run: the repair
+      // starts from its output. Otherwise the red gate is re-run once below (the gates before it passed on this tree
+      // in the landing's sandbox), and the repair starts from the landing gate's own output when it is red again.
       const redAtLanding = requeued && joined && sh("git", ["rev-parse", branch], project.root) === joined.merge ? repairFromRed(reds.get(issue.id), joined) : undefined;
       reds.delete(issue.id);
       let gated: GateRun;
@@ -2217,7 +2218,9 @@ export const createPipeline = (ctx: PipelineContext) => {
         const name = redAtLanding.failure.name;
         console.log(
           `${ref(issue.id)}: ${base} has not moved since ${name} went red at landing - ` +
-            (ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
+            (redAtLanding.rerun
+              ? `it went red twice there (re-run included); no gate run, the repair starts from that output.`
+              : ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
         );
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
       } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
@@ -2276,7 +2279,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           // The note says the gate ran three times: only true when the third run went red on that same gate.
           else if (gated.failure.name === secondRun.failure.name) threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
         } else if (!gated.failure) console.log(`${ref(issue.id)}: ${firstRun.failure?.name ?? "a gate"} red, then green on a re-run - a flake, no repair pass`);
-      } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
+      } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0 && !redAtLanding?.rerun) {
         const again = ctx.regate;
         const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, first.name));
         earlier.push(first);

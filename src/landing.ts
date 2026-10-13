@@ -373,8 +373,12 @@ export const rememberFailed = <R extends Pick<GateRun, "failures" | "rerunOf">>(
   return run;
 };
 
-/** What a red landing gate ran on and said: the branch head and base tip it merged, the gates it ran and the failure it hit. */
-export type RedLanding = { head: string; base: string; failure: NonNullable<GateRun["failure"]>; gates: GateRun["gates"] };
+/**
+ * What a red landing gate ran on and said: the branch head and base tip it merged, the gates it ran and the failure it hit.
+ * `rerun`: the landing had already re-run the red gate and it was red again, so the failure is the re-run's and a requeue
+ * on the same tree has nothing left to re-run.
+ */
+export type RedLanding = { head: string; base: string; failure: NonNullable<GateRun["failure"]>; gates: GateRun["gates"]; rerun?: true };
 
 /**
  * The red landing gate a requeue repairs from, without running the gates again: the landing gate's own, when
@@ -706,7 +710,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       const seen = !!known && named.length > 0 && named.every((t) => known.has(t));
       const earlier = seen ? [] : since().filter(([, r]) => r.files.some((f) => mine.includes(f) || subject.has(f))).map(([id]) => id);
       const failing = result.run.failure ? failingTests(result.run.failure.output) : [];
-      if (result.run.failure) ctx.reds?.set(o.issue, { head: o.head!, base: result.base, failure: result.run.failure, gates: result.run.gates });
+      if (result.run.failure) ctx.reds?.set(o.issue, { head: o.head!, base: result.base, failure: result.run.failure, gates: result.run.gates, ...(result.run.rerunOf ? { rerun: true as const } : {}) });
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}), ...(seen ? { seen: true as const } : {}) };
     }
     if (result.kind === "merged") {
