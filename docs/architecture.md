@@ -397,6 +397,12 @@ Such a line: it is not listed, and once the first is filed `fileFollowUps` posts
 that issue with the tracker's `comment` (`places`, the issue of each place, is shared by a run's
 turns like `seen`); a comment that fails is tried again by the next `file`, and a first that failed
 to file leaves it held, never filed as an issue of its own.
+A line that would become a new issue is first met against the open tickets awaiting triage, which a
+person may have filed: `fileFollowUps` reads them once per call (the tracker's `open`, those carrying
+the triage label or status; a read that fails files as before), and a ticket whose body or `Touches:`
+line names a place of the line (`Seat.spots`) and whose title shares three significant words with it
+is the issue the evidence is posted on, as for a repeat within a run; a line that names no place
+matches none. `test/followup-open-duplicate.test.ts`.
 The two stops file them too (`stopLanding`, before the summary is printed), except after a safety
 stop - the shared `.git` changed - where nothing is written to the tracker: each entry stays in the
 record as `failed` with that reason, which the report lists under Needs you as one to file by hand -

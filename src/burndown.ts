@@ -729,6 +729,17 @@ const addPlace = (places: Places, seat: Seat, id: string) => {
 // What was said again about an issue already filed, as the comment on it.
 const repeatComment = (f: FollowUp, ref: (id: string) => string) =>
   `Named again by the ${f.phase} agent working on ${ref(f.from)}, as the same finding, worded "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
+// Whether a ticket a person filed is the same finding as a follow-up: its body (the `Touches:` line included, a
+// pattern equal to the path too) names a file the follow-up is about, and its title shares three significant words
+// with the follow-up's (`WORDS_SHARED_NO_PLACE`, the rule for a pair the files alone cannot settle). A follow-up
+// naming no file of the base tree is never matched: there the title is all there is, and a person's ticket is no repeat.
+const namesPlaceOf = (t: Ticket, seat: Seat): boolean => {
+  const paths = seat.spots.map((s) => s.path);
+  const named = paths.some((p) => new RegExp(`(?<![\\w@.-])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w@-])`).test(t.body) || parseTouches(t.body).includes(p));
+  if (!named) return false;
+  const words = significantWords(t.title, paths);
+  return [...seat.words].filter((w) => words.has(w)).length >= WORDS_SHARED_NO_PLACE;
+};
 // The titles filed by every turn of this `sandcastle run`: a turn that re-runs a ticket (partly done,
 // requeued) hears its agents name the same problem again, and that is still one ticket.
 const filedThisRun = new Set<string>();
@@ -741,19 +752,33 @@ const placesThisRun: Places = new Map();
  * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, or sharing three
  * significant words of its title with one when either of the two names no place, is not filed:
  * its evidence is a comment on that issue (`places` holds the issue of each place) and it is not
- * returned, unless the comment fails. A dry run files nothing and returns them unfiled, for the summary to list.
+ * returned, unless the comment fails. A follow-up that would be a new ticket is first met against the open tickets
+ * carrying the `triage` label (one `open` read per call, none when it fails): one whose body or `Touches:` line names
+ * the follow-up's place and whose title shares three significant words is commented on the same way. A dry run files nothing and returns them unfiled, for the summary to list.
  * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
  * the base). `seen` is the titles already filed, shared by a run's turns. A failed filing is kept with
  * its reason, never thrown, and its title left unseen for a later turn to file: the run's landings stand.
  */
 export const fileFollowUps = async (
-  tracker: Pick<Tracker, "create" | "ref" | "comment">,
+  tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open">>,
   followUps: readonly FollowUp[],
-  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists; named?: NamedOnBase },
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists; named?: NamedOnBase; triage?: string },
 ): Promise<FiledFollowUp[]> => {
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
   const out: FiledFollowUp[] = [];
+  // The open tickets awaiting triage, read once for the batch and only when a follow-up gets as far as a new ticket. A
+  // list that fails files as before: the check is a courtesy, never a reason to lose a follow-up.
+  let awaiting: Ticket[] | undefined;
+  const awaitingTriage = (): Ticket[] => {
+    if (awaiting) return awaiting;
+    try {
+      awaiting = o.triage === undefined || !tracker.open ? [] : tracker.open(false).filter((t) => t.labels?.includes(o.triage!) || t.status === o.triage);
+    } catch {
+      awaiting = [];
+    }
+    return awaiting;
+  };
   for (const f of followUps) {
     const key = titleKey(f.title);
     if (seen.has(key)) continue;
@@ -775,6 +800,20 @@ export const fileFollowUps = async (
     if (o.dryRun) {
       seen.add(key);
       out.push(at);
+      continue;
+    }
+    const same = place.spots.length ? awaitingTriage().find((t) => t.id !== f.from && namesPlaceOf(t, place)) : undefined;
+    if (same) {
+      try {
+        await o.write(() => {
+          tracker.comment(same.id, repeatComment(f, tracker.ref));
+          return same.id;
+        });
+        seen.add(key);
+        addPlace(places, place, same.id);
+      } catch (error) {
+        out.push({ ...at, failed: errorLine(error) });
+      }
       continue;
     }
     const body =
@@ -822,8 +861,10 @@ export type NamedFollowUp = { title: string; id?: string; phase?: string; from?:
 export const createFollowUpBook = (
   run: { update(fields: { followUps: FiledFollowUp[] }): void },
   o: {
-    tracker: Pick<Tracker, "create" | "ref" | "comment">;
+    tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open">>;
     dryRun: boolean;
+    /** The triage label (GitHub) or status (files): a follow-up that repeats an open ticket carrying it is a comment on that ticket. */
+    triage?: string;
     write: (fn: () => string) => Promise<string>;
     seen?: Set<string>;
     places?: Places;
@@ -875,6 +916,7 @@ export const createFollowUpBook = (
         places,
         exists: o.exists,
         named: o.named,
+        triage: o.triage,
       });
       if (settled.length) {
         for (const s of settled) listed.set(titleKey(s.title), s);
@@ -3209,6 +3251,7 @@ export const burndown = async (
   const followUps = createFollowUpBook(run, {
     tracker,
     dryRun: DRY_RUN,
+    triage: project.tracker.triage,
     write: (fn) => host.write(fn, trackerMade(project.root)),
     seen: filedThisRun,
     places: placesThisRun,
