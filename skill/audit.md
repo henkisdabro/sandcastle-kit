@@ -30,9 +30,9 @@ action's categories and its closed-spec test, so keep queue.md to hand.
    Brief for each subagent
    You are auditing a repository for small, well-evidenced problems. Read-only: read files,
    search, run `git log`, `git show`, `git blame` and `gh issue view N`. No edits (bar your
-   findings file below), no commits, no tracker writes (no `gh issue create`, `gh issue comment`,
-   `gh issue edit`, `gh issue close`, no `gh label`), and no `sandcastle run`, `preflight` or
-   anything else that spends model allowance.
+   findings and coverage files below), no commits, no tracker writes (no `gh issue create`,
+   `gh issue comment`, `gh issue edit`, `gh issue close`, no `gh label`), and no
+   `sandcastle run`, `preflight` or anything else that spends model allowance.
    Lens: <the lens, e.g. security>
    Areas: <the directories to cover>
    Report at most <the cap> findings, most important first. Each must be small enough for one
@@ -111,5 +111,5 @@ action's categories and its closed-spec test, so keep queue.md to hand.
     - Record each filed number or path in its finding's file (`filed`).
 11. **Report**: a table of what was filed (number, title, queued or not), merged, and dropped with
     the reason, and a line per lens that reached its cap: "cap reached - coverage incomplete", with
-    the areas it did not finish. Say nothing of how many more findings there may be. The next step is `/sandcastle run`, or `/sandcastle queue` for anything filed
-    unqueued.
+    the areas it did not finish. Say nothing of how many more findings there may be. The next
+    step is `/sandcastle run`, or `/sandcastle queue` for anything filed unqueued.
