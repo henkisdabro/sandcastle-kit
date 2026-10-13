@@ -33,7 +33,8 @@ export type Failure = { name: string; command: string; exitCode: number; output:
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
 // `pressureSome`, `pressureFull`: the highest memory pressure (`avg10`, percent) read in the sandbox while this pass ran; absent at 0 or where the kernel gives none.
-// `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
+// `head`: the commit the run gated, read in its sandbox: a base run's (`gateBase`), as the base's name can move between asking and
+// gating; a ticket run's (`runGates`), the head `rememberFailed` keeps each failed test by.
 // `rewrote`: the tracked files the gates changed in the worktree, which were put back.
 export type GateRun = {
   gates: Gate[];

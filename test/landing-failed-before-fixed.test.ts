@@ -22,7 +22,7 @@ type Ctx = import("../src/landing.ts").LandContext;
 type Project = import("../src/config.ts").Project;
 type GateRun = import("../src/gates.ts").GateRun;
 
-const TMP = mkdtempSync(join(tmpdir(), "sandcastle-landing-red-rerun-"));
+const TMP = mkdtempSync(join(tmpdir(), "sandcastle-landing-failed-before-fixed-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 let n = 0;
 
