@@ -1510,7 +1510,8 @@ fast-forward or a conflict found on the host never takes it) and releases it whe
 ends, gated or not; the first priority wait the run begins for the pool spends it as well.
 A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than
 the run's claims, so with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
-The claim is kept in this process (`claims`), not in the pool's files; `test/pool-landing-claim.test.ts`.
+The claim is kept in this process (`claims`), not in the pool's files; `test/pool-landing-claim.test.ts`, and
+`test/pool-landing-claim-spare.test.ts` for the slot to spare.
 The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is
 this process's, and another run needs only a wait's start - and, for the pool's last free slot,
 whether it is a landing's, which the entry's file name says (a `-priority` before `.wait`; the
