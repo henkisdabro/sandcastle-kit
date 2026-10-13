@@ -51,8 +51,8 @@ const CONFIGURED = [
 ];
 
 /** A gate run that passed the gates named in `passed`, then went red on `name`. */
-const red = (name: string, output: string, passed: string[] = [], exitCode = 1): GateRun => {
-  const failure = { name, command: CONFIGURED.find((g) => g.name === name)!.command, exitCode, output };
+const red = (name: string, output: string, passed: string[] = [], exitCode = 1, tests?: string[]): GateRun => {
+  const failure = { name, command: CONFIGURED.find((g) => g.name === name)!.command, exitCode, output, ...(tests ? { tests } : {}) };
   return { gates: [...passed.map((p) => ({ name: p, pass: true })), { name, pass: false, ...(exitCode === 124 ? { timedOut: true } : {}) }], failure, failures: [failure] };
 };
 /** A gate run that passed the gates named, from whichever gate it started at. */
@@ -312,6 +312,32 @@ test("a re-run whose test ids cannot be read goes to repair after the re-run, as
   assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "repair", "gate", "review"]);
 });
 
+// What `clip` makes of an output over 32k characters: a marker line between the head and the tail.
+const CLIPPED_OUTPUT = (...tests: string[]) => `${specRed(...tests)}\n[... 90000 characters cut ...]\nlast lines`;
+
+test("a re-run whose clipped output carries no whole-output tests gives no flaked entry and no third run", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push(red("test", CLIPPED_OUTPUT("alpha"), ["lint"]));
+  h.regates.push(red("test", CLIPPED_OUTPUT("beta")));
+  h.gates.push(BOTH);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "repair", "gate", "review"]);
+  assert.equal(o.flaked, undefined);
+});
+
+test("reds with whole-output tests on disjoint ids still get the third run, though their outputs are clipped", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.gates.push(red("test", CLIPPED_OUTPUT("other"), ["lint"], 1, [id("alpha")]));
+  h.regates.push(red("test", CLIPPED_OUTPUT("other"), [], 1, [id("beta")]), green("test"));
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "regate"]);
+  assert.equal(o.status, "green");
+  assert.deepEqual(o.flaked, [id("alpha"), id("beta")]);
+});
+
 test("a re-run that timed out is not run a third time", async () => {
   const h = harness();
   h.agents.impl = implementing("a.txt");
@@ -357,4 +383,40 @@ test("a third red that names no tests is said as such in the repair prompt", asy
   await h.attempt();
   const repairs = h.passes.filter((p) => p.name === `repair-${ID}`);
   assert.match(repairs[0].args.GATE_OUTPUT, /run 3: no test ids in its output\n/);
+});
+
+// A gate result that already holds the third run (`rerunOf.rerunOf`, from `thirdOnDisjoint`): the same decisions as
+// the regate path, with no `regate` call - the gates ran three times inside one slot.
+const chained = (third: GateRun, second: GateRun, first: GateRun): GateRun => ({ ...third, rerunOf: { ...second, rerunOf: first } });
+
+test("a gate result holding three runs, the third green, makes no regate call and keeps the flaked tests", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.gates.push(chained(green("lint", "test"), red("test", specRed("beta")), red("test", specRed("alpha"), ["lint"])));
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate"]);
+  assert.equal(o.status, "green");
+  assert.equal(o.repairs, 0);
+  assert.deepEqual(o.gates.map((g) => [g.name, g.pass]), [["lint", true], ["test", true]]);
+  assert.deepEqual(o.flaked, [id("alpha"), id("beta")]);
+  assert.ok(o.said.some((l) => /test red on different tests from the first red - a flake each time, gating once more with no repair pass/.test(l)), o.said.join("\n"));
+  assert.ok(o.said.some((l) => /test red twice on different tests, then green on a third run - a flake, no repair pass/.test(l)), o.said.join("\n"));
+});
+
+test("a gate result holding three red runs goes to one repair pass that names the failing tests of all three, with no regate call", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push(chained(red("test", specRed("gamma", "delta")), red("test", specRed("beta")), red("test", specRed("alpha"), ["lint"])));
+  h.gates.push(BOTH);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "repair", "gate", "review"]);
+  const repairs = h.passes.filter((p) => p.name === `repair-${ID}`);
+  assert.equal(repairs.length, 1);
+  const prompt = repairs[0].args.GATE_OUTPUT;
+  assert.match(prompt, /run 1: test\/x\.test\.ts::alpha\n/);
+  assert.match(prompt, /run 2: test\/x\.test\.ts::beta\n/);
+  assert.match(prompt, /run 3: test\/x\.test\.ts::gamma, test\/x\.test\.ts::delta\n/);
+  assert.equal(o.status, "green");
+  assert.deepEqual(o.flaked, [id("alpha"), id("beta")], "gamma and delta are still red when the repair starts");
 });

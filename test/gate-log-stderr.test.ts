@@ -41,7 +41,7 @@ test("a red gate's log holds its stdout, then its stderr under a marker, and end
   assert.deepEqual(lines.slice(at, at + 5), [
     "Test Files  2 failed",
     "     Tests  3 failed",
-    "# stderr of unit (at most its last 64 KiB):",
+    "# stderr of unit (at most its last 8 MiB):",
     "FAIL a.test.ts",
     "Test timed out in 5000ms",
   ]);
@@ -53,7 +53,7 @@ test("a green gate's stderr is logged too, before its verdict line", async () =>
   const lines = await gated([{ name: "lint", command: "run-lint" }], [
     ["run-lint", { exitCode: 0, stdout: ["ok"], stderr: "warning: deprecated" }],
   ]);
-  const marker = lines.indexOf("# stderr of lint (at most its last 64 KiB):");
+  const marker = lines.indexOf("# stderr of lint (at most its last 8 MiB):");
   assert.ok(marker > 0, "no marker line");
   assert.equal(lines[marker + 1], "warning: deprecated");
   assert.match(lines.filter(Boolean).at(-1) ?? "", /^# lint green in /);

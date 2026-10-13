@@ -284,14 +284,14 @@ test("a re-run that goes red on a later gate than the first red repairs from tha
 });
 
 /** A green first attempt, then a red landing gate on the base tip it merged with: what the requeue reads. */
-const redAtLanding = async () => {
+const redAtLanding = async (rerun?: true) => {
   const h = harness();
   h.agents.impl = implementing("a.txt");
   h.gates.push(BOTH);
   assert.equal((await h.attempt()).status, "green");
   h.land("b.txt", "b\n");
   const landing = red("test", "FAIL: a.txt and b.txt cannot both exist", ["lint"]);
-  h.reds.set(ID, { head: h.tip(BRANCH), base: h.tip("main"), failure: landing.failure!, gates: landing.gates });
+  h.reds.set(ID, { head: h.tip(BRANCH), base: h.tip("main"), failure: landing.failure!, gates: landing.gates, ...(rerun ? { rerun } : {}) });
   h.requeue();
   h.agents.repair = (wt) => {
     git(wt, "rm", "-q", "b.txt");
@@ -323,6 +323,20 @@ test("a requeue whose re-run is red again repairs from the re-run's output", asy
   assert.match(repair?.args.GATE_OUTPUT ?? "", /\(the re-run\)/);
   assert.equal(o.status, "green");
   assert.equal(o.repairs, 1);
+});
+
+test("a requeue after a landing gate that went red twice repairs from the landing's output with no regate and no gate run", async () => {
+  const h = await redAtLanding(true);
+  h.gates.push(BOTH);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["repair", "gate", "review"], "no gate run, no regate before the repair");
+  assert.deepEqual(h.reruns, []);
+  const repair = h.passes.find((p) => p.name === `repair-${ID}`);
+  assert.match(repair?.args.GATE_OUTPUT ?? "", /a\.txt and b\.txt cannot both exist/);
+  assert.equal(o.status, "green");
+  assert.equal(o.repairs, 1);
+  assert.ok(o.said.some((l) => /test went red at landing - it went red twice there \(re-run included\); no gate run, the repair starts from that output\./.test(l)), o.said.join("\n"));
+  assert.ok(!o.said.some((l) => /is re-run first/.test(l)), o.said.join("\n"));
 });
 
 test("a requeue on a base that moved since its landing gate went red runs the gates in full, and a red there is re-run from its gate", async () => {
@@ -395,7 +409,7 @@ test("burndown() hands createPipeline the re-run port, built on its own runGates
 
 test("burndown() has the first ticket gate run re-run its red inside the slot, and the pipeline asks for it only with a re-run port and repair passes", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(src, /gate: \(box, id, rerunOnRed\) => runGates\(box, id, undefined, false, undefined, rerunOnRed\),/);
+  assert.match(src, /gate: \(box, id, rerunOnRed\) => runGates\(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed\),/);
   assert.match(src, /gate\(sandbox, issue\.id, !!ctx\.regate && repair > 0\)/);
 });
 

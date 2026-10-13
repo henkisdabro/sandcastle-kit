@@ -125,7 +125,7 @@ test("a red landing gate is kept for the requeue: the branch head, the base tip 
   const head2 = head(root);
   const tip = git(root, "rev-parse", "main");
   await h.land("2");
-  assert.deepEqual(h.reds.get("2"), { head: head2, base: tip, failure, gates: RED.gates });
+  assert.deepEqual(h.reds.get("2"), { head: head2, base: tip, failure, gates: RED.gates, rerun: true });
   assert.equal(git(root, "rev-parse", "main"), tip, "a red merge moves nothing");
 });
 

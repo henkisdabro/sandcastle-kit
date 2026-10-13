@@ -30,6 +30,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; unset, Claude Code's own default applies. (#742)
 - **`sandcastle queue --lint` suggests splitting each ticket the estimate sizes as large** (6 or more
   `Touches:` paths, or a body of 2,500 characters or more), naming its paths and body length. (#743)
+- **The closing summary counts time a run spent paused** - a `sandcastle pause`, or a wait for the
+  plan's usage window - among the causes of a run that took far longer than its estimate; the run
+  record keeps it as `pausedMs`. (#757)
 
 ### Changed
 
@@ -48,16 +51,28 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **An idle repair pass no longer earns the extra pass for a new failure**: with `repair: 1`, a pass
   that commits nothing followed by a flake on another test ends the ticket red instead of running
   a second pass. (#736)
-- **Beside another run, the sandbox slot a run keeps for landing no longer sits idle** while none of
-  its landings waits: another run takes it, and the owner's landing gets the next slot that frees.
-  (#729)
+- **Beside another run, the pool keeps one sandbox slot for landing, any run's, instead of one per
+  run**: the shares split the rest, so two runs of share 2 on 4 slots no longer leave half the pool
+  idle, and the start line and estimate count the whole share as the tickets'. (#729, #754)
 - **A requeue after a red landing gate no longer blames landed tickets for failures the branch's own
   gates had already shown** in the same run; the line says the failure was seen on the branch
   before. (#731) A requeued ticket's gate runs, on a tree the base was merged into, are not counted
   as the branch's own.
 - **The one re-run of a red ticket gate runs inside the gates slot of the run that went red**, so it
-  no longer queues behind other runs for minutes (#737); a file the red run's gates rewrote is
-  still reported after it.
+  no longer queues behind other runs for minutes (#737), and so does the third run of a gate that
+  went red on different tests (#751); a file the red run's gates rewrote is still reported after it.
+- **A failing test seen only in the clipped middle of a long red output is no longer recorded as
+  flaky** or taken for a different failure: the gate's whole output is read for failing tests, and a
+  sandbox returns up to 8 MiB of each stream instead of 64 KiB. (#752)
+- **A ticket requeued after its landing gate went red twice goes straight to repair** from that
+  output, instead of running the gate a third time first. (#755)
+- **A landing gate that goes red and then green lists the test under "Likely flaky"** in the closing
+  summary, and its re-run counts as a gate re-run, no longer inflating the estimate's typical
+  landing-gates time. (#756)
+- **The closing summary's `Against the estimate:` line gives a ratio for tokens, and for a run
+  under its estimate**, not only for a run over it on time.
+- **A test a ticket's repair fixed and a landed ticket then broke again names the ticket that broke
+  it**, instead of reading as "seen on the branch before". (#758)
 - **A ticket gate whose re-run goes red on different tests from the first red is treated as a
   flake** and run a third time before any repair pass; red on the third run goes to repair with
   the failing tests of all three runs named, and tests that went red then green are kept on the
@@ -68,7 +83,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The line for a conflicted ticket's resolve no longer claims nothing that shares its files is
   left to land**: it says the tickets it waited for have landed or left the run.
 - **Three status-view tests that went red under load are steadied**: they waited for the first
-  frame, which can come before the view has read git or the run record. (#744, #753)
+  frame, which can come before the view has read git or the run record. (#744, #753) So is a pool
+  test whose other run, registered "a second earlier", fell after this run's on a loaded machine.
+  (#768)
 
 ## [0.15.0] - 2026-10-12
 

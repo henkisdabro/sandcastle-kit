@@ -36,7 +36,7 @@ const headline = (out: string) => out.split("\n").filter((l) => /^(Against the e
 
 test("a run that took five times its estimate gives both, with the tokens", () => {
   const [line] = headline(render(facts({ estimate, tokenTotal })));
-  assert.equal(line, "Against the estimate: 5h 00m against an estimate of 1h 00m (5.0x); tokens 90.0M in / 1.2M out against an estimate of 20.0M in / 400k out.");
+  assert.equal(line, "Against the estimate: 5h 00m against an estimate of 1h 00m (5.0x); tokens 90.0M in / 1.2M out against an estimate of 20.0M in / 400k out (4.5x).");
 });
 
 test("the largest causes the record measured are named, largest first, and anything under a minute is left out", () => {
@@ -63,13 +63,18 @@ test("a run within twice its estimate says nothing of it", () => {
 
 test("a run that took half its estimate or less gives the estimate and no causes", () => {
   const out = render(facts({ estimate: { ...estimate, ms: { mid: 11 * 60 * MIN, high: 12 * 60 * MIN } }, sharedMs: 3 * 60 * MIN }));
-  assert.deepEqual(headline(out), ["Against the estimate: 5h 00m against an estimate of 11h 00m."]);
+  assert.deepEqual(headline(out), ["Against the estimate: 5h 00m against an estimate of 11h 00m (0.5x)."]);
 });
 
 test("tokens alone more than twice off give the line, with no causes for a run on time", () => {
   const out = render(facts({ estimate: { ...estimate, ms: { mid: 4 * 60 * MIN, high: 5 * 60 * MIN } }, tokenTotal }));
   assert.equal(headline(out).length, 1);
-  assert.match(headline(out)[0], /tokens 90\.0M in/);
+  assert.match(headline(out)[0], /tokens 90\.0M in .* \(4\.5x\)\.$/);
+});
+
+test("tokens far under the estimate give their ratio, as a run far over it does", () => {
+  const out = render(facts({ estimate: { ...estimate, ms: { mid: 4 * 60 * MIN, high: 5 * 60 * MIN } }, tokenTotal: { input: 1, cacheWrite: 0, cacheRead: 8_000_000, output: 100_000 } }));
+  assert.match(headline(out)[0], /against an estimate of 20\.0M in \/ 400k out \(0\.4x\)\.$/);
 });
 
 test("a run with no estimate, a live run and a dry run give no line", () => {
@@ -128,4 +133,21 @@ test("the timings lines give the gates slot waits, the landings' sandbox slot wa
   ].join("\n");
   assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 27 * MIN, landingWaitMs: 3 * MIN, reruns: 2, rerunMs: 6 * MIN, repairs: 1, repairMs: 6 * MIN });
   assert.equal(timeLostFromTimings(text, "none"), undefined);
+});
+
+test("a landing gate's marked re-run line counts as one gate re-run, and a ticket's in-slot gates re-run line once", () => {
+  const text = [
+    line({ issue: "1", phase: "gates", ms: 3 * MIN }),
+    line({ issue: "1", phase: "gates", ms: 4 * MIN, rerun: true }),
+    line({ issue: "1", phase: "landing gates", ms: 2 * MIN, ok: false }),
+    line({ issue: "1", phase: "landing gates", ms: 1 * MIN, rerun: true }),
+    // A requeued ticket's second landing has no mark and is no re-run.
+    line({ issue: "1", phase: "landing gates", ms: 5 * MIN }),
+  ].join("\n");
+  assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 0, landingWaitMs: 0, reruns: 2, rerunMs: 5 * MIN, repairs: 0, repairMs: 0 });
+});
+
+test("a ticket whose landing gate flaked is listed under Likely flaky", () => {
+  const out = render(facts({ tickets: { "31": { state: "merged", title: "a", flaked: ["test/clock.test.ts::ticks"] } } }));
+  assert.deepEqual(flakyLine(out), [`${FLAKY}test/clock.test.ts::ticks (#31).`]);
 });

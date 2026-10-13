@@ -451,7 +451,7 @@
         <div class="tile">
           <h3>Shares the machine</h3>
           <p>Live runs split the sandbox slots.</p>
-          <div class="slots" aria-hidden="true"><i>my-app</i><i>my-app</i><i>my-app</i><i class="b">api</i><i class="b">api</i><i class="b">api</i></div>
+          <div class="slots" aria-hidden="true"><i>my-app</i><i>my-app</i><i>my-app</i><i class="b">api</i><i class="b">api</i><i class="l">landing</i></div>
           <p class="slots-cap">six sandbox slots, two projects running</p>
           <p class="slots-note">Hold a run without losing work: <code>sandcastle pause</code> · <code>resume</code></p>
         </div>
@@ -480,7 +480,7 @@
           <div class="bound">
             <h3>Shares the machine</h3>
             <ul>
-              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other. A run with at least two sandbox slots keeps one for landing, so a green branch does not wait behind a ticket. <code>sandcastle cap 2</code> limits a live run's share.</li>
+              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other. The pool keeps one slot for any run's landing, so a green branch does not wait behind a ticket, and no slot sits idle. <code>sandcastle cap 2</code> limits a live run's share.</li>
               <li><b>CPU and memory counted.</b> Each sandbox has a CPU limit. Landing, base and verify gates take the run's next free gate slot before ticket gates; <code>sandcastle size</code> recommends pool limits from measured memory, and doctor warns when they exceed the VM.</li>
               <li><b>A pause keeps the work.</b> Passes in flight finish and green branches still land. Parked sandboxes close, slots go back to other runs and the machine can sleep until you resume.</li>
               <li><b>Detached.</b> A run started by your agent outlives the session that started it; <code>sandcastle wait</code> and <code>sandcastle stop</code> find it again.</li>

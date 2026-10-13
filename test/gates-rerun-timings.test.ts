@@ -90,3 +90,32 @@ test("timed() in burndown() writes the step's lines through timingLines", () => 
   assert.match(src, /appendFileSync\(timings, timingLines\(line, ended\)\.map\(\(l\) => JSON\.stringify\(l\) \+ "\\n"\)\.join\(""\)\);/);
   assert.match(src, /const result = await fn\(\);\n\s+ended = result;/);
 });
+
+test("a three-run result writes three lines in order, the wait on the first only and the ms summing to the step's", () => {
+  const redFail = (output: string) => ({ name: "test", command: "run-tests", exitCode: 1, output });
+  const one = { gates: [{ name: "lint", pass: true, ms: 1000 }, { name: "test", pass: false, ms: 2000 }], failure: redFail("FAILED tests/a.py::x"), failures: [], waitMs: 5000, ms: 3000, pressureSome: 40 };
+  const two = { gates: [{ name: "test", pass: false, ms: 2500 }], failure: redFail("FAILED tests/b.py::y"), failures: [], ms: 2500, pressureSome: 30, rerunOf: one };
+  const result = { gates: [{ name: "lint", pass: true, ms: 1000 }, { name: "test", pass: true, ms: 1500 }], failures: [], waitMs: 5000, pressureSome: 2, rerunOf: two };
+  const text = written(result, 12_000, { pressureSome: 2 });
+  const lines = text.trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 3);
+  assert.deepEqual(lines.map((l) => l.ok), [false, false, true]);
+  assert.deepEqual(lines.map((l) => l.waitMs), [5000, undefined, undefined]);
+  assert.deepEqual(lines.map((l) => l.ms), [3000, 2500, 1500]);
+  // The wait is no part of the step's time, so the lines sum to the elapsed time less it.
+  assert.equal(lines.reduce((sum, l) => sum + l.ms, 0) + 5000, 12_000);
+  assert.deepEqual(lines.map((l) => Object.keys(l.gates ?? {})), [["lint", "test"], ["test"], ["test"]]);
+  assert.deepEqual(lines.map((l) => l.pressureSome), [40, 30, 2]);
+  assert.deepEqual(ticketPasses(text, "7", "run-1").map((p) => [p.phase, p.ok, p.red]), [["gates", false, ["test"]], ["gates", false, ["test"]], ["gates", true, undefined]]);
+});
+
+test("the re-run lines carry rerun: true and the first line does not", () => {
+  const redFail = (output: string) => ({ name: "test", command: "run-tests", exitCode: 1, output });
+  const one = { gates: [{ name: "test", pass: false, ms: 2000 }], failure: redFail("a"), failures: [], ms: 2000 };
+  const two = { gates: [{ name: "test", pass: false, ms: 2000 }], failure: redFail("b"), failures: [], ms: 2000, rerunOf: one };
+  const result = { gates: [{ name: "test", pass: true, ms: 1000 }], failures: [], rerunOf: two };
+  const pair = written(two, 4000).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(pair.map((l) => l.rerun), [undefined, true]);
+  const three = written(result, 5000).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(three.map((l) => l.rerun), [undefined, true, true]);
+});

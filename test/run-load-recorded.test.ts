@@ -70,8 +70,8 @@ test("burndown() feeds the meter from the share samples and records its mean at 
 });
 
 test("burndown() samples the slots at every look, not only when its share or demand changes", () => {
-  // Another run beginning or ending moves the slot kept for landing while this run's share stays put: a sample
-  // taken only on a share change would keep the old figure for the rest of the run.
+  // Another run beginning or ending moves the estimate's divisor (the share beside another run, the workers alone)
+  // while this run's share stays put: a sample taken only on a share change would keep the old figure for the rest of the run.
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   const body = src.slice(src.indexOf("const poolValues = () => {"), src.indexOf("const poolWatch"));
   const sample = body.indexOf("load.sample(");

@@ -358,20 +358,48 @@ export type LandContext = {
   timed?: (issue: string, took: { elapsed: number; slotWaitMs: number }, landed: Landed) => void;
 };
 
-/** Keeps the test ids a ticket gate run failed (`LandContext.failedBefore`), its first run and its re-run alike: the run went red on them even where the re-run was green. */
-export const rememberFailed = <R extends Pick<GateRun, "failures" | "rerunOf">>(failedBefore: Map<string, Set<string>>, id: string, run: R): R => {
-  for (const f of [...run.failures, ...(run.rerunOf?.failures ?? [])]) {
-    const tests = failingTests(f.output, Infinity);
-    if (!tests.length) continue;
-    const known = failedBefore.get(id) ?? new Set<string>();
-    for (const t of tests) known.add(t);
-    failedBefore.set(id, known);
+// The head each test of a ticket's set went red on (undefined: the run had none), beside the set `LandContext.failedBefore` hands the landing.
+const wentRedOn = new WeakMap<Set<string>, Map<string, string | undefined>>();
+
+/**
+ * Keeps the test ids a ticket gate run failed (`LandContext.failedBefore`), its first run and its re-run alike: the run went red on them even where the re-run was green.
+ * A test stays only while nothing says the branch fixed it: a green run drops every test that went red on another head, a commit between the two - a repair -
+ * having fixed it, so a landed ticket that breaks it again is named. Red and then green on the same head (a re-run in the slot, a pass that committed nothing)
+ * is a flake and stays. A red run drops nothing: its test list can be clipped or cut short. A run with no head (`GateRun.head`) counts as the same head.
+ */
+export const rememberFailed = <R extends Pick<GateRun, "failures" | "rerunOf" | "failure" | "head">>(failedBefore: Map<string, Set<string>>, id: string, run: R): R => {
+  const known = failedBefore.get(id) ?? new Set<string>();
+  const heads = wentRedOn.get(known) ?? new Map<string, string | undefined>();
+  wentRedOn.set(known, heads);
+  failedBefore.set(id, known);
+  if (!run.failure) {
+    for (const t of known) {
+      const was = heads.get(t);
+      if (was !== undefined && run.head !== undefined && was !== run.head) {
+        known.delete(t);
+        heads.delete(t);
+      }
+    }
   }
+  // Every run of the chain (`GateRun.rerunOf`): the third run's result, the re-run, the first red.
+  for (let r: Pick<GateRun, "failures" | "rerunOf" | "head"> | undefined = run; r; r = r.rerunOf) {
+    for (const f of r.failures) {
+      for (const t of failingTests(f.output, Infinity)) {
+        known.add(t);
+        heads.set(t, r.head ?? run.head);
+      }
+    }
+  }
+  if (!known.size) failedBefore.delete(id);
   return run;
 };
 
-/** What a red landing gate ran on and said: the branch head and base tip it merged, the gates it ran and the failure it hit. */
-export type RedLanding = { head: string; base: string; failure: NonNullable<GateRun["failure"]>; gates: GateRun["gates"] };
+/**
+ * What a red landing gate ran on and said: the branch head and base tip it merged, the gates it ran and the failure it hit.
+ * `rerun`: the landing had already re-run the red gate and it was red again, so the failure is the re-run's and a requeue
+ * on the same tree has nothing left to re-run.
+ */
+export type RedLanding = { head: string; base: string; failure: NonNullable<GateRun["failure"]>; gates: GateRun["gates"]; rerun?: true };
 
 /**
  * The red landing gate a requeue repairs from, without running the gates again: the landing gate's own, when
@@ -703,7 +731,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       const seen = !!known && named.length > 0 && named.every((t) => known.has(t));
       const earlier = seen ? [] : since().filter(([, r]) => r.files.some((f) => mine.includes(f) || subject.has(f))).map(([id]) => id);
       const failing = result.run.failure ? failingTests(result.run.failure.output) : [];
-      if (result.run.failure) ctx.reds?.set(o.issue, { head: o.head!, base: result.base, failure: result.run.failure, gates: result.run.gates });
+      if (result.run.failure) ctx.reds?.set(o.issue, { head: o.head!, base: result.base, failure: result.run.failure, gates: result.run.gates, ...(result.run.rerunOf ? { rerun: true as const } : {}) });
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}), ...(seen ? { seen: true as const } : {}) };
     }
     if (result.kind === "merged") {
@@ -775,17 +803,15 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
   Math.min(concurrency, tickets, landing ? Math.max(1, pool - 1) : Infinity);
 
 /**
- * What the start line says of the slot `pipelineWorkers` leaves. Alone, it is one of the machine's slots, left in
- * the run's worker count. Beside another run it is one of the run's share, while the share is 2 or more: the pool
- * holds the run's ticket pipelines to share - 1 at each lease (`leaseSlot`'s `keep`). At a share of 1 the run's one
- * slot is a ticket's, and a landing goes first when a slot frees (`slotTurn`); a ticket already running is never
- * taken back (ADR 0001). `share` is the run's share at its start beside another run, none when it is alone: only the
- * clause that applies is said, as every clause at once read as though another run were live.
+ * What the start line says of the slot `pipelineWorkers` leaves. Alone, it is one of the machine's slots, left in the
+ * run's worker count. Beside another run it is still one of the machine's, kept for any run's landing rather than a
+ * part of this run's share: the shares split the pool less that slot, and a ticket never takes the pool's last free slot
+ * while another run is live (`leaseSlot`'s `keep`). `beside` is true when another run is live at the run's start: only
+ * the clause that applies is said, as every clause at once read as though another run were live.
  */
-export const landingSlotNote = (pool: number, share?: number) => {
+export const landingSlotNote = (pool: number, beside = false) => {
   const kept = `one of the ${pool} machine-wide sandbox slots is kept for landing`;
-  if (share === undefined) return kept;
-  return share >= 2 ? `${kept} - beside another run, one of this run's share of ${share}` : `${kept} - beside another run, at this run's share of 1, a landing goes first when a slot frees`;
+  return beside ? `${kept} - beside another run, for any run's landing, outside every run's share` : kept;
 };
 
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */

@@ -100,7 +100,7 @@ const harness = (root: string, answers: GateRun[], failedBefore?: Map<string, Se
   };
   const land = async (id: string) =>
     (await quietly(() => landOne(ctx, { issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${id}`) }))).result;
-  return { land, calls };
+  return { land, calls, reds: ctx.reds! };
 };
 
 test("a red landing gate is run again from the red gate before the ticket is red, and a flake lands", async () => {
@@ -126,6 +126,22 @@ test("a port that ran the re-run inside its own slot is not asked for another", 
   const { land, calls } = harness(root, [{ ...redOn("test", "a.test.ts"), rerunOf: first }]);
   assert.equal((await landSecond(land)).kind, "red");
   assert.equal(calls.length, 1);
+});
+
+test("a red landing whose gate ran the re-run leaves it marked on the red kept for the requeue, and one without leaves none", async () => {
+  const first = redOn("test", "a.test.ts");
+  const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" } });
+  const twice = harness(root, [{ ...redOn("test", "b.test.ts"), rerunOf: first }]);
+  assert.equal((await landSecond(twice.land)).kind, "red");
+  assert.equal(twice.reds.get("2")?.rerun, true);
+  const root2 = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" } });
+  // A timed-out gate is never re-run, so its result has no `rerunOf` and the requeue's own rules apply.
+  const timedOut = redOn("test", "a.test.ts");
+  timedOut.failure!.exitCode = 124;
+  const once = harness(root2, [timedOut]);
+  assert.equal((await landSecond(once.land)).kind, "red");
+  assert.ok(once.reds.has("2"));
+  assert.equal("rerun" in once.reds.get("2")!, false);
 });
 
 test("a timed-out landing gate is not run again", async () => {
@@ -222,4 +238,32 @@ test("the requeue the schedule tells, the outcome and the tracker comment of a r
   assert.equal(said.outcome?.text, "red when merged, as seen on the branch before (gate test; failing t.test.ts)");
   assert.match(said.tracker?.text ?? "", /already failing on this branch's own ticket gates in this run, so no landed ticket is named\./);
   assert.doesNotMatch(said.tracker?.text ?? "", /on the merged tree/);
+});
+
+test("the tests of all three runs of a ticket gate are kept, the first run's included", () => {
+  const kept = new Map<string, Set<string>>();
+  const run: GateRun = { ...GREEN, rerunOf: { ...redOn("test", "b.test.ts"), rerunOf: redOn("test", "a.test.ts") } };
+  assert.equal(rememberFailed(kept, "7", run), run);
+  assert.deepEqual([...kept.get("7")!].sort(), ["a.test.ts", "b.test.ts"]);
+  rememberFailed(kept, "9", { ...redOn("test", "z.test.ts"), rerunOf: { ...redOn("test", "y.test.ts"), rerunOf: redOn("test", "x.test.ts") } });
+  assert.deepEqual([...kept.get("9")!].sort(), ["x.test.ts", "y.test.ts", "z.test.ts"]);
+});
+
+const { landingFlaked } = await import("../src/gates.ts");
+
+test("landingFlaked gives the red run's tests after the pipeline's entries when the in-slot re-run went green", () => {
+  const result: GateRun = { ...GREEN, rerunOf: redOn("test", "test/b.test.ts", "test/a.test.ts") };
+  assert.deepEqual(landingFlaked(result, ["test/a.test.ts", "test/old.test.ts"]), ["test/a.test.ts", "test/old.test.ts", "test/b.test.ts"]);
+  assert.deepEqual(landingFlaked(result, undefined), ["test/b.test.ts", "test/a.test.ts"]);
+});
+
+test("landingFlaked gives nothing for a red re-run, a green run, or a result with no re-run", () => {
+  assert.equal(landingFlaked({ ...redOn("test", "test/a.test.ts"), rerunOf: redOn("test", "test/a.test.ts") }, ["x"]), undefined);
+  assert.equal(landingFlaked(GREEN, ["x"]), undefined);
+  assert.equal(landingFlaked(redOn("test", "test/a.test.ts"), undefined), undefined);
+});
+
+test("burndown's landing gate port records what landingFlaked returns on the ticket", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  assert.match(src, /const flaked = landingFlaked\(result, run\.tickets\(\)\[id\]\?\.flaked\);\n\s+if \(flaked\) run\.ticket\(id, \{ flaked \}\);/);
 });

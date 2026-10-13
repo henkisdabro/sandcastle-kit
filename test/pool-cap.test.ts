@@ -10,7 +10,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { startNode } from "./cli-spawn.ts";
-import { cleanup, heldBy, mine, other, pool, registrations, setHeld, steady, tix, until } from "./pool-sim.ts";
+import { cleanup, heldBy, mine, other, pool, registrations, setHeld, steady, ticket, tix, until } from "./pool-sim.ts";
 
 const { joinPool, members, parseCapArgs, setCap, setDemand, splitShares, standing } = pool;
 
@@ -33,38 +33,38 @@ test("the split: a cap lowers what a run asks for, and the others take the rest 
   assert.deepEqual(split(6, [[0, 2], [5]]), [0, 5], "a drained run still has no share");
 });
 
-test("a cap of 1 on one of two runs gives the other 5, and lifting it returns both to 3 + 3; the capped run keeps its slots", async () => {
-  // A holds 3 of its 5 and B holds the other 3; A has two tickets waiting.
+test("a cap of 1 on one of two runs gives the other 4, and lifting it returns both to 3 + 2; the capped run keeps its slots", async () => {
+  // Two runs split 5 slots (the sixth is kept for landing). A holds 3 of its 5 and B holds 2; A has two tickets waiting.
   joinPool("alpha", 5, 5);
   const first = tix("a", 5);
   await until(() => mine() === 5, "run A to fill its demand alone");
   other("beta", { demand: 5, held: 0 });
   first[0]!.release();
   first[1]!.release();
-  const again = tix("again", 2);
+  const again = [ticket("again0", { keep: true }), ticket("again1", { keep: true })];
   await until(() => mine() === 3, "A's two tickets to finish");
-  setHeld("beta", 3);
-  assert.deepEqual(shares(), [3, 3]);
+  setHeld("beta", 2);
+  assert.deepEqual(shares(), [3, 2]);
 
-  // Capped at 1, A is above its share of 1 and holds 3: it keeps them, and B's share is 5.
+  // Capped at 1, A is above its share of 1 and holds 3: it keeps them, and B's share is 4.
   setCap("alpha", 1);
-  assert.deepEqual(shares(), [1, 5]);
-  await steady(() => heldBy() === "3,3", "the cap took a slot from the capped run");
+  assert.deepEqual(shares(), [1, 4]);
+  await steady(() => heldBy() === "2,3", "the cap took a slot from the capped run");
 
   // A lets go of two; its own waiting tickets do not take them back, B's do.
   first[2]!.release();
   first[3]!.release();
   await until(() => mine() === 1, "A to let go of two");
   await steady(() => mine() === 1 && again.every((t) => !t.taken), "the capped run took a slot above its cap");
-  setHeld("beta", 5);
-  assert.equal(heldBy(), "1,5");
+  setHeld("beta", 4);
+  assert.equal(heldBy(), "1,4");
 
-  // Lifted, both are at their equal split again (B keeps what it holds until its tickets finish).
+  // Lifted, both are at their split again (B keeps what it holds until its tickets finish).
   setCap("alpha", "off");
-  assert.deepEqual(shares(), [3, 3]);
+  assert.deepEqual(shares(), [3, 2]);
   assert.equal(standing("alpha").cap, undefined);
-  setHeld("beta", 3);
-  await until(() => heldBy() === "3,3", "A to take the slots B let go of");
+  setHeld("beta", 2);
+  await until(() => heldBy() === "2,3", "A to take the slots B let go of");
 });
 
 test("a capped run takes no slot above its cap even when no other run wants one, and takes them again once lifted", async () => {

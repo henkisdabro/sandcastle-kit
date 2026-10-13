@@ -973,13 +973,18 @@ export type PauseHandlingPorts = {
   refresh(): void;
   /** Milliseconds since the epoch. */
   now?(): number;
+  /** Told the run's total time spent paused so far (milliseconds) each time a pause ends: the run record's `pausedMs`. */
+  pausedFor?(ms: number): void;
 };
 
 /**
  * The run's side of a pause, told by the scheduler: the `paused` and `resumed` changes write the record, say what the
  * run waits for (once, and again when that changes) and release or re-take keep-awake. `end` is the run's close with its
  * last ticket landed while paused: not paused any more, and awake for the verify and the summary. `waitOutPause` is
- * an attempt's wait, before the guard decides, for a pause the latest reading has just asked for.
+ * an attempt's wait, before the guard decides, for a pause the latest reading has just asked for. The time paused is
+ * summed here, where every pause and its end arrive: from the `since` of the first `paused` told to the `resumed`, the
+ * `pause stopped` or the `end`; a `paused` told again in the same span (a person takes a usage pause over, a later reset
+ * time) is the same span.
  */
 export const createPauseHandling = (ports: PauseHandlingPorts) => {
   // Said once per pause: the first time the scheduler tells it, and again when what it waits for changes.
@@ -987,11 +992,24 @@ export const createPauseHandling = (ports: PauseHandlingPorts) => {
   // What the run is paused for when it took the pause itself, to say how it ended.
   let forUsage: UsagePaused | undefined;
   const now = ports.now ?? Date.now;
+  // The span in progress (its `since`, seconds) and the finished spans' total.
+  let spanSince: number | undefined;
+  let pausedMs = 0;
+  // A pause lasts until `sandcastle resume`, across a run's turns, so a later turn is told it with its first `since`:
+  // counted from there, the turn before's paused time was counted again, and could exceed this turn's own length.
+  const startedAt = now();
+  const closeSpan = () => {
+    if (spanSince === undefined) return;
+    pausedMs += Math.max(0, now() - Math.max(spanSince * 1000, startedAt));
+    spanSince = undefined;
+    ports.pausedFor?.(Math.round(pausedMs));
+  };
   const clockOf = (seconds: number) => new Date(seconds * 1000).toTimeString().slice(0, 5);
   return {
     /** The `paused`, `resumed` and `pause stopped` changes; any other is not this handler's. */
     told(c: Change<unknown, unknown>): void {
       if (c.kind === "paused") {
+        spanSince ??= c.since;
         // The tickets still finishing; once none is, the machine may sleep (the demand is 0 by then too).
         ports.record({ since: c.since, finishing: c.finishing, ...c.usage });
         const finishing = c.finishing.length ? `finishing ${c.finishing.map(ports.ref).join(", ")}` : "nothing is in flight";
@@ -1014,6 +1032,7 @@ export const createPauseHandling = (ports: PauseHandlingPorts) => {
         if (!c.finishing.length) ports.releaseAwake();
         ports.refresh();
       } else if (c.kind === "resumed") {
+        closeSpan();
         ports.record(undefined);
         ports.say(
           forUsage && now() / 1000 >= forUsage.resumesAt
@@ -1026,6 +1045,7 @@ export const createPauseHandling = (ports: PauseHandlingPorts) => {
         ports.refresh();
       } else if (c.kind === "pause stopped") {
         // A stop ended the pause: tickets in flight finish, and the Herdr sidebar and tab bar read this record meanwhile.
+        closeSpan();
         ports.record(undefined);
         said = undefined;
         forUsage = undefined;
@@ -1036,6 +1056,7 @@ export const createPauseHandling = (ports: PauseHandlingPorts) => {
     /** The run's close: a pause still told is cleared and the machine held awake. */
     async end(): Promise<void> {
       if (said === undefined) return;
+      closeSpan();
       ports.record(undefined);
       said = undefined;
       await ports.holdAwake();
