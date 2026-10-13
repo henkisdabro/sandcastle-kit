@@ -1502,6 +1502,15 @@ left behind another run that began waiting after its own run did, and any other 
 yields while one of the run's priority waits is waiting (`priorityAhead`).
 A run with no priority wait is served as it always was, and a run that has waited less than another
 is still behind it, priority or not.
+A landing that will gate **claims** the gates pool before its gates ask (`claimSlot`, `src/pool.ts`):
+it opens its sandbox and merges for seconds first, and a ticket gate asked in that window took the
+slot and held it for a whole gate run.
+`landOne` takes the claim once it holds its landing sandbox slot (not while it waits for one; a
+fast-forward or a conflict found on the host never takes it) and releases it when `landInSandbox`
+ends, gated or not; the first priority wait the run begins for the pool spends it as well.
+A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than
+the run's claims, so with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
+The claim is kept in this process (`claims`), not in the pool's files; `test/pool-landing-claim.test.ts`.
 The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is
 this process's, and another run needs only a wait's start - and, for the pool's last free slot,
 whether it is a landing's, which the entry's file name says (a `-priority` before `.wait`; the
