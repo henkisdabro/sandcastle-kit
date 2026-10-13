@@ -975,6 +975,7 @@ h1 {
   font-weight: 650;
 }
 .slots .b { background: var(--queued); }
+.slots .l { background: none; outline: 1px dashed var(--shore); outline-offset: -1px; color: var(--shore); }
 .tile > .slots-cap { margin: 0.8rem 0 0; color: var(--shore); }
 .tile > .slots-note { margin: 1.2rem 0 0; }
 
