@@ -1213,7 +1213,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         sentBack.set(t.id, back);
         tell({ kind: "requeued", id: t.id, again });
         inPipeline++;
-        requeuedAt.set(t.id, { at: clock(), pausedMs });
+        // A landing goes on during a pause, so a requeue may come in one: its part before the requeue is no part of the wait.
+        requeuedAt.set(t.id, { at: clock(), pausedMs: pausedMs + (pausedSince !== undefined ? clock() - pauseBegan : 0) });
         pipelines.push({ ticket: t, rank: REQUEUED });
         demand();
         return true;

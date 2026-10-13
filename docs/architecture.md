@@ -606,7 +606,8 @@ state.
   record's note says it waits for a free slot, not for the ticket that has landed) and
   `resolve starts` for a wait it said,
   `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`,
-  `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`).
+  `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`,
+  `test/schedule-resolve-late-holder.test.ts`).
   While a resolve waits for queued branches only (none in its gates), a worker that is free does
   not take a ticket that has not started: it waits, with its slot if it holds one (a landing that
   waits for a slot still takes it back), and takes the resolve when it is pushed, else the landing
@@ -1790,7 +1791,8 @@ It holds the landing gates' time, so `typicalTimes` and `estimate` skip it too, 
 count twice.
 A requeued ticket's resolve wait, for a resolve that waited, runs from its requeue to its
 attempt's start: the queue before the wait and the queue for a free worker after it are in it, the
-time a pause held the run is not. It reaches the attempt as `at.resolveWaitMs` and is added to the
+time a pause held the run after the requeue is not (a landing goes on in a pause, so a requeue can
+come in the middle of one: `test/resolve-wait-paused.test.ts`). It reaches the attempt as `at.resolveWaitMs` and is added to the
 `waitMs` of that attempt's first `setup` line
 (`withQueued`); a ticket has no slot wait to add it to (slot first).
 The landings in a row (the history tickets' landing gates, none for one that landed without a gate,

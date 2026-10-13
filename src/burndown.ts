@@ -1301,7 +1301,7 @@ export const createHoldRecord = (o: {
 };
 
 /**
- * A resolve wait's note: the branches queued to land have landed, and a ticket still in its pipeline "lands or
+ * A resolve wait's note: the branches queued to land have landed, and a ticket still in its gates "lands or
  * leaves the run" - it may never reach a landing, so "has landed" would promise one.
  */
 export const resolveWaitNote = (ref: (id: string) => string, c: { for: string[]; running: string[] }): string => {

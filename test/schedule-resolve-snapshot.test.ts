@@ -70,7 +70,7 @@ test("a resolve does not wait for a ticket that shares its file and is still imp
   assert.equal((endings.get("10") as { landed: Landed }).landed.kind, "merged");
 });
 
-test("a resolve waits for a ticket in its gates that started after the wait began, until it has landed", async () => {
+test("a resolve waits for a ticket in its gates that shares only its other file, until it has landed, and not for one still implementing", async () => {
   const run30 = later();
   const land30 = later();
   const sentBack = later();
