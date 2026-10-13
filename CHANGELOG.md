@@ -11,6 +11,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- **The idle mark and `sandcastle doctor` name a newer kit release** tagged on the kit's remote
+  (`0.17.0 out - /sandcastle update`), read with `git ls-remote --tags`, cached for six hours and
+  switched off with `"updateCheck": false` in the personal settings. `/sandcastle-mark dismiss`
+  quiets the hint until a newer release is tagged; `show` brings it back. (#787, #788)
 - **The merge comment lists what a review changed**: each review commit's short hash and subject
   (the subject alone for a project that lands by squash, whose branch is gone after landing), so
   a reader can see the branch changed after the implementer's record. (#766)
@@ -18,17 +22,21 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   by a fresh subagent with no triage notes before it is queued; where two reasonable readings would
   differ, you are asked to decide, and each read is recorded in the triage file. (#771)
 - **The Claude Code mod's idle mark shows the kit version** (`sandcastle 0.16.0`, or `0.16.0+3` for
-  a clone past its release tag), `update needed` when the project has Upgrading notes it has not had,
-  and `project on X` when its recorded release is older with nothing pending.
+  a clone past its release tag), and `update needed` when the project has Upgrading notes it has
+  not had or no usable update record; a current project's mark says nothing more.
   `sandcastle --version --json` gives the facts, and a bare `/sandcastle-mark` reports them in
-  full. (#786)
+  full. (#786, #787)
 
 ### Changed
 
+- **Agents' comments on a GitHub ticket open with "Sandcastle agent:"**, so the kit never takes
+  one for a person's. (#792)
 - **A full review sees the implementer's whole final message**, cut at about 4,000 characters,
   not only its last paragraph, so a caveat in a mid-message list reaches the reviewer. (#746)
 - **A ticket's gates run at the gate share of the CPUs** while they hold a gates slot, not the
   smaller ticket share its sandbox was created with, and the limit is set back afterwards. (#760)
+- **Implementers and reviewers are told that a loop over most test files, one at a time, is the
+  full suite run serially**: one review spent 33 minutes so, slowing the gates beside it.
 - **A reviewer no longer runs the full suite after its last commit**: it runs the typecheck and the
   tests covering what it changed, and leaves the rest to the ticket gates that start as it exits.
   (#761)
@@ -50,6 +58,26 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **A GitHub 5xx while a prompt is expanded counts as one failure whatever its status**, so a 502
+  then a 504 stop the run like any matching pair; the stop line and the closing summary name the
+  status and githubstatus.com, not `doctor --verify`, and list the stopped tickets. (#783)
+- **A person's comment posted while a ticket's gates or a repair run is no longer counted as
+  reviewed**: only the full review records the comments it read, so a carried branch goes back to
+  the full review before it lands. (#792)
+- **The full review of a carried branch with a late comment and a conflicted merge is shown the
+  files the resolver changed beyond the conflict**, as the Codex cross-review is. (#793)
+- **A base or verify gate's priority wait no longer ends a landing's claim on the gates slot**:
+  each landing's claim is its own. (#794)
+- **A slow GitHub no longer freezes a run** while it checks blockers (at the start too), checks
+  whether a merged ticket was reopened, or lists open tickets before filing a follow-up: each read
+  gives up after 30 seconds, and a ticket whose blocker links cannot be read waits. The start's
+  checks of comment-only blockers and blocker lines read with the same limit. (#795, #798)
+- **The idle mark's newer-release read works with a `GIT_SSH` program that is not ssh** (plink, a
+  wrapper): it no longer adds `-o BatchMode=yes`, which such a program refused, so the release was
+  never named.
+- **A mark left by an older mod in a session that reloads the mod** is drawn in plain sand instead of
+  breaking the band.
+- **"Worth a glance" no longer quotes a gap the reviewer says it fixed** in its opening sentence.
 - **A conflicted ticket's resolve is no longer lost to a fresh ticket**: one free worker waits for
   the resolve to be released, while the others take the queue's next tickets, and the resolve waits
   only for tickets past their review that share its files - not for one that has gone back to a

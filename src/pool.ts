@@ -722,8 +722,9 @@ const writeWait = (wait: OwnWait) => {
   writeFileSync(`${wait.file}.tmp`, `${wait.pid} ${wait.run} ${wait.since} ${wait.label}\n`);
   renameSync(`${wait.file}.tmp`, wait.file);
 };
-const beginWait = (pool: PoolName, label: string, priority: boolean): OwnWait => {
-  if (priority) spendClaim(pool);
+const beginWait = (pool: PoolName, label: string, priority: boolean, claim?: SlotClaim): OwnWait => {
+  // Only the claim this wait was given: a priority wait with none (a base or verify gate) leaves every landing's claim standing.
+  if (priority) claim?.release();
   const since = clock();
   const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}${priority ? PRIORITY_MARK : ".wait"}`);
   const wait = { file, pid: process.pid, run: RUN_ID, since, pool, priority, order: sequence - 1, label };
@@ -754,13 +755,15 @@ const countedFrom = (wait: OwnWait): Wait => {
  */
 const claims = new Map<PoolName, Set<object>>();
 
-/** A claim on `pool` for this run's coming priority wait; `release` ends it, once, and the first priority wait for the pool does too. */
+/** A claim on `pool` for one landing's coming priority wait; `release` ends it, and so does that wait (`withSlot`'s `claim`). */
 export type SlotClaim = { release(): void };
 
 /**
  * A landing that will gate the merged tree claims the gates pool when it holds its sandbox slot: a ticket gate of this run
  * yields to it (`priorityAhead`) while the pool's free slots are no more than the run's claims. Held until the landing's
- * own priority wait for the pool begins (`beginWait`) or the landing ends without gating (`release`).
+ * own priority wait for the pool begins (it is handed the claim, `beginWait`) or the landing ends without gating (`release`).
+ * Claims are tied to their landing, not anonymous: a priority wait made without one (a base or verify gate) spends none,
+ * where it used to spend the oldest and let a ticket gate take the slot after it.
  */
 export const claimSlot = (pool: PoolName): SlotClaim => {
   const mine = {};
@@ -768,13 +771,6 @@ export const claimSlot = (pool: PoolName): SlotClaim => {
   claims.set(pool, set);
   set.add(mine);
   return { release: () => void set.delete(mine) };
-};
-
-/** The oldest claim on `pool` ends: the priority wait it was made for has begun and stands in its place. */
-const spendClaim = (pool: PoolName) => {
-  const set = claims.get(pool);
-  const first = set?.values().next();
-  if (first && !first.done) set!.delete(first.value);
 };
 
 /**
@@ -841,7 +837,7 @@ export type SlotLease = { release(): void };
 export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number, giveUp?: undefined, priority?: boolean, keep?: boolean): Promise<SlotLease>;
 export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean, priority?: boolean, keep?: boolean): Promise<SlotLease | undefined>;
 export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs = 5000, giveUp?: () => boolean, priority = false, keep = false): Promise<SlotLease | undefined> {
-  return takeSlot(pool, label, onWait, pollMs, giveUp, priority, keep, undefined, (lease) => lease);
+  return takeSlot(pool, label, onWait, pollMs, giveUp, priority, keep, undefined, undefined, (lease) => lease);
 }
 
 /**
@@ -849,8 +845,8 @@ export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReas
  * on a free slot `withSlot`'s `fn` starts before the call returns, with no microtask between, as it did
  * before there were leases (a test holds the slot and queues behind it in one go, and relies on it).
  */
-async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number, giveUp: (() => boolean) | undefined, priority: boolean, keep: boolean, onward: (() => boolean) | undefined, use: (lease: SlotLease) => T): Promise<Awaited<T> | undefined> {
-  const wait = beginWait(pool, label, priority);
+async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number, giveUp: (() => boolean) | undefined, priority: boolean, keep: boolean, onward: (() => boolean) | undefined, claim: SlotClaim | undefined, use: (lease: SlotLease) => T): Promise<Awaited<T> | undefined> {
+  const wait = beginWait(pool, label, priority, claim);
   let slot: ReturnType<typeof tryAcquire>;
   try {
     let told: WaitReason | undefined;
@@ -939,8 +935,8 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
 }
 
 /** Waits for a slot, runs `fn`, frees the slot. */
-export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000, priority = false, keep = false, onward?: () => boolean): Promise<T> =>
-  (await takeSlot(pool, label, onWait, pollMs, undefined, priority, keep, onward, async (lease) => {
+export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000, priority = false, keep = false, onward?: () => boolean, claim?: SlotClaim): Promise<T> =>
+  (await takeSlot(pool, label, onWait, pollMs, undefined, priority, keep, onward, claim, async (lease) => {
     try {
       return await fn();
     } finally {

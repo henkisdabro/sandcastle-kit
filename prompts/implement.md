@@ -114,9 +114,12 @@ For a change in behaviour:
    for real.
 5. **Name each test after what a caller sees,** not after the function it calls.
 
-While working, run single test files and the typecheck. Before you finish, run the typecheck gate and
-the tests your change touches or that cover it, each once. Do not run the full suite
-yourself: the orchestrator runs every gate right after you exit.
+While working, run single test files and the typecheck. Before you finish, run the typecheck gate
+and the tests your change touches or that cover it, each once. Do not run the full suite yourself:
+the orchestrator runs every gate right after you exit. A loop that runs most of the test files one
+at a time is the full suite run serially - slower, and it slows the gates beside it: when a change
+reaches nearly every test (a preload, a shared helper, a doc many tests read), leave that to the
+gates.
 
 {{KIT_PROTECTED}}
 {{KIT_PROJECT_RULES}}

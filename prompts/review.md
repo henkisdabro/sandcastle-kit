@@ -118,12 +118,14 @@ worktree; never wait on a backgrounded run with `sleep`, `pgrep` or Monitor, and
 to time it.
 
 The orchestrator runs every one of them on this branch as soon as you finish, the full suite
-included, re-runs a red ticket gate once in its slot and gives a red that stays a repair pass. So run
-the typecheck gate and the tests that cover what you are looking at or changing, as often as you
+included, re-runs a red ticket gate once in its slot and gives a red that stays a repair pass. So
+run the typecheck gate and the tests that cover what you are looking at or changing, as often as you
 need, and do not run the full suite yourself: a run of yours repeats the gates that start as you
-exit, and slows them while it runs beside them. After docs-only commits (prose in a README, a doc or
-a comment), run only the tests that cover that prose, if any. A gate run of your own adds nothing when
-you commit nothing.
+exit, and slows them while it runs beside them. A loop that runs most of the test files one at a
+time is the full suite run serially - slower, and it slows the gates beside it: when a change
+reaches nearly every test (a preload, a shared helper, a doc many tests read), leave that to the
+gates. After docs-only commits (prose in a README, a doc or a comment), run only the tests that
+cover that prose, if any. A gate run of your own adds nothing when you commit nothing.
 
 A long command that is not a gate - a download, an install, a build - also runs in the foreground
 with the tool's longest timeout, never in the background. If one is in the background anyway, wait for

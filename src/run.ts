@@ -624,7 +624,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // Function replacements: a `$&` or `$'` in a rule or gate is text, not a
     // replacement pattern.
     const text = readFileSync(join(KIT, `prompts/${kind === "rereview" || kind === "remerge" ? "review" : kind}.md`), "utf8")
-      .replaceAll("{{KIT_AFTER_REPAIR}}", () => (kind === "rereview" ? AFTER_REPAIR : kind === "remerge" ? AFTER_MERGE : ""))
+      .replaceAll("{{KIT_AFTER_REPAIR}}", () => (kind === "rereview" ? AFTER_REPAIR : kind === "remerge" ? AFTER_MERGE : kind === "review" ? "{{MERGE_STRAYS}}" : ""))
       .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
@@ -648,6 +648,9 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     if (kind !== "resolve") allowed.add("FOLLOWUPS_NAMED");
     if (kind === "rereview") allowed.add("REPAIR_BASE");
     if (kind === "remerge") for (const k of ["REVIEW_BASE", "MERGE_STRAYS"]) allowed.add(k);
+    // The full review of a carried branch whose conflicted merge a person's late comment sent there is shown the resolver's named strays
+    // too (empty otherwise), through the slot the narrow reviews fill, so a project's own review prompt needs no edit.
+    if (kind === "review") allowed.add("MERGE_STRAYS");
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
     if (unknown.length) {
       throw new Error(`The ${kind} prompt has placeholders Sandcastle cannot fill: ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(", ")} - from ${project.rules ?? "the kit template"}.`);
@@ -1460,7 +1463,7 @@ export type BranchHead = {
   gap?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
-  /** The ticket's comment count when the kit last wrote `reviewed`, `green` or `repaired` (`commentCount`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
+  /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`commentCount`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
   comments?: number;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;

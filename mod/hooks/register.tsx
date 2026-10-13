@@ -17,7 +17,7 @@ import type { EngineInterface, Register } from "claude-code";
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
 import { activity, afterTurn, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
-import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Tone, type Trigger } from "./idle.ts";
+import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, heldRelease, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Tone, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
@@ -27,7 +27,7 @@ const MARK_ICON = "♜";
 /** The idle mark's line the band draws between runs, as sand-coloured parts; null for none. */
 const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
 /** The sand each tone of the mark's line is drawn in: the hint in the castle's bright sand and bold, never Claude Code's notice colour. */
-const TONES: Record<Tone, { color: string; bold?: boolean }> = { name: { color: SAND.name }, hint: { color: SAND.top, bold: true }, muted: { color: SAND.muted } };
+const TONES: Record<Tone, { color: string; bold?: boolean }> = { name: { color: SAND.name }, hint: { color: SAND.top, bold: true } };
 /** The cache refresh's row the band draws under the castle; null for none. */
 const warmLine = atom({ plugin: "sandcastle", key: "warm" } as const, null);
 /** What the cache refresh remembers; `$.state`, because a reload restarts module variables and not state. */
@@ -314,7 +314,7 @@ async function adopt($: EngineInterface, root: string) {
     seenAt(root).since = kept?.since;
   }
   await $.command.register({ name: "sandcastle-status", description: "Show the sandcastle run in this project, with no model turn", immediate: true });
-  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count, or hide or show the mark, with no model turn", argumentHint: "[dismiss|hide|show]", immediate: true });
+  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count and newer release, or hide or show the mark, with no model turn", argumentHint: "[dismiss|hide|show]", immediate: true });
 }
 
 /** The shared cache entry's key: one per project root, apart from the session entry under the bare root. */
@@ -430,7 +430,7 @@ async function facts($: EngineInterface, root: string): Promise<MarkInput> {
   const entry = parseEntry(await $.store.get(readyKey(root)));
   const versionRead = parseVersionEntry(await $.store.get(versionKey(root)));
   const choice = parseChoice(await $.store.get(markKey(root)));
-  return { setUp, idleMark, hidden: choice?.hidden, dismissed: choice?.dismissed, entry, versionRead, now };
+  return { setUp, idleMark, hidden: choice?.hidden, dismissed: choice?.dismissed, dismissedRelease: choice?.dismissedRelease, entry, versionRead, now };
 }
 
 /**
@@ -442,7 +442,8 @@ async function mark($: EngineInterface, root: string): Promise<Mark | undefined>
   if (!input.setUp || !input.idleMark) return markText(input);
   if (input.dismissed && dismissalEnded(input.dismissed, input.entry, input.now)) {
     // A ticket not in the dismissal is ready: the dismissal is over for good, not only while it shows.
-    await $.store.set(markKey(root), { hidden: input.hidden === true });
+    // The dismissed release is its own: it stays as it was.
+    await $.store.set(markKey(root), { hidden: input.hidden === true, ...(input.dismissedRelease ? { dismissedRelease: input.dismissedRelease } : {}) });
     input.dismissed = undefined;
   }
   if (!input.hidden) {
@@ -461,12 +462,15 @@ async function choose($: EngineInterface, root: string, args: string): Promise<s
   if (action === undefined) return MARK_USAGE;
   if (action !== "report") {
     const input = await facts($, root);
-    const prior: Choice = { hidden: input.hidden === true, ...(input.dismissed ? { dismissed: input.dismissed } : {}) };
-    await $.store.set(markKey(root), choiceAfter(action, prior, input.entry, input.now));
+    const prior: Choice = { hidden: input.hidden === true, ...(input.dismissed ? { dismissed: input.dismissed } : {}), ...(input.dismissedRelease ? { dismissedRelease: input.dismissedRelease } : {}) };
+    await $.store.set(markKey(root), choiceAfter(action, prior, input.entry, input.now, input.versionRead));
     if (idling) await place($, await mark($, root));
   }
   const input = await facts($, root);
-  const done = { dismiss: "Dismissed: the count stays quiet until a ticket not ready now becomes ready.", hide: "Hidden in this project until /sandcastle-mark show.", show: "Shown." };
+  // A release kept from an earlier dismissal that a newer tag has ended is not named: the report below would contradict it.
+  const held = action === "dismiss" ? heldRelease(input) : undefined;
+  const out = held ? ` The ${held} release stays quiet until a newer one is tagged.` : "";
+  const done = { dismiss: `Dismissed: the count stays quiet until a ticket not ready now becomes ready.${out}`, hide: "Hidden in this project until /sandcastle-mark show.", show: "Shown." };
   return action === "report" ? markReport(input) : `${done[action]}\n${markReport(input)}`;
 }
 
@@ -683,11 +687,15 @@ export const register: Register = (on) => {
               <Text color={SAND.top} bold>
                 {MARK_ICON}
               </Text>
-              {line.map((part) => (
-                <Text color={TONES[part.tone].color} bold={TONES[part.tone].bold}>
-                  {part.text}
-                </Text>
-              ))}
+              {line.map((part) => {
+                // A mark set by an older mod can hold a tone this one has dropped (`muted`): drawn as the name, never a throw.
+                const tone = TONES[part.tone] ?? TONES.name;
+                return (
+                  <Text color={tone.color} bold={tone.bold}>
+                    {part.text}
+                  </Text>
+                );
+              })}
             </Box>
           )}
           {now === null

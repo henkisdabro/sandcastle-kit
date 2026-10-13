@@ -21,7 +21,7 @@ export type Entry = {
 /** What `sandcastle --version --json` prints (src/upgrading.ts's `versionFacts`), the part the mark reads. */
 export type VersionFacts = {
   kit: { version: string; release: string; past: number };
-  /** The newest tagged release; always null until the kit reads one, and the mark says nothing of it yet. */
+  /** The newest release tagged on the kit's remote and when the kit read it (ISO 8601); null when it is not known: the check is off, failed or found none. */
   newestRelease: { release: string; checkedAt: string } | null;
   /** Null outside a set-up project. */
   project: { recorded: boolean; release: string | null; pendingNotes: string[] } | null;
@@ -51,6 +51,11 @@ export type Choice = {
   hidden: boolean;
   /** `/sandcastle-mark dismiss`: the ready ids at that moment; absent when nothing is dismissed. */
   dismissed?: string[];
+  /**
+   * `/sandcastle-mark dismiss`: the newest release tagged on the remote at that moment, when it was newer than the kit's
+   * own; absent when no release is dismissed. Kept apart from `dismissed`, so ending one leaves the other as it was.
+   */
+  dismissedRelease?: string;
 };
 
 /** What the line is decided from. */
@@ -63,6 +68,8 @@ export type MarkInput = {
   hidden?: boolean;
   /** The ids of a dismissal (`/sandcastle-mark dismiss`); the count stays quiet while the ready set is within them. */
   dismissed?: string[];
+  /** The release of a dismissal (`/sandcastle-mark dismiss`); `N out` stays quiet until a release newer than it is tagged. */
+  dismissedRelease?: string;
   /** The cached read; none yet, or with no `now`, gives the bare mark. */
   entry?: Entry;
   /** The cached version read; none yet, or too old to show, and the mark carries no version. */
@@ -87,8 +94,21 @@ const current = (entry: Entry | undefined, now: number | undefined): string[] =>
 export const dismissalEnded = (dismissed: string[], entry: Entry | undefined, now: number | undefined): boolean =>
   current(entry, now).some((id) => !dismissed.includes(id));
 
-/** A tone of the mark's line: `name` the row's sand, `hint` the castle's bright sand in bold, `muted` the dimmer sand. */
-export type Tone = "name" | "hint" | "muted";
+/**
+ * Whether a release dismissal has ended: the newest release the facts name is newer than the dismissed one.
+ * Facts that name none say nothing either way, as a count too old to show does for a ready dismissal.
+ */
+export const releaseDismissalEnded = (dismissedRelease: string, facts: VersionFacts | null): boolean => {
+  const out = facts?.newestRelease?.release;
+  return out !== undefined && newer(out, dismissedRelease);
+};
+
+/** The dismissed release while its dismissal holds, else undefined: what the report and the `dismiss` reply name. */
+export const heldRelease = (input: Pick<MarkInput, "dismissedRelease" | "versionRead" | "now">): string | undefined =>
+  input.dismissedRelease !== undefined && !releaseDismissalEnded(input.dismissedRelease, currentFacts(input.versionRead, input.now)) ? input.dismissedRelease : undefined;
+
+/** A tone of the mark's line: `name` the row's sand, `hint` the castle's bright sand in bold. */
+export type Tone = "name" | "hint";
 
 /** One coloured piece of the line. The pieces are drawn side by side with a space between them. */
 export type MarkPart = { text: string; tone: Tone };
@@ -119,10 +139,13 @@ const releaseLabel = (kit: VersionFacts["kit"]): string => `${kit.release}${kit.
  * the line never says why (`sandcastle queue` and the status view do). A dismissal takes the
  * count off, never the mark; hiding takes both.
  *
- * With version facts the name carries the kit's release, and one hint may follow the count:
- * `update needed` when the project has Upgrading notes it has not had or no usable update record
- * (bold, the call to action becomes `/sandcastle update`), else `project on X` when its recorded
- * release is older than the kit's (muted, the call to action stays `/sandcastle run`).
+ * With version facts the name carries the kit's release, and one hint may follow the count, the
+ * first of these that holds (bold, the call to action becomes `/sandcastle update`): `N out` when
+ * the newest release tagged on the kit's remote is newer than the kit's own release, else
+ * `update needed` when the project has Upgrading notes it has not had or no usable update record.
+ * A dismissed release (`dismissedRelease`) quiets `N out` until a newer one is tagged, and the
+ * line then falls to `update needed` as if no release were out: that hint has no dismissal.
+ * A project that is current says nothing: its recorded release is for the report.
  */
 export const markText = (input: MarkInput): Mark | undefined => {
   if (!input.setUp || !input.idleMark || input.hidden) return undefined;
@@ -134,11 +157,12 @@ export const markText = (input: MarkInput): Mark | undefined => {
   const lead = `${facts ? `sandcastle ${releaseLabel(facts.kit)}` : "sandcastle"}${count ? ` · ${count} ready` : ""}`;
   const project = facts?.project;
   const parts: MarkPart[] = [];
-  if (project && (!project.recorded || project.pendingNotes.length > 0)) {
+  const out = facts?.newestRelease?.release;
+  const outQuiet = out !== undefined && input.dismissedRelease !== undefined && !newer(out, input.dismissedRelease);
+  if (facts && out && !outQuiet && newer(out, facts.kit.release)) {
+    parts.push({ text: `${lead} ·`, tone: "name" }, { text: `${out} out`, tone: "hint" }, { text: "- /sandcastle update", tone: "name" });
+  } else if (project && (!project.recorded || project.pendingNotes.length > 0)) {
     parts.push({ text: `${lead} ·`, tone: "name" }, { text: "update needed", tone: "hint" }, { text: "- /sandcastle update", tone: "name" });
-  } else if (facts && project?.release && newer(facts.kit.release, project.release)) {
-    parts.push({ text: `${lead} ·`, tone: "name" }, { text: `project on ${project.release}`, tone: "muted" });
-    if (count) parts.push({ text: "- /sandcastle run", tone: "name" });
   } else parts.push({ text: count ? `${lead} - /sandcastle run` : lead, tone: "name" });
   return { text: parts.map((p) => p.text).join(" "), parts };
 };
@@ -152,18 +176,43 @@ export const markAction = (args: string): "dismiss" | "hide" | "show" | "report"
   return word === "" ? "report" : word === "dismiss" || word === "hide" || word === "show" ? word : undefined;
 };
 
-/** The choice after `dismiss`, `hide` or `show`: the dismissal holds the ids of a count that is current, none otherwise. */
-export const choiceAfter = (action: "dismiss" | "hide" | "show", choice: Choice, entry: Entry | undefined, now: number | undefined): Choice =>
-  action === "show" ? { hidden: false } : action === "hide" ? { ...choice, hidden: true } : { ...choice, dismissed: [...current(entry, now)] };
+/** The release a dismissal would quiet: the newest one on the remote, when the facts are current and it is newer than the kit's own. */
+const releaseOut = (read: VersionEntry | undefined, now: number | undefined): string | undefined => {
+  const facts = currentFacts(read, now);
+  const out = facts?.newestRelease?.release;
+  return facts && out !== undefined && newer(out, facts.kit.release) ? out : undefined;
+};
+
+/**
+ * The choice after `dismiss`, `hide` or `show`: the dismissal holds the ids of a count that is current, none otherwise,
+ * and the release `N out` names when there is one (else an earlier dismissed release stays). `show` clears both.
+ */
+export const choiceAfter = (
+  action: "dismiss" | "hide" | "show",
+  choice: Choice,
+  entry: Entry | undefined,
+  now: number | undefined,
+  versionRead?: VersionEntry,
+): Choice => {
+  if (action === "show") return { hidden: false };
+  if (action === "hide") return { ...choice, hidden: true };
+  const dismissedRelease = releaseOut(versionRead, now) ?? choice.dismissedRelease;
+  return { ...choice, dismissed: [...current(entry, now)], ...(dismissedRelease !== undefined ? { dismissedRelease } : {}) };
+};
 
 /** A stored value as a choice, or undefined when it is not one (the store is shared, so it is checked). */
 export const parseChoice = (value: unknown): Choice | undefined => {
   if (typeof value !== "object" || value === null) return undefined;
-  const { hidden, dismissed } = value as Record<string, unknown>;
+  const { hidden, dismissed, dismissedRelease } = value as Record<string, unknown>;
   if (typeof hidden !== "boolean") return undefined;
-  if (dismissed === undefined) return { hidden };
-  if (!Array.isArray(dismissed) || !dismissed.every((id) => typeof id === "string")) return undefined;
-  return { hidden, dismissed: dismissed as string[] };
+  if (dismissed !== undefined && (!Array.isArray(dismissed) || !dismissed.every((id) => typeof id === "string"))) return undefined;
+  // A release the comparison cannot read would quiet `N out` for good, so it is no choice at all.
+  if (dismissedRelease !== undefined && (typeof dismissedRelease !== "string" || !numbers(dismissedRelease))) return undefined;
+  return {
+    hidden,
+    ...(dismissed !== undefined ? { dismissed: dismissed as string[] } : {}),
+    ...(dismissedRelease !== undefined ? { dismissedRelease: dismissedRelease as string } : {}),
+  };
 };
 
 const ago = (ms: number): string => {
@@ -175,14 +224,20 @@ const ago = (ms: number): string => {
 export const markReport = (input: MarkInput): string => {
   const { entry, now } = input;
   const dismissed = input.dismissed !== undefined && !dismissalEnded(input.dismissed, entry, now);
+  const release = heldRelease(input);
   const state = !input.setUp
     ? "not shown: this project is not set up (no .sandcastle/config.ts)"
     : !input.idleMark
       ? `hidden on this machine ("idleMark": false in the personal settings)${input.hidden ? " and in this project" : ""}`
       : input.hidden
         ? "hidden in this project (/sandcastle-mark show brings it back)"
-        : dismissed
-          ? "shown without a count: dismissed until a new ticket becomes ready (/sandcastle-mark show ends it)"
+        : dismissed || release
+          ? `shown${dismissed ? " without a count" : ""}: ${[
+              dismissed ? "dismissed until a new ticket becomes ready" : "",
+              release ? `release ${release} dismissed until a newer one is tagged` : "",
+            ]
+              .filter(Boolean)
+              .join(", and ")} (/sandcastle-mark show ends ${dismissed && release ? "both" : "it"})`
           : "shown";
   const count = !entry
     ? "No count read yet."
@@ -194,13 +249,14 @@ export const markReport = (input: MarkInput): string => {
 const versionReport = (read: VersionEntry | undefined, now: number | undefined): string => {
   const facts = read?.facts;
   if (!read || !facts) return "Kit version: not read yet.";
-  const { kit, project } = facts;
+  const { kit, project, newestRelease } = facts;
   const recorded = !project ? "this is not a set-up project" : !project.recorded ? "none (no usable update record on this machine)" : (project.release ?? "none named by the record");
   const notes = !project || project.pendingNotes.length === 0 ? [" none held."] : ["", ...project.pendingNotes.map((n) => `  - ${n}`)];
   return [
     `Kit version: ${kit.version}, read ${now === undefined ? "earlier" : ago(now - read.at)}${read.ok ? "" : " (the latest read failed)"}${currentFacts(read, now) ? "" : "; too old to show"}.`,
     `Project's recorded release: ${recorded}.`,
     `Pending Upgrading notes:${notes.join("\n")}`,
+    `Newest release: ${newestRelease ? `${newestRelease.release}, checked ${now === undefined ? "earlier" : ago(now - Date.parse(newestRelease.checkedAt))}` : "not known (the check is off, the remote did not answer or it has no release tag)"}.`,
   ].join("\n");
 };
 

@@ -1,5 +1,5 @@
 // A tracker read made during a run (the check before a ticket starts and before it lands, the hand-back
-// read, the overrun warning's read) must not stop the run's event loop while GitHub answers, and must give
+// read, the overrun warning's read, the blocker checks, the reopen check and the follow-up filing's open list) must not stop the run's event loop while GitHub answers, and must give
 // up at a limit, read as "cannot be read". A fake `gh` on PATH that sleeps; no network.
 //
 //   pnpm test:file test/tracker-read-limit.test.ts
@@ -12,7 +12,8 @@ import { test } from "node:test";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { makeTracker, readTicketState, TRACKER_READ_MS } = await import("../src/tracker.ts");
-const { handBack } = await import("../src/burndown.ts");
+const { fileFollowUps, handBack, notReopened, openOnQueue } = await import("../src/burndown.ts");
+const { blockedNote, blockerProblems, commentOnlyBlocks, openBlockersNow } = await import("../src/blockers.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -71,6 +72,95 @@ test("a tracker with no asynchronous read is read by get, and a throw is a rejec
   await assert.rejects(readTicketState({ get: () => { throw new Error("gh: HTTP 502"); } }, "9"), /HTTP 502/);
 });
 
+const queued = [{ id: "5", title: "t", body: "no blockers named in the body", comments: [] as string[] }];
+
+test("the open-ticket list is read without stopping the run's timers, and a gh that never answers ends it at the limit", async () => {
+  fakeGh("exec sleep 30");
+  const r = await during(tracker.openAsync!(false, 300));
+  assert.ok(r.ticks >= 8, `the timer fired ${r.ticks} times in ${r.ms} ms`);
+  assert.ok(r.ms >= 250 && r.ms < 3000, `gave up after ${r.ms} ms`);
+  assert.match("error" in r ? r.error.message : "", /^gh issue list failed: gh issue gave no answer in 0\.3 s - GitHub is slow or not answering\.$/);
+});
+
+test("a slow open-ticket list that answers is the open tickets", async () => {
+  fakeGh(`sleep 0.2\necho '[{"number":8,"title":"x","body":"","labels":[{"name":"needs-triage"}]}]'`);
+  const r = await during(tracker.openAsync!(false, 5000));
+  assert.ok(r.ticks >= 4, `the timer fired ${r.ticks} times in ${r.ms} ms`);
+  assert.deepEqual("value" in r && r.value.map((t) => [t.id, t.labels]), [["8", ["needs-triage"]]]);
+});
+
+test("the reopen check keeps the run's timers going and, given up at the limit, says the ticket was reopened", async () => {
+  fakeGh("exec sleep 30");
+  const r = await during(tracker.reopenedSinceAsync!("4", 0, 300));
+  assert.ok(r.ticks >= 8, `the timer fired ${r.ticks} times in ${r.ms} ms`);
+  assert.ok(r.ms >= 250 && r.ms < 3000, `gave up after ${r.ms} ms`);
+  assert.equal("value" in r && r.value, true);
+});
+
+test("the reopen check answers false when gh lists no reopen after the merge", async () => {
+  fakeGh(`sleep 0.1\necho 2020-01-01T00:00:00Z`);
+  assert.equal(await tracker.reopenedSinceAsync!("4", Date.parse("2021-01-01T00:00:00Z"), 5000), false);
+  assert.equal(await tracker.reopenedSinceAsync!("4", Date.parse("2019-01-01T00:00:00Z"), 5000), true);
+});
+
+test("a ticket merged earlier whose reopen check cannot be read runs normally, and one nobody reopened is closed as merged", async () => {
+  fakeGh("exec sleep 30");
+  const found = "abc1234 2021-01-01T00:00:00+00:00";
+  const slow = await during(notReopened(tracker, "4", found, 300));
+  assert.ok(slow.ticks >= 8, `the timer fired ${slow.ticks} times in ${slow.ms} ms`);
+  assert.equal("value" in slow && slow.value, undefined);
+  assert.equal(await notReopened({ reopenedSince: () => { throw new Error("gh: HTTP 502"); } }, "4", found), undefined);
+  assert.equal(await notReopened({ reopenedSince: () => false }, "4", found), "abc1234");
+  assert.equal(await notReopened({ reopenedSince: () => true, reopenedSinceAsync: async () => false }, "4", found), "abc1234");
+});
+
+test("the blocker check of a GitHub ticket whose blocker links cannot be read keeps the timers going, ends at the limit and holds the ticket", async () => {
+  fakeGh("exec sleep 30");
+  const r = await during(openBlockersNow(project, makeTracker(project), ["5"], 300)(queued, new Set()));
+  assert.ok(r.ticks >= 8, `the timer fired ${r.ticks} times in ${r.ms} ms`);
+  assert.ok(r.ms >= 250 && r.ms < 3000, `gave up after ${r.ms} ms`);
+  const open = ("value" in r ? r.value : [[]])[0];
+  assert.deepEqual(open.map((b) => [b.kind, b.state]), [["links", "unreadable"]]);
+  assert.equal(blockedNote(open, new Set(["5"])), "waits for #5's blocker links (could not be read)");
+});
+
+test("the blocker check reads a blocker's state through the time limit too, and an open one holds the ticket", async () => {
+  fakeGh(`case "$*" in\n  "issue view"*) echo '{"number":5,"blockedBy":{"nodes":[{"number":3}]}}' ;;\n  *) sleep 30 ;;\nesac`);
+  const r = await during(openBlockersNow(project, makeTracker(project), ["5"], 300)(queued, new Set()));
+  assert.ok(r.ticks >= 8, `the timer fired ${r.ticks} times in ${r.ms} ms`);
+  assert.deepEqual(("value" in r ? r.value : [[]])[0].map((b) => [b.kind, b.id, b.state]), [["github", "3", "unreadable"]]);
+});
+
+test("a ticket whose links are read and whose blocker is closed starts", async () => {
+  fakeGh(`case "$*" in\n  "issue view"*) echo '{"number":5,"blockedBy":{"nodes":[{"number":3}]}}' ;;\n  *) echo "closed completed" ;;\nesac`);
+  assert.deepEqual((await openBlockersNow(project, makeTracker(project), ["5"], 5000)(queued, new Set()))[0], []);
+});
+
+test("the run's start reads the queue's blockers without stopping the timers and ends at the limit", async () => {
+  fakeGh("exec sleep 30");
+  const r = await during(openOnQueue(project, makeTracker(project), queued, 300));
+  assert.ok(r.ticks >= 8, `the timer fired ${r.ticks} times in ${r.ms} ms`);
+  assert.ok(r.ms >= 250 && r.ms < 3000, `gave up after ${r.ms} ms`);
+  assert.deepEqual("value" in r && [...r.value.keys()], ["5"]);
+});
+
+test("a follow-up is still filed when the open-ticket list cannot be read", async () => {
+  const made: string[] = [];
+  let asked = 0;
+  const filing = {
+    ref: (id: string) => `#${id}`,
+    create: (title: string) => String(made.push(title) + 100),
+    comment: () => {},
+    open: () => { throw new Error("the sync list must not be used"); },
+    openAsync: async () => { asked++; throw new Error("gh issue list failed: gh issue gave no answer in 30 s"); },
+  };
+  const f = { title: "Pool leaks a worker", evidence: "src/pool.ts:12 leaks", from: "7", phase: "review" };
+  const filed = await fileFollowUps(filing, [f], { dryRun: false, write: async (fn) => fn(), exists: () => true, triage: "needs-triage" });
+  assert.equal(asked, 1);
+  assert.deepEqual(filed.map((x) => x.id), ["101"]);
+  assert.deepEqual(made, [f.title]);
+});
+
 test("the run's reads before a ticket starts, before it lands, for the overrun warning and for a head record's comments go through the time-limited read", () => {
   const burndown = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   const landing = readFileSync(new URL("../src/landing.ts", import.meta.url), "utf8");
@@ -81,4 +171,27 @@ test("the run's reads before a ticket starts, before it lands, for the overrun w
   assert.match(landing, /const called = await withdrawal\(o\.issue\);/);
   assert.match(landing, /\(await readTicketState\(tracker, o\.issue\)\)\.body/);
   assert.doesNotMatch(landing, /tracker\.get\(/);
+  // The blocker checks, the reopen check and the follow-up filing's open list, the other reads of a run.
+  assert.match(burndown, /tracker\.reopenedSinceAsync \? await tracker\.reopenedSinceAsync\(issue,/);
+  assert.match(burndown, /const merge = await mergedEarlier\(issue\.id, branch\);/);
+  assert.match(burndown, /return found \? notReopened\(tracker, issue, found\) : undefined;/);
+  assert.match(burndown, /tracker\.openAsync \? await tracker\.openAsync\(false\) : tracker\.open\(false\)/);
+  assert.match(burndown, /openBlockers\(project, tracker, resolve, i, limitMs\)/);
+  assert.match(burndown, /open: openBlockersNow\(project, tracker, queued\.map/);
+  const blockers = readFileSync(new URL("../src/blockers.ts", import.meta.url), "utf8");
+  assert.match(blockers, /await tracker\.declaredBlockersAsync\(t\.id, limitMs\)/);
+  assert.match(blockers, /await githubStateAsync\(ref\.id, limitMs\)/);
+  assert.match(blockers, /\(limitMs === undefined \? refsOf\(project, tracker, t\) : await refsOfAsync\(project, tracker, t, limitMs\)\)/);
+});
+
+test("the run's start checks of blocker lines and comment-only blockers keep the timers firing and end at the limit (#798)", async () => {
+  fakeGh("exec sleep 30");
+  const tracker = makeTracker(project);
+  const problems = await during(blockerProblems(project, tracker, queued, new Set(["5"]), 300));
+  assert.ok(problems.ticks >= 8, `the timer fired ${problems.ticks} times in ${problems.ms} ms`);
+  assert.ok(problems.ms < 3000, `gave up after ${problems.ms} ms`);
+  const commented = [{ ...queued[0]!, comments: ["Blocked by #9"], queued: true }];
+  const blocks = await during(commentOnlyBlocks(project, tracker, commented, 300));
+  assert.ok(blocks.ticks >= 8, `the timer fired ${blocks.ticks} times in ${blocks.ms} ms`);
+  assert.ok(blocks.ms < 3000, `gave up after ${blocks.ms} ms`);
 });

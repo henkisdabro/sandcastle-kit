@@ -462,6 +462,17 @@ A tracker read made while a run is under way (the check before a ticket starts a
 lands, `handBack`, the overrun warning, the comments a head record counts) goes through
 `readTicketState`: `Tracker.getAsync` where the tracker has one (GitHub: `gh` through `shAsync`,
 which never blocks the event loop and gives up at `TRACKER_READ_MS`), else `get`. A timeout is a failed read, which each caller already handles.
+The run's other tracker reads are asynchronous and time-limited the same way, optional on `Tracker` beside
+the sync forms commands outside a run keep (`queue`, `lint`, `report`): `reopenedSinceAsync` (`mergedEarlier`
+through `notReopened`; unreadable means reopened, so the ticket runs normally), `openAsync` (the follow-up
+filing's list of open tickets; unreadable means an empty list, and the follow-up is still filed), and the
+blocker checks (`openOnQueue` at the start, then the start's `commentOnlyBlocks` and `blockerProblems`
+with the same `limitMs`, and `blockerWhyAsync` for a blocker's reason; `openBlockersNow` as tickets land,
+each dependant read side by side), whose `declaredBlockersAsync` and state reads go through
+`blockerResolver`'s `limitMs`. A ticket whose native blocker links cannot be read is held by a `links`
+blocker that is never closed, and starts once a later read gets them. The repository's own name
+(`thisRepoAsync`) is one read shared by the callers that ask meanwhile; one that fails or times out is
+asked again later, so a same-repo native blocker is never read as another repository's for the run.
 What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it
 asks the ledger's `describe` for
 
@@ -561,7 +572,10 @@ why in a `<stray path="...">reason</stray>` line of its final message (`strayNam
 `src/burndown.ts`), `splitStrays` sets those against the check's list, and only a path left unnamed
 holds the ticket (`strayNote` lists it, and the named ones apart) - the named ones go to the narrow
 review as `MERGE_STRAYS` (`namedStraysView`, in the `remerge` prompt) and the gates
-(`test/pipeline-named-strays.test.ts`)
+(`test/pipeline-named-strays.test.ts`); the full review a person's late comment sends a conflicted
+carried merge to gets them too, in the `review` prompt's `{{KIT_AFTER_REPAIR}}` slot and with its own
+lead-in, since it is shown no combined diff - the cross-review as well
+(`test/carried-late-comment.test.ts`, `test/carried-late-comment-cross.test.ts`)
 
 ## `src/schedule.ts`
 
@@ -766,12 +780,17 @@ state.
   (`promptExpansionLine`, `src/errors.ts`: a `PromptError` or `PromptExpansionTimeoutError`, the
   library's `(FiberFailure)` prefix and the `Error:` tag dropped, the command's stderr kept) is
   counted by failure (`sameExpansionFailure`: the same once the command, which names the ticket, and
-  an elapsed time are set aside); the `SETUP_CRASHES`th (2nd) ticket to crash alike adds the cause
-  and tells `{ kind: "setup problem", line }` once.
+  an elapsed time are set aside, and every `HTTP 5xx` is one failure whatever `gh` words after the
+  status, so a 502 and then a 504 count together); the `SETUP_CRASHES`th (2nd) ticket to crash alike adds the
+  cause and tells `{ kind: "setup problem", line }` once.
+  A line with an HTTP 5xx (`githubServerError`) is GitHub's failure, not the setup's: the stop line
+  and the next step name the status and githubstatus.com instead of `doctor --verify`, and the next
+  step lists the stopped tickets to run again.
   Like a limit it is no safety stop: tickets in flight finish and green branches land, and each
   queued ticket ends as not begun. `burndown()` records `setupProblem` in the run record and prints
   the line; the closing summary's `Stopped starting tickets` line quotes the error once and its next
-  step points at `sandcastle doctor --verify` instead of the per-ticket comment hint
+  step points at `sandcastle doctor --verify` (githubstatus.com for a 5xx) instead of the per-ticket
+  comment hint
   (`test/stop-on-setup-crash.test.ts`).
   The crashed ticket's note is `agentFailure`'s cleaning (cut at a word), and the pass's `catch`
   appends `! error: <line>` to the ticket's readable agent log (`logExpansionFailure`,
@@ -1535,7 +1554,10 @@ it opens its sandbox and merges for seconds first, and a ticket gate asked in th
 slot and held it for a whole gate run.
 `landOne` takes the claim once it holds its landing sandbox slot (not while it waits for one; a
 fast-forward or a conflict found on the host never takes it) and releases it when `landInSandbox`
-ends, gated or not; the first priority wait the run begins for the pool spends it as well.
+ends, gated or not.
+The claim is handed down with the gate (`ctx.gate` -> `runGates` -> `withSlot`) and the landing's own
+priority wait spends that claim and no other: a priority wait made without one (the base check's, the
+verify's) spends none, and another landing's claim keeps holding ticket gates back.
 A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than
 the run's claims, so with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
 The claim is kept in this process (`claims`), not in the pool's files; `test/pool-landing-claim.test.ts`, and
@@ -2121,18 +2143,23 @@ matches the line; `OUTCOME_STATE` in `src/status-rows.ts` is a `Record<OutcomeKi
 `tsc` holds the status view to the kinds, both ways), log archive, status pane
 
 A carried branch's head record (`heads.json`) also keeps `comments`: the ticket's comment count,
-read from the tracker each time the pipeline writes `reviewed`, `green` or `repaired` (`noteHead`),
-so a comment an agent made during its pass is inside the count.
+read from the tracker just before a full review's pass starts and recorded with its `reviewed` write
+(`fullReview`), and by no other write.
+The gates, a repair, the re-review after a repair and the two narrow reviews (after a conflict
+resolution, after a base merge) keep the count the last full review recorded, so a person's comment
+posted during any of them is still past it at the next carry.
 At carry time a branch that would be land-only (`landOnlyHead`, `reviewedOnlyHead`) is told apart
 by `personCommentsSince`, in `src/ledger.ts` beside the comment texts it knows: the comments past
 that count that do not open with the kit's own fixed openings (`KIT_COMMENT`: "did not land",
-"held", "Named again", the merge comments) and are not a Markdown ticket file's `### <date> - sandcastle`
+"held", "Named again", the merge comments) or with `AGENT_COMMENT_MARKER` (`src/tracker.ts`, which the
+GitHub tracker's words - `SAY`, `RECORD`, `NOCHANGE`, `BLOCKED`, `LOST` - ask every agent comment to open with: an agent that drops it costs one
+unneeded full review, never a missed comment) and are not a Markdown ticket file's `### <date> - sandcastle`
 entry.
 Such a comment, which no reviewer has read, keeps the branch land-only for the implementer and the
 gates, but the full review (`fullReview` in the pipeline, which shows the comments) runs after any
 merge resolution, in place of the narrow review or none at all; the carried line says "a comment since
 its review - full review".
-The review writes the new count, so a comment is acted on once.
+The full review writes the new count, so a comment is acted on once.
 A record with no `comments` (written before the count was kept), or a tracker that cannot be read,
 never sends a branch to the full review.
 A Markdown ticket file keeps its comments in one section, so only a new `### ` entry in it counts.
@@ -2481,24 +2508,50 @@ left out, since the prompt is read when the session is idle and a later run may 
 `src/run.ts` and the status view) and `hooks/idle.ts` (pure, imports nothing: the idle mark, one row
 of sand above the prompt between runs in a set-up project. `markText(input)` is the line or
 undefined to clear it, as `{ text, parts }` - the plain text and the same line as coloured parts
-(`name`, `hint`, `muted`; joined by a space they are the text); its one input object is the set-up
-flag, the machine switch, the project's hidden flag, the dismissed ids, the cache `Entry`, the
+(`name`, `hint`; joined by a space they are the text); its one input object is the set-up
+flag, the machine switch, the project's hidden flag, the dismissed ids, the dismissed release, the cache `Entry`, the
 cached version read (`versionRead`) and the time.
 `sandcastle · N ready - /sandcastle run` shows N only while the last good read is under `COUNT_MS`
 (an hour) old, else the bare mark.
 The version facts are `sandcastle --version --json` (`src/upgrading.ts`'s `versionFacts`: `kit`
-`{ version, release, past }`, `newestRelease` - null until the kit reads one, and the mark says
-nothing of it yet - and `project`: null when the git root of the working directory has no
-`.sandcastle/config.ts` plain file, else `{ recorded, release, pendingNotes }`, `recorded` false for
+`{ version, release, past }`, `newestRelease` - `{ release, checkedAt }` or null, below - and
+`project`: null when the git root of the working directory has no `.sandcastle/config.ts` plain file, else `{ recorded, release, pendingNotes }`, `recorded` false for
 no usable update record and `release` null when a usable record names none; plain `--version` is
 unchanged).
 With them the name carries the kit's release plus `+N` for a clone N commits past its release's own
 tag (`sandcastle 0.16.0+3`; the commit and local changes only in the `/sandcastle-mark` report), and
-one hint may follow the count: `update needed` (notes not had, no record or an unreadable one; bold
-in `SAND.top`, the call to action `/sandcastle update`) before `project on X` (the recorded release
-is numerically older than the kit's, `0.10.0` newer than `0.9.0`, with nothing pending;
-`SAND.muted`, the call to action stays `/sandcastle run`, none with no ready ticket) before the
-version alone.
+one hint may follow the count, the first that holds: `N out` (the newest release is numerically newer
+than the kit's own release, `0.10.0` newer than `0.9.0`, a clone past its tag included; bold in
+`SAND.top`, the call to action `/sandcastle update`), else `update needed` (notes not had, no record
+or an unreadable one; the same bold, the same call to action), else the version alone.
+The project's recorded release is never drawn (a muted `project on X` once was: it read as "this
+project runs an older kit" when it meant "last updated at X, nothing to do"); only the bare
+`/sandcastle-mark` report names it, and the newest release with when it was checked.
+The newest release is `newestRelease` in `src/upgrading.ts`, not the mod's: the highest exact `vX.Y.Z`
+tag in `git ls-remote --tags origin` of the kit checkout (`releaseOut` compares it with the kit's
+release; doctor prints it as an `info` line).
+The read is never a fetch and never waits on a person: `GIT_TERMINAL_PROMPT=0`, ssh in batch mode
+(the ssh git would pick - `GIT_SSH_COMMAND`, else `core.sshCommand`, which the variable set for the
+read would otherwise override, else `GIT_SSH`, else `ssh` - plus `-o BatchMode=yes`), `SIGKILL` at
+10 seconds, its output in a temp file because a remote helper the kill leaves behind would hold a
+pipe open.
+It runs only when the kit is the top of its own checkout and has an `origin` (`ls-remote --get-url`,
+which applies `insteadOf`); otherwise null.
+The answer is cached machine-wide in `KIT_CACHE/newest-release/<hash>.json`, keyed by the kit's real
+directory and `origin`'s URL, so a second clone or a moved remote shares no answer: a good read holds
+six hours (`NEWEST_FRESH_MS`), a failure is retried after one hour (`NEWEST_RETRY_MS`) and never
+sooner, and a failure gives null - never the last good release, which the remote may no longer
+show.
+A cache that does not parse, or holds a value of the wrong shape, counts as none, and one dated in
+the future (a clock that moved) is read again.
+`"updateCheck": false` in the personal `config.json` gives null before any of it (a known key in
+`MACHINE_KEYS`; only `false` stops the read, and doctor's machine-wide settings check reports a value
+that is not a boolean, as for `idleMark`).
+`test/hermetic-env.ts` and `test/parent-watch.ts` set `GIT_ALLOW_PROTOCOL=file` for tests, so no
+test's `doctor` or `--version --json` reaches a remote, and `test/hermetic-env.ts` gives each test
+file a cache directory of its own, so the failure that read caches never lands in the developer's
+`KIT_CACHE` for the same checkout (`test/hermetic-cache.test.ts`); `test/newest-release.test.ts` puts
+a fake `git` ahead on `PATH`.
 The facts are read as the count is: `VersionEntry` (`afterVersionRead`, `parseVersionEntry`,
 `parseVersionFacts`) in one `$.store` key per project root (`version:<root>`), through `due` on the
 same `tried` rule and the same triggers - both reads see a trigger before either consumes it, so the
@@ -2508,8 +2561,8 @@ or a render, none in a project that is not set up, while the mark is hidden or w
 switch is off; a failed or garbled read keeps the last good facts, which are shown for an hour as
 the count is.
 The band draws each part as its own `Text` in a row (`TONES` in `register.tsx`), and
-`mod/tests/version.test.ts` holds the hooks, `test/idle-mark-version.test.ts` the text and
-`test/version-json.test.ts` the command.
+`mod/tests/version.test.ts` holds the hooks, `test/idle-mark-version.test.ts` the text,
+`test/version-json.test.ts` the command and `test/newest-release.test.ts` the lookup.
 The ready count: `readyIds(stdout)` takes `sandcastle queue --json` and returns the ids with an
 empty `blockedOn`, or undefined for anything that is not a list of such tickets (a failed read,
 never 0); `due(entry, now, trigger)` says to read when there is no entry, the last attempt (`tried`)
@@ -2545,8 +2598,9 @@ since a mark above a castle reads as a second, stale queue; its count is always 
 project's.
 A person's choices are `/sandcastle-mark` (`markAction`, answered by a `command.run` with text and
 no model turn): `hide` and `show` set the hidden flag, `dismiss` records the ids of a count that is
-current (`choiceAfter`; a count too old to show was not seen, so it records none), `show` clears
-both, no argument is `markReport` (the state, the cached count and its age) and any other word is
+current (`choiceAfter`; a count too old to show was not seen, so it records none) and, when the
+current version facts name a newest release newer than the kit's own, that release
+(`dismissedRelease`; with none to record, an earlier one stays), `show` clears both, no argument is `markReport` (the state, the cached count and its age) and any other word is
 `MARK_USAGE`.
 The choices are one `Choice` in `$.store` under `mark:<root>`, beside `ready:<root>`: machine-local,
 kept across a restart, never in the repository, checked by `parseChoice`. `markText` gives no line
@@ -2554,11 +2608,17 @@ when hidden, and no count while a dismissal holds - the current ready ids all wi
 ones (`dismissalEnded` is the other case: an id not in them, and an id leaving ends nothing); the
 idle look also clears the stored dismissal when it ends, so it is over for good, not only while the
 new id is ready.
+The dismissed release is kept apart from the dismissed ids (`parseChoice` accepts a choice without
+it, so today's stored form still parses; one that is not `X.Y.Z` is no choice): ending one leaves the
+other as it was, and the idle look's rewrite keeps `dismissedRelease`.
+`markText` leaves `N out` off while the newest release is not newer than the dismissed one
+(`releaseDismissalEnded` is the other case), and the line falls to `update needed`, which has no
+dismissal.
 A hidden mark makes no queue read.
 A choice made while the mark is what the line shows redraws it at once (`idling`), not at the next
-look. `test/idle-mark.test.ts`, `test/idle-mark-choice.test.ts` and `test/idle-ready.test.ts` hold
-the module, `mod/tests/ready.test.ts` the count's hooks, `mod/tests/skill-turn-end.test.ts` the read
-at the end of the skill's turn, `mod/tests/mark.test.ts` the command's) and `hooks/keep-warm.ts`
+look. `test/idle-mark.test.ts`, `test/idle-mark-choice.test.ts`, `test/idle-mark-release-dismissal.test.ts`
+and `test/idle-ready.test.ts` hold the module, `mod/tests/ready.test.ts` the count's hooks, `mod/tests/skill-turn-end.test.ts` the read
+at the end of the skill's turn, `mod/tests/mark.test.ts` and `mod/tests/mark-release.test.ts` the command's) and `hooks/keep-warm.ts`
 (pure, imports nothing: the cache refresh.
 While a run this session started or follows is live, the session sits idle and Claude Code's prompt
 cache lapses after an hour of silence (5 minutes on overage), so the turn that closes the run would

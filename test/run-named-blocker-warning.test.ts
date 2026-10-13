@@ -11,5 +11,5 @@ import { test } from "node:test";
 
 test("the run's start hands blockerProblems the whole queue's ids", () => {
   const burndown = readFileSync(join(import.meta.dirname, "..", "src/burndown.ts"), "utf8");
-  assert.match(burndown, /blockerProblems\(project, tracker, queued, new Set\(whole\.map\(\(t\) => t\.id\)\)\)/);
+  assert.match(burndown, /blockerProblems\(project, tracker, queued, new Set\(whole\.map\(\(t\) => t\.id\)\), TRACKER_READ_MS\)/);
 });

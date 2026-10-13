@@ -477,7 +477,7 @@ children, so unqueue the spec.
 | Named | Waits until | Enable |
 |---|---|---|
 | `Blocked by #12`, `Depends on #12` | issue or pull request #12 is closed or merged | always on |
-| a native "blocked by" edge to issue #12 (GitHub only; `owner/repo#12` when the issue is in another repository) | issue #12 is closed (in its own repository); one closed as not planned never lets the ticket start; one gh cannot read counts as open | always on; needs a gh that knows `blockedBy`, else one warning line and the body is read alone |
+| a native "blocked by" edge to issue #12 (GitHub only; `owner/repo#12` when the issue is in another repository) | issue #12 is closed (in its own repository); one closed as not planned never lets the ticket start; one gh cannot read counts as open, and so does a ticket whose own edges a run cannot read in time (`waits for #N's blocker links (could not be read)`): it starts once a later read gets them | always on; needs a gh that knows `blockedBy`, else one warning line and the body is read alone |
 | `Blocked by ENG-42` | the Linear issue is in a *completed* or *canceled* state | `blockers.linear: ["ENG"]` and `LINEAR_API_KEY` |
 | `Blocked by .scratch/checkout/issues/03-pay.md` | that file on the base branch has `Status: done` | the files tracker, or `blockers.files: { dir }` |
 | `Blocked by: 01, 02` (a header line in a ticket file) | those tickets of the same feature are done | the files tracker |
@@ -975,7 +975,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next; a run killed without its exit handler is added by the next run's start. Each carries the run's `load` (the sandboxes it ran at once and its ticket count), by which the estimate picks the runs that price its gate times. `sandcastle report --changelog` reads it |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens (with `tokensNote`, `incomplete` or `unknown`, for an agent pass that failed before its result counted them) and each gate's own time, a `carried` flag on a ticket whose branch was carried into the run (`unreviewed` in its place for a carried branch that gets a full review, which the estimate prices as a fresh ticket), a `remainder` flag on a ticket re-run for what a "part of" merge left, `touches`, the path count of its `Touches:` line (0 with none), and `bodyChars`, the length of its body, which the estimate sizes it by (`ok` is false for a gate run with a red gate, named in `red`). A red gate run again inside its own gates slot is a line of its own after the red run's, marked `rerun`; the closing summary counts a marked landing gate line as a re-run, and the estimate's typical landing gates leave it out. A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`, and the base gates' and the verify's `waitMs` also include their wait for a machine-wide sandbox slot; a ticket has no wait for a machine-wide sandbox slot, since a pipeline takes its slot before it takes the ticket first in line, so the slot goes to that ticket's rank. A landing gate has lines of its own (phase `landing gates`), so the landings in a row, which can set a run's length, are on record. So has every landing that came to its merge (phase `landing`, `result` the way it ended: merged, conflict, red): its `waitMs` is the wait for a machine-wide sandbox slot (left out, as no wait, for a fast-forward, which takes none, and for a conflict git found on the host first), and a requeued ticket's second `setup` line adds to its `waitMs` how long it waited from its requeue to its resolve's start (for the tickets ahead of it, and then for a free slot), when its resolve waited for tickets ahead of it at all. The estimate and the status view's "usual time" come from it, all but the `landing` lines, which hold the landing gates' time again |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output, one section per gate run, headed with its kind (`# landing gates on the merged tree - run <id>, <local time>`), a `# waited Ns for a gates slot` line after any wait, and its gate lines in the same local time. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged, or only by `sandcastle clean` while the ticket's worktree is kept. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
-| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with the ticket's comment count then, its gate results, any criterion left undone, changelog lines and check-by-hand note, and each branch's last outcome. The same moves that archive logs drop a `heads.json` entry whose branch is gone and whose last write is over 14 days old, so the file stays the size of the tickets in play |
+| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with the ticket's comment count as its last full review started, its gate results, any criterion left undone, changelog lines and check-by-hand note, and each branch's last outcome. The same moves that archive logs drop a `heads.json` entry whose branch is gone and whose last write is over 14 days old, so the file stays the size of the tickets in play |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/file-shares.log` | Every pair of tickets that started together sharing a mergeable file, one line each, appended at each start and each mid-run release under a `--- <time>, run pid <pid> ---` line per turn (turns over 14 days old are dropped when logs are archived); the screen names each file once |
 | `logs/verify-gates.log` | The gates on the merged base at the end of a run, streamed as a ticket's gates log is (each gate's full output with colour codes stripped, `# <gate> green/RED in Ns`, the wait for a gates slot), whether green or red (`RED TOGETHER`); a run that skipped its verify removes an earlier one. On a red: the run prints the failing tests' names above its excerpt, and the summary's re-gated line names them, and says so when the red tree is exactly one a ticket's own gates passed (the sandbox differs, not the merge) or one a landing sandbox passed (a flaky or order-dependent test). A red verify is run once more first, and the log is the second run's; red twice with only test timeouts, or with a gate three times its recorded time, is called likely load |
@@ -1172,13 +1172,19 @@ itself, in the status view's castle, glyphs and colours:
   project has Upgrading notes it has not had, or no usable update record on this machine (one set
   up before records existed, or on another machine), the line says so and points at the update:
   `sandcastle 0.17.0 · 4 ready · update needed - /sandcastle update`, `update needed` in brighter
-  sand and bold. When the project's recorded release is older than the kit's and nothing is
-  pending, a quiet note names it and the call to action stays `/sandcastle run`: `sandcastle
-  0.17.0 · 4 ready · project on 0.16.0 - /sandcastle run`. The version and the project's state come
-  from `sandcastle --version --json`, which also works outside a project and is read like the
-  queue: in the background, on the same ten-minute schedule and triggers (the end of a
+  sand and bold. When a newer release of the kit is tagged on its remote, that comes first:
+  `sandcastle 0.16.0 · 4 ready · 0.17.0 out - /sandcastle update` (only when the newest release is
+  newer than the kit's own release; a clone past its tag counts). The line says nothing about the
+  project while it is current, whatever release it last updated at. The version, the newest
+  release and the project's state come from `sandcastle --version --json`, which also works
+  outside a project and is read like the queue: in the background, on the same ten-minute schedule and triggers (the end of a
   `/sandcastle update` turn drops the hint), never in a project that is not set up or while the
-  mark is hidden. The count comes from `sandcastle queue --json`, read in the background and
+  mark is hidden. The newest release is the highest `vX.Y.Z` tag that `git ls-remote --tags` finds
+  on the kit checkout's `origin` (never a fetch, no prompt, killed at 10 seconds), kept machine-wide
+  under the kit's cache directory: a good read holds six hours, a failed one is tried again after an
+  hour, and a failure shows no release rather than the last one. `"updateCheck": false` in your
+  [personal settings](#personal-settings) stops the read, and `sandcastle doctor` names the release
+  too, in an `info` line. The count comes from `sandcastle queue --json`, read in the background and
   cached once per project in the mod's store, shared by every Claude Code session on the machine:
   at most one tracker read per project every 10 minutes while nothing changes, plus one when a run
   of the project, or one the session follows, ends and one when you use `/sandcastle` (it may just have labelled tickets). A
@@ -1190,14 +1196,18 @@ itself, in the status view's castle, glyphs and colours:
 - 🔕 **`/sandcastle-mark`**: your say over the idle mark, with no model turn.
   - `dismiss` takes the count off while you have seen it: the line reads plain `sandcastle` until
     a ticket that was not ready becomes ready, which brings the count back. A ticket leaving the
-    ready set does not. The mark itself stays.
-  - `hide` turns the mark off in this project until `show`; `show` undoes both hiding and a
-    dismissal.
+    ready set does not. The mark itself stays. It also quiets `N out` until a release newer than
+    that one is tagged; a newly ready ticket does not bring the release back, nor a newer release
+    the count. `update needed` has no dismissal, so a dismissed release shows it when Upgrading
+    notes are pending.
+  - `hide` turns the mark off in this project until `show`; `show` undoes hiding and both
+    dismissals.
   - With no argument it says whether the mark is shown, hidden (here or machine-wide) or
     dismissed, and the cached count with its age, so a stale count can be told from an empty
     queue. It also reports the full kit version (the commit and local changes too), the release
-    this project last updated at and the Upgrading notes it has not had, or that none are held -
-    the facts last read, even while the mark is hidden. Any other argument prints the usage line.
+    this project last updated at, the Upgrading notes it has not had (or that none are held) and
+    the newest release with when it was checked - the facts last read, even while the mark is
+    hidden. Any other argument prints the usage line.
 
   The choices are kept in the mod's store under the project root: on your machine only, across a
   restart, and never in the repository. The machine-wide `idleMark` switch stays in your personal
@@ -1241,9 +1251,12 @@ all of it. The mod:
   it does it through the kit, never itself. It makes none while an entry under 10 minutes old
   stands, except when you use `/sandcastle` and again when that turn ends (triage labels tickets
   in between);
-- in the same cases, runs `sandcastle --version --json` there for the kit version and the
-  project's update state, with the same 20 second timeout and one entry per project in its store.
-  A few local `git` commands run inside it, and nothing reaches the network;
+- in the same cases, runs `sandcastle --version --json` there for the kit version, the project's
+  update state and the kit's newest release, with the same 20 second timeout and one entry per
+  project in its store. The kit, not the mod, looks the newest release up: `git ls-remote --tags` on
+  the kit checkout's `origin`, at most once in six hours, off with `"updateCheck": false`. A few
+  local `git` commands run inside it, and that lookup is the only thing in it that reaches the
+  network;
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -1251,8 +1264,8 @@ all of it. The mod:
   `~/.cache` when unset) and the resolved roots in it, then reads `run.json` there only to see
   whether it names this session;
 - keeps small entries per project in its own store: which session closes the run and the last run
-  it has accounted for, the cached ready count and version facts, and your `/sandcastle-mark` choices (hidden, and
-  the ids of a dismissal);
+  it has accounted for, the cached ready count and version facts, and your `/sandcastle-mark` choices (hidden, the
+  ids of a dismissal and the release of one);
 - while a run this session started (or follows) is live, once a minute checks how long the session
   has been silent and, after 55 minutes, sends one cache refresh: a tool-less request over the
   conversation (`$.model.fork`, not Claude Code's `/fork` command), which adds nothing to it and
@@ -1293,7 +1306,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor, then points to `sandcastle size` while neither machine pool limit is set | ➖ no |
 | `sandcastle help` | Lists every command | ➖ no |
-| `sandcastle --version` | The kit version: the release (`X.Y.Z`), and in a clone that is past it or has local changes, how far and at which commit (`X.Y.Z +1 (1c4f46f)`). Doctor's first line says the same, and so do a run's start line and its record (`versions.kit` in `logs/run.json`). `--json` prints the facts the Claude Code mod's idle mark reads instead (`kit`, `newestRelease` - always `null` for now - and `project`: null outside a set-up project, else whether it has an update record, the release recorded and the Upgrading notes it has not had); it works outside a project too | ➖ no |
+| `sandcastle --version` | The kit version: the release (`X.Y.Z`), and in a clone that is past it or has local changes, how far and at which commit (`X.Y.Z +1 (1c4f46f)`). Doctor's first line says the same, and so do a run's start line and its record (`versions.kit` in `logs/run.json`). `--json` prints the facts the Claude Code mod's idle mark reads instead (`kit`, `newestRelease` - the newest release tagged on the kit's remote and when it was checked, or `null` when that is not known - and `project`: null outside a set-up project, else whether it has an update record, the release recorded and the Upgrading notes it has not had); it works outside a project too | ➖ no |
 | `sandcastle doctor [--verify]` | Checks machine and project setup (inside a project also the tracker and, on GitHub, the queue label) and prints the fix for each problem as the command that applies it; doctor itself changes nothing. Names the Claude Code and Codex versions sandbox images will get, shows the size of Docker's build cache with the `docker builder prune` hint, points to `sandcastle size` (an `info` line) while neither machine pool limit is set, warns when the pool limits need more memory than the VM has, priced from the measured anonymous memory of gates and agents (both numbers and the `config.json` key; a run's start prints the same warning), and warns - never fails - when the release channel cannot be reached, the project's base image is more than 30 days old, or a pulled kit has Upgrading notes the project has not had since its last update. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call), and in a GitHub project whether `GH_TOKEN` can push there - a probe that writes nothing; a token that can is a FIX | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle updated [--declined KEY[,KEY...]] [--accepted KEY[,KEY...]]` | Records that this project has acted on the kit's Upgrading notes (the last step of `/sandcastle update`), as the update record `.sandcastle/.run/kit-updated`: the kit's release, every Upgrading note it has now and `declined`, the update steps the user declined (`--declined` adds keys such as `claude-mod` at this release; earlier ones are kept; `--accepted` takes off one the user has since asked for), so the next update names a declined step in a line and does not ask again; it prints the release recorded before (or that there was none) and the kit's version now. Until then, after a pull, doctor lists the notes the project has not had and a run warns about them | ➖ no |
@@ -1414,11 +1427,12 @@ naming the file, and every run asks before it bills API credits ([Run](#-run)). 
 | `maxSandboxes`, `maxGates` | `6`, `2` | Machine-wide limits across all projects ([Concurrency](#-concurrency)); `SANDCASTLE_MAX_*` overrides them |
 | `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
 | `herdr.clickHint` | `"auto"` | `"ctrl"` or `"cmd"`: the key the status view's hint names for a click on a ticket, in place of the one sensed from your terminal (`"auto"`); `SANDCASTLE_CLICK_HINT` overrides it ([The Herdr plugin](#the-herdr-plugin)). `herdr` holds no other key |
+| `updateCheck` | `true` | `false` stops `sandcastle doctor` and the idle mark looking up the kit's newest release (`git ls-remote --tags` on the kit checkout's `origin`, at most once in six hours; nothing is fetched) |
 | `idleMark` | `true` | `false` turns off the idle mark the Claude Code mod draws between runs, in every project ([The Claude Code mod](#-the-claude-code-mod)) |
 | `keepWarm` | `true` | `false` stops the session that started a run keeping its prompt cache warm while the run is live, in every project, and beats a project's `keepWarm: true`. A refresh request reads the cached conversation at about 0.1x the input price; a cold restart re-reads it at the full price, so leave it on unless you would rather not spend the allowance |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
-A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit, has an `idleMark` or a `keepWarm` that is not `true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint that names both keys.
+A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit, has an `idleMark`, a `keepWarm` or an `updateCheck` that is not `true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint that names both keys.
 
 ### 🐳 The image's agent versions
 

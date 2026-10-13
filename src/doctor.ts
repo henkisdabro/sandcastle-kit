@@ -20,7 +20,7 @@ import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
 import { poolWarningsNow, sizePointerNow } from "./size.ts";
 import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
-import { kitVersion, upgradeLines } from "./upgrading.ts";
+import { kitRelease, kitVersion, newestRelease, releaseOut, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
 import { runtimeProblemNow } from "./runtime.ts";
@@ -425,6 +425,10 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   if (pathKit) console.log(`info \`sandcastle\` on PATH runs another kit checkout (${pathKit}), not this one (${realpathSync(KIT)}): \`./bin/sandcastle\` runs this checkout.`);
   else check(linked, "`sandcastle` on PATH points at this kit", `\`${bin} setup\` (or: \`mkdir -p ~/.local/bin && ln -sf ${bin} ~/.local/bin/sandcastle\`, and put ~/.local/bin on PATH)`);
 
+  // Not a fault: a newer tag is on the remote. Silent when the lookup is off, failed or finds nothing newer.
+  const out = releaseOut(newestRelease(), kitRelease());
+  if (out) console.log(`info sandcastle-kit ${out} is out (this kit is ${kitRelease()}): \`/sandcastle update\` brings it in.`);
+
   const skill = join(homedir(), ".claude/skills/sandcastle");
   const skillOk = (() => {
     try {
@@ -472,6 +476,9 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       // The mod reads this one and never reports it, so a typo would leave the mark on without a word.
       const idleMark = machineSettings().idleMark;
       if (idleMark !== undefined && typeof idleMark !== "boolean") return `"idleMark" in ${settingsFile} is ${JSON.stringify(idleMark)}, not true or false.`;
+      // The newest-release lookup reads this one, and a typo would leave the network read on without a word.
+      const updateCheck = machineSettings().updateCheck;
+      if (updateCheck !== undefined && typeof updateCheck !== "boolean") return `"updateCheck" in ${settingsFile} is ${JSON.stringify(updateCheck)}, not true or false.`;
       // The session's keep-warm reads this one too, and a typo would leave it on without a word.
       const keepWarm = machineSettings().keepWarm;
       if (keepWarm !== undefined && typeof keepWarm !== "boolean") return `"keepWarm" in ${settingsFile} is ${JSON.stringify(keepWarm)}, not true or false.`;
@@ -491,6 +498,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
         : settingsProblem?.startsWith('"idleMark"')
           ? `Set it to \`false\` to turn the Claude Code mod's idle mark off, or delete the line to show it.`
+          : settingsProblem?.startsWith('"updateCheck"')
+          ? `Set it to \`false\` to stop doctor and the idle mark looking up the kit's newest release on its remote, or delete the line to keep the lookup on.`
           : settingsProblem?.startsWith('"keepWarm"')
           ? `Set it to \`false\` to stop the session keeping its prompt cache warm during a run, or delete the line to keep it on.`
           : settingsProblem?.startsWith('"herdr')

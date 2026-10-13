@@ -59,3 +59,10 @@ test("the implementer runs the typecheck gate and the tests covering its change,
   assert.match(p, /run the typecheck gate and the tests that cover the conflicted files, then `git commit --no-edit`/);
   assert.doesNotMatch(p, /The same gates are re-run/);
 });
+
+test("the implement and review prompts call a loop over most test files, one at a time, the full suite", () => {
+  for (const name of ["implement.md", "review.md"]) {
+    const p = read(name);
+    assert.match(p, /A loop that runs most of the test files one at a time is the full suite run serially - slower, and it slows the gates beside it/, name);
+  }
+});

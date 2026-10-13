@@ -20,7 +20,7 @@ import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { agentFailure } from "./agents.ts";
 import { remainderNote } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
-import { promptExpansionLine } from "./errors.ts";
+import { githubServerError, promptExpansionLine } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine, unretriedLine } from "./landing.ts";
@@ -28,7 +28,7 @@ import { overrunLine, overrunNoted } from "./report.ts";
 import { HANDED_BACK, readOutcomes, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
 import type { Again, Change, Ending, StopCause } from "./schedule.ts";
-import { refOf } from "./tracker.ts";
+import { AGENT_COMMENT_MARKER, refOf } from "./tracker.ts";
 
 /** What the ledger reads of a pipeline's result: burndown's own `Outcome` is one. */
 export type Finished = {
@@ -146,7 +146,8 @@ export const partlyDoneComment = (
 
 // The openings of the comments the kit writes itself: the close and "not landed" comments above, a hold's
 // text (`describe`, and the pipeline's own holds), `sandcastle land`'s merge comment and the repeat of a
-// follow-up filed already (`repeatComment`, burndown.ts). A person's comment on a ticket after its
+// follow-up filed already (`repeatComment`, burndown.ts), and any agent's comment, which opens with
+// `AGENT_COMMENT_MARKER` (every comment the tracker's words ask an agent for). A person's comment on a ticket after its
 // review is told from these (`personCommentsSince`). `sandcastle requeue --note` is a person's word and
 // is not here.
 const KIT_COMMENT = /^(?:Sandcastle (?:ran this ticket|held this|could not finish this)|(?:Merged|Squashed) locally, not yet pushed, by|Merged into `[^`]*` by an earlier Sandcastle run|Gated green on `|Named again by the )/;
@@ -172,7 +173,7 @@ export const commentCount = (comments: string[]): number => commentEntries(comme
 
 /**
  * The comments past the first `seen` that a person wrote: not one the kit wrote (its openings are fixed), and not
- * an agent's, which a snapshot of the count taken after the agent's pass already holds. `seen` is the count
+ * an agent's, which opens with `AGENT_COMMENT_MARKER`. `seen` is the count
  * recorded with a branch's head; none recorded means none can be told, and none is returned.
  */
 export const personCommentsSince = (comments: string[], seen: number | undefined): string[] =>
@@ -180,7 +181,7 @@ export const personCommentsSince = (comments: string[], seen: number | undefined
     ? []
     : commentEntries(comments)
         .slice(seen)
-        .filter((e) => !KIT_COMMENT.test(e.text) && !(e.heading ?? "").endsWith(" - sandcastle"))
+        .filter((e) => !KIT_COMMENT.test(e.text) && !e.text.startsWith(AGENT_COMMENT_MARKER) && !(e.heading ?? "").endsWith(" - sandcastle"))
         .map((e) => e.text);
 
 // The one comment a ticket that did not land gets: the conflict (the other
@@ -659,10 +660,15 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
 /**
  * The words of a run that stopped starting tickets because every one crashed expanding its prompt the same way: a
  * setup problem (a token that cannot see the repo, `gh` not signed in), not the tickets', so the error is quoted once
- * and `doctor --verify` is the next step - never the per-ticket "add a comment for the implementer".
+ * and `doctor --verify` is the next step - never the per-ticket "add a comment for the implementer". A GitHub 5xx is
+ * GitHub's failure, not the setup's: the tokens are fine, so it names the status and githubstatus.com instead.
  */
-export const setupProblemWords = (line: string): string =>
-  `a setup problem, not the tickets': their prompts could not be expanded - ${line}. Run \`sandcastle doctor --verify\``;
+export const setupProblemWords = (line: string): string => {
+  const status = githubServerError(line);
+  return status
+    ? `GitHub failed (HTTP ${status}), not the tickets' or the setup: their prompts could not be expanded - ${line}. Check githubstatus.com`
+    : `a setup problem, not the tickets': their prompts could not be expanded - ${line}. Run \`sandcastle doctor --verify\``;
+};
 
 /**
  * How a stop's cause reads in the notes of the tickets it left unstarted and in the closing

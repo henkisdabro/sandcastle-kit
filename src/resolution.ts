@@ -210,20 +210,38 @@ export const splitStrays = (stray: string[], said: NamedStray[]): { named: Named
 };
 
 /**
- * What the narrow review of a resolution is shown of the clean files the resolver named (`MERGE_STRAYS`): the files and
+ * What a review of a resolution is shown of the clean files the resolver named (`MERGE_STRAYS`): the files and
  * its reasons, with the ask to hold each change to what the merge needs. Empty when there are none, so the prompt
  * carries no heading over nothing. It names the diff against the base's side because the combined diff above shows no
  * line the resolution dropped from that side - the very loss the hold guarded against.
  */
-export const namedStraysView = (named: NamedStray[]): string =>
-  named.length
-    ? "# Files the resolver changed that merged cleanly\n\nThe resolver changed these files, which git merged without a conflict and the base had changed, " +
-      "and gave the reason for each. The combined diff above does not show a line the resolution dropped from the base's side, " +
-      "so read each file's diff against that side, `git diff <merge>^2 <merge> -- <file>` with `<merge>` the merge commit above. " +
-      "Each change must be only what the merge needs (a test or a call adapted to the other side's code), and no line another " +
-      "ticket landed in the file may be lost:\n\n" +
-      `${named.map((n) => `- \`${n.path}\` - ${n.why}`).join("\n")}\n\n`
-    : "";
+export const namedStraysView = (named: NamedStray[], review: "narrow" | "full" = "narrow"): string => {
+  if (!named.length) return "";
+  const list = `${named.map((n) => `- \`${n.path}\` - ${n.why}`).join("\n")}\n\n`;
+  const ask =
+    "Each change must be only what the merge needs (a test or a call adapted to the other side's code), and no line another " +
+    "ticket landed in the file may be lost:\n\n";
+  // The full review is shown no combined diff, so its lead-in names the command that shows each stray instead.
+  if (review === "full") {
+    return (
+      "# Files the resolver changed that merged cleanly\n\n" +
+      "A conflicted merge of the base into this branch was resolved since it was last reviewed. The resolver changed these files, " +
+      "which git merged without a conflict and the base had changed, and gave the reason for each. The branch's diff against the base can hide " +
+      "a line the resolution dropped from the base's side, so read each file's diff against that side, " +
+      "`git diff <merge>^2 <merge> -- <file>`, with `<merge>` the branch's latest merge commit (`git log --merges -1 --format=%H`). " +
+      ask +
+      list
+    );
+  }
+  return (
+    "# Files the resolver changed that merged cleanly\n\n" +
+    "The resolver changed these files, which git merged without a conflict and the base had changed, " +
+    "and gave the reason for each. The combined diff above does not show a line the resolution dropped from the base's side, " +
+    "so read each file's diff against that side, `git diff <merge>^2 <merge> -- <file>` with `<merge>` the merge commit above. " +
+    ask +
+    list
+  );
+};
 
 /**
  * The note on a ticket held for a resolution that changed more than the conflict: the run record and the tracker comment share it.

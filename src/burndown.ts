@@ -39,7 +39,7 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
+import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
@@ -50,7 +50,7 @@ import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, type Ticket, type Tracker } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
@@ -595,9 +595,14 @@ const isLeadIn = (sentence: string): boolean => {
 // with an anaphor brings the sentences before it in its paragraph, as many as fit under UNGATED_MAX (the
 // nearest first), because what it points at is one of them. A gap sentence that is a lead-in (`isLeadIn`)
 // brings the sentences after it in its unit instead, in order, within the same size.
+// A gap still open, said anywhere in the message: it outweighs an opening that says the gap was fixed.
+const STILL_OPEN = /\b(?:remains?|not\s+(?:yet\s+)?(?:fixed|addressed|handled)|left\s+(?:alone|unfixed|undone)|unfixed|still\s+(?:fails?|broken|wrong|open))\b/i;
 const gapOf = (text: string): string | undefined => {
   if (followUpsOf(text).length || unmetOf(text)) return undefined;
   const all = sentencesOf(text);
+  // A review that opens by saying it found a gap and fixed it ("I found one gap in the implementer's work and fixed it.")
+  // then describes that gap under a bold lead-in: a fixed gap, not one left, unless a sentence says one is still open.
+  if (all.length && GAP_FIXED.test(all[0]!.text) && !all.some((s) => STILL_OPEN.test(withoutCode(withoutQuotes(s.text))))) return undefined;
   const take = new Set<number>();
   all.forEach((s, i) => {
     if (!isGap(withoutCode(withoutQuotes(s.text)))) return;
@@ -799,7 +804,7 @@ const placesThisRun: Places = new Map();
  * its reason, never thrown, and its title left unseen for a later turn to file: the run's landings stand.
  */
 export const fileFollowUps = async (
-  tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open">>,
+  tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open" | "openAsync">>,
   followUps: readonly FollowUp[],
   o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists; named?: NamedOnBase; triage?: string },
 ): Promise<FiledFollowUp[]> => {
@@ -807,12 +812,14 @@ export const fileFollowUps = async (
   const places = o.places ?? new Map();
   const out: FiledFollowUp[] = [];
   // The open tickets awaiting triage, read once for the batch and only when a follow-up gets as far as a new ticket. A
-  // list that fails files as before: the check is a courtesy, never a reason to lose a follow-up.
+  // list that fails, or is not answered in time (`TRACKER_READ_MS`), files as before: the check is a courtesy, never a
+  // reason to lose a follow-up. Read asynchronously: up to 500 issues, while the run's other work goes on.
   let awaiting: Ticket[] | undefined;
-  const awaitingTriage = (): Ticket[] => {
+  const awaitingTriage = async (): Promise<Ticket[]> => {
     if (awaiting) return awaiting;
     try {
-      awaiting = o.triage === undefined || !tracker.open ? [] : tracker.open(false).filter((t) => t.labels?.includes(o.triage!) || t.status === o.triage);
+      const open = o.triage === undefined || !tracker.open ? [] : tracker.openAsync ? await tracker.openAsync(false) : tracker.open(false);
+      awaiting = open.filter((t) => t.labels?.includes(o.triage!) || t.status === o.triage);
     } catch {
       awaiting = [];
     }
@@ -841,7 +848,7 @@ export const fileFollowUps = async (
       out.push(at);
       continue;
     }
-    const same = place.spots.length ? awaitingTriage().find((t) => t.id !== f.from && namesPlaceOf(t, place)) : undefined;
+    const same = place.spots.length ? (await awaitingTriage()).find((t) => t.id !== f.from && namesPlaceOf(t, place)) : undefined;
     if (same) {
       try {
         await o.write(() => {
@@ -1111,6 +1118,22 @@ export const scopeIds = (tracker: Tracker, list: string, known: Issue[] = []): S
   );
 
 /**
+ * The merge `git log` found for a ticket (`found`: its short hash and commit time) when nobody reopened the ticket
+ * since. The reopen check is asynchronous and time-limited (`TRACKER_READ_MS`) where the tracker has one; a check that
+ * cannot be made, or is not answered in time, counts as a reopen, so the ticket runs normally.
+ */
+export const notReopened = async (tracker: Pick<Tracker, "reopenedSince" | "reopenedSinceAsync">, issue: string, found: string, limitMs?: number): Promise<string | undefined> => {
+  const [merge, mergedAt] = found.split(" ");
+  let reopened: boolean;
+  try {
+    reopened = tracker.reopenedSinceAsync ? await tracker.reopenedSinceAsync(issue, Date.parse(mergedAt), limitMs) : tracker.reopenedSince(issue, Date.parse(mergedAt));
+  } catch {
+    reopened = true;
+  }
+  return reopened ? undefined : merge;
+};
+
+/**
  * Every queued ticket with an open blocker, whether or not this turn runs it. A later autonomy
  * turn names its tickets in `TICKETS`, and a `waiting` built from those alone loses every
  * dependant outside the list - so the closing summary never says they were freed.
@@ -1118,10 +1141,13 @@ export const scopeIds = (tracker: Tracker, list: string, known: Issue[] = []): S
 export const waitingTickets = async (project: Project, tracker: Tracker, whole: Issue[]): Promise<{ issue: string; on: string[] }[]> =>
   [...(await openOnQueue(project, tracker, whole))].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
 
-/** The open blockers of each ticket in `whole` that has any, in queue order. */
-export const openOnQueue = async (project: Project, tracker: Tracker, whole: Issue[]): Promise<Map<string, Blocker[]>> => {
-  const resolve = blockerResolver(project, tracker, new Set(whole.map((i) => i.id)));
-  const open = await Promise.all(whole.map((i) => openBlockers(project, tracker, resolve, i)));
+/**
+ * The open blockers of each ticket in `whole` that has any, in queue order. Read for a run, so asynchronously and
+ * given up at `limitMs`: a blocker, or a ticket's blocker links, that cannot be read in time counts as open.
+ */
+export const openOnQueue = async (project: Project, tracker: Tracker, whole: Issue[], limitMs = TRACKER_READ_MS): Promise<Map<string, Blocker[]>> => {
+  const resolve = blockerResolver(project, tracker, new Set(whole.map((i) => i.id)), limitMs);
+  const open = await Promise.all(whole.map((i) => openBlockers(project, tracker, resolve, i, limitMs)));
   return new Map(whole.flatMap((i, at) => (open[at].length ? [[i.id, open[at]] as const] : [])));
 };
 
@@ -1584,11 +1610,9 @@ export const createPipeline = (ctx: PipelineContext) => {
   // own merge message finds it instead - unless someone reopened the issue
   // after that merge, which asks for more work, not for a close. Any doubt
   // (gh unreachable) means a normal run, which is what happened before.
-  const mergedEarlier = (issue: string, branch: string) => {
+  const mergedEarlier = async (issue: string, branch: string) => {
     const found = sh("git", ["log", base, "-1", "--format=%h %cI", "--fixed-strings", `--grep=Merge ${branch} (closes ${ref(issue)})`], project.root);
-    if (!found) return undefined;
-    const [merge, mergedAt] = found.split(" ");
-    return tracker.reopenedSince(issue, Date.parse(mergedAt)) ? undefined : merge;
+    return found ? notReopened(tracker, issue, found) : undefined;
   };
 
   /**
@@ -1663,13 +1687,13 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[] }) => {
+  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number }) => {
     if (dryRun) return;
     try {
-      // The comment count is read now, after the pass that wrote these fields: an agent's own comment (a repair's report)
-      // is then inside it, and only a person's later comment reads as new at the next carry.
-      const comments = "reviewed" in fields || "green" in fields || "repaired" in fields ? await ticketComments(id) : undefined;
-      recordHead(project.root, id, { branch, ...fields, ...(comments ? { comments: commentCount(comments) } : {}) }, runId);
+      // `comments` is given only by the full review, read just before its pass starts (`fullReview`): a person's comment
+      // during the gates or a repair, or after the reviewer read the thread, then stays past the count at the next carry.
+      // An agent's own comment opens with the kit's marker (`AGENT_COMMENT_MARKER`), which `personCommentsSince` skips.
+      recordHead(project.root, id, { branch, ...fields }, runId);
     } catch (error) {
       console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
     }
@@ -1776,7 +1800,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     // unmet line, final message and changelog lines (see `implUnmetView`, `implSaidView`, `implChangelogView`).
     // `FOLLOWUPS_NAMED` is empty here too, and filled at every agent pass (`pass`) from the run's follow-up book.
     const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_SAID: "", IMPL_CHANGELOG: "", FOLLOWUPS_NAMED: "", ...tracker.promptArgs(issue.id) };
-    const merge = mergedEarlier(issue.id, branch);
+    const merge = await mergedEarlier(issue.id, branch);
     if (merge) {
       return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
     }
@@ -2079,7 +2103,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // implementer takes the branch, as it does for any carried branch.
       // The cleanly merged files the resolver said it had to change, and why (`strayNamesOf`).
       let resolverSaid: NamedStray[] = [];
-      // The stray changes among them that `strayChanges` found, which the narrow review is shown.
+      // The stray changes among them that `strayChanges` found, which the review is shown.
       let namedStrays: NamedStray[] = [];
       if (landOnly && mergeConflicted) {
         await juncture("resolve");
@@ -2221,6 +2245,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // the ticket's comments, which its prompt reads. Returns the review commits it made.
       const fullReview = async () => {
         await juncture("review");
+        // The comments the reviewer is about to read. Only this review records the count: the narrow reviews and the
+        // re-review after a repair are told to leave the spec alone, so a comment before them is still unread.
+        const seenComments = await ticketComments(issue.id);
         let reviewModel: string | undefined;
         const beforeReview = ownNow();
         const listBefore = ownList();
@@ -2230,7 +2257,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           () => {
             return reviewWithFallback(ref(issue.id), (agent, model) => {
               reviewModel = model;
-              return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
+              return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog), MERGE_STRAYS: namedStraysView(namedStrays, "full") })(agent);
             });
           },
           undefined,
@@ -2242,13 +2269,13 @@ export const createPipeline = (ctx: PipelineContext) => {
               issue.id,
               "cross-review",
               () => {
-                return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) }));
+                return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog), MERGE_STRAYS: namedStraysView(namedStrays, "full") }));
               },
               undefined,
               () => CROSS_REVIEW_MODEL,
             )
           : undefined;
-        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenComments ? { comments: commentCount(seenComments) } : {}) });
         reviewed = true;
         for (const r of [review, cross]) {
           const u = r && ungatedOf(r.stdout);
@@ -2808,10 +2835,10 @@ export const burndown = async (
   const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i) => (wholeOpen.has(i.id) ? [[i.id, { ticket: i, on: wholeOpen.get(i.id)! }] as const] : [])));
   const waiting = [...wholeOpen].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
   // A comment is not read as a blocker; say so where the run would start the issue.
-  for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })))) console.log(`  warning: ${commentBlockLine(f)}`);
+  for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })), TRACKER_READ_MS)) console.log(`  warning: ${commentBlockLine(f)}`);
   // A blocker that can never close (missing, a cycle) holds its ticket for good; an unnamed Linear key lets it start.
   // The whole queue's ids, so a blocker queued outside the named tickets is not called "not queued".
-  for (const line of await blockerProblems(project, tracker, queued, new Set(whole.map((t) => t.id)))) console.log(`  warning: ${line}`);
+  for (const line of await blockerProblems(project, tracker, queued, new Set(whole.map((t) => t.id)), TRACKER_READ_MS)) console.log(`  warning: ${line}`);
   // A ticket others wait for starts first; otherwise the tracker's order
   // holds. The two blockers of seven waiting tickets once ran last of thirty,
   // so a run stopped early would have left all seven stuck for another run.
@@ -3276,7 +3303,7 @@ export const burndown = async (
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
   // `from`: a red gate's re-run, which starts at that gate (`gatesIn`'s own).
   // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
-  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false) => {
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim) => {
     const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
@@ -3309,7 +3336,7 @@ export const burndown = async (
       log: gatesLog(project, id),
       // A ticket's gates, in its own sandbox: the gate share while they hold the slot (a landing's sandbox has it already).
       ...(!priority && ticketCpus !== undefined && gateCpus !== undefined ? { cpus: { gate: gateCpus, ticket: ticketCpus } } : {}),
-    }, priority, from, rerunOnRed, thirdOnDisjoint);
+    }, priority, from, rerunOnRed, thirdOnDisjoint, claim);
     // A ticket's gates only (the landing's own red is judged against these): the first run's failures and a re-run's alike.
     // Not a requeued ticket's: its gates run on a tree the base was merged into, so a test a landed ticket broke
     // there would read as the branch's own, and a second red at landing would name no ticket.
@@ -3430,8 +3457,8 @@ export const burndown = async (
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
-    gate: async (box, id, how) => {
-      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed));
+    gate: async (box, id, how, claim) => {
+      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed, false, claim));
       const times = gateMs(result);
       if (times) landingGateMs.set(id, times);
       const flaked = landingFlaked(result, run.tickets()[id]?.flaked);

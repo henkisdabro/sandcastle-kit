@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
 import { buildFixture, hang, release } from "./status-fixture.ts";
-import { needsScript, orphans, settledTty, started, startSession, until, type Painted, type Session } from "./status-run.ts";
+import { drawFrame, needsScript, orphans, settledTty, started, startSession, until, type Painted, type Session } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-lifecycle-"));
 // An older orchestrator's live run: a few rows, one sandbox container, so a frame is quick and the view calls docker, git and sandcastle.
@@ -24,9 +24,15 @@ after(() => {
 
 /** Starts the view; whatever a test leaves of it is ended after the test. */
 const opened: Session[] = [];
+/** How many git calls the fakes had logged when each view started. */
+const gitAtOpen = new WeakMap<Session, number>();
 afterEach(() => opened.splice(0).forEach((session) => session.close()));
 const open = async (options: Parameters<typeof startSession>[1] = {}) => {
+  // Counted before any view runs: a view collecting meanwhile would add its own calls to the count.
+  gitPerCollection();
+  const before = gitCalls();
   const session = await startSession(fixture, options);
+  gitAtOpen.set(session, before);
   opened.push(session);
   return session;
 };
@@ -35,11 +41,29 @@ const widthOf = (frame: { text: string }) => [...frame.text.split("\n")[0]!].len
 /** The sequences a live view writes to leave the alternate screen and give the terminal back. */
 const LEFT = ["\x1b[?1007h", "\x1b[?7h", "\x1b[?25h", "\x1b[?1049l"];
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-/** How many processes the fakes have logged so far. */
-const logged = () => readFileSync(fixture.pids, "utf8").split("\n").filter(Boolean).length;
-/** Waits until every source has answered and nothing more is being started: the fakes' log still for `ms`. */
+/** How many processes the fakes have logged so far, and how many of them were git. */
+const lines = () => readFileSync(fixture.pids, "utf8").split("\n").filter(Boolean);
+const logged = () => lines().length;
+const gitCalls = () => lines().filter((l) => l.endsWith(" git")).length;
+/** The git calls of one whole collection of the fixture, counted once from a `status 0` frame. */
+let collection: number | undefined;
+const gitPerCollection = () => {
+  if (collection === undefined) {
+    const before = gitCalls();
+    drawFrame(fixture);
+    collection = gitCalls() - before;
+  }
+  return collection;
+};
+/**
+ * Waits until every source has answered and nothing more is being started: the first collection's git calls all made
+ * (git draws no "loading…", and makes its calls one after another: one slow call left a quiet gap mid-collection),
+ * then the fakes' log still for `ms`.
+ */
 const settled = async (view: Session, ms = 700) => {
   await view.frame(0, (f) => !f.text.includes("loading…"));
+  const want = gitPerCollection();
+  await until("the first collection's git calls", () => (gitCalls() - (gitAtOpen.get(view) ?? 0) >= want ? true : undefined));
   let count = logged();
   let since = performance.now();
   await until("the collectors to go quiet", () => {
