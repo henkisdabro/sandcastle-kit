@@ -21,7 +21,7 @@ export type Entry = {
 /** What `sandcastle --version --json` prints (src/upgrading.ts's `versionFacts`), the part the mark reads. */
 export type VersionFacts = {
   kit: { version: string; release: string; past: number };
-  /** The newest tagged release; always null until the kit reads one, and the mark says nothing of it yet. */
+  /** The newest release tagged on the kit's remote and when the kit read it (ISO 8601); null when it is not known: the check is off, failed or found none. */
   newestRelease: { release: string; checkedAt: string } | null;
   /** Null outside a set-up project. */
   project: { recorded: boolean; release: string | null; pendingNotes: string[] } | null;
@@ -87,8 +87,8 @@ const current = (entry: Entry | undefined, now: number | undefined): string[] =>
 export const dismissalEnded = (dismissed: string[], entry: Entry | undefined, now: number | undefined): boolean =>
   current(entry, now).some((id) => !dismissed.includes(id));
 
-/** A tone of the mark's line: `name` the row's sand, `hint` the castle's bright sand in bold, `muted` the dimmer sand. */
-export type Tone = "name" | "hint" | "muted";
+/** A tone of the mark's line: `name` the row's sand, `hint` the castle's bright sand in bold. */
+export type Tone = "name" | "hint";
 
 /** One coloured piece of the line. The pieces are drawn side by side with a space between them. */
 export type MarkPart = { text: string; tone: Tone };
@@ -119,10 +119,11 @@ const releaseLabel = (kit: VersionFacts["kit"]): string => `${kit.release}${kit.
  * the line never says why (`sandcastle queue` and the status view do). A dismissal takes the
  * count off, never the mark; hiding takes both.
  *
- * With version facts the name carries the kit's release, and one hint may follow the count:
- * `update needed` when the project has Upgrading notes it has not had or no usable update record
- * (bold, the call to action becomes `/sandcastle update`), else `project on X` when its recorded
- * release is older than the kit's (muted, the call to action stays `/sandcastle run`).
+ * With version facts the name carries the kit's release, and one hint may follow the count, the
+ * first of these that holds (bold, the call to action becomes `/sandcastle update`): `N out` when
+ * the newest release tagged on the kit's remote is newer than the kit's own release, else
+ * `update needed` when the project has Upgrading notes it has not had or no usable update record.
+ * A project that is current says nothing: its recorded release is for the report.
  */
 export const markText = (input: MarkInput): Mark | undefined => {
   if (!input.setUp || !input.idleMark || input.hidden) return undefined;
@@ -134,11 +135,11 @@ export const markText = (input: MarkInput): Mark | undefined => {
   const lead = `${facts ? `sandcastle ${releaseLabel(facts.kit)}` : "sandcastle"}${count ? ` · ${count} ready` : ""}`;
   const project = facts?.project;
   const parts: MarkPart[] = [];
-  if (project && (!project.recorded || project.pendingNotes.length > 0)) {
+  const out = facts?.newestRelease?.release;
+  if (facts && out && newer(out, facts.kit.release)) {
+    parts.push({ text: `${lead} ·`, tone: "name" }, { text: `${out} out`, tone: "hint" }, { text: "- /sandcastle update", tone: "name" });
+  } else if (project && (!project.recorded || project.pendingNotes.length > 0)) {
     parts.push({ text: `${lead} ·`, tone: "name" }, { text: "update needed", tone: "hint" }, { text: "- /sandcastle update", tone: "name" });
-  } else if (facts && project?.release && newer(facts.kit.release, project.release)) {
-    parts.push({ text: `${lead} ·`, tone: "name" }, { text: `project on ${project.release}`, tone: "muted" });
-    if (count) parts.push({ text: "- /sandcastle run", tone: "name" });
   } else parts.push({ text: count ? `${lead} - /sandcastle run` : lead, tone: "name" });
   return { text: parts.map((p) => p.text).join(" "), parts };
 };
@@ -194,13 +195,14 @@ export const markReport = (input: MarkInput): string => {
 const versionReport = (read: VersionEntry | undefined, now: number | undefined): string => {
   const facts = read?.facts;
   if (!read || !facts) return "Kit version: not read yet.";
-  const { kit, project } = facts;
+  const { kit, project, newestRelease } = facts;
   const recorded = !project ? "this is not a set-up project" : !project.recorded ? "none (no usable update record on this machine)" : (project.release ?? "none named by the record");
   const notes = !project || project.pendingNotes.length === 0 ? [" none held."] : ["", ...project.pendingNotes.map((n) => `  - ${n}`)];
   return [
     `Kit version: ${kit.version}, read ${now === undefined ? "earlier" : ago(now - read.at)}${read.ok ? "" : " (the latest read failed)"}${currentFacts(read, now) ? "" : "; too old to show"}.`,
     `Project's recorded release: ${recorded}.`,
     `Pending Upgrading notes:${notes.join("\n")}`,
+    `Newest release: ${newestRelease ? `${newestRelease.release}, checked ${now === undefined ? "earlier" : ago(now - Date.parse(newestRelease.checkedAt))}` : "not known (the check is off, the remote did not answer or it has no release tag)"}.`,
   ].join("\n");
 };
 

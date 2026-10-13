@@ -27,7 +27,7 @@ const MARK_ICON = "♜";
 /** The idle mark's line the band draws between runs, as sand-coloured parts; null for none. */
 const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
 /** The sand each tone of the mark's line is drawn in: the hint in the castle's bright sand and bold, never Claude Code's notice colour. */
-const TONES: Record<Tone, { color: string; bold?: boolean }> = { name: { color: SAND.name }, hint: { color: SAND.top, bold: true }, muted: { color: SAND.muted } };
+const TONES: Record<Tone, { color: string; bold?: boolean }> = { name: { color: SAND.name }, hint: { color: SAND.top, bold: true } };
 /** The cache refresh's row the band draws under the castle; null for none. */
 const warmLine = atom({ plugin: "sandcastle", key: "warm" } as const, null);
 /** What the cache refresh remembers; `$.state`, because a reload restarts module variables and not state. */
