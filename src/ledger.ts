@@ -147,7 +147,7 @@ export const partlyDoneComment = (
 // The openings of the comments the kit writes itself: the close and "not landed" comments above, a hold's
 // text (`describe`, and the pipeline's own holds), `sandcastle land`'s merge comment and the repeat of a
 // follow-up filed already (`repeatComment`, burndown.ts), and any agent's comment, which opens with
-// `AGENT_COMMENT_MARKER` (the tracker's `SAY` words ask for it). A person's comment on a ticket after its
+// `AGENT_COMMENT_MARKER` (every comment the tracker's words ask an agent for). A person's comment on a ticket after its
 // review is told from these (`personCommentsSince`). `sandcastle requeue --note` is a person's word and
 // is not here.
 const KIT_COMMENT = /^(?:Sandcastle (?:ran this ticket|held this|could not finish this)|(?:Merged|Squashed) locally, not yet pushed, by|Merged into `[^`]*` by an earlier Sandcastle run|Gated green on `|Named again by the )/;

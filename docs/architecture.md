@@ -2140,7 +2140,7 @@ At carry time a branch that would be land-only (`landOnlyHead`, `reviewedOnlyHea
 by `personCommentsSince`, in `src/ledger.ts` beside the comment texts it knows: the comments past
 that count that do not open with the kit's own fixed openings (`KIT_COMMENT`: "did not land",
 "held", "Named again", the merge comments) or with `AGENT_COMMENT_MARKER` (`src/tracker.ts`, which the
-GitHub tracker's `SAY` words ask every agent comment to open with: an agent that drops it costs one
+GitHub tracker's words - `SAY`, `RECORD`, `NOCHANGE`, `BLOCKED`, `LOST` - ask every agent comment to open with: an agent that drops it costs one
 unneeded full review, never a missed comment) and are not a Markdown ticket file's `### <date> - sandcastle`
 entry.
 Such a comment, which no reviewer has read, keeps the branch land-only for the implementer and the

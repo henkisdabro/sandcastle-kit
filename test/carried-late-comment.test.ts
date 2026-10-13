@@ -371,6 +371,19 @@ test("a comment opening with the agent marker is the kit's, whatever follows it,
   assert.deepEqual(personCommentsSince([mention], 0), [mention]);
 });
 
+test("every comment the GitHub tracker asks an agent for opens with the marker, in the rendered implement and repair prompts", () => {
+  const root = mkdtempSync(join(TMP, "render-"));
+  const p = { root, name: "fixture", label: "fixture", gates: [{ name: "test", command: "run-tests" }], tracker: fakeTracker() } as unknown as Parameters<typeof renderPrompts>[0];
+  const tracker = makeTracker(p);
+  // The implementer's record can follow the full review's count (a re-run that gets only a narrow review, or none):
+  // unmarked, it reads as a person's at the next carry.
+  for (const k of ["LOST", "RECORD", "NOCHANGE", "BLOCKED", "SAY"] as const) assert.ok(tracker.words[k].includes(`"${AGENT_COMMENT_MARKER}"`), k);
+  const rendered = renderPrompts(p, tracker);
+  const marks = (kind: "implement" | "repair") => readFileSync(rendered[kind], "utf8").split(`"${AGENT_COMMENT_MARKER}"`).length - 1;
+  assert.equal(marks("implement"), 4);
+  assert.ok(marks("repair") >= 1);
+});
+
 test("a person's comment while the ticket's gates run is not absorbed by the green write: the next carry gets the full review", async () => {
   const h = harness();
   h.agents.impl = implementing("shared.txt", "seven\n");
