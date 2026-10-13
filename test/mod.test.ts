@@ -196,7 +196,7 @@ test("the band is the castle's three rows, the run beside its walls, each row cu
 
 test("the cache row goes at the end of the title row while it fits, else on a row of its own lined up with the text", () => {
   const s = summarise(run);
-  const cache = "cache warm · refresh in 55m";
+  const cache = "cache refresh in 55m";
   const text = (columns: number) =>
     band(s, columns, CASTLE, cache).map((row) => row.map((seg) => (seg.count === undefined ? seg.text : `${seg.text} ${seg.count}`)).join("  "));
   const full = `█████  sandcastle  demo  landing 2/4  1.7M in / 30k out  ${cache}`;

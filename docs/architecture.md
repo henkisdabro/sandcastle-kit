@@ -2578,7 +2578,7 @@ hour cost about 1.3x the input price against one cold re-write at about 1.25x - 
 (`afterTurn`: one more try at 55 minutes), and a second miss in a run turns the refresh off for it.
 No plan windows (an API key, a gateway) assume nothing: the first refresh's measured read decides.
 `settle` records a refresh, and a fork that is not answered (`api-error`, `aborted`) is a miss.
-The band's row is `cache warm · refresh in 12m` or `cache refreshed HH:MM · 157k read`.
+The band's row is `cache refresh in 12m`, and after a refresh `cache refresh in 55m · last 157k` (what the refresh read); "warm" is not said, since the refresh keeps it so.
 In `register.tsx` a `$.clock.every(60_000)` tick runs while `round` finds a live run this session
 started, followed, or (recording no session) closes; it reads `$.session.usage()`, calls
 `$.model.fork` when `refresh` is set, keeps `Warmth` in `$.state` (`sandcastle.warmth`, which a
