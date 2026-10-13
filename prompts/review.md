@@ -121,7 +121,8 @@ included, re-runs a red ticket gate once in its slot and gives a red that stays 
 the typecheck gate and the tests that cover what you are looking at or changing, as often as you
 need, and do not run the full suite yourself: a run of yours repeats the gates that start as you
 exit, and slows them while it runs beside them. After docs-only commits (prose in a README, a doc or
-a comment), run none. A gate run of your own adds nothing when you commit nothing.
+a comment), run only the tests that cover that prose, if any. A gate run of your own adds nothing when
+you commit nothing.
 
 A long command that is not a gate - a download, an install, a build - also runs in the foreground
 with the tool's longest timeout, never in the background. If one is in the background anyway, wait for
