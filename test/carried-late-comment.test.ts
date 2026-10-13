@@ -1,0 +1,365 @@
+// A carried branch reviewed and green at a head, with a comment from a person on its ticket since that review,
+// gets the full review (which shows the comments) after any merge resolution - not the narrow review, and not
+// none. A comment the kit or an agent wrote does not count: the kit's have fixed openings, an agent's is inside
+// the count recorded after its pass. The pipeline over a temp repo with scripted agents, gate runs and a ticket
+// whose comments the test sets; no Docker, model, gh or network.
+//
+//   pnpm test:file test/carried-late-comment.test.ts
+
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { after, test } from "node:test";
+import { quietly } from "./quiet.ts";
+
+// sandbox.ts, pool.ts and peaks.ts derive their directories from these at import: nothing here may touch the user's.
+process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
+// The merges pass process.env through to git, so an exported identity would win over config.
+for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
+const { createPipeline } = await import("../src/burndown.ts");
+const { closeComment, commentCount, notLandedComment, partlyDoneComment, personCommentsSince } = await import("../src/ledger.ts");
+const { readHeads, recordHead } = await import("../src/run.ts");
+type Ctx = import("../src/burndown.ts").PipelineContext;
+type Box = import("../src/burndown.ts").PipelineBox;
+type Outcome = Awaited<ReturnType<ReturnType<typeof createPipeline>>>;
+type GateRun = import("../src/gates.ts").GateRun;
+type RedLanding = import("../src/landing.ts").RedLanding;
+
+const TMP = mkdtempSync(join(tmpdir(), "sandcastle-pipeline-"));
+after(() => rmSync(TMP, { recursive: true, force: true }));
+let n = 0;
+
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const write = (cwd: string, file: string, text: string) => {
+  mkdirSync(dirname(join(cwd, file)), { recursive: true });
+  writeFileSync(join(cwd, file), text);
+};
+const commit = (cwd: string, file: string, text: string, message = `change ${file}`) => {
+  write(cwd, file, text);
+  git(cwd, "add", file);
+  git(cwd, "commit", "-q", "-m", message);
+};
+
+const ID = "7";
+const BRANCH = `agent/issue-${ID}`;
+const ISSUE = { id: ID, title: "seven", body: "", comments: [] as string[] } as Parameters<ReturnType<typeof createPipeline>>[0];
+
+const GREEN: GateRun = { gates: [{ name: "test", pass: true }], failures: [] };
+
+/** What an agent does in the sandbox's worktree, by its pass: `impl`, `review`, `repair` or `resolve`. Returns its final message. */
+type Agent = (worktree: string) => string | void;
+
+/**
+ * A project in a temp repo and a pipeline over it, with every port faked. `events` is each agent pass
+ * and gate run in order; `passes` the passes' names and prompt arguments; `phases` each timed step.
+ */
+const harness = () => {
+  const root = join(TMP, `repo${n++}`);
+  mkdirSync(root);
+  git(root, "init", "-q", "-b", "main");
+  git(root, "config", "user.name", "Operator Example");
+  git(root, "config", "user.email", "operator@example.com");
+  git(root, "config", "commit.gpgsign", "false");
+  commit(root, "shared.txt", "start\n", "start");
+  // Each prompt names every argument its pass may get, so `usedArgs` passes them all on.
+  const prompts = Object.fromEntries(
+    ["implement", "review", "repair", "rereview", "remerge", "resolve"].map((kind) => {
+      const file = join(root, `.sandcastle/.run/${kind}.md`);
+      write(root, `.sandcastle/.run/${kind}.md`, "{{ISSUE_NUMBER}} {{GATE_NAME}} {{GATE_COMMAND}} {{GATE_OUTPUT}} {{REVIEW_BASE}} {{REPAIR_BASE}} {{IMPL_UNMET}} {{MERGE_STRAYS}}\n");
+      return [kind, file];
+    }),
+  ) as Ctx["prompts"];
+  const events: string[] = [];
+  const passes: { name: string; prompt: string; args: Record<string, string> }[] = [];
+  // The ticket's comments now, as the tracker reads them: a test (or an agent in its pass) appends to it.
+  const comments: string[] = [];
+  // What the last attempt printed.
+  const printed: string[] = [];
+  const phases: string[] = [];
+  const agents: Record<string, Agent> = {};
+  const gates: GateRun[] = [];
+
+  // Sandcastle's sandbox on the ticket's branch: a worktree of the shared repo, cut from main for a new branch.
+  const open = async (branch: string): Promise<Box> => {
+    const path = join(TMP, `wt${n++}`);
+    const exists = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: root }).status === 0;
+    if (exists) git(root, "worktree", "add", "-q", path, branch);
+    else git(root, "worktree", "add", "-q", "-b", branch, path, "main");
+    const box = {
+      worktreePath: path,
+      // Git alone: what else the pipeline asks a sandbox (its memory peak) the fake does not have.
+      exec: async (cmd: string) => {
+        if (!cmd.startsWith("git ")) return { exitCode: 127, stdout: "", stderr: "not in the fake sandbox" };
+        const r = spawnSync("sh", ["-c", cmd], { cwd: path, encoding: "utf8" });
+        return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
+      },
+      run: async (opts: { name?: string; promptFile?: string; promptArgs?: Record<string, string> }) => {
+        const name = opts.name ?? "";
+        const kind = name.split("-")[0];
+        events.push(kind);
+        passes.push({ name, prompt: basename(opts.promptFile ?? "", ".md"), args: opts.promptArgs ?? {} });
+        const before = git(path, "rev-parse", "HEAD");
+        const stdout = agents[kind]?.(path) ?? "";
+        const commits = git(path, "rev-list", `${before}..HEAD`).split("\n").filter(Boolean).map((sha) => ({ sha }));
+        return { iterations: [], stdout, commits };
+      },
+      close: async () => {
+        git(root, "worktree", "remove", "--force", path);
+        return {};
+      },
+    };
+    return box as unknown as Box;
+  };
+
+  const project = {
+    root,
+    name: "fixture",
+    baseBranch: "main",
+    gates: [{ name: "test", command: "run-tests" }],
+    generated: [],
+    setup: [],
+    implement: {},
+    review: {},
+    repair: {},
+    changelog: true,
+  } as unknown as Ctx["project"];
+  const results: PromiseSettledResult<Outcome>[] = [];
+  const requeuedAs = new Map<string, string>();
+  const reds = new Map<string, RedLanding>();
+  const notes: Ctx["notes"] = [];
+
+  /** A pipeline as burndown() makes one: each call is one attempt of the ticket. */
+  const pipeline = createPipeline({
+    project,
+    tracker: { ref: (id: string) => `#${id}`, agentsWrite: true, promptArgs: () => ({}), reopenedSince: () => false, get: () => ({ id: ID, comments: [...comments] }) } as unknown as Ctx["tracker"],
+    runId: "2026-10-04T00:00:00.000Z",
+    dryRun: false,
+    repair: 1,
+    testRedGate: false,
+    prompts,
+    overrides: new Map(),
+    open,
+    gate: async () => {
+      events.push("gate");
+      const next = gates.shift();
+      assert.ok(next, "a gate run the test did not expect");
+      return next;
+    },
+    baseGate: async () => assert.fail("no base gate run was expected"),
+    baseWentRed: () => {},
+    timed: async (_issue, phase, fn) => {
+      phases.push(phase);
+      return fn();
+    },
+    run: { ticket: () => {} },
+    view: { claim: () => {} },
+    host: { begin: () => {}, settle: async () => {} },
+    requeuedAs,
+    results,
+    reds,
+    reports: new Map(),
+    notes,
+    took: new Map(),
+    keptWorktrees: [],
+    tampered: new Map(),
+  });
+
+  /** One attempt; its result is kept as burndown's attempt keeps it, and the events and phases start afresh. */
+  const attempt = async () => {
+    events.length = 0;
+    passes.length = 0;
+    phases.length = 0;
+    const { result: o, lines } = await quietly(() => pipeline({ ...ISSUE, comments: [...comments] }));
+    printed.splice(0, printed.length, ...lines);
+    results.splice(0, results.length, ...results.filter((r) => r.status !== "fulfilled" || r.value.issue !== ID), { status: "fulfilled", value: o });
+    return o;
+  };
+  /** The landing sent the ticket back once: its second attempt is to come. */
+  const requeue = () => requeuedAs.set(ID, "requeued: conflicted with #1 at landing");
+  /** Another ticket lands on main, changing `file`. */
+  const land = (file: string, text: string) => commit(root, file, text, `Merge agent/issue-1 (closes #1)`);
+  const tip = (ref: string) => git(root, "rev-parse", ref);
+  /** A person commits `file` to the ticket's branch between runs. */
+  const onBranch = (file: string, text: string) => {
+    const path = join(TMP, `wt${n++}`);
+    git(root, "worktree", "add", "-q", path, BRANCH);
+    commit(path, file, text);
+    git(root, "worktree", "remove", "--force", path);
+  };
+  return { root, agents, gates, events, passes, phases, notes, reds, comments, printed, attempt, requeue, land, tip, onBranch };
+};
+
+
+/** An implementer that commits `file`, saying `say`. */
+const implementing = (file: string, text = `${file}\n`, say = ""): Agent => (wt) => {
+  commit(wt, file, text);
+  return say;
+};
+
+/** A first attempt: implemented, reviewed and gated green on a branch, the ticket having `comments` then. */
+const greenBranch = async (comments: string[] = []) => {
+  const h = harness();
+  h.comments.push(...comments);
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  h.gates.push(GREEN);
+  const first = await h.attempt();
+  assert.equal(first.status, "green");
+  assert.deepEqual(h.events, ["impl", "review", "gate"]);
+  return h;
+};
+
+/** The resolution of a conflict in shared.txt, as a resolver makes it. */
+const resolving: Agent = (wt) => {
+  write(wt, "shared.txt", "one\nseven\n");
+  git(wt, "add", "shared.txt");
+  git(wt, "commit", "-q", "--no-edit");
+};
+
+const SPEC_CHANGE = "Having it also read `flaked` is wanted after all - please change the design.";
+
+test("a person's comment since the review sends a clean carried merge through the full review before the gates", async () => {
+  const h = await greenBranch();
+  h.land("landed.txt", "another ticket's line\n");
+  h.comments.push(SPEC_CHANGE);
+  h.gates.push(GREEN);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+  assert.equal(h.passes[0].prompt, "review");
+  assert.equal(o.status, "green");
+  assert.equal(readHeads(h.root)[ID].comments, 1);
+});
+
+test("a person's comment on a carried branch at its green head, with no merge, gets the full review", async () => {
+  const h = await greenBranch();
+  h.comments.push(SPEC_CHANGE);
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+  assert.equal(h.passes[0].prompt, "review");
+});
+
+test("the kit's own comment on the ticket since the review leaves a clean carried merge land-only", async () => {
+  const h = await greenBranch();
+  h.land("landed.txt", "another ticket's line\n");
+  h.comments.push(notLandedComment(undefined, { branch: BRANCH, base: "main", files: ["shared.txt"], with: ["#1"] })!);
+  h.gates.push(GREEN);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["gate"]);
+  assert.equal(o.status, "green");
+});
+
+test("a comment an agent wrote during its pass is inside the recorded count and sends nothing to review", async () => {
+  const h = harness();
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  h.agents.review = () => {
+    h.comments.push("The review found nothing to change.");
+  };
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.equal(readHeads(h.root)[ID].comments, 1);
+  h.land("landed.txt", "another ticket's line\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["gate"]);
+});
+
+test("a person's comment after an agent's is still told, by its place past the recorded count", async () => {
+  const h = harness();
+  h.agents.impl = implementing("shared.txt", "seven\n");
+  h.agents.review = () => {
+    h.comments.push("The review found nothing to change.");
+  };
+  h.gates.push(GREEN);
+  await h.attempt();
+  h.comments.push(SPEC_CHANGE);
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+});
+
+test("a conflicted carried merge with a person's comment since gets the full review after the resolver, not the narrow one", async () => {
+  const h = await greenBranch();
+  h.land("shared.txt", "one\n");
+  h.comments.push(SPEC_CHANGE);
+  h.agents.resolve = resolving;
+  h.gates.push(GREEN);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["resolve", "review", "gate"]);
+  assert.deepEqual(h.passes.map((p) => p.prompt), ["resolve", "review"]);
+  assert.equal(o.status, "green");
+});
+
+test("a conflicted carried merge with no new comment still gets the narrow review after the resolver", async () => {
+  const h = await greenBranch();
+  h.land("shared.txt", "one\n");
+  h.agents.resolve = resolving;
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.passes.map((p) => p.prompt), ["resolve", "remerge"]);
+});
+
+test("a person's comment is acted on once: the full review records the new count, and the next carry is land-only", async () => {
+  const h = await greenBranch();
+  h.comments.push(SPEC_CHANGE);
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["review", "gate"]);
+  h.land("landed.txt", "another ticket's line\n");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["gate"]);
+});
+
+test("a head record from before the count was kept never sends a carried branch to a full review", async () => {
+  const h = await greenBranch();
+  recordHead(h.root, ID, { branch: BRANCH, comments: undefined }, "2026-10-04T00:00:00.000Z");
+  h.comments.push(SPEC_CHANGE);
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.deepEqual(h.events, ["gate"]);
+});
+
+test("the carried line says a comment since the review sends it to the full review", async () => {
+  const h = await greenBranch();
+  h.comments.push(SPEC_CHANGE);
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.match(h.printed.join("\n"), /a comment since its review - full review/);
+});
+
+test("the kit's own comments are told from a person's by their fixed openings", () => {
+  const kit = [
+    notLandedComment("the report", undefined)!,
+    notLandedComment(undefined, { branch: BRANCH, base: "main", files: ["a.txt"], with: ["#1"] })!,
+    notLandedComment(undefined, undefined, { branch: BRANCH, base: "main", with: ["#1"], gates: ["test"] })!,
+    closeComment({ branch: BRANCH, commits: 1, repairs: 0 }, "test"),
+    partlyDoneComment({ branch: BRANCH, commits: 1, repairs: 0, unmet: "the docs" }, "test"),
+    "Sandcastle held this: conflict resolution changed other.txt.",
+    "Sandcastle could not finish this.\n\nblocked",
+    "Gated green on `agent/issue-7` (test), but not merged automatically: review and merge by hand.",
+    'Named again by the review agent working on #3, as the same finding, worded "x":\n\nevidence',
+    "Merged into `main` by an earlier Sandcastle run (abc1234); closing.",
+    "Merged locally, not yet pushed, by `sandcastle land` from `agent/issue-7` (1 commit(s)); test all green on the merge.",
+  ];
+  assert.deepEqual(personCommentsSince(kit, 0), []);
+  assert.deepEqual(personCommentsSince([...kit, SPEC_CHANGE], 0), [SPEC_CHANGE]);
+  // The note of `sandcastle requeue --note` is a person's word.
+  const note = "Note for the next run, from `sandcastle requeue`:\n\nuse the other design";
+  assert.deepEqual(personCommentsSince(["first", note], 1), [note]);
+  // Only those past the count recorded.
+  assert.deepEqual(personCommentsSince(["old one", "old two"], 2), []);
+  assert.deepEqual(personCommentsSince(["old one"], undefined), []);
+});
+
+test("a Markdown ticket file's comments count by their headings, the kit's marked by theirs", () => {
+  const section = (...entries: string[]) => `## Comments\n\n${entries.join("\n")}`;
+  const kit = "### 2026-10-01 - sandcastle\n\nA comment of the kit, which has no fixed opening here.\n";
+  const person = "### 2026-10-02 - maintainer\n\nChange the design.\n";
+  assert.equal(commentCount([]), 0);
+  assert.equal(commentCount([section(kit, person)]), 2);
+  assert.deepEqual(personCommentsSince([section(kit, person)], 1), ["Change the design."]);
+  assert.deepEqual(personCommentsSince([section(kit)], 0), []);
+});

@@ -33,7 +33,7 @@ its sandbox closes, once its container is stopped, with the worktree's records -
 the run without replacing the pipeline's own ending, and writes only the pipeline's facts (commits,
 minutes, tokens); dependencies, the files the scheduler's hold compares (`ticketFiles`,
 `refreshFiles`: one ticket at a time per file git cannot merge) and the record of what it tells
-(`createHoldRecord`), re-runs of carried branches (land-only, narrow review; a branch reviewed but
+(`createHoldRecord`), re-runs of carried branches (land-only, narrow review, or the full review when a person has commented since; a branch reviewed but
 never green is land-only too, from `reviewedOnlyHead`, unless its head record's `red` says its gates
 ended red at that tip; a branch left with no commit ahead of the base is no carried work, so the
 pipeline's setup cuts it from the base's tip again before its sandbox opens - `cutFromBase`, through
@@ -2055,6 +2055,24 @@ Preconditions, run arguments, keep-awake, preflight, prompt rendering, agent log
 a reader decides on the kind, never the line, and `test/outcome-kinds.test.ts` fails on one that
 matches the line; `OUTCOME_STATE` in `src/status-rows.ts` is a `Record<OutcomeKind, string>`, so
 `tsc` holds the status view to the kinds, both ways), log archive, status pane
+
+A carried branch's head record (`heads.json`) also keeps `comments`: the ticket's comment count,
+read from the tracker each time the pipeline writes `reviewed`, `green` or `repaired` (`noteHead`),
+so a comment an agent made during its pass is inside the count.
+At carry time a branch that would be land-only (`landOnlyHead`, `reviewedOnlyHead`) is told apart
+by `personCommentsSince`, in `src/ledger.ts` beside the comment texts it knows: the comments past
+that count that do not open with the kit's own fixed openings (`KIT_COMMENT`: "did not land",
+"held", "Named again", the merge comments) and are not a Markdown ticket file's `### <date> - sandcastle`
+entry.
+Such a comment, which no reviewer has read, keeps the branch land-only for the implementer and the
+gates, but the full review (`fullReview` in the pipeline, which shows the comments) runs after any
+merge resolution, in place of the narrow review or none at all; the carried line says "a comment since
+its review - full review".
+The review writes the new count, so a comment is acted on once.
+A record with no `comments` (written before the count was kept), or a tracker that cannot be read,
+never sends a branch to the full review.
+A Markdown ticket file keeps its comments in one section, so only a new `### ` entry in it counts.
+`test/carried-late-comment.test.ts` holds the rule.
 
 The run record's `estimate` (`RunEstimate` in `mod/hooks/run-record.ts`) is the start estimate as
 figures, written by `burndown()` with the record it creates at each turn's start from `priceRun` in
