@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-13
+
 ### Added
 
 - **A repair agent can say a red gate is outside its branch**: it ends with
@@ -2725,7 +2727,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.12.0...v0.13.0
