@@ -166,6 +166,7 @@ A queued ticket with no open blocker - one a run would start now.
 _Avoid_: queued (which counts blocked tickets too)
 
 **Dismissal**:
-A person's "seen these" on the idle mark's count, which holds until a ticket not in it becomes
-ready. Hiding the mark is a separate, lasting switch.
+A person's "seen these" on the idle mark: the ready count, which holds until a ticket not in it
+becomes ready, and the newest release `N out` names, which holds until a newer one is tagged. The two
+end apart. Hiding the mark is a separate, lasting switch.
 _Avoid_: snooze, hide

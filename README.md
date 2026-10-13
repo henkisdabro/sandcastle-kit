@@ -1196,9 +1196,12 @@ itself, in the status view's castle, glyphs and colours:
 - 🔕 **`/sandcastle-mark`**: your say over the idle mark, with no model turn.
   - `dismiss` takes the count off while you have seen it: the line reads plain `sandcastle` until
     a ticket that was not ready becomes ready, which brings the count back. A ticket leaving the
-    ready set does not. The mark itself stays.
-  - `hide` turns the mark off in this project until `show`; `show` undoes both hiding and a
-    dismissal.
+    ready set does not. The mark itself stays. It also quiets `N out` until a release newer than
+    that one is tagged; a newly ready ticket does not bring the release back, nor a newer release
+    the count. `update needed` has no dismissal, so a dismissed release shows it when Upgrading
+    notes are pending.
+  - `hide` turns the mark off in this project until `show`; `show` undoes hiding and both
+    dismissals.
   - With no argument it says whether the mark is shown, hidden (here or machine-wide) or
     dismissed, and the cached count with its age, so a stale count can be told from an empty
     queue. It also reports the full kit version (the commit and local changes too), the release
@@ -1261,8 +1264,8 @@ all of it. The mod:
   `~/.cache` when unset) and the resolved roots in it, then reads `run.json` there only to see
   whether it names this session;
 - keeps small entries per project in its own store: which session closes the run and the last run
-  it has accounted for, the cached ready count and version facts, and your `/sandcastle-mark` choices (hidden, and
-  the ids of a dismissal);
+  it has accounted for, the cached ready count and version facts, and your `/sandcastle-mark` choices (hidden, the
+  ids of a dismissal and the release of one);
 - while a run this session started (or follows) is live, once a minute checks how long the session
   has been silent and, after 55 minutes, sends one cache refresh: a tool-less request over the
   conversation (`$.model.fork`, not Claude Code's `/fork` command), which adds nothing to it and
