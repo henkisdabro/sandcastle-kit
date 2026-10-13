@@ -405,8 +405,9 @@ headline's `need you` and adds no Next step.
 The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ticket file's `Status:`;
 the value is `label` in `config.ts`). Mark a ticket only when an agent with no chat context could finish it from the ticket and its comments,
 and your gates could prove it. The `/sandcastle queue` skill action walks every open ticket,
-gathers the facts, asks you the open decisions in batches, writes each decision on its ticket, then
-labels it. No tickets yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
+gathers the facts, asks you the open decisions in batches, writes each decision on its ticket, has a
+fresh subagent read the finished ticket cold (where two readings of it would differ, you are asked),
+then labels it. No tickets yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
 A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`. On GitHub a native "blocked by" edge (the issue's Relationships panel) holds it as well.
 A colon is read too (`Blocked by: #12`); blockers listed under a `## Blocked by` heading are not,
