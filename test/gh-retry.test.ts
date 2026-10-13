@@ -57,7 +57,7 @@ test("a ticket read that gets a 502 twice and then succeeds is read on the third
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "title: the ticket");
   assert.equal(r.stderr, "");
-  assert.deepEqual(f.log(), ["gh issue view 7", "sleep 5", "gh issue view 7", "sleep 12", "gh issue view 7"]);
+  assert.deepEqual(f.log(), ["gh issue view 7", "sleep 15", "gh issue view 7", "sleep 45", "gh issue view 7"]);
 });
 
 test("a ticket read that gets a 404 fails at once, with one call, no wait and gh's own words", () => {
@@ -83,7 +83,7 @@ test("the prompt's ticket and comments reads go through the retry, and a 404 in 
     const f = fakes(["1 |HTTP 503: Service Unavailable", "0 body|"]);
     const r = run(f, viewCommand(word, "5"));
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(f.log(), [`gh ${args}`, "sleep 5", `gh ${args}`]);
+    assert.deepEqual(f.log(), [`gh ${args}`, "sleep 15", `gh ${args}`]);
     const g = fakes(["1 |HTTP 404: Not Found"]);
     assert.equal(run(g, viewCommand(word, "5")).status, 1);
     assert.deepEqual(g.log(), [`gh ${args}`]);
@@ -117,4 +117,14 @@ test("a review that fails any other way is still run again on the implementer's 
   assert.match(lines.join("\n"), /Reviewing with/);
   assert.equal(models.length, 2);
   assert.notEqual(models[0], models[1]);
+});
+
+test("the patched Sandcastle gives a prompt's shell expression room for every retry wait", () => {
+  const dist = readFileSync(join(KIT, "node_modules", "@ai-hero", "sandcastle", "dist", "index.js"), "utf8");
+  const cap = dist.match(/PROMPT_EXPANSION_TIMEOUT_MS = (\d+(?:e\d+)?);/);
+  assert.ok(cap, "Sandcastle's prompt expansion limit was not found in its dist; read it again and update the test");
+  const waits = readFileSync(join(KIT, "container", "gh-retry.sh"), "utf8").match(/^RETRY_WAITS="([\d ]+)"/m)![1]!;
+  const waited = waits.split(" ").reduce((sum, s) => sum + Number(s) * 1000, 0);
+  // Half the limit left for the three gh calls themselves; unpatched (30 s) this fails, as the waits alone are 60 s.
+  assert.ok(Number(cap[1]) >= 2 * waited, `the limit is ${cap[1]} ms for ${waited} ms of waits: the pnpm patch for #782 is not applied (run pnpm install, and re-make the patch on an upgrade)`);
 });

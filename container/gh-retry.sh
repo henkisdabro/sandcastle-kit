@@ -4,10 +4,10 @@
 # A 4xx (not found, no access) or any other failure ends at once, with gh's own words on stderr and
 # its exit code. Three tries; the waits before the second and the third are RETRY_WAITS.
 #
-# Sandcastle gives a prompt's shell expression 30 s in all, and the library's constant is not ours
-# to raise: the waits are short enough that the last try still has most of that window.
+# Sandcastle gives a prompt's shell expression 120 s in all (the kit's pnpm patch raises its 30 s):
+# a GitHub incident's 5xx often outlasts a few seconds, and the waits leave the three tries 60 s.
 
-RETRY_WAITS="5 12"
+RETRY_WAITS="15 45"
 
 for pause in 0 $RETRY_WAITS; do
   [ "$pause" = 0 ] || sleep "$pause"
