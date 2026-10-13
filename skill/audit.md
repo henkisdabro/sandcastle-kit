@@ -30,9 +30,9 @@ action's categories and its closed-spec test, so keep queue.md to hand.
    Brief for each subagent
    You are auditing a repository for small, well-evidenced problems. Read-only: read files,
    search, run `git log`, `git show`, `git blame` and `gh issue view N`. No edits (bar your
-   findings file below), no commits, no tracker writes (no `gh issue create`, `gh issue comment`,
-   `gh issue edit`, `gh issue close`, no `gh label`), and no `sandcastle run`, `preflight` or
-   anything else that spends model allowance.
+   findings and coverage files below), no commits, no tracker writes (no `gh issue create`,
+   `gh issue comment`, `gh issue edit`, `gh issue close`, no `gh label`), and no
+   `sandcastle run`, `preflight` or anything else that spends model allowance.
    Lens: <the lens, e.g. security>
    Areas: <the directories to cover>
    Report at most <the cap> findings, most important first. Each must be small enough for one
@@ -41,8 +41,12 @@ action's categories and its closed-spec test, so keep queue.md to hand.
    Per finding: `title` (imperative), `lens`, `area`, `severity`, `evidence` (file:line),
    `problem`, `fix`, `doneWhen` (a check the gates can run), `touches` (paths), `dependsOn`
    (another finding's title, optional), `confidence` (`high` or `medium`).
-   Write each finding as soon as you have it to `.sandcastle/triage/audit/<lens>.json` (the only
-   file you may write), as a JSON array.
+   Write each finding as soon as you have it to `.sandcastle/triage/audit/<lens>.json` as a JSON
+   array. When you stop, write `.sandcastle/triage/audit/<lens>.coverage.json` (the only other
+   file you may write): `{"capReached": true or false, "notFinished": [<each of your areas you did
+   not finish reading>]}`. `capReached` is true when you stopped because you had <the cap>
+   findings, not because you ran out of things to look at. Give no count of findings beyond the
+   cap: you did not look for them, so any number is invented.
    ```
 
    The files sit under `.sandcastle/triage/`, which `sandcastle init` ignores (an older project
@@ -55,9 +59,20 @@ action's categories and its closed-spec test, so keep queue.md to hand.
    human-only, blocked by another ticket, already fixed or false, epic or too big, parked. Before
    calling one ready, read its cited lines yourself: a subagent's claim is not evidence until
    checked. Split one that is too big into children that are each ready.
+   - **A bug finding is ready only when its evidence has three things**, each checked by you: a
+     trigger that can actually be reached (an input, a call or a state the code can be put in, not
+     one only the cited line allows), an observable failure (a wrong result, a crash, a lost
+     write - not "looks wrong"), and the nearest guard or caller that could disprove it, read and
+     found not to. A line that looks wrong alone often is not: a guard upstream, a caller that
+     never passes the bad value, a test that already covers it.
+   - **A finding whose evidence stays disputed** after that goes to a fresh read-only reader where
+     the harness has subagents (the same read-only brief, given only the finding and its
+     evidence), else to the user in step 7 as a keep-or-drop. It never goes to the queue on its
+     own. Do not send every finding to a refuter: the finder's `confidence` is a poor rule for
+     routing, and keep-or-drop is often a question of priority, which a refuter cannot answer.
 7. **Ask in batched rounds** as the queue action does: up to four questions a round, each
-   standalone, the recommended option first. Ask the decisions, and keep-or-drop for
-   `medium`-confidence findings.
+   standalone, the recommended option first. Ask the decisions, keep-or-drop for
+   `medium`-confidence findings, and keep-or-drop for each finding step 6 left disputed.
 8. **Cluster findings that touch the same files**, before the filing list. One ticket per finding
    born overlapping makes a queue whose tickets all want the same few files.
    - Group the findings by shared `touches` paths (a directory covers everything under it, a glob
@@ -74,7 +89,9 @@ action's categories and its closed-spec test, so keep queue.md to hand.
      to warn of tickets that will meet at landing.
 9. **Show the filing list** - title, lens, severity, touches, what it waits for, queued or not,
    with each cluster from step 8 shown as one row naming the findings it merges and the edges
-   called real or order-only - and get the user's yes before filing anything: filing writes to the
+   called real or order-only - and, for each lens whose coverage file says `capReached`, the line
+   "cap reached - coverage incomplete" with its `notFinished` areas (or just the line when it names
+   none), and get the user's yes before filing anything: filing writes to the
    tracker. The user can split a cluster back into its findings.
 10. **File in dependency order**, so a blocker exists (and has its number) before what waits on
     it. Write each body by queue.md's "Writing a ticket body" - its blocker line, `Touches:` line,
@@ -93,5 +110,6 @@ action's categories and its closed-spec test, so keep queue.md to hand.
       rules.
     - Record each filed number or path in its finding's file (`filed`).
 11. **Report**: a table of what was filed (number, title, queued or not), merged, and dropped with
-    the reason. The next step is `/sandcastle run`, or `/sandcastle queue` for anything filed
-    unqueued.
+    the reason, and a line per lens that reached its cap: "cap reached - coverage incomplete", with
+    the areas it did not finish. Say nothing of how many more findings there may be. The next
+    step is `/sandcastle run`, or `/sandcastle queue` for anything filed unqueued.
