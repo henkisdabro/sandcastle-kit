@@ -6,6 +6,7 @@
 //   pnpm test:file test/hermetic-cache.test.ts
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,12 +16,17 @@ import { KIT, runNode } from "./cli-spawn.ts";
 const dir = mkdtempSync(join(realpathSync(tmpdir()), "sandcastle-hermetic-cache-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
+// The lookup reads only a checkout with an `origin` (as git reports it): a copy of the tree without one (the full
+// check's Linux leg) reads nothing and caches nothing, so there is nothing to hold here.
+const origin = spawnSync("git", ["-C", KIT, "ls-remote", "--get-url", "origin"], { encoding: "utf8" });
+const hasOrigin = origin.status === 0 && !["", "origin"].includes(origin.stdout.trim());
+
 const entries = (cache: string) => {
   const releases = join(cache, "sandcastle-kit", "newest-release");
   return existsSync(releases) ? readdirSync(releases) : [];
 };
 
-test("a test's `--version --json` writes its newest-release answer to a cache of its own, never the shell's", () => {
+test("a test's `--version --json` writes its newest-release answer to a cache of its own, never the shell's", { skip: !hasOrigin && "this checkout has no origin, so no newest-release read is made" }, () => {
   const host = join(dir, "host-cache");
   mkdirSync(host);
   const out = join(dir, "seen.json");
