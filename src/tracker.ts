@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { sh } from "./sandbox.ts";
+import { MANAGED_SETTINGS, sh } from "./sandbox.ts";
 
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
@@ -344,8 +344,9 @@ const github = (project: Project): Tracker => {
     },
     words: {
       LOST: "comment on the ticket that the sandbox's git record was lost",
-      TICKET_VIEW: "!`gh issue view {{ISSUE_NUMBER}}`",
-      COMMENTS_VIEW: "# Comments on the ticket\n\n!`gh issue view {{ISSUE_NUMBER}} --comments`\n\n",
+      // Through container/gh-retry.sh: a GitHub 5xx or timeout is retried there, a 4xx fails at once.
+      TICKET_VIEW: `!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}}\``,
+      COMMENTS_VIEW: `# Comments on the ticket\n\n!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}} --comments\`\n\n`,
       RECORD:
         "**Before you finish, comment on the ticket** with what you changed, the commit(s), and anything a\n" +
         "human must still do. The ticket is closed automatically when your branch merges, so that comment is\n" +
