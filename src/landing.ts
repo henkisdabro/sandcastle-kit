@@ -23,7 +23,7 @@ import { OperatorError, SlowStartError } from "./errors.ts";
 import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type LandingGate, type Opener, squashBody } from "./land.ts";
-import { claimSlot, dropHandOff, handOffId, withSlot } from "./pool.ts";
+import { claimSlot, dropHandOff, handOffId, type SlotClaim, withSlot } from "./pool.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
@@ -338,7 +338,7 @@ export type LandContext = {
   /** Where every write to the host's git goes. */
   host: HostGit;
   /** Gates a merged tree in the sandbox `opener` opened: the gates of the run, on a tree no pipeline gated. Its wait for a machine-wide gates slot goes before the run's ticket gates (`runGates`'s `priority`). */
-  gate: (box: Box, id: string, how?: Parameters<LandingGate>[1]) => Promise<GateRun>;
+  gate: (box: Box, id: string, how?: Parameters<LandingGate>[1], claim?: SlotClaim) => Promise<GateRun>;
   /** The test ids each ticket's own gates failed in this run, a flake that went green on a re-run included: a red landing gate that fails only these was seen on the branch before, and no landed ticket is named for it. */
   failedBefore?: Map<string, Set<string>>;
   /**
@@ -656,14 +656,14 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
           }
           at?.slotWaited?.(Date.now() - asked);
           // Claimed from the moment the sandbox is held: opening it and merging take seconds, and a ticket gate asked in
-          // them would take the gates slot and hold it for a whole gate run. The landing's own gates wait spends the claim;
-          // a landing that ends without gating (a conflict, a throw) releases it here.
+          // them would take the gates slot and hold it for a whole gate run. The landing's own gates wait spends this claim (handed
+          // to `ctx.gate`) and no other landing's; a landing that ends without gating (a conflict, a throw) releases it here.
           const claim = claimSlot("gates");
           return landInSandbox(
             project,
             { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId, ref: ref(o.issue) },
             opener,
-            (box, how) => ctx.gate(box, o.issue, how),
+            (box, how) => ctx.gate(box, o.issue, how, claim),
             host.expected,
           ).finally(claim.release);
         }, undefined, undefined, true, false, () => (at?.behind?.() ?? 0) > 0);
