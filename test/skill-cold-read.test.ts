@@ -30,6 +30,9 @@ test("the cold read sits after the decisions are written and before the label go
   assert.ok(decisions >= 0 && decisions < cold && cold < label && label < report, [decisions, cold, label, report].join(" "));
   assert.ok(coldRead.includes("after step 4 and before the queue label goes on"));
   assert.ok(!step(4).includes("add the queue label"), "step 4 still labels");
+  const readyRow = queueRaw.split("\n").find((l) => l.trimStart().startsWith("| Ready")) ?? "";
+  assert.ok(!readyRow.includes("label now"), "step 2's table still labels a ready ticket before its cold read");
+  assert.ok(readyRow.includes("after the cold read (step 5)"), readyRow);
 });
 
 test("only a ticket written or changed in this session is read, and a fresh read is reused", () => {

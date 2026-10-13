@@ -49,7 +49,7 @@ comments, and the gates can prove it.
 
    | Category | Action |
    |---|---|
-   | Ready - spec closed, provable by the gates | label now; add a short triage note if the ticket is stale or half-fixed |
+   | Ready - spec closed, provable by the gates | label (step 6), after the cold read (step 5) if its body was written or changed in this session; add a short triage note if the ticket is stale or half-fixed |
    | Needs a decision | ask (step 3) |
    | Human-only - console, device, secret, production, legal | the hold label - `ready-for-human`, or what `docs/agents/triage-labels.md` maps it to (a run never takes a ticket carrying it, nor the older `needs-human`) - with a comment saying why |
    | Blocked by another ticket | label it, with a blocker line in the ticket body (see "Writing a ticket body"): a run skips it until the blocker is closed |
