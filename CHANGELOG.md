@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-13
+
 ### Added
 
 - **The idle mark and `sandcastle doctor` name a newer kit release** tagged on the kit's remote

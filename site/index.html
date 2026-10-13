@@ -46,7 +46,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://henkisdabro.github.io/sandcastle-kit/#app",
         "name": "sandcastle-kit",
-        "softwareVersion": "0.16.0",
+        "softwareVersion": "0.17.0",
         "description": "An opinionated issue-burndown kit built on Sandcastle: unattended Claude Code agents implement, review, gate and merge GitHub issues or Markdown tickets in Docker sandboxes, locally, with nothing pushed.",
         "url": "https://henkisdabro.github.io/sandcastle-kit/",
         "applicationCategory": "DeveloperApplication",
@@ -526,7 +526,7 @@
           <div class="bound">
             <h3>Above the prompt</h3>
             <ul>
-              <li><b>A band while it runs.</b> The run's stage and tokens, and how many tickets are working, need you, are ready to land, are blocked or have merged.</li>
+              <li><b>A band while it runs.</b> The run's stage and tokens, and how many tickets are working, need you, are ready to land, are blocked or have merged - and when the session's prompt cache is next refreshed (<code>cache refresh in 55m</code>), so the closing turn is not paid for again.</li>
               <li><b>A line when you are needed.</b> A conflict, a red gate, a held branch or a crash pins a line naming the tickets, until they are dealt with or the run ends.</li>
             </ul>
           </div>
@@ -540,8 +540,8 @@
           <div class="bound">
             <h3>Between runs</h3>
             <ul>
-              <li><b>Ready tickets.</b> Between runs, a quiet row of sand above the prompt shows how many tickets a run would start now: <code>♜ sandcastle · 4 ready - /sandcastle run</code>. The count is read in the background, at most once every ten minutes per project.</li>
-              <li><b>Hide the reminder.</b> <code>/sandcastle-mark dismiss</code> hides the count until another ticket becomes ready; <code>hide</code> turns the mark off for the project.</li>
+              <li><b>Ready tickets.</b> Between runs, a quiet row of sand above the prompt shows the kit's version and how many tickets a run would start now: <code>♜ sandcastle 0.17.0 · 4 ready - /sandcastle run</code>. It adds <code>update needed</code> when the project has upgrading notes to act on, and names a newer kit release once one is out. The count is read in the background, at most once every ten minutes per project.</li>
+              <li><b>Hide the reminder.</b> <code>/sandcastle-mark dismiss</code> hides the count until another ticket becomes ready, and a newer release until the next one; <code>hide</code> turns the mark off for the project.</li>
             </ul>
           </div>
         </div>
@@ -722,7 +722,7 @@
   <footer class="foot">
     <p class="foot-credit">Built by <a href="https://www.henriksoderlund.com/?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=footer-author-link" rel="author">Henrik Söderlund</a></p>
     <p><a href="https://www.henriksoderlund.com/expertise?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=more-work-link#showcase-projects">More AI and automation work →</a></p>
-    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.16.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
+    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.17.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
   </footer>
 
   <script src="js/status-render.js" defer></script>
