@@ -2505,7 +2505,7 @@ left out, since the prompt is read when the session is idle and a later run may 
 of sand above the prompt between runs in a set-up project. `markText(input)` is the line or
 undefined to clear it, as `{ text, parts }` - the plain text and the same line as coloured parts
 (`name`, `hint`; joined by a space they are the text); its one input object is the set-up
-flag, the machine switch, the project's hidden flag, the dismissed ids, the cache `Entry`, the
+flag, the machine switch, the project's hidden flag, the dismissed ids, the dismissed release, the cache `Entry`, the
 cached version read (`versionRead`) and the time.
 `sandcastle · N ready - /sandcastle run` shows N only while the last good read is under `COUNT_MS`
 (an hour) old, else the bare mark.
@@ -2594,8 +2594,9 @@ since a mark above a castle reads as a second, stale queue; its count is always 
 project's.
 A person's choices are `/sandcastle-mark` (`markAction`, answered by a `command.run` with text and
 no model turn): `hide` and `show` set the hidden flag, `dismiss` records the ids of a count that is
-current (`choiceAfter`; a count too old to show was not seen, so it records none), `show` clears
-both, no argument is `markReport` (the state, the cached count and its age) and any other word is
+current (`choiceAfter`; a count too old to show was not seen, so it records none) and, when the
+current version facts name a newest release newer than the kit's own, that release
+(`dismissedRelease`; with none to record, an earlier one stays), `show` clears both, no argument is `markReport` (the state, the cached count and its age) and any other word is
 `MARK_USAGE`.
 The choices are one `Choice` in `$.store` under `mark:<root>`, beside `ready:<root>`: machine-local,
 kept across a restart, never in the repository, checked by `parseChoice`. `markText` gives no line
@@ -2603,11 +2604,17 @@ when hidden, and no count while a dismissal holds - the current ready ids all wi
 ones (`dismissalEnded` is the other case: an id not in them, and an id leaving ends nothing); the
 idle look also clears the stored dismissal when it ends, so it is over for good, not only while the
 new id is ready.
+The dismissed release is kept apart from the dismissed ids (`parseChoice` accepts a choice without
+it, so today's stored form still parses; one that is not `X.Y.Z` is no choice): ending one leaves the
+other as it was, and the idle look's rewrite keeps `dismissedRelease`.
+`markText` leaves `N out` off while the newest release is not newer than the dismissed one
+(`releaseDismissalEnded` is the other case), and the line falls to `update needed`, which has no
+dismissal.
 A hidden mark makes no queue read.
 A choice made while the mark is what the line shows redraws it at once (`idling`), not at the next
-look. `test/idle-mark.test.ts`, `test/idle-mark-choice.test.ts` and `test/idle-ready.test.ts` hold
-the module, `mod/tests/ready.test.ts` the count's hooks, `mod/tests/skill-turn-end.test.ts` the read
-at the end of the skill's turn, `mod/tests/mark.test.ts` the command's) and `hooks/keep-warm.ts`
+look. `test/idle-mark.test.ts`, `test/idle-mark-choice.test.ts`, `test/idle-mark-release-dismissal.test.ts`
+and `test/idle-ready.test.ts` hold the module, `mod/tests/ready.test.ts` the count's hooks, `mod/tests/skill-turn-end.test.ts` the read
+at the end of the skill's turn, `mod/tests/mark.test.ts` and `mod/tests/mark-release.test.ts` the command's) and `hooks/keep-warm.ts`
 (pure, imports nothing: the cache refresh.
 While a run this session started or follows is live, the session sits idle and Claude Code's prompt
 cache lapses after an hour of silence (5 minutes on overage), so the turn that closes the run would

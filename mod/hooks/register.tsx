@@ -428,7 +428,7 @@ async function facts($: EngineInterface, root: string): Promise<MarkInput> {
   const entry = parseEntry(await $.store.get(readyKey(root)));
   const versionRead = parseVersionEntry(await $.store.get(versionKey(root)));
   const choice = parseChoice(await $.store.get(markKey(root)));
-  return { setUp, idleMark, hidden: choice?.hidden, dismissed: choice?.dismissed, entry, versionRead, now };
+  return { setUp, idleMark, hidden: choice?.hidden, dismissed: choice?.dismissed, dismissedRelease: choice?.dismissedRelease, entry, versionRead, now };
 }
 
 /**
@@ -440,7 +440,8 @@ async function mark($: EngineInterface, root: string): Promise<Mark | undefined>
   if (!input.setUp || !input.idleMark) return markText(input);
   if (input.dismissed && dismissalEnded(input.dismissed, input.entry, input.now)) {
     // A ticket not in the dismissal is ready: the dismissal is over for good, not only while it shows.
-    await $.store.set(markKey(root), { hidden: input.hidden === true });
+    // The dismissed release is its own: it stays as it was.
+    await $.store.set(markKey(root), { hidden: input.hidden === true, ...(input.dismissedRelease ? { dismissedRelease: input.dismissedRelease } : {}) });
     input.dismissed = undefined;
   }
   if (!input.hidden) {
@@ -459,12 +460,13 @@ async function choose($: EngineInterface, root: string, args: string): Promise<s
   if (action === undefined) return MARK_USAGE;
   if (action !== "report") {
     const input = await facts($, root);
-    const prior: Choice = { hidden: input.hidden === true, ...(input.dismissed ? { dismissed: input.dismissed } : {}) };
-    await $.store.set(markKey(root), choiceAfter(action, prior, input.entry, input.now));
+    const prior: Choice = { hidden: input.hidden === true, ...(input.dismissed ? { dismissed: input.dismissed } : {}), ...(input.dismissedRelease ? { dismissedRelease: input.dismissedRelease } : {}) };
+    await $.store.set(markKey(root), choiceAfter(action, prior, input.entry, input.now, input.versionRead));
     if (idling) await place($, await mark($, root));
   }
   const input = await facts($, root);
-  const done = { dismiss: "Dismissed: the count stays quiet until a ticket not ready now becomes ready.", hide: "Hidden in this project until /sandcastle-mark show.", show: "Shown." };
+  const out = action === "dismiss" && input.dismissedRelease ? ` The ${input.dismissedRelease} release stays quiet until a newer one is tagged.` : "";
+  const done = { dismiss: `Dismissed: the count stays quiet until a ticket not ready now becomes ready.${out}`, hide: "Hidden in this project until /sandcastle-mark show.", show: "Shown." };
   return action === "report" ? markReport(input) : `${done[action]}\n${markReport(input)}`;
 }
 
