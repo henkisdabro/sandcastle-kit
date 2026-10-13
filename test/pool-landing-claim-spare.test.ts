@@ -21,7 +21,7 @@ afterEach(async () => {
   await Promise.allSettled(gates.map((g) => g.done));
 });
 
-const gate = (log: string[], label: string, priority = false) => {
+const gate = (log: string[], label: string, priority = false, claim?: ReturnType<typeof claimSlot>) => {
   let release!: () => void;
   const hold = new Promise<void>((r) => (release = r));
   const g = { waits: false, held: false, release, done: undefined as unknown as Promise<void> };
@@ -29,7 +29,7 @@ const gate = (log: string[], label: string, priority = false) => {
     g.held = true;
     log.push(label);
     await hold;
-  }, () => (g.waits = true), POLL, priority);
+  }, () => (g.waits = true), POLL, priority, false, undefined, claim);
   made.push(g);
   return g;
 };
@@ -45,7 +45,7 @@ test("with a gates slot to spare beyond the run's claims, a ticket gate takes it
   const second = gate(log, "second ticket gate");
   await until(() => second.waits, "the second ticket gate's wait");
   await steady(() => !second.held, "the second ticket gate left the last free slot to the landing's claim", 100);
-  const landing = gate(log, "landing gate", true);
+  const landing = gate(log, "landing gate", true, claim);
   await until(() => landing.held, "the landing gate's slot");
   assert.equal(second.held, false);
   claim.release();

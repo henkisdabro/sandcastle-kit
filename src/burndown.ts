@@ -39,7 +39,7 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
+import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
@@ -3276,7 +3276,7 @@ export const burndown = async (
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
   // `from`: a red gate's re-run, which starts at that gate (`gatesIn`'s own).
   // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
-  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false) => {
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim) => {
     const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
@@ -3309,7 +3309,7 @@ export const burndown = async (
       log: gatesLog(project, id),
       // A ticket's gates, in its own sandbox: the gate share while they hold the slot (a landing's sandbox has it already).
       ...(!priority && ticketCpus !== undefined && gateCpus !== undefined ? { cpus: { gate: gateCpus, ticket: ticketCpus } } : {}),
-    }, priority, from, rerunOnRed, thirdOnDisjoint);
+    }, priority, from, rerunOnRed, thirdOnDisjoint, claim);
     // A ticket's gates only (the landing's own red is judged against these): the first run's failures and a re-run's alike.
     // Not a requeued ticket's: its gates run on a tree the base was merged into, so a test a landed ticket broke
     // there would read as the branch's own, and a second red at landing would name no ticket.
@@ -3430,8 +3430,8 @@ export const burndown = async (
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
-    gate: async (box, id, how) => {
-      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed));
+    gate: async (box, id, how, claim) => {
+      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed, false, claim));
       const times = gateMs(result);
       if (times) landingGateMs.set(id, times);
       const flaked = landingFlaked(result, run.tickets()[id]?.flaked);

@@ -1538,7 +1538,9 @@ it opens its sandbox and merges for seconds first, and a ticket gate asked in th
 slot and held it for a whole gate run.
 `landOne` takes the claim once it holds its landing sandbox slot (not while it waits for one; a
 fast-forward or a conflict found on the host never takes it) and releases it when `landInSandbox`
-ends, gated or not; the first priority wait the run begins for the pool spends it as well.
+ends, gated or not. The claim is handed down with the gate (`ctx.gate` -> `runGates` -> `withSlot`) and
+the landing's own priority wait spends that claim and no other: a priority wait made without one (the
+base check's, the verify's) spends none, and another landing's claim keeps holding ticket gates back.
 A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than
 the run's claims, so with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
 The claim is kept in this process (`claims`), not in the pool's files; `test/pool-landing-claim.test.ts`, and

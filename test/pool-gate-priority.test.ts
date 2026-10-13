@@ -183,7 +183,7 @@ test("runGates with priority takes the freed gates slot before the run's ticket 
 // The callers' wiring: burndown's landing gate, `sandcastle land` and the base and verify gates ask for the priority, a ticket's gate does not.
 test("the landing, base and verify gates ask for priority and a ticket's gate does not", () => {
   const src = (file: string) => readFileSync(join(import.meta.dirname, "../src", file), "utf8");
-  assert.match(src("burndown.ts"), /runGates\(box, id, "landing gate", true, how\?\.from, how\?\.rerunOnRed\)/);
+  assert.match(src("burndown.ts"), /runGates\(box, id, "landing gate", true, how\?\.from, how\?\.rerunOnRed, false, claim\)/);
   assert.match(src("burndown.ts"), /gate: \(box, id, rerunOnRed\) => runGates\(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed\),/);
   assert.match(src("land.ts"), /runGates\(project, box, `\$\{ref\} land gates`, false, \{ log \}, true, how\?\.from, how\?\.rerunOnRed\)/);
   // gateBase: the base and verify gates take a sandbox slot of their own; the mid-run check runs in a ticket's.
