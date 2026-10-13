@@ -137,6 +137,45 @@ export const partlyDoneComment = (
   (overrunNoted(o.overrun) ? `\n\n${overrunLine(o.overrun!)}` : "") +
   (report ? `\n\n${report}` : "");
 
+// The openings of the comments the kit writes itself: the close and "not landed" comments above, a hold's
+// text (`describe`, and the pipeline's own holds), `sandcastle land`'s merge comment and the repeat of a
+// follow-up filed already (`repeatComment`, burndown.ts). A person's comment on a ticket after its
+// review is told from these (`personCommentsSince`). `sandcastle requeue --note` is a person's word and
+// is not here.
+const KIT_COMMENT = /^(?:Sandcastle (?:ran this ticket|held this|could not finish this)|(?:Merged|Squashed) locally, not yet pushed, by|Merged into `[^`]*` by an earlier Sandcastle run|Gated green on `|Named again by the )/;
+
+/**
+ * A ticket's comments one to an entry. GitHub's come that way; a Markdown ticket file holds them as one
+ * section, so its entries are the `### ` headings under `## Comments` (the kit writes each as `### <date> - sandcastle`).
+ */
+const commentEntries = (comments: string[]): { text: string; heading?: string }[] =>
+  comments.flatMap((c) => {
+    if (!/^## Comments\b/m.test(c)) return [{ text: c.trim() }];
+    return c
+      .split(/^(?=### )/m)
+      .filter((part) => part.startsWith("### "))
+      .map((part) => {
+        const [heading, ...rest] = part.split("\n");
+        return { heading: heading.trim(), text: rest.join("\n").trim() };
+      });
+  });
+
+/** How many comments a ticket has, as `personCommentsSince` counts them. */
+export const commentCount = (comments: string[]): number => commentEntries(comments).length;
+
+/**
+ * The comments past the first `seen` that a person wrote: not one the kit wrote (its openings are fixed), and not
+ * an agent's, which a snapshot of the count taken after the agent's pass already holds. `seen` is the count
+ * recorded with a branch's head; none recorded means none can be told, and none is returned.
+ */
+export const personCommentsSince = (comments: string[], seen: number | undefined): string[] =>
+  seen === undefined
+    ? []
+    : commentEntries(comments)
+        .slice(seen)
+        .filter((e) => !KIT_COMMENT.test(e.text) && !(e.heading ?? "").endsWith(" - sandcastle"))
+        .map((e) => e.text);
+
 // The one comment a ticket that did not land gets: the conflict (the other
 // ticket and the files), the agents' report, or both - never two comments.
 export const notLandedComment = (

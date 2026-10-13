@@ -62,7 +62,7 @@ import { sandboxOpener } from "./land.ts";
 import {
   carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
-import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
+import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
@@ -1583,13 +1583,25 @@ export const createPipeline = (ctx: PipelineContext) => {
   const addReport = (id: string, heading: string, text: string) =>
     reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
 
+  /** The ticket's comments now; undefined when the tracker cannot be read (a head record then keeps its last count, which at worst sends a carried branch to a full review it did not need). */
+  const ticketComments = (id: string): string[] | undefined => {
+    try {
+      return tracker.get(id).comments;
+    } catch {
+      return undefined;
+    }
+  };
+
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
   const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[] }) => {
     if (dryRun) return;
     try {
-      recordHead(project.root, id, { branch, ...fields }, runId);
+      // The comment count is read now, after the pass that wrote these fields: an agent's own comment (a repair's report)
+      // is then inside it, and only a person's later comment reads as new at the next carry.
+      const comments = "reviewed" in fields || "green" in fields || "repaired" in fields ? ticketComments(id) : undefined;
+      recordHead(project.root, id, { branch, ...fields, ...(comments ? { comments: commentCount(comments) } : {}) }, runId);
     } catch (error) {
       console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
     }
@@ -1905,12 +1917,18 @@ export const createPipeline = (ctx: PipelineContext) => {
       const reviewedOnly = carried && greenOnly === undefined ? reviewedOnlyHead(project.root, base, issue.id) : undefined;
       const greenHead = greenOnly ?? reviewedOnly;
       let landOnly = greenHead !== undefined;
+      // A person's comment since the head was reviewed (the count the record kept): no reviewer has read it, so the
+      // branch is land-only for the implementer and the gates, but a full review - which shows the comments - runs
+      // after any merge resolution, in place of the narrow one or none at all.
+      const lateComment =
+        greenHead !== undefined &&
+        personCommentsSince(ticketComments(issue.id) ?? issue.comments ?? [], readHeads(project.root)[issue.id]?.comments).length > 0;
       // A tip past the head is merge commits only (landOnlyHead): a resolution a hold left
       // on the branch was never reviewed, unless a narrow review has since recorded the tip.
       const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch], project.root) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch], project.root);
       if (greenHead !== undefined) {
-        console.log((reviewedOnly !== undefined ? reviewedCarriedLine : greenCarriedLine)(ref(issue.id), greenHead, requeued));
-        run.ticket(issue.id, { note: "land only - reviewed earlier" });
+        console.log((reviewedOnly !== undefined ? reviewedCarriedLine : greenCarriedLine)(ref(issue.id), greenHead, requeued, lateComment));
+        run.ticket(issue.id, { note: lateComment ? "land only - a comment since its review, full review" : "land only - reviewed earlier" });
       }
       let mergeConflicted = false;
       // The base commit the merge below joined, for checking the resolution against git's own
@@ -2123,7 +2141,65 @@ export const createPipeline = (ctx: PipelineContext) => {
           gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
         };
       };
-      if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
+      // The full review of the branch, as the first attempt's: the implementer's word is shown (`implSaid`), and
+      // the ticket's comments, which its prompt reads. Returns the review commits it made.
+      const fullReview = async () => {
+        await juncture("review");
+        let reviewModel: string | undefined;
+        const beforeReview = ownNow();
+        const review = await timed(
+          issue.id,
+          "review",
+          () => {
+            return reviewWithFallback(ref(issue.id), (agent, model) => {
+              reviewModel = model;
+              return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
+            });
+          },
+          undefined,
+          () => reviewModel,
+        );
+        if (CROSS_REVIEW) await juncture("cross-review");
+        const cross = CROSS_REVIEW
+          ? await timed(
+              issue.id,
+              "cross-review",
+              () => {
+                return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) }));
+              },
+              undefined,
+              () => CROSS_REVIEW_MODEL,
+            )
+          : undefined;
+        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+        reviewed = true;
+        for (const r of [review, cross]) {
+          const u = r && ungatedOf(r.stdout);
+          if (u) ungated.push(u);
+          const g = r && gapOf(r.stdout);
+          if (g) gaps.push(g);
+          noteChangelog(r?.stdout);
+          const m = r && unmetOf(r.stdout);
+          if (m) unmet.push(m);
+        }
+        noteHead(issue.id, branch, agentsSaid());
+        if (!tracker.agentsWrite) {
+          for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
+            const said = r && tags(r.stdout).report;
+            if (said) addReport(issue.id, who, said);
+          }
+        }
+        return ownNow() - beforeReview;
+      };
+      if (landOnly && lateComment) {
+        // A person commented after the review: the resolver (if the merge conflicted) worked from the old spec, and a clean
+        // merge would land it unread. The full review reads the comments and the whole branch, the resolution included;
+        // what the earlier reviews left (`ungated`, `gaps`) is theirs to restate.
+        console.log(`${ref(issue.id)}: a comment since its review${mergeConflicted ? ", merge resolved" : ""} - full review.`);
+        ungated.length = 0;
+        gaps.length = 0;
+        reviewCommits += await fullReview();
+      } else if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
         // The resolver finished the merge on a branch reviewed and green at greenHead, or the branch
         // carries a merge from an earlier run that no review has read: nobody has seen its
         // resolution. A clean land-only merge of the base needs no review.
@@ -2202,52 +2278,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (u) unmet.push(u);
           noteHead(issue.id, branch, agentsSaid());
         } else {
-          await juncture("review");
-          let reviewModel: string | undefined;
-          const beforeReview = ownNow();
-          const review = await timed(
-            issue.id,
-            "review",
-            () => {
-              return reviewWithFallback(ref(issue.id), (agent, model) => {
-                reviewModel = model;
-                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
-              });
-            },
-            undefined,
-            () => reviewModel,
-          );
-          if (CROSS_REVIEW) await juncture("cross-review");
-          const cross = CROSS_REVIEW
-            ? await timed(
-                issue.id,
-                "cross-review",
-                () => {
-                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) }));
-                },
-                undefined,
-                () => CROSS_REVIEW_MODEL,
-              )
-            : undefined;
-          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
-          reviewCommits = ownNow() - beforeReview;
-          reviewed = true;
-          for (const r of [review, cross]) {
-            const u = r && ungatedOf(r.stdout);
-            if (u) ungated.push(u);
-            const g = r && gapOf(r.stdout);
-            if (g) gaps.push(g);
-            noteChangelog(r?.stdout);
-            const m = r && unmetOf(r.stdout);
-            if (m) unmet.push(m);
-          }
-          noteHead(issue.id, branch, agentsSaid());
-          if (!tracker.agentsWrite) {
-            for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
-              const said = r && tags(r.stdout).report;
-              if (said) addReport(issue.id, who, said);
-            }
-          }
+          reviewCommits = await fullReview();
         }
       }
 
