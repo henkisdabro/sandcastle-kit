@@ -100,7 +100,7 @@ const harness = (root: string, answers: GateRun[], failedBefore?: Map<string, Se
   };
   const land = async (id: string) =>
     (await quietly(() => landOne(ctx, { issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${id}`) }))).result;
-  return { land, calls };
+  return { land, calls, reds: ctx.reds! };
 };
 
 test("a red landing gate is run again from the red gate before the ticket is red, and a flake lands", async () => {
@@ -126,6 +126,22 @@ test("a port that ran the re-run inside its own slot is not asked for another", 
   const { land, calls } = harness(root, [{ ...redOn("test", "a.test.ts"), rerunOf: first }]);
   assert.equal((await landSecond(land)).kind, "red");
   assert.equal(calls.length, 1);
+});
+
+test("a red landing whose gate ran the re-run leaves it marked on the red kept for the requeue, and one without leaves none", async () => {
+  const first = redOn("test", "a.test.ts");
+  const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" } });
+  const twice = harness(root, [{ ...redOn("test", "b.test.ts"), rerunOf: first }]);
+  assert.equal((await landSecond(twice.land)).kind, "red");
+  assert.equal(twice.reds.get("2")?.rerun, true);
+  const root2 = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" } });
+  // A timed-out gate is never re-run, so its result has no `rerunOf` and the requeue's own rules apply.
+  const timedOut = redOn("test", "a.test.ts");
+  timedOut.failure!.exitCode = 124;
+  const once = harness(root2, [timedOut]);
+  assert.equal((await landSecond(once.land)).kind, "red");
+  assert.ok(once.reds.has("2"));
+  assert.equal("rerun" in once.reds.get("2")!, false);
 });
 
 test("a timed-out landing gate is not run again", async () => {
