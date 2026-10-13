@@ -141,10 +141,16 @@ test("a layer build still finds its base image when another project builds a bas
   await until("the layer build's start", () => log(m).some((l) => l.startsWith("start sandcastle-one:")));
   // The other project's build of a 2.0.0 base prunes the 1.0.0 one - unless it must wait for the layer.
   // Whichever it does, the layer's `FROM` resolves once that build has either waited or finished.
+  // Its wait ends the race too: after waiting it still builds two images, each a kit start, which under load ran past the limit.
+  let sawWait!: () => void;
+  const waited = new Promise((r) => (sawWait = () => r("waited")));
   const other = finished(startKit(["build"], { cwd: project("two", false), env: env(m, "2.0.0", { FAKE_UID: "2000" }), stdio: ["ignore", "pipe", "pipe"] }), (out) => {
-    if (WAITING.test(out)) writeFileSync(go, "");
+    if (WAITING.test(out)) {
+      writeFileSync(go, "");
+      sawWait();
+    }
   });
-  const done = await Promise.race([other.then(() => "other"), new Promise((r) => setTimeout(r, 8000, "timeout"))]);
+  const done = await Promise.race([other.then(() => "other"), waited, new Promise((r) => setTimeout(r, 8000, "timeout"))]);
   writeFileSync(go, "");
   const [a, b] = await Promise.all([layer, other]);
   assert.notEqual(done, "timeout", "the other build neither waited nor finished");

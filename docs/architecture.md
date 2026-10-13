@@ -466,9 +466,13 @@ The run's other tracker reads are asynchronous and time-limited the same way, op
 the sync forms commands outside a run keep (`queue`, `lint`, `report`): `reopenedSinceAsync` (`mergedEarlier`
 through `notReopened`; unreadable means reopened, so the ticket runs normally), `openAsync` (the follow-up
 filing's list of open tickets; unreadable means an empty list, and the follow-up is still filed), and the
-blocker checks (`openOnQueue` at the start, `openBlockersNow` as tickets land), whose `declaredBlockersAsync`
-and state reads go through `blockerResolver`'s `limitMs`. A ticket whose native blocker links cannot be read
-is held by a `links` blocker that is never closed, and starts once a later read gets them.
+blocker checks (`openOnQueue` at the start, then the start's `commentOnlyBlocks` and `blockerProblems`
+with the same `limitMs`, and `blockerWhyAsync` for a blocker's reason; `openBlockersNow` as tickets land,
+each dependant read side by side), whose `declaredBlockersAsync` and state reads go through
+`blockerResolver`'s `limitMs`. A ticket whose native blocker links cannot be read is held by a `links`
+blocker that is never closed, and starts once a later read gets them. The repository's own name
+(`thisRepoAsync`) is one read shared by the callers that ask meanwhile; one that fails or times out is
+asked again later, so a same-repo native blocker is never read as another repository's for the run.
 What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it
 asks the ledger's `describe` for
 

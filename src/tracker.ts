@@ -208,15 +208,19 @@ const github = (project: Project): Tracker => {
     }
     return here;
   };
+  // One read at a time, shared by the callers that ask meanwhile; a failed or timed-out read leaves `here` unread, so a
+  // later call asks again - kept as undefined, every same-repo native blocker read as another repository's for the run.
+  let hereRead: Promise<string | undefined> | undefined;
   const thisRepoAsync = async (limitMs: number) => {
-    if (here === null) {
-      try {
-        here = (await ghAsync(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], limitMs)).trim() || undefined;
-      } catch {
-        here = undefined;
-      }
-    }
-    return here;
+    if (here !== null) return here;
+    hereRead ??= ghAsync(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], limitMs).then(
+      (out) => (here = out.trim() || undefined),
+      () => {
+        hereRead = undefined;
+        return undefined;
+      },
+    );
+    return hereRead;
   };
   // Each ticket's native blockers (`12`, or `owner/repo#12` from another repository), as the list and view calls read them.
   const native = new Map<string, string[]>();

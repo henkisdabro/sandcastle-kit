@@ -253,3 +253,19 @@ test("plain --version reads no remote", () => {
   assert.match(newest({ json: false }), /^sandcastle-kit \d+\.\d+\.\d+/);
   assert.equal(reads().length, 0);
 });
+
+test("a GIT_SSH program that is not ssh gets no -o of batch mode: the read leaves git its own, with no prompt", () => {
+  const before = { ...process.env };
+  try {
+    process.env.GIT_SSH = "/usr/local/bin/plink";
+    newest();
+    assert.equal(reads()[0], "0|");
+    rmSync(cacheHome, { recursive: true, force: true });
+    process.env.GIT_SSH = "/usr/bin/ssh";
+    newest();
+    assert.equal(reads()[1], "0|'/usr/bin/ssh' -o BatchMode=yes");
+  } finally {
+    for (const name of Object.keys(process.env)) if (!(name in before)) delete process.env[name];
+    Object.assign(process.env, before);
+  }
+});

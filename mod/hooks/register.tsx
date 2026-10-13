@@ -687,11 +687,15 @@ export const register: Register = (on) => {
               <Text color={SAND.top} bold>
                 {MARK_ICON}
               </Text>
-              {line.map((part) => (
-                <Text color={TONES[part.tone].color} bold={TONES[part.tone].bold}>
-                  {part.text}
-                </Text>
-              ))}
+              {line.map((part) => {
+                // A mark set by an older mod can hold a tone this one has dropped (`muted`): drawn as the name, never a throw.
+                const tone = TONES[part.tone] ?? TONES.name;
+                return (
+                  <Text color={tone.color} bold={tone.bold}>
+                    {part.text}
+                  </Text>
+                );
+              })}
             </Box>
           )}
           {now === null

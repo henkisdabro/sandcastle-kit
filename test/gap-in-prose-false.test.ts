@@ -238,3 +238,10 @@ test("gap sentences that do not follow each other are joined with an ellipsis, n
   const gap = await gapOfReview("- A gap remains in the parser.\n- The tests pass.\n- The same gap remains in the docs.\n");
   assert.equal(gap, "A gap remains in the parser. … The same gap remains in the docs.");
 });
+
+test("a review that opens by saying it found a gap and fixed it names no gap, unless it says one is still open", async () => {
+  const fixed = "I found one gap in the implementer's work and fixed it.\n\n**The gap:** the comparison only set aside a reason phrase of one to three plain words.\n\nWhat I changed (commit 84e4868): the comparison now ignores the whole phrase.\n";
+  assert.equal(await gapOfReview(fixed), undefined);
+  const open = "I found one gap in the implementer's work and fixed it.\n\nA second gap remains in the docs: the README still names the old command.\n";
+  assert.equal(await gapOfReview(open), "A second gap remains in the docs: the README still names the old command.");
+});

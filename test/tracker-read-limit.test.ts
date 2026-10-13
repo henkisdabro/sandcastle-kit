@@ -13,7 +13,7 @@ import { test } from "node:test";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { makeTracker, readTicketState, TRACKER_READ_MS } = await import("../src/tracker.ts");
 const { fileFollowUps, handBack, notReopened, openOnQueue } = await import("../src/burndown.ts");
-const { blockedNote, openBlockersNow } = await import("../src/blockers.ts");
+const { blockedNote, blockerProblems, commentOnlyBlocks, openBlockersNow } = await import("../src/blockers.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -182,4 +182,16 @@ test("the run's reads before a ticket starts, before it lands, for the overrun w
   assert.match(blockers, /await tracker\.declaredBlockersAsync\(t\.id, limitMs\)/);
   assert.match(blockers, /await githubStateAsync\(ref\.id, limitMs\)/);
   assert.match(blockers, /\(limitMs === undefined \? refsOf\(project, tracker, t\) : await refsOfAsync\(project, tracker, t, limitMs\)\)/);
+});
+
+test("the run's start checks of blocker lines and comment-only blockers keep the timers firing and end at the limit (#798)", async () => {
+  fakeGh("exec sleep 30");
+  const tracker = makeTracker(project);
+  const problems = await during(blockerProblems(project, tracker, queued, new Set(["5"]), 300));
+  assert.ok(problems.ticks >= 8, `the timer fired ${problems.ticks} times in ${problems.ms} ms`);
+  assert.ok(problems.ms < 3000, `gave up after ${problems.ms} ms`);
+  const commented = [{ ...queued[0]!, comments: ["Blocked by #9"], queued: true }];
+  const blocks = await during(commentOnlyBlocks(project, tracker, commented, 300));
+  assert.ok(blocks.ticks >= 8, `the timer fired ${blocks.ticks} times in ${blocks.ms} ms`);
+  assert.ok(blocks.ms < 3000, `gave up after ${blocks.ms} ms`);
 });

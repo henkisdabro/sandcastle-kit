@@ -595,9 +595,14 @@ const isLeadIn = (sentence: string): boolean => {
 // with an anaphor brings the sentences before it in its paragraph, as many as fit under UNGATED_MAX (the
 // nearest first), because what it points at is one of them. A gap sentence that is a lead-in (`isLeadIn`)
 // brings the sentences after it in its unit instead, in order, within the same size.
+// A gap still open, said anywhere in the message: it outweighs an opening that says the gap was fixed.
+const STILL_OPEN = /\b(?:remains?|not\s+(?:yet\s+)?(?:fixed|addressed|handled)|left\s+(?:alone|unfixed|undone)|unfixed|still\s+(?:fails?|broken|wrong|open))\b/i;
 const gapOf = (text: string): string | undefined => {
   if (followUpsOf(text).length || unmetOf(text)) return undefined;
   const all = sentencesOf(text);
+  // A review that opens by saying it found a gap and fixed it ("I found one gap in the implementer's work and fixed it.")
+  // then describes that gap under a bold lead-in: a fixed gap, not one left, unless a sentence says one is still open.
+  if (all.length && GAP_FIXED.test(all[0]!.text) && !all.some((s) => STILL_OPEN.test(withoutCode(withoutQuotes(s.text))))) return undefined;
   const take = new Set<number>();
   all.forEach((s, i) => {
     if (!isGap(withoutCode(withoutQuotes(s.text)))) return;
@@ -2830,10 +2835,10 @@ export const burndown = async (
   const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i) => (wholeOpen.has(i.id) ? [[i.id, { ticket: i, on: wholeOpen.get(i.id)! }] as const] : [])));
   const waiting = [...wholeOpen].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
   // A comment is not read as a blocker; say so where the run would start the issue.
-  for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })))) console.log(`  warning: ${commentBlockLine(f)}`);
+  for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })), TRACKER_READ_MS)) console.log(`  warning: ${commentBlockLine(f)}`);
   // A blocker that can never close (missing, a cycle) holds its ticket for good; an unnamed Linear key lets it start.
   // The whole queue's ids, so a blocker queued outside the named tickets is not called "not queued".
-  for (const line of await blockerProblems(project, tracker, queued, new Set(whole.map((t) => t.id)))) console.log(`  warning: ${line}`);
+  for (const line of await blockerProblems(project, tracker, queued, new Set(whole.map((t) => t.id)), TRACKER_READ_MS)) console.log(`  warning: ${line}`);
   // A ticket others wait for starts first; otherwise the tracker's order
   // holds. The two blockers of seven waiting tickets once ran last of thirty,
   // so a run stopped early would have left all seven stuck for another run.

@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { KIT_CACHE } from "./live-runs.ts";
 import { KIT, machineSettings } from "./sandbox.ts";
 
@@ -75,10 +75,16 @@ const highestRelease = (stdout: string): string | null => {
  * The ssh a read uses: the one git would pick (`GIT_SSH_COMMAND`, else `core.sshCommand`, else
  * `GIT_SSH`, else `ssh`) with batch mode on, so a passphrase or host-key question fails the read and
  * never waits for a keyboard. `core.sshCommand` is read here because the variable set for the read
- * overrides it: a remote that needs its own key would never answer.
+ * overrides it: a remote that needs its own key would never answer. A `GIT_SSH` program that is not
+ * ssh (plink, a wrapper) may refuse `-o`: the read then sets no command and leaves git its own, with
+ * `GIT_TERMINAL_PROMPT=0` alone - else the read failed every hour and no release was ever named.
  */
-const batchSsh = (kit: string, env: NodeJS.ProcessEnv): string =>
-  `${env.GIT_SSH_COMMAND || git(kit, ["config", "core.sshCommand"]) || (env.GIT_SSH ? `'${env.GIT_SSH.replaceAll("'", "'\\''")}'` : "ssh")} -o BatchMode=yes`;
+const batchSsh = (kit: string, env: NodeJS.ProcessEnv): string | undefined => {
+  const command = env.GIT_SSH_COMMAND || git(kit, ["config", "core.sshCommand"]);
+  if (command) return `${command} -o BatchMode=yes`;
+  if (!env.GIT_SSH) return "ssh -o BatchMode=yes";
+  return basename(env.GIT_SSH) === "ssh" ? `'${env.GIT_SSH.replaceAll("'", "'\\''")}' -o BatchMode=yes` : undefined;
+};
 
 /**
  * `git ls-remote --tags origin` of the kit checkout: the output, or undefined for a failure. Never
@@ -87,13 +93,14 @@ const batchSsh = (kit: string, env: NodeJS.ProcessEnv): string =>
  * helper the kill leaves behind would hold a pipe open and keep this call waiting for it.
  */
 const lsRemote = (kit: string): string | undefined => {
+  const ssh = batchSsh(kit, process.env);
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-ls-remote-"));
   const out = join(dir, "out");
   const fd = openSync(out, "w");
   try {
     const r = spawnSync("git", ["-C", kit, "ls-remote", "--tags", "origin"], {
       stdio: ["ignore", fd, "ignore"],
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: batchSsh(kit, process.env) },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(ssh ? { GIT_SSH_COMMAND: ssh } : {}) },
       timeout: LS_REMOTE_MS,
       killSignal: "SIGKILL",
     });
