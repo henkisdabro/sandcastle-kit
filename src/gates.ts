@@ -781,11 +781,12 @@ export const LANDING = "landing";
  * and then found a conflict ran no gate and left no line at all.
  */
 export const writeLandingLine = (
-  timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, took: { elapsed: number; slotWaitMs: number }, result: { ok: boolean; kind: string },
+  timings: string, who: { run: string; project: string; issue: string; carried?: boolean; unreviewed?: boolean }, took: { elapsed: number; slotWaitMs: number }, result: { ok: boolean; kind: string },
 ) => {
   const line = {
     ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING, ...stepTimes(took.elapsed, { waitMs: took.slotWaitMs }), ok: result.ok, result: result.kind,
     ...(who.carried ? { carried: true } : {}),
+    ...(who.unreviewed ? { unreviewed: true } : {}),
   };
   appendFileSync(timings, JSON.stringify(line) + "\n");
 };
@@ -802,7 +803,7 @@ export const BASE_RED = "base-red";
  * ticket's state, and a ticket landing already holds the landing stage `landOne` wrote.
  */
 export const timedLandingGate = <T>(
-  timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, fn: () => Promise<T>,
+  timings: string, who: { run: string; project: string; issue: string; carried?: boolean; unreviewed?: boolean }, fn: () => Promise<T>,
 ): Promise<T> => timedGate(LANDING_GATES, timings, who, fn);
 
 /**
@@ -810,7 +811,7 @@ export const timedLandingGate = <T>(
  * gate asks for - `BASE_RED`) still leaves its line, so the time it took is on record.
  */
 export const timedGate = async <T>(
-  phase: string, timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, fn: () => Promise<T>,
+  phase: string, timings: string, who: { run: string; project: string; issue: string; carried?: boolean; unreviewed?: boolean }, fn: () => Promise<T>,
 ): Promise<T> => {
   const since = Date.now();
   let result: T | undefined;
@@ -827,6 +828,7 @@ export const timedGate = async <T>(
     const line = {
       ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
       ...(who.carried ? { carried: true } : {}),
+      ...(who.unreviewed ? { unreviewed: true } : {}),
       ...(gateTimes ? { gates: gateTimes } : {}),
       ...(peakMib ? { peakMib } : {}),
       ...pressure,

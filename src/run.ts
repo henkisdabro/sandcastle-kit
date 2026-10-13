@@ -917,6 +917,17 @@ export const isCarried = (root: string, base: string, id: string): boolean => {
   }
 };
 
+/**
+ * What a carried branch (`isCarried`) costs at the start of a run: `carried` when a recorded head lets it skip the
+ * implementer and the full review (`landOnlyHead`, `reviewedOnlyHead`: a land-only or narrowly reviewed branch), `unreviewed`
+ * when it has neither, so a full review still runs. Undefined for a branch that is no carried work. The estimate prices
+ * an unreviewed one as a fresh ticket, and its timings lines say `unreviewed` in place of `carried`, so the carried history stays land-only.
+ */
+export const carriedKind = (root: string, base: string, id: string): "carried" | "unreviewed" | undefined => {
+  if (!isCarried(root, base, id)) return undefined;
+  return landOnlyHead(root, base, id) !== undefined || reviewedOnlyHead(root, base, id) !== undefined ? "carried" : "unreviewed";
+};
+
 /** The nearest-rank percentile, `p` in (0, 1]; the median above takes the middle one, this the one a fraction `p` of the list is at or below. */
 const percentile = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length, Math.max(1, Math.ceil(xs.length * p))) - 1];
 const HIGH = 0.8;
@@ -1019,7 +1030,7 @@ export const SIZE_WORDS: Record<TicketSize, string> = {
  * a row on the one worker, whatever the slots, so they count with or without `gateSlots`.
  */
 export const priceRun = (
-  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[]; bodyChars?: number[]; beside?: string[] } = {},
+  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; unreviewed?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[]; bodyChars?: number[]; beside?: string[] } = {},
 ): { text: string; figures: RunEstimate } | undefined => {
   let text: string;
   try {
@@ -1027,7 +1038,7 @@ export const priceRun = (
   } catch {
     return undefined;
   }
-  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; remainder?: unknown; touches?: unknown; bodyChars?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
+  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; unreviewed?: unknown; remainder?: unknown; touches?: unknown; bodyChars?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
   type Group = {
     ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string;
     // The path count of the ticket's `Touches:` line, from the first line that records it; undefined for a ticket of older lines.
@@ -1039,7 +1050,7 @@ export const priceRun = (
     // A `remainder` field on a line: the ticket was re-run for what an earlier "part of" merge left.
     remainder?: boolean;
     // Seen while grouping: a `carried` field on a line, a resolve pass, an implement pass.
-    flagged?: boolean; resolved?: boolean; implemented?: boolean;
+    flagged?: boolean; resolved?: boolean; implemented?: boolean; unreviewed?: boolean;
     // A ticket implemented and requeued in the same run: what came after its first resolve, the cost of a carried branch's attempt.
     tail?: Group;
     // The history ticket a `tail` was cut from, so the line counts tickets.
@@ -1077,6 +1088,7 @@ export const priceRun = (
       // A ticket's gate passes (the pre-landing `gates` lines, `waitMs` already out of `ms`): the time it holds a gates slot.
       if (l.phase === "gates") g.gateMs += l.ms as number;
       if (l.carried === true) g.flagged = true;
+      if (l.unreviewed === true) g.unreviewed = true;
       if (l.remainder === true) g.remainder = true;
       if (g.bodyChars === undefined && typeof l.bodyChars === "number" && Number.isFinite(l.bodyChars) && l.bodyChars >= 0) g.bodyChars = l.bodyChars;
       if (g.touches === undefined && typeof l.touches === "number" && Number.isFinite(l.touches) && l.touches >= 0) g.touches = l.touches;
@@ -1110,7 +1122,8 @@ export const priceRun = (
     // implemented and requeued in the same run is a fresh one, and its tail is a carried sample of its own: pricing a carried
     // ticket from its whole first attempt put the estimate at twice the real time.
     for (const g of groups.values()) {
-      g.carried = g.flagged === true || (g.resolved === true && !g.implemented);
+      // An unreviewed carried branch got a full review: a whole ticket's figures, so a fresh sample whatever its resolve says.
+      g.carried = g.unreviewed !== true && (g.flagged === true || (g.resolved === true && !g.implemented));
       if (g.carried || g.implemented !== true || !g.tail?.tokened) g.tail = undefined;
     }
     return [...groups.values()];
@@ -1169,7 +1182,9 @@ export const priceRun = (
   const olderSet = new Set<Group>(olderGroups);
   const per = Array.from({ length: tickets }, (_, at) => {
     const carried = detail.carried?.[at] ?? false;
-    const remainder = !carried && (detail.remainder?.[at] ?? false);
+    // An unreviewed carried branch is priced as a fresh ticket: it is told apart only in the start line.
+    const unreviewed = !carried && (detail.unreviewed?.[at] ?? false);
+    const remainder = !carried && !unreviewed && (detail.remainder?.[at] ?? false);
     const model = models?.[at];
     const inModel = model === undefined ? counted : counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
     const older = model === undefined || inModel.length >= SOLID_HISTORY ? [] : olderGroups.filter((g) => (g.model ?? IMPL_MODEL) === model).slice(0, SOLID_HISTORY - inModel.length);
@@ -1253,9 +1268,10 @@ export const priceRun = (
   const highSteps = steps((xs) => percentile(xs, HIGH));
   const bound = (t: { serial: number; chained: number; gated: number; landed: number }) => Math.max(t.serial, t.chained, t.gated, t.landed);
   const carriedCount = detail.carried?.slice(0, tickets).filter(Boolean).length ?? 0;
-  const remainderCount = detail.remainder?.slice(0, tickets).filter((r, at) => r && !detail.carried?.[at]).length ?? 0;
-  const split = carriedCount || remainderCount
-    ? ` (${[carriedCount ? `${carriedCount} carried` : "", remainderCount ? `${remainderCount} remainder` : "", `${tickets - carriedCount - remainderCount} fresh`].filter(Boolean).join(", ")})`
+  const unreviewedCount = detail.unreviewed?.slice(0, tickets).filter((u, at) => u && !detail.carried?.[at]).length ?? 0;
+  const remainderCount = detail.remainder?.slice(0, tickets).filter((r, at) => r && !detail.carried?.[at] && !detail.unreviewed?.[at]).length ?? 0;
+  const split = carriedCount || remainderCount || unreviewedCount
+    ? ` (${[carriedCount ? `${carriedCount} carried` : "", unreviewedCount ? `${unreviewedCount} to review` : "", remainderCount ? `${remainderCount} remainder` : "", `${tickets - carriedCount - unreviewedCount - remainderCount} fresh`].filter(Boolean).join(", ")})`
     : "";
   // At a tie too: the tickets' figure ends with a landing of its own, so landings in a row as long as it still set the time.
   const landBound = highMs.landed > 0 && highMs.landed >= Math.max(highMs.serial, highMs.chained, highMs.gated);
