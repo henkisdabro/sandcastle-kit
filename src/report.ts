@@ -370,6 +370,11 @@ export const timeLostFromTimings = (text: string, runId: string): TimeLost | und
     if (GATE_SLOT_PHASES.includes(line.phase)) lost.gateWaitMs += waitMs;
     if (line.phase === LANDING) lost.landingWaitMs += waitMs;
     const issue = String(line.issue ?? "");
+    // A landing re-run inside its slot is a line of its own, marked; a requeued ticket's second landing is no re-run.
+    if (line.phase === LANDING_GATES && (line as { rerun?: unknown }).rerun === true) {
+      lost.reruns++;
+      lost.rerunMs += ms;
+    }
     if (line.phase === "gates" && issue) {
       if (gated.has(issue)) {
         lost.reruns++;

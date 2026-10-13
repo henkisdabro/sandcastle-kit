@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -3236,6 +3236,8 @@ export const burndown = async (
       const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed));
       const times = gateMs(result);
       if (times) landingGateMs.set(id, times);
+      const flaked = landingFlaked(result, run.tickets()[id]?.flaked);
+      if (flaked) run.ticket(id, { flaked });
       return result;
     },
     landed,

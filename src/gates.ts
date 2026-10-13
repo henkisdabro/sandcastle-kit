@@ -590,6 +590,17 @@ export const flakedTests = (reds: Failure[], greenAfter: boolean) => {
   return flaked;
 };
 
+/**
+ * A landing gate's tests that went red on its run and green on the re-run inside the same slot, added to `kept` (the
+ * ticket's `flaked` so far, its entries first, each id once). Undefined when the result is no red-then-green: green with no
+ * re-run, a re-run that is red too, or a port that ran no re-run.
+ */
+export const landingFlaked = (result: GateRun, kept: string[] | undefined): string[] | undefined => {
+  const red = result.rerunOf?.failure;
+  if (!red || result.failure) return undefined;
+  return [...new Set([...(kept ?? []), ...flakedTests([red], true)])];
+};
+
 /** The three runs' failing tests, for the repair prompt: a gate red on different tests in its first two runs, then red again. */
 export const threeRunsNote = (name: string, reds: Failure[]) => {
   const cap = 20;
@@ -675,7 +686,8 @@ export const gateRed = (result: unknown): string[] | undefined => {
  * line and then the re-run's, as two separate runs wrote them. One line for both read as a single green pass: the
  * ticket card lost the red run, and the closing summary the memory pressure read while it went red. A third run in the
  * same slot (`rerunOf.rerunOf`) is a line of its own, oldest first. The wait is the first run's, and each later line has
- * only its own gates; the lines' `ms` sum to the step's.
+ * only its own gates; the lines' `ms` sum to the step's. Every line after the first carries `rerun: true`, so a reader can
+ * tell a re-run from a requeued ticket's second pass, which is no re-run.
  */
 export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, result: unknown): Record<string, unknown>[] => {
   const r = result as GateRun | undefined;
@@ -693,12 +705,12 @@ export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, 
     const ms = Math.min(Math.max(0, Math.round(run.ms!)), left);
     left -= ms;
     const redGates = gateRed(run);
-    return { ...common, ms, ...(i === 0 && waitMs ? { waitMs } : {}), ok: false, gates: gateMs(run), peakMib: peakOf(run), ...pressureFields(pressureOf(run)), red: redGates?.length ? redGates : undefined };
+    return { ...common, ms, ...(i === 0 && waitMs ? { waitMs } : {}), ...(i > 0 ? { rerun: true } : {}), ok: false, gates: gateMs(run), peakMib: peakOf(run), ...pressureFields(pressureOf(run)), red: redGates?.length ? redGates : undefined };
   });
   // The result's own gates: from the red gate on, the passes before it are the first run's.
   const first = runs[0];
   const redAt = first.failure ? first.gates.findIndex((g) => g.name === first.failure!.name) : -1;
-  return [...lines, { ...rest, ms: left, gates: gateMs({ gates: r.gates.slice(Math.max(0, redAt)) }) }];
+  return [...lines, { ...rest, ms: left, rerun: true, gates: gateMs({ gates: r.gates.slice(Math.max(0, redAt)) }) }];
 };
 
 /**
@@ -794,7 +806,8 @@ export const timedGate = async <T>(
       ...pressure,
       ...(red?.length ? { red } : {}),
     };
-    appendFileSync(timings, JSON.stringify(line) + "\n");
+    // A landing gate re-run inside its slot is a line of its own after the red run's (`timingLines`).
+    appendFileSync(timings, timingLines(line, result).map((l) => JSON.stringify(l) + "\n").join(""));
   }
 };
 

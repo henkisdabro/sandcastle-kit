@@ -201,3 +201,21 @@ test("status: ends ~HH:MM is the pipelines' end, or the landings in a row when t
   const short = ends();
   assert.ok(short >= 9 && short <= 11, `short landings end in ${short}m`);
 });
+
+test("a landing gate re-run inside its slot is a second line marked rerun, left out of the typical landing gates", async () => {
+  const timings = join(TMP, "rerun.jsonl");
+  const failure = { name: "test", command: "run-tests", exitCode: 1, output: "FAIL test/a.test.ts" };
+  const red = { gates: [{ name: "test", pass: false, ms: 20 }], failure, failures: [failure], ms: 20 };
+  await timedLandingGate(timings, { run: "r1", project: "fixture", issue: "7" }, async () => ({ gates: [{ name: "test", pass: true, ms: 10 }], failures: [], rerunOf: red }));
+  const lines = readFileSync(timings, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map((l) => [l.phase, l.ok, l.rerun]), [[LANDING_GATES, false, undefined], [LANDING_GATES, true, true]]);
+  // Two tickets' landings of 2 and 4 minutes, each with a marked re-run of 10: the typical is the median (the upper one of two) of the first lines, 4 minutes: a re-run would make it 12.
+  const p = project(
+    ["8", "9"].flatMap((issue, i) => [
+      line({ issue, phase: LANDING_GATES, ms: (2 + 2 * i) * MIN }),
+      line({ issue, phase: LANDING_GATES, ms: 10 * MIN, rerun: true }),
+    ]),
+    null,
+  );
+  assert.equal(typicalTimes(p)[LANDING_GATES], 240);
+});

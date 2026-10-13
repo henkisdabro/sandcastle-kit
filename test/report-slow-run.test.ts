@@ -129,3 +129,20 @@ test("the timings lines give the gates slot waits, the landings' sandbox slot wa
   assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 27 * MIN, landingWaitMs: 3 * MIN, reruns: 2, rerunMs: 6 * MIN, repairs: 1, repairMs: 6 * MIN });
   assert.equal(timeLostFromTimings(text, "none"), undefined);
 });
+
+test("a landing gate's marked re-run line counts as one gate re-run, and a ticket's in-slot gates re-run line once", () => {
+  const text = [
+    line({ issue: "1", phase: "gates", ms: 3 * MIN }),
+    line({ issue: "1", phase: "gates", ms: 4 * MIN, rerun: true }),
+    line({ issue: "1", phase: "landing gates", ms: 2 * MIN, ok: false }),
+    line({ issue: "1", phase: "landing gates", ms: 1 * MIN, rerun: true }),
+    // A requeued ticket's second landing has no mark and is no re-run.
+    line({ issue: "1", phase: "landing gates", ms: 5 * MIN }),
+  ].join("\n");
+  assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 0, landingWaitMs: 0, reruns: 2, rerunMs: 5 * MIN, repairs: 0, repairMs: 0 });
+});
+
+test("a ticket whose landing gate flaked is listed under Likely flaky", () => {
+  const out = render(facts({ tickets: { "31": { state: "merged", title: "a", flaked: ["test/clock.test.ts::ticks"] } } }));
+  assert.deepEqual(flakyLine(out), [`${FLAKY}test/clock.test.ts::ticks (#31).`]);
+});
