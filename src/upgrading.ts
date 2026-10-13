@@ -8,9 +8,12 @@
 // or "no record".
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { KIT } from "./sandbox.ts";
+import { KIT_CACHE } from "./live-runs.ts";
+import { KIT, machineSettings } from "./sandbox.ts";
 
 const updateRecord = (root: string) => join(root, ".sandcastle/.run/kit-updated");
 
@@ -44,19 +47,134 @@ const kitFacts = (kit: string): { version: string; release: string; past: number
 
 export const kitVersion = (kit = KIT): string => kitFacts(kit).version;
 
+/** A good read of the kit's remote holds this long. */
+export const NEWEST_FRESH_MS = 6 * 60 * 60 * 1000;
+/** A failed read is not tried again sooner than this. */
+export const NEWEST_RETRY_MS = 60 * 60 * 1000;
+/** `git ls-remote` is killed at this. */
+export const LS_REMOTE_MS = 10 * 1000;
+
+/** The newest release as `sandcastle --version --json` carries it: the release and when it was read (ISO 8601). */
+export type NewestRelease = { release: string; checkedAt: string };
+
+/**
+ * The highest exact `vX.Y.Z` tag in `git ls-remote --tags` output, as `X.Y.Z`, compared as numbers
+ * (`v0.10.0` is above `v0.9.0`); null for none. A pre-release or any other tag is no release, and
+ * an annotated tag's peeled line (`^{}`) names the same release as its tag.
+ */
+const highestRelease = (stdout: string): string | null => {
+  let best: string | null = null;
+  for (const line of stdout.split("\n")) {
+    const release = line.split("\t")[1]?.match(/^refs\/tags\/v(\d+\.\d+\.\d+)(?:\^\{\})?$/)?.[1];
+    if (release && (best === null || compareReleases(release, best) > 0)) best = release;
+  }
+  return best;
+};
+
+/** The ssh a read uses: the person's own command (`GIT_SSH_COMMAND`) with batch mode on, so a passphrase or host-key question fails the read and never waits for a keyboard. */
+const batchSsh = (env: NodeJS.ProcessEnv): string => `${env.GIT_SSH_COMMAND || (env.GIT_SSH ? `'${env.GIT_SSH.replaceAll("'", "'\\''")}'` : "ssh")} -o BatchMode=yes`;
+
+/**
+ * `git ls-remote --tags origin` of the kit checkout: the output, or undefined for a failure. Never
+ * a fetch (nothing is written to the checkout), never a prompt (`GIT_TERMINAL_PROMPT=0`, ssh in
+ * batch mode) and killed at `LS_REMOTE_MS`. The output goes to a temp file, not a pipe: a remote
+ * helper the kill leaves behind would hold a pipe open and keep this call waiting for it.
+ */
+const lsRemote = (kit: string): string | undefined => {
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-ls-remote-"));
+  const out = join(dir, "out");
+  const fd = openSync(out, "w");
+  try {
+    const r = spawnSync("git", ["-C", kit, "ls-remote", "--tags", "origin"], {
+      stdio: ["ignore", fd, "ignore"],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: batchSsh(process.env) },
+      timeout: LS_REMOTE_MS,
+      killSignal: "SIGKILL",
+    });
+    return r.status === 0 && !r.error ? readFileSync(out, "utf8") : undefined;
+  } finally {
+    closeSync(fd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+type ReleaseCache = { at: number; ok: boolean; release: string | null };
+
+/** The cache file of one kit directory and `origin` URL: a clone elsewhere, or a remote that moved, shares no answer. */
+const releaseCache = (kit: string, origin: string): string => {
+  let dir = kit;
+  try {
+    dir = realpathSync(kit);
+  } catch {}
+  return join(KIT_CACHE, "newest-release", `${createHash("sha256").update(JSON.stringify([dir, origin])).digest("hex").slice(0, 24)}.json`);
+};
+
+/** The cache's content, or undefined when the file is missing or is not one (an unparsable cache counts as none). */
+const readReleaseCache = (file: string): ReleaseCache | undefined => {
+  try {
+    const { at, ok, release } = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof at !== "number" || !Number.isFinite(at) || typeof ok !== "boolean") return undefined;
+    if (release !== null && !(typeof release === "string" && /^\d+\.\d+\.\d+$/.test(release))) return undefined;
+    return { at, ok, release };
+  } catch {
+    return undefined;
+  }
+};
+
+const named = (c: ReleaseCache): NewestRelease | null => (c.ok && c.release ? { release: c.release, checkedAt: new Date(c.at).toISOString() } : null);
+
+/**
+ * The newest tagged release of the kit, from `git ls-remote --tags` on the checkout's `origin`, or
+ * null when it is not known: the check is off (`"updateCheck": false` in the personal settings), the
+ * kit is not the top of its own checkout, the remote did not answer, or it has no release tag.
+ * Cached machine-wide (`releaseCache`): a good read holds six hours, a failure is retried after an
+ * hour and never sooner, and a failure gives null - never the last good value, which may be a
+ * release the remote no longer shows. `now` is the clock, for a test.
+ */
+export const newestRelease = (kit = KIT, now = Date.now()): NewestRelease | null => {
+  try {
+    if (machineSettings().updateCheck === false) return null;
+  } catch {
+    // A settings file that cannot be read is doctor's to report; it does not stop `--version`.
+  }
+  if (git(kit, ["rev-parse", "--show-cdup"]) !== "") return null;
+  // `--get-url` applies `url.<base>.insteadOf` and prints a bare `origin` when there is no such remote: read nothing from that.
+  const origin = git(kit, ["ls-remote", "--get-url", "origin"]);
+  if (!origin || origin === "origin") return null;
+  const file = releaseCache(kit, origin);
+  const cached = readReleaseCache(file);
+  // A cache from the future is a clock that moved: read again rather than trust it.
+  if (cached && now - cached.at >= 0 && now - cached.at < (cached.ok ? NEWEST_FRESH_MS : NEWEST_RETRY_MS)) return named(cached);
+  const stdout = lsRemote(kit);
+  const read: ReleaseCache = { at: now, ok: stdout !== undefined, release: stdout === undefined ? null : highestRelease(stdout) };
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(read));
+    renameSync(tmp, file);
+  } catch {
+    // An unwritable cache costs a read at the next look, never the answer.
+  }
+  return named(read);
+};
+
+/** The newest release when it is newer than the kit's own release (a clone past its tag included), else undefined. */
+export const releaseOut = (newest: NewestRelease | null, release: string): string | undefined =>
+  newest && compareReleases(newest.release, release) > 0 ? newest.release : undefined;
+
 /**
  * What `sandcastle --version --json` prints, for the Claude Code mod's idle mark: the kit version,
- * the newest tagged release (null: this kit does not read one yet), and the project's update state.
+ * the newest tagged release (null: not known, see `newestRelease`), and the project's update state.
  * `project` is null when `root` is not a set-up project (no `.sandcastle/config.ts` plain file at
  * the git root); `recorded` is false when there is no usable update record, and `release` null when
  * a usable record names none.
  */
-export const versionFacts = (root: string | undefined, kit = KIT) => {
+export const versionFacts = (root: string | undefined, kit = KIT, newest: NewestRelease | null = newestRelease(kit)) => {
   const setUp = root !== undefined && statSync(join(root, ".sandcastle/config.ts"), { throwIfNoEntry: false })?.isFile() === true;
-  if (!setUp) return { kit: kitFacts(kit), newestRelease: null, project: null };
+  if (!setUp) return { kit: kitFacts(kit), newestRelease: newest, project: null };
   const pending = pendingUpgrades(root, kit);
   const release = pending.recorded ? (recordedRelease(root, kit) ?? null) : null;
-  return { kit: kitFacts(kit), newestRelease: null, project: { recorded: pending.recorded, release, pendingNotes: pending.notes } };
+  return { kit: kitFacts(kit), newestRelease: newest, project: { recorded: pending.recorded, release, pendingNotes: pending.notes } };
 };
 
 /** Each bullet under a `### Upgrading` heading, by its bold lead (else its first line). */

@@ -24,6 +24,11 @@
 //    the git call that started it, so a before-and-after listing of a fixture repo differs and removing the fixture
 //    can fail with ENOTEMPTY. (Not `gc.auto`: a pair for it would stop `hostGitConfig` adding its own, and hide a
 //    broken `disableHostGitGc` from test/landing-queue.test.ts.)
+//  - `GIT_ALLOW_PROTOCOL` is `file` unless set: the kit looks up its newest release with `git ls-remote` on its
+//    own `origin` (src/upgrading.ts), which `doctor` and `--version --json` do, and a test must not reach the
+//    network or wait on a remote that does not answer. A local path or `file://` remote still works, and a test of
+//    the lookup puts a fake `git` ahead on `PATH`. test/parent-watch.ts sets it for a child started with its own
+//    environment.
 //  - Names the code reads as a setting or a credential are removed: HERDR_*, TMUX*, SANDCASTLE_* (but not
 //    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests and which are the tests' own switches, such as
 //    SANDCASTLE_TEST_NOW, the fixture clock: test/status-clock.ts) and the names in `SCRUBBED` below. A test that
@@ -45,6 +50,8 @@ export const SCRUBBED = [
   "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY", "LINEAR_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID",
   // The terminal the click hint senses (src/click-hint.ts), and the colour switch.
   "TERM_PROGRAM", "LC_TERMINAL", "VTE_VERSION", "KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "NO_COLOR",
+  // The ssh the newest-release lookup builds on (src/upgrading.ts): a developer's own command is not a test's.
+  "GIT_SSH_COMMAND", "GIT_SSH",
   // The status view's pane size and colour depth (src/status-view.ts): a test of a frame gives its own.
   "TERM_COLS", "TERM_ROWS", "COLUMNS", "COLORTERM",
   // The live status view's test knobs (src/status-view.ts): how many frames it draws, where a frame's errors go.
@@ -100,4 +107,5 @@ if (process.env.NODE_TEST_CONTEXT) {
   for (const name of GIT_IDENTITY) delete process.env[name];
   addGitConfig("user.useConfigOnly", "true");
   addGitConfig("maintenance.auto", "false");
+  process.env.GIT_ALLOW_PROTOCOL ??= "file";
 }

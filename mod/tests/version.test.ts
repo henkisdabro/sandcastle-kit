@@ -17,7 +17,7 @@ const VERSION_KEY = "version:/work";
 const MARK_KEY = "mark:/work";
 const ready = (ids: string[]) => ({ at: T0 - MIN, ids, ok: true, tried: T0 - MIN });
 const queue = (...ids: string[]) => JSON.stringify(ids.map((id) => ({ id, title: `Ticket ${id}`, updated: null, blockedOn: [] })));
-const facts = (kit: object, project: object | null) => ({ kit: { version: "0.17.0", release: "0.17.0", past: 0, ...kit }, newestRelease: null, project });
+const facts = (kit: object, project: object | null, newestRelease: object | null = null) => ({ kit: { version: "0.17.0", release: "0.17.0", past: 0, ...kit }, newestRelease, project });
 const SETTLED = { recorded: true, release: "0.17.0", pendingNotes: [] };
 const NEEDED = { recorded: false, release: null, pendingNotes: [] };
 const BEHIND = { recorded: true, release: "0.16.0", pendingNotes: [] };
@@ -104,7 +104,7 @@ test("the first look reads the version once with the kit's own command in the pr
   expect(w.versionReads.length).toBe(1);
 });
 
-test("update needed is drawn bold in the castle's bright sand and the project's older release in muted sand, never a notice colour", async ($, on) => {
+test("update needed and a newer release out are drawn bold in the castle's bright sand, never a notice colour, and the project's older release not at all", async ($, on) => {
   const w = world(on, { [VERSION_KEY]: { at: T0 - MIN, facts: facts({}, NEEDED), ok: true, tried: T0 - MIN } });
   await $.session.start(START);
   expect(await markNow($)).toEqual([
@@ -112,13 +112,16 @@ test("update needed is drawn bold in the castle's bright sand and the project's 
     { text: "update needed", color: "#e8d6b4", bold: true },
     { text: "- /sandcastle update", color: "#cdb894", bold: false },
   ]);
-  w.store.set(VERSION_KEY, { at: T0 - MIN, facts: facts({}, BEHIND), ok: true, tried: T0 - MIN });
+  w.store.set(VERSION_KEY, { at: T0 - MIN, facts: facts({}, BEHIND, { release: "0.18.0", checkedAt: "2026-10-13T05:12:00.000Z" }), ok: true, tried: T0 - MIN });
   await w.clock.advance(15000);
   expect(await markNow($)).toEqual([
     { text: "sandcastle 0.17.0 · 2 ready ·", color: "#cdb894", bold: false },
-    { text: "project on 0.16.0", color: "#927c5e", bold: false },
-    { text: "- /sandcastle run", color: "#cdb894", bold: false },
+    { text: "0.18.0 out", color: "#e8d6b4", bold: true },
+    { text: "- /sandcastle update", color: "#cdb894", bold: false },
   ]);
+  w.store.set(VERSION_KEY, { at: T0 - MIN, facts: facts({}, BEHIND), ok: true, tried: T0 - MIN });
+  await w.clock.advance(15000);
+  expect(await markNow($)).toEqual([{ text: "sandcastle 0.17.0 · 2 ready - /sandcastle run", color: "#cdb894", bold: false }]);
 });
 
 test("a clone past its release tag shows the release and how far past it", async ($, on) => {
@@ -233,6 +236,7 @@ test("a bare /sandcastle-mark reports the full kit version, the recorded release
   expect(report).toContain("Kit version: 0.17.0 +3 (1c4f46f, local changes), read 4 min ago.");
   expect(report).toContain("Project's recorded release: 0.16.0.");
   expect(report).toContain("Pending Upgrading notes:\n  - A new default.");
+  expect(report).toContain("Newest release: not known");
   w.store.set(VERSION_KEY, { at: T0 - 4 * MIN, facts: facts({}, SETTLED), ok: true, tried: T0 - 4 * MIN });
   expect((await $.command.run(MARK(""))).text).toContain("Pending Upgrading notes: none held.");
   // Hidden, the report still tells the facts held, and reads nothing.

@@ -1172,13 +1172,19 @@ itself, in the status view's castle, glyphs and colours:
   project has Upgrading notes it has not had, or no usable update record on this machine (one set
   up before records existed, or on another machine), the line says so and points at the update:
   `sandcastle 0.17.0 · 4 ready · update needed - /sandcastle update`, `update needed` in brighter
-  sand and bold. When the project's recorded release is older than the kit's and nothing is
-  pending, a quiet note names it and the call to action stays `/sandcastle run`: `sandcastle
-  0.17.0 · 4 ready · project on 0.16.0 - /sandcastle run`. The version and the project's state come
-  from `sandcastle --version --json`, which also works outside a project and is read like the
-  queue: in the background, on the same ten-minute schedule and triggers (the end of a
+  sand and bold. When a newer release of the kit is tagged on its remote, that comes first:
+  `sandcastle 0.16.0 · 4 ready · 0.17.0 out - /sandcastle update` (only when the newest release is
+  newer than the kit's own release; a clone past its tag counts). The line says nothing about the
+  project while it is current, whatever release it last updated at. The version, the newest
+  release and the project's state come from `sandcastle --version --json`, which also works
+  outside a project and is read like the queue: in the background, on the same ten-minute schedule and triggers (the end of a
   `/sandcastle update` turn drops the hint), never in a project that is not set up or while the
-  mark is hidden. The count comes from `sandcastle queue --json`, read in the background and
+  mark is hidden. The newest release is the highest `vX.Y.Z` tag that `git ls-remote --tags` finds
+  on the kit checkout's `origin` (never a fetch, no prompt, killed at 10 seconds), kept machine-wide
+  under the kit's cache directory: a good read holds six hours, a failed one is tried again after an
+  hour, and a failure shows no release rather than the last one. `"updateCheck": false` in your
+  [personal settings](#personal-settings) stops the read, and `sandcastle doctor` names the release
+  too, in an `info` line. The count comes from `sandcastle queue --json`, read in the background and
   cached once per project in the mod's store, shared by every Claude Code session on the machine:
   at most one tracker read per project every 10 minutes while nothing changes, plus one when a run
   of the project, or one the session follows, ends and one when you use `/sandcastle` (it may just have labelled tickets). A
@@ -1196,8 +1202,9 @@ itself, in the status view's castle, glyphs and colours:
   - With no argument it says whether the mark is shown, hidden (here or machine-wide) or
     dismissed, and the cached count with its age, so a stale count can be told from an empty
     queue. It also reports the full kit version (the commit and local changes too), the release
-    this project last updated at and the Upgrading notes it has not had, or that none are held -
-    the facts last read, even while the mark is hidden. Any other argument prints the usage line.
+    this project last updated at, the Upgrading notes it has not had (or that none are held) and
+    the newest release with when it was checked - the facts last read, even while the mark is
+    hidden. Any other argument prints the usage line.
 
   The choices are kept in the mod's store under the project root: on your machine only, across a
   restart, and never in the repository. The machine-wide `idleMark` switch stays in your personal
@@ -1241,9 +1248,12 @@ all of it. The mod:
   it does it through the kit, never itself. It makes none while an entry under 10 minutes old
   stands, except when you use `/sandcastle` and again when that turn ends (triage labels tickets
   in between);
-- in the same cases, runs `sandcastle --version --json` there for the kit version and the
-  project's update state, with the same 20 second timeout and one entry per project in its store.
-  A few local `git` commands run inside it, and nothing reaches the network;
+- in the same cases, runs `sandcastle --version --json` there for the kit version, the project's
+  update state and the kit's newest release, with the same 20 second timeout and one entry per
+  project in its store. The kit, not the mod, looks the newest release up: `git ls-remote --tags` on
+  the kit checkout's `origin`, at most once in six hours, off with `"updateCheck": false`. A few
+  local `git` commands run inside it, and that lookup is the only thing in it that reaches the
+  network;
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -1414,11 +1424,12 @@ naming the file, and every run asks before it bills API credits ([Run](#-run)). 
 | `maxSandboxes`, `maxGates` | `6`, `2` | Machine-wide limits across all projects ([Concurrency](#-concurrency)); `SANDCASTLE_MAX_*` overrides them |
 | `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
 | `herdr.clickHint` | `"auto"` | `"ctrl"` or `"cmd"`: the key the status view's hint names for a click on a ticket, in place of the one sensed from your terminal (`"auto"`); `SANDCASTLE_CLICK_HINT` overrides it ([The Herdr plugin](#the-herdr-plugin)). `herdr` holds no other key |
+| `updateCheck` | `true` | `false` stops `sandcastle doctor` and the idle mark looking up the kit's newest release (`git ls-remote --tags` on the kit checkout's `origin`, at most once in six hours; nothing is fetched) |
 | `idleMark` | `true` | `false` turns off the idle mark the Claude Code mod draws between runs, in every project ([The Claude Code mod](#-the-claude-code-mod)) |
 | `keepWarm` | `true` | `false` stops the session that started a run keeping its prompt cache warm while the run is live, in every project, and beats a project's `keepWarm: true`. A refresh request reads the cached conversation at about 0.1x the input price; a cold restart re-reads it at the full price, so leave it on unless you would rather not spend the allowance |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
-A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit, has an `idleMark` or a `keepWarm` that is not `true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint that names both keys.
+A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit, has an `idleMark`, a `keepWarm` or an `updateCheck` that is not `true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint that names both keys.
 
 ### 🐳 The image's agent versions
 

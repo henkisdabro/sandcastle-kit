@@ -2487,18 +2487,40 @@ cached version read (`versionRead`) and the time.
 `sandcastle · N ready - /sandcastle run` shows N only while the last good read is under `COUNT_MS`
 (an hour) old, else the bare mark.
 The version facts are `sandcastle --version --json` (`src/upgrading.ts`'s `versionFacts`: `kit`
-`{ version, release, past }`, `newestRelease` - null until the kit reads one, and the mark says
-nothing of it yet - and `project`: null when the git root of the working directory has no
-`.sandcastle/config.ts` plain file, else `{ recorded, release, pendingNotes }`, `recorded` false for
+`{ version, release, past }`, `newestRelease` - `{ release, checkedAt }` or null, below - and
+`project`: null when the git root of the working directory has no `.sandcastle/config.ts` plain file, else `{ recorded, release, pendingNotes }`, `recorded` false for
 no usable update record and `release` null when a usable record names none; plain `--version` is
 unchanged).
 With them the name carries the kit's release plus `+N` for a clone N commits past its release's own
 tag (`sandcastle 0.16.0+3`; the commit and local changes only in the `/sandcastle-mark` report), and
-one hint may follow the count: `update needed` (notes not had, no record or an unreadable one; bold
-in `SAND.top`, the call to action `/sandcastle update`) before `project on X` (the recorded release
-is numerically older than the kit's, `0.10.0` newer than `0.9.0`, with nothing pending;
-`SAND.muted`, the call to action stays `/sandcastle run`, none with no ready ticket) before the
-version alone.
+one hint may follow the count, the first that holds: `N out` (the newest release is numerically newer
+than the kit's own release, `0.10.0` newer than `0.9.0`, a clone past its tag included; bold in
+`SAND.top`, the call to action `/sandcastle update`), else `update needed` (notes not had, no record
+or an unreadable one; the same bold, the same call to action), else the version alone.
+The project's recorded release is never drawn (a muted `project on X` once was: it read as "this
+project runs an older kit" when it meant "last updated at X, nothing to do"); only the bare
+`/sandcastle-mark` report names it, and the newest release with when it was checked.
+The newest release is `newestRelease` in `src/upgrading.ts`, not the mod's: the highest exact `vX.Y.Z`
+tag in `git ls-remote --tags origin` of the kit checkout (`releaseOut` compares it with the kit's
+release; doctor prints it as an `info` line).
+The read is never a fetch and never waits on a person: `GIT_TERMINAL_PROMPT=0`, ssh in batch mode
+(the person's `GIT_SSH_COMMAND`, else `ssh`, plus `-o BatchMode=yes`), `SIGKILL` at 10 seconds, its
+output in a temp file because a remote helper the kill leaves behind would hold a pipe open.
+It runs only when the kit is the top of its own checkout and has an `origin` (`ls-remote --get-url`,
+which applies `insteadOf`); otherwise null.
+The answer is cached machine-wide in `KIT_CACHE/newest-release/<hash>.json`, keyed by the kit's real
+directory and `origin`'s URL, so a second clone or a moved remote shares no answer: a good read holds
+six hours (`NEWEST_FRESH_MS`), a failure is retried after one hour (`NEWEST_RETRY_MS`) and never
+sooner, and a failure gives null - never the last good release, which the remote may no longer
+show.
+A cache that does not parse, or holds a value of the wrong shape, counts as none, and one dated in
+the future (a clock that moved) is read again.
+`"updateCheck": false` in the personal `config.json` gives null before any of it (a known key in
+`MACHINE_KEYS`; only `false` stops the read, and doctor's machine-wide settings check reports a value
+that is not a boolean, as for `idleMark`).
+`test/hermetic-env.ts` and `test/parent-watch.ts` set `GIT_ALLOW_PROTOCOL=file` for tests, so no
+test's `doctor` or `--version --json` reaches a remote; `test/newest-release.test.ts` puts a fake
+`git` ahead on `PATH`.
 The facts are read as the count is: `VersionEntry` (`afterVersionRead`, `parseVersionEntry`,
 `parseVersionFacts`) in one `$.store` key per project root (`version:<root>`), through `due` on the
 same `tried` rule and the same triggers - both reads see a trigger before either consumes it, so the
@@ -2508,8 +2530,8 @@ or a render, none in a project that is not set up, while the mark is hidden or w
 switch is off; a failed or garbled read keeps the last good facts, which are shown for an hour as
 the count is.
 The band draws each part as its own `Text` in a row (`TONES` in `register.tsx`), and
-`mod/tests/version.test.ts` holds the hooks, `test/idle-mark-version.test.ts` the text and
-`test/version-json.test.ts` the command.
+`mod/tests/version.test.ts` holds the hooks, `test/idle-mark-version.test.ts` the text,
+`test/version-json.test.ts` the command and `test/newest-release.test.ts` the lookup.
 The ready count: `readyIds(stdout)` takes `sandcastle queue --json` and returns the ids with an
 empty `blockedOn`, or undefined for anything that is not a list of such tickets (a failed read,
 never 0); `due(entry, now, trigger)` says to read when there is no entry, the last attempt (`tried`)

@@ -10,6 +10,9 @@
 // this process starts next.
 
 export {};
+// A kit process a test starts with an environment of its own never reaches a remote (the newest-release
+// lookup, src/upgrading.ts, runs `git ls-remote`): test/hermetic-env.ts does the same for the test process.
+if (process.env.SANDCASTLE_TEST_PARENT) process.env.GIT_ALLOW_PROTOCOL ??= "file";
 const testPid = Number(process.env.SANDCASTLE_TEST_PARENT);
 delete process.env.SANDCASTLE_TEST_PARENT;
 
