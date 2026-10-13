@@ -83,3 +83,30 @@ test("AGENTS.md's skill row names audit.md", () => {
   const row = agents.split("\n").find((l) => l.startsWith("| `skill/` |")) ?? "";
   assert.ok(row.includes("audit.md"), row);
 });
+
+test("the brief asks each lens whether it reached its cap, and the filing list and report say so", () => {
+  const flat = (text: string) => text.replace(/\s+/g, " ");
+  assert.match(block, /capReached/);
+  assert.match(block, /notFinished/);
+  assert.match(flat(block), /Give no count of findings beyond the cap/);
+  const steps = flat(outside);
+  const step9 = steps.match(/9\. \*\*Show the filing list\*\*.*?(?= 10\. \*\*)/)?.[0] ?? "";
+  const step11 = steps.match(/11\. \*\*Report\*\*.*/)?.[0] ?? "";
+  for (const [name, text] of [["step 9", step9], ["step 11", step11]]) {
+    assert.ok(text.includes("cap reached - coverage incomplete"), `${name} lacks the coverage line`);
+  }
+  assert.match(step11, /Say nothing of how many more findings/);
+});
+
+test("step 6 makes a bug ready only on a reachable trigger, a failure and a checked guard", () => {
+  const flat = audit.replace(/\s+/g, " ");
+  const step6 = flat.match(/6\. \*\*Classify each\*\*.*?(?= 7\. \*\*)/)?.[0] ?? "";
+  assert.ok(step6.length > 0, "no step 6");
+  assert.match(step6, /A bug finding is ready only when its evidence has three things/);
+  for (const part of ["trigger that can actually be reached", "observable failure", "nearest guard or caller"]) {
+    assert.ok(step6.includes(part), `step 6 lacks "${part}"`);
+  }
+  assert.match(step6, /fresh read-only reader where the harness has subagents.*, else to the user in step 7 as a keep-or-drop/);
+  assert.match(step6, /never goes to the queue on its own/i);
+  assert.match(step6, /Do not send every finding to a refuter/);
+});
