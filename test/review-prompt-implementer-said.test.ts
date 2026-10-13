@@ -159,7 +159,7 @@ test("a review of an implementer that said nothing in prose gets an empty IMPL_S
   const review = h.passes.find((p) => p.name === `review-${ID}`);
   assert.ok(review, "the full review ran");
   assert.equal(review.args.IMPL_SAID, "");
-  assert.doesNotMatch(filled(review.promptFile, review.args), /What the implementer said last/);
+  assert.doesNotMatch(filled(review.promptFile, review.args), /# What the implementer said/, "no heading over nothing");
 });
 
 test("the review after a repair is narrow and is not shown the message, and the head record keeps it", async () => {
