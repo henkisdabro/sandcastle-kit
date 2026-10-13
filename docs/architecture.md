@@ -254,9 +254,13 @@ fails rather than looping.
 The time parked inside a pass is that step's `waitMs` (the step line's `ms` and the ticket's usual
 time leave it out, as for a gates-slot wait) and is added to `waited` once, by `timed`.
 No wait for a machine-wide sandbox slot is a ticket's: its worker leased the slot before it took the
-ticket (slot first), so the per-ticket summary line (`ticketTime`) is the ticket's own time and the
-first `setup` line carries no slot wait; the run's waits are `createSlotWaits`'
-(`test/slot-wait-timings.test.ts`).
+ticket (slot first), so the first `setup` line carries no slot wait; the run's waits are
+`createSlotWaits`' (`test/slot-wait-timings.test.ts`).
+The per-ticket summary line (`ticketTime`) labels three figures: `work 19m + 8m waiting, landing 12m`.
+Work is `took` less `waited`, the waiting is `waited`, and the landing is the landing's elapsed
+(its own wait for a gates slot included), kept per ticket from the landing port's `timed` callback
+and shown only for a ticket that merged.
+A conflicted ticket's resolve wait is in none of the three.
 A sent-back ticket's resolve wait, which also comes before the pipeline, is handed in as
 `at.resolveWaitMs`, and the first `setup` step takes it as `timed`'s `queuedMs`: `withQueued`
 (`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`, and not to `waited`, since `took`

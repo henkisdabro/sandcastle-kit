@@ -1283,13 +1283,23 @@ export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, 
   return typeof prior?.started === "number" ? { attemptStarted: at } : { started: at, attemptStarted: at };
 };
 
+const spanWords = (ms: number): string => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
+
 /**
- * The summary line's time for a ticket: its work. A wait for a machine-wide sandbox slot is no ticket's: a worker
- * leases its slot before it takes a ticket (slot first), so the wait is the run's (`createSlotWaits`).
+ * The summary line's time for a ticket, each part labelled so tickets compare: `work 19m + 8m waiting, landing 12m`.
+ * Work is the pipeline's time (`took`) less the waits inside it (`waited`: a gates slot, another ticket's fix, the
+ * plan's limit); the landing's own elapsed (its wait for a gates slot included) is only given for a ticket that
+ * landed. A wait for a machine-wide sandbox slot is no ticket's: a worker leases its slot before it takes a ticket
+ * (slot first), so the wait is the run's (`createSlotWaits`).
  */
-export const ticketTime = (workMs: number | undefined): string => {
-  const work = workMs === undefined ? "" : workMs < 60_000 ? `${Math.round(workMs / 1000)}s` : `${Math.round(workMs / 60_000)}m`;
-  return work && ` ${work}`;
+export const ticketTime = (tookMs: number | undefined, waitedMs = 0, landingMs?: number): string => {
+  const parts: string[] = [];
+  if (tookMs !== undefined) {
+    const waiting = Math.min(Math.max(waitedMs, 0), tookMs);
+    parts.push(`work ${spanWords(tookMs - waiting)}${waiting > 0 ? ` + ${spanWords(waiting)} waiting` : ""}`);
+  }
+  if (landingMs !== undefined) parts.push(`landing ${spanWords(landingMs)}`);
+  return parts.length ? ` ${parts.join(", ")}` : "";
 };
 
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
@@ -3216,6 +3226,8 @@ export const burndown = async (
 
   const slotWanted = { n: 0 };
   const landed = new Map<string, { files: string[]; commit: string; clean?: true }>();
+  // Each ticket's landing time, elapsed (its wait for a gates slot included), for the closing summary's per-ticket line.
+  const landingMs = new Map<string, number>();
   // Each landing's gate times, the record a red verify of the tree it gated is judged by (`likelyLoad`).
   const landingGateMs = new Map<string, Record<string, number>>();
   const ctx: LandContext = {
@@ -3254,7 +3266,11 @@ export const burndown = async (
     },
     reds,
     failedBefore,
-    timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
+    timed: (id, took, landed) => {
+      // A ticket's landings add up (a requeue lands again); the summary line shows them only for a ticket that merged.
+      landingMs.set(id, (landingMs.get(id) ?? 0) + took.elapsed);
+      writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind });
+    },
   };
 
   // A crash carries its ticket: the per-ticket line of a rejected pipeline would otherwise name none, nor its tokens.
@@ -3738,7 +3754,7 @@ export const burndown = async (
     const o = r.value;
     const state = final[o.issue]?.state === "red" ? "gate red" : (final[o.issue]?.state ?? o.status);
     const repaired = repairWords(o);
-    const time = ticketTime(took.get(o.issue));
+    const time = ticketTime(took.get(o.issue), waited.get(o.issue), final[o.issue]?.state === "merged" ? landingMs.get(o.issue) : undefined);
     const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
     console.log(`  ${ref(o.issue)} ${state.padEnd(10)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${gateLine(o.gates)}${time}  ${o.branch}${cost}`);
   }

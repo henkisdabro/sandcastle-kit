@@ -179,7 +179,7 @@ test("a throw in the timings writer costs a landing nothing", async () => {
 
 test("burndown wires the landing line to the landing port, as the landing gates are", () => {
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(source, /timed: \(id, took, landed\) => writeLandingLine\(timings, \{ run: runId, project: project\.name, issue: id, carried: carriedAtStart\.has\(id\) \}, took, \{ ok: didMerge\(landed\), kind: landed\.kind \}\)/);
+  assert.match(source, /timed: \(id, took, landed\) => \{[^}]*?writeLandingLine\(timings, \{ run: runId, project: project\.name, issue: id, carried: carriedAtStart\.has\(id\) \}, took, \{ ok: didMerge\(landed\), kind: landed\.kind \}\);\s*\},/);
 });
 
 // -- the landing line is no part of a ticket's pipeline time ------------------------------------------------------
