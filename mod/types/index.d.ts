@@ -13,10 +13,10 @@ declare module "claude-code" {
   interface PluginState {
     /**
      * `castle`: the frame of the castle the band draws, an index into run-state.ts's `CASTLE_FRAMES`.
-     * `mark`: the idle mark's line the band draws between runs (idle.ts's `markText`), null for none.
+     * `mark`: the idle mark's line the band draws between runs - the `parts` of idle.ts's `markText` - null for none.
      * `warm`: the cache refresh's row under the castle (keep-warm.ts's `band`), null for none.
      * `warmth`: what the refresh remembers across a reload (keep-warm.ts's `Warmth`).
      */
-    sandcastle: { view: View; castle: number; mark: string | null; warm: string | null; warmth: Warmth };
+    sandcastle: { view: View; castle: number; mark: { text: string; tone: "name" | "hint" | "muted" }[] | null; warm: string | null; warmth: Warmth };
   }
 }

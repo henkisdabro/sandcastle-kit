@@ -83,7 +83,7 @@ test("dismiss takes the count off at once and keeps the mark; the reply is text 
   expect(await markNow($)).toBe(READY(3));
   const out = await $.command.run(MARK("dismiss"));
   expect(out.text).toMatch(/^Dismissed: the count stays quiet until a ticket not ready now becomes ready\.\nIdle mark: shown without a count: dismissed/);
-  expect(out.text).toMatch(/\nCached count: 3 ready, read 1 min ago\.$/);
+  expect(out.text).toMatch(/\nCached count: 3 ready, read 1 min ago\.\n/);
   expect(await markNow($)).toBe("sandcastle");
   expect(w.store.get(MARK_KEY)).toEqual({ hidden: false, dismissed: ["1", "2", "3"] });
   expect(w.prompts).toEqual([]);
@@ -132,7 +132,7 @@ test("no argument reports the state, the count and its age; the machine switch i
   const w = world(on, ["1", "2"]);
   await $.session.start(START);
   w.store.set(READY_KEY, entry(7, ["1", "2"]));
-  expect((await $.command.run(MARK(""))).text).toBe("Idle mark: shown.\nCached count: 2 ready, read 7 min ago.");
+  expect((await $.command.run(MARK(""))).text).toBe("Idle mark: shown.\nCached count: 2 ready, read 7 min ago.\nKit version: not read yet.");
   w.settings = JSON.stringify({ idleMark: false });
   expect((await $.command.run(MARK(""))).text).toMatch(/^Idle mark: hidden on this machine \("idleMark": false in the personal settings\)\./);
   // A report changes nothing.
@@ -140,7 +140,7 @@ test("no argument reports the state, the count and its age; the machine switch i
   // A count too old to show is told from an empty queue.
   w.settings = "";
   w.store.set(READY_KEY, entry(90, ["1", "2"]));
-  expect((await $.command.run(MARK(""))).text).toBe("Idle mark: shown.\nCached count: 2 ready, read 1 h 30 min ago; too old to show.");
+  expect((await $.command.run(MARK(""))).text).toBe("Idle mark: shown.\nCached count: 2 ready, read 1 h 30 min ago; too old to show.\nKit version: not read yet.");
 });
 
 test("an unknown argument gets the usage line and changes nothing", async ($, on) => {

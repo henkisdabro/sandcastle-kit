@@ -2366,10 +2366,36 @@ left out, since the prompt is read when the session is idle and a later run may 
 (`test/mod-end-prompt.test.ts`) - and the band cut to its width - `test/mod.test.ts` holds both to
 `src/run.ts` and the status view) and `hooks/idle.ts` (pure, imports nothing: the idle mark, one row
 of sand above the prompt between runs in a set-up project. `markText(input)` is the line or
-undefined to clear it; its one input object is the set-up flag, the machine switch, the project's
-hidden flag, the dismissed ids, the cache `Entry` and the time.
+undefined to clear it, as `{ text, parts }` - the plain text and the same line as coloured parts
+(`name`, `hint`, `muted`; joined by a space they are the text); its one input object is the set-up
+flag, the machine switch, the project's hidden flag, the dismissed ids, the cache `Entry`, the
+cached version read (`versionRead`) and the time.
 `sandcastle · N ready - /sandcastle run` shows N only while the last good read is under `COUNT_MS`
 (an hour) old, else the bare mark.
+The version facts are `sandcastle --version --json` (`src/upgrading.ts`'s `versionFacts`: `kit`
+`{ version, release, past }`, `newestRelease` - null until the kit reads one, and the mark says
+nothing of it yet - and `project`: null when the git root of the working directory has no
+`.sandcastle/config.ts` plain file, else `{ recorded, release, pendingNotes }`, `recorded` false for
+no usable update record and `release` null when a usable record names none; plain `--version` is
+unchanged).
+With them the name carries the kit's release plus `+N` for a clone N commits past its release's own
+tag (`sandcastle 0.16.0+3`; the commit and local changes only in the `/sandcastle-mark` report), and
+one hint may follow the count: `update needed` (notes not had, no record or an unreadable one; bold
+in `SAND.top`, the call to action `/sandcastle update`) before `project on X` (the recorded release
+is numerically older than the kit's, `0.10.0` newer than `0.9.0`, with nothing pending;
+`SAND.muted`, the call to action stays `/sandcastle run`, none with no ready ticket) before the
+version alone.
+The facts are read as the count is: `VersionEntry` (`afterVersionRead`, `parseVersionEntry`,
+`parseVersionFacts`) in one `$.store` key per project root (`version:<root>`), through `due` on the
+same `tried` rule and the same triggers - both reads see a trigger before either consumes it, so the
+end of a skill's turn re-reads both - with its own one-at-a-time flag in `register.tsx`
+(`refreshVersion`), the kit command resolved for the queue, a 20 s timeout, never awaited by a look
+or a render, none in a project that is not set up, while the mark is hidden or while the machine
+switch is off; a failed or garbled read keeps the last good facts, which are shown for an hour as
+the count is.
+The band draws each part as its own `Text` in a row (`TONES` in `register.tsx`), and
+`mod/tests/version.test.ts` holds the hooks, `test/idle-mark-version.test.ts` the text and
+`test/version-json.test.ts` the command.
 The ready count: `readyIds(stdout)` takes `sandcastle queue --json` and returns the ids with an
 empty `blockedOn`, or undefined for anything that is not a list of such tickets (a failed read,
 never 0); `due(entry, now, trigger)` says to read when there is no entry, the last attempt (`tried`)
