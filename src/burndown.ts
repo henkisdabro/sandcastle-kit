@@ -1128,10 +1128,10 @@ const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${
 
 /**
  * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
- * it says one), the sent-back tickets waiting to resolve, then the run's wait for a sandbox slot (`slotWait`, when
- * its oldest open wait began; `createSlotWaits`) once it is longer than a typical issue takes (`typicalMs`; with
- * no history nothing is said, as the estimate says nothing then). The wait is the run's, not a ticket's: a worker
- * leases its slot before it takes a ticket. No line when none of these is in flight.
+ * it says one), the sent-back tickets waiting to resolve, the green tickets queued for the landing worker, then the
+ * run's wait for a sandbox slot (`slotWait`, when its oldest open wait began; `createSlotWaits`) once it is longer
+ * than a typical issue takes (`typicalMs`; with no history nothing is said, as the estimate says nothing then). The wait
+ * is the run's, not a ticket's: a worker leases its slot before it takes a ticket. No line when none of these is in flight.
  */
 export const heartbeatLine = (o: {
   now: number;
@@ -1139,6 +1139,7 @@ export const heartbeatLine = (o: {
   working: { ref: string; phase: string; since: number }[];
   landing?: { ref: string; phase?: string; since: number }[];
   resolving?: { ref: string; since: number }[];
+  queued?: { ref: string; since: number }[];
   slotWait?: number;
   typicalMs?: number;
 }): string | undefined => {
@@ -1147,6 +1148,7 @@ export const heartbeatLine = (o: {
   if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.queued?.length) parts.push(`queued to land: ${o.queued.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}`);
   return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
 };
@@ -3005,6 +3007,8 @@ export const burndown = async (
   // The heartbeat's other tickets in flight: a landing (its step, once it says one) and a sent-back ticket's wait to resolve (since it was told).
   const landing = new Map<string, { phase?: string; since: number }>();
   const resolving = new Map<string, number>();
+  // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
+  const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
@@ -3279,6 +3283,7 @@ export const burndown = async (
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
       landing: [...landing].map(([n, l]) => ({ ref: ref(n), ...(l.phase ? { phase: l.phase } : {}), since: l.since })),
       resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
+      queued: [...queuedToLand].map(([n, since]) => ({ ref: ref(n), since })),
       slotWait: slotWaits.since,
       typicalMs: typicalIssueMs(typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)))),
     });
@@ -3590,7 +3595,10 @@ export const burndown = async (
         view.finish(issue.id, word, check !== undefined || last());
       });
       // Its outcome now, not only at its landing: a branch waiting for landing had none for this run.
-      if (report.kind === "green") bookkeep(issue.id, () => ledger.ready(issue.id, value, heldAtLanding(value)));
+      if (report.kind === "green") {
+        queuedToLand.set(issue.id, Date.now());
+        bookkeep(issue.id, () => ledger.ready(issue.id, value, heldAtLanding(value)));
+      }
       // To the landing worker as it ends, not when the slowest pipeline does.
       return report;
     }
@@ -3621,6 +3629,7 @@ export const burndown = async (
   const landings: typeof landingPorts = {
     ...landingPorts,
     land: async (o, behind) => {
+      queuedToLand.delete(o.issue);
       landing.set(o.issue, { since: Date.now() });
       try {
         return await landingPorts.land(o, behind);
@@ -3657,6 +3666,7 @@ export const burndown = async (
       case "ended":
         // A wait the run's stop cut short is told no "resolve starts".
         resolving.delete(c.id);
+        queuedToLand.delete(c.id);
         // Its label refuses it, found as it would have started: that ticket only, never the run.
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
         // How each ticket's part in the run ended: the ledger records it.
