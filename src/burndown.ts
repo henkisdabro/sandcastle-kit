@@ -2823,10 +2823,12 @@ export const burndown = async (
   // (set once `slotWaits` exists): the closing summary names both when the run took far longer than its estimate.
   const shared = createSharedMeter();
   let sandboxWaitedMs = () => 0;
+  // The time the run spent paused (a person's `sandcastle pause`, or a usage pause), told by the pause handling as each pause ends.
+  let pausedMs = 0;
   const lostTimes = (): RunRecord => {
     const sharedMs = shared.ms();
     const sandboxWaitMs = Math.round(sandboxWaitedMs());
-    return { ...(sharedMs > 0 ? { sharedMs } : {}), ...(sandboxWaitMs > 0 ? { sandboxWaitMs } : {}) };
+    return { ...(sharedMs > 0 ? { sharedMs } : {}), ...(sandboxWaitMs > 0 ? { sandboxWaitMs } : {}), ...(pausedMs > 0 ? { pausedMs } : {}) };
   };
   // The ticket slots the run could use, over the time its tickets work at full demand: the record keeps their mean, not the start's share, which moves.
   const load = createLoadMeter(slots);
@@ -2851,7 +2853,7 @@ export const burndown = async (
     shared.sample(sharedBelowAsk(mine, otherRuns().length));
     // The live figures of a run that is not finished yet (a killed run never writes the end's): rewritten as they grow, so a partial summary has them.
     const lost = lostTimes();
-    if (lost.sharedMs !== shownLost.sharedMs || lost.sandboxWaitMs !== shownLost.sandboxWaitMs) {
+    if (lost.sharedMs !== shownLost.sharedMs || lost.sandboxWaitMs !== shownLost.sandboxWaitMs || lost.pausedMs !== shownLost.pausedMs) {
       shownLost = lost;
       run.update(lost);
     }
@@ -3473,6 +3475,10 @@ export const burndown = async (
 
   const pausing = createPauseHandling({
     record: (paused) => run.update({ paused }),
+    pausedFor: (ms) => {
+      pausedMs = ms;
+      run.update({ pausedMs });
+    },
     say: (line) => console.log(line),
     ref,
     releaseAwake,

@@ -873,7 +873,7 @@ the **Next step**. Under the header's `Settings:` line, a run that showed the pl
 it ended: `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going), and a cross-review run
 with a Codex reading adds `Codex plan usage at the end:` in the same shape. A run more than twice off its start
 estimate (or under half) gets an `Against the estimate:` line, and a slow one `Largest causes measured:` under it (time
-beside another run, slot waits, re-runs and repairs); `Likely flaky` lists tests that went red and then green, or that a
+paused, time beside another run, slot waits, re-runs and repairs); `Likely flaky` lists tests that went red and then green, or that a
 repair judged flaky, with the tickets they hit. `sandcastle report` prints it again at any time, with git and the blockers as they
 are now. Then:
 

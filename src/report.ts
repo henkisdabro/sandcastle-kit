@@ -74,6 +74,8 @@ export type Facts = {
   sharedMs?: number;
   /** Milliseconds in which a worker waited for a sandbox slot (the run record's `sandboxWaitMs`). */
   sandboxWaitMs?: number;
+  /** Milliseconds the run spent paused (the run record's `pausedMs`). */
+  pausedMs?: number;
   /** What this run's timings lines say of its re-runs and its slot waits (`timeLostFromTimings`). */
   timeLost?: TimeLost;
   /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
@@ -572,6 +574,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     ...(run.estimate && typeof run.estimate === "object" ? { estimate: run.estimate } : {}),
     ...(ms(run.sharedMs) ? { sharedMs: ms(run.sharedMs) } : {}),
     ...(ms(run.sandboxWaitMs) ? { sandboxWaitMs: ms(run.sandboxWaitMs) } : {}),
+    ...(ms(run.pausedMs) ? { pausedMs: ms(run.pausedMs) } : {}),
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
@@ -1028,7 +1031,7 @@ const SLOW = 2;
 /**
  * The run's time and tokens beside the estimate it was given, when either is more than twice off, and for a run that took
  * more than twice its estimate the largest causes the record can measure (a minute or more each, largest first): the time
- * held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. The estimate
+ * paused, held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. The estimate
  * comes from the record (a file in a repository): only finite positive figures count. None for a run still going, which
  * has neither its time nor its tokens yet.
  */
@@ -1056,6 +1059,7 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
   const causes = [
     ...(f.sharedMs ? [{ ms: f.sharedMs, text: `${span(f.sharedMs)} at a share below what it asked for, beside another run` }] : []),
     ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets` }] : []),
+    ...(f.pausedMs ? [{ ms: f.pausedMs, text: `${span(f.pausedMs)} paused (sandcastle pause or the plan's usage)` }] : []),
     ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
     ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
     ...(lost && lost.reruns + lost.repairs
@@ -1065,7 +1069,7 @@ const estimateLines = (f: Facts, end: string | undefined): string[] => {
         }]
       : []),
   ].filter((c) => c.ms >= 60_000).sort((a, b) => b.ms - a.ms);
-  lines.push(causes.length ? `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` : "No cause measured: no time beside another run, slot wait, re-run or repair reached a minute.");
+  lines.push(causes.length ? `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` : "No cause measured: no pause, time beside another run, slot wait, re-run or repair reached a minute.");
   return lines;
 };
 
