@@ -100,6 +100,31 @@ test("a re-run that is red again returns its failure, still inside the one slot"
   assert.deepEqual(mineInGates(), { locks: 0, waits: 0 });
 });
 
+test("a file the red run's gates rewrote is still reported after the re-run, which starts past the gate that rewrote it", async () => {
+  // lint rewrites a tracked file and passes, test goes red, and the re-run starts at test: lint never runs again.
+  let dirty = false;
+  let red = 1;
+  const box = {
+    exec: async (cmd: string) => {
+      if (cmd.startsWith("git status")) return { exitCode: 0, stdout: dirty ? " M src/fmt.ts\0" : "", stderr: "" };
+      if (cmd.startsWith("git checkout HEAD --")) {
+        dirty = false;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (cmd.includes("run-lint")) {
+        dirty = true;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (cmd.includes("run-tests")) return { exitCode: red-- > 0 ? 1 : 0, stdout: "", stderr: "boom" };
+      return { exitCode: 0, stdout: "", stderr: "" };
+    },
+  };
+  const result = await runGates(project, box, "fixture gates", false, {}, false, undefined, true);
+  assert.equal(result.failure, undefined);
+  assert.ok(result.rerunOf);
+  assert.deepEqual(result.rewrote, ["src/fmt.ts"]);
+});
+
 test("a green run makes no second pass", async () => {
   const box = sandbox("none", 0);
   const result = await runGates(project, box, "fixture gates", false, {}, false, undefined, true);

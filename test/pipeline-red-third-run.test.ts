@@ -251,6 +251,19 @@ test("three reds on different tests go to one repair pass that names the failing
   assert.deepEqual(o.flaked, [id("alpha"), id("beta")], "gamma and delta are still red when the repair starts");
 });
 
+test("a re-run that passes the red gate and goes red on a later one goes to repair, with no third run", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push(red("lint", specRed("alpha")));
+  h.regates.push(red("test", specRed("x"), ["lint"]));
+  h.gates.push(BOTH);
+  await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "repair", "gate", "review"]);
+  const repairs = h.passes.filter((p) => p.name === `repair-${ID}`);
+  assert.doesNotMatch(repairs[0].args.GATE_OUTPUT, /three times|run 1:/);
+});
+
 test("a third run red on the same test as the first does not list it as flaked", async () => {
   const h = harness();
   h.agents.impl = implementing("a.txt");

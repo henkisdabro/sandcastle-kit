@@ -9,6 +9,67 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **A repair agent can say a red gate is outside its branch**: it ends with
+  `<verdict>outside-branch</verdict>` and a `Flaky:` line, and the run gates once more instead of
+  spending another repair pass; the tests it names are kept on the ticket's run record. (#739)
+- **The start estimate is kept on the run record** as an `estimate` field (time and tokens, middle
+  and high, and the slots and tickets it priced), so `history.jsonl` sets it beside what the run
+  took. (#740)
+- **The closing summary flags a pass whose largest turn held more than 150,000 tokens of
+  context**, naming the pass and the peak; each pass's peak is recorded as `peakContext` on its
+  timings line and the ticket's run record. (#741)
+- **The closing summary says why a run overran its estimate**: it sets the run's time and tokens
+  beside the start estimate when they are more than twice off, names the largest causes it can
+  measure (time shared with another run, waits for sandbox and gates slots, re-runs and repairs),
+  and lists once each test that went red and then green, or that a repair judged flaky, with the
+  tickets it hit. (#733)
+- **`autoCompactWindow` in `.sandcastle/config.ts`** (a token count from 100,000 to 1,000,000) sets
+  when Claude agents in a sandbox compact their context, passed as
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; unset, Claude Code's own default applies. (#742)
+- **`sandcastle queue --lint` suggests splitting each ticket the estimate sizes as large** (6 or more
+  `Touches:` paths, or a body of 2,500 characters or more), naming its paths and body length. (#743)
+
+### Changed
+
+- **The start estimate sizes each ticket by its `Touches:` path count and body length** (small,
+  medium or large), prices it from the window's tickets of that size and names the signal in its
+  line; a ticket with no `Touches:` line is sized by its body alone. A model with fewer than five
+  tickets in the window is priced from its older runs, and the estimate says so. (#732)
+- **A full review is told to read a large diff a few files at a time**: a tool result over about
+  30 KB comes back to the agent as a 2 KB preview, and five of seven reviews in one run spent their
+  first call that way.
+- **A red landing gate is run once more, from the red gate on, before the ticket is requeued**, as
+  ticket gates already were. (#731)
+
+### Fixed
+
+- **An idle repair pass no longer earns the extra pass for a new failure**: with `repair: 1`, a pass
+  that commits nothing followed by a flake on another test ends the ticket red instead of running
+  a second pass. (#736)
+- **Beside another run, the sandbox slot a run keeps for landing no longer sits idle** while none of
+  its landings waits: another run takes it, and the owner's landing gets the next slot that frees.
+  (#729)
+- **A requeue after a red landing gate no longer blames landed tickets for failures the branch's own
+  gates had already shown** in the same run; the line says the failure was seen on the branch
+  before. (#731) A requeued ticket's gate runs, on a tree the base was merged into, are not counted
+  as the branch's own.
+- **The one re-run of a red ticket gate runs inside the gates slot of the run that went red**, so it
+  no longer queues behind other runs for minutes (#737); a file the red run's gates rewrote is
+  still reported after it.
+- **A ticket gate whose re-run goes red on different tests from the first red is treated as a
+  flake** and run a third time before any repair pass; red on the third run goes to repair with
+  the failing tests of all three runs named, and tests that went red then green are kept on the
+  ticket's run record as `flaked`. (#738) Only the same gate counts: a re-run that passed the red
+  gate and went red on a later one goes to repair as before.
+- **The run's output says which ticket crashed** (`#N CRASHED ...`, with its tokens), and a ticket
+  that ends in a merge conflict says with whom and in which files on its live line.
+- **The line for a conflicted ticket's resolve no longer claims nothing that shares its files is
+  left to land**: it says the tickets it waited for have landed or left the run.
+- **Three status-view tests that went red under load are steadied**: they waited for the first
+  frame, which can come before the view has read git or the run record. (#744, #753)
+
 ## [0.15.0] - 2026-10-12
 
 ### Added

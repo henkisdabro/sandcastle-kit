@@ -200,7 +200,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     progress.again?.(red.name);
     const rerun = await pass(startAt(red.name));
     // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
-    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs, ms: firstMs } };
+    // A file the first run's gates rewrote is reported too: the re-run starts at the red gate, so the gate that
+    // rewrote it may not run again, and the run's `gateRewrites` line would lose it.
+    const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? [])])];
+    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) };
   }, progress.wait, undefined, priority);
 };
 

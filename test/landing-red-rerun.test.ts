@@ -196,7 +196,8 @@ test("the tests a ticket gate run failed are kept, a re-run's green flake includ
 test("burndown hands the landing gate its re-run and keeps what the ticket gates failed", () => {
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   assert.match(source, /runGates\(box, id, "landing gate", true, how\?\.from, how\?\.rerunOnRed\)/);
-  assert.match(source, /if \(!priority\) rememberFailed\(failedBefore, id, gated\);/);
+  // A requeued ticket's gates run on the merged tree: what they fail is not the branch's own.
+  assert.match(source, /if \(!priority && !ledger\.requeuedAs\.has\(id\)\) rememberFailed\(failedBefore, id, gated\);/);
   assert.match(source, /^    failedBefore,$/m);
 });
 

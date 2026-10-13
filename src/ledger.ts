@@ -507,8 +507,9 @@ export const createLedger = (d: {
     // The landing worker's only voice in the run's output: without it, a run that spends its last
     // half hour landing prints nothing between the last agent pass and the closing summary.
     // A hold carries its reason: "needs a human" alone sent the reader to run.json for the paths.
-    // A conflict found before landing ends the ticket as finally as one at landing: said the same way.
-    if (view && (ending.kind === "landing" || ending.kind === "conflict")) d.say(`${d.ref(id)}: ${view.word}${record?.state === "held" && record.note ? `: ${record.note}` : ""}.`);
+    // A conflict found before landing ends the ticket as finally as one at landing: said the same way. A conflict
+    // carries its note too (with whom, which files): "merge conflict." alone left the reader to the closing summary.
+    if (view && (ending.kind === "landing" || ending.kind === "conflict")) d.say(`${d.ref(id)}: ${view.word}${(record?.state === "held" || record?.state === "conflict") && record.note ? `: ${record.note}` : ""}.`);
     // A hand-back is as final as a landing, and nothing else prints it before the closing summary. A
     // conflict-resolution hold (status `held`) is excluded: burndown prints that one as it holds it.
     if (ending.kind === "pipeline" && ending.outcome.status !== "held" && record?.state === "held") d.say(`${d.ref(id)}: ${record.note}.`);

@@ -104,8 +104,11 @@ for (const exit of EXITS) {
   test(`${exit.name} ends the view, hands the terminal back and leaves no docker, gh, git or sandcastle running`, needsScript, async () => {
     const view = await open({ env: exit.popup ? { SANDCASTLE_STATUS_KEYS: "1" } : {} });
     await view.frame();
-    // The check below would hold for a view that started nothing: it has asked docker, git and the queue by now.
-    assert.deepEqual([...new Set(started(fixture).map((p) => p.name))].sort(), ["docker", "git", "sandcastle"], "the view started what the check looks for");
+    // The check below would hold for a view that started nothing, so it waits until the view has asked docker, git
+    // and the queue: the first frame comes before the collectors' first readings, and under load before git (#744).
+    const names = () => [...new Set(started(fixture).map((p) => p.name))].sort();
+    await until("the view to ask docker, git and the queue", () => (names().join() === "docker,git,sandcastle" ? true : undefined), 15_000).catch(() => undefined);
+    assert.deepEqual(names(), ["docker", "git", "sandcastle"], "the view started what the check looks for");
     exit.act(view);
     const ended = await view.ended(exit.name, 10_000);
     assert.ok(exit.status.includes(ended.status), `ended ${ended.status}, expected ${exit.status.join(" or ")}`);
@@ -250,7 +253,10 @@ test("a drag of the pane ends in one repaint, at the final size, soon after the 
     assert.ok(took < 1500, `repainted ${Math.round(took)} ms after the last resize`);
     await pause(300);
     const widths = frames.seen.map((f) => widthOf(f.frame));
-    assert.deepEqual([...new Set(widths)], [70], `frames painted during and after the drag: ${widths.join(", ")}`);
+    // A frame at the starting width painted before the view saw the first resize is not a repaint of the drag (it
+    // came under load, #744); any frame from the first narrower one on must be the final size.
+    const from = widths.findIndex((w) => w !== 100);
+    assert.deepEqual([...new Set(widths.slice(from))], [70], `frames painted during and after the drag: ${widths.join(", ")}`);
   } finally {
     frames.stop();
   }

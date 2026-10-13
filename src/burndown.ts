@@ -1246,7 +1246,7 @@ export const createHoldRecord = (o: {
           return;
         }
         case "resolve starts":
-          o.say(`  ${o.ref(c.id)} resolves its conflict now: nothing that shares its files is left to land`);
+          o.say(`  ${o.ref(c.id)} resolves its conflict now: the tickets it waited for have landed or left the run`);
           run.ticket(c.id, { note: null });
       }
     },
@@ -2272,10 +2272,11 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
       // A re-run that went red on tests the first red did not name is another flake, not a failure to repair: the gate
       // runs a third time. Red again, on any tests, goes to repair with all three runs' tests named; unreadable test
-      // ids (a lint or type gate) keep the re-run's result as it was.
+      // ids (a lint or type gate) keep the re-run's result as it was. Only the same gate: a re-run that passed the red
+      // gate and went red on a later one (which never ran before) is a first red there, not a flake.
       let threeRuns: { red: Failure; note: string } | undefined;
       const second = gated.failure;
-      if (ctx.regate && second && earlier.length === 1 && second.exitCode !== 124 && disjointReds(earlier[0], second)) {
+      if (ctx.regate && second && earlier.length === 1 && earlier[0].name === second.name && second.exitCode !== 124 && disjointReds(earlier[0], second)) {
         const again = ctx.regate;
         const secondAt = gated.gates.findIndex((g) => g.name === second.name);
         console.log(`${ref(issue.id)}: ${second.name} red on different tests from the first red - a flake each time, gating once more with no repair pass`);
@@ -2283,7 +2284,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         earlier.push(second);
         gated = { ...third, gates: [...gated.gates.slice(0, Math.max(0, secondAt)), ...third.gates] };
         if (!gated.failure) console.log(`${ref(issue.id)}: ${second.name} red twice on different tests, then green on a third run - a flake, no repair pass`);
-        else threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
+        // The note says the gate ran three times: only true when the third run went red on that same gate.
+        else if (gated.failure.name === second.name) threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
       }
       // Kept on the ticket's record whatever follows (a repair may still fail): these went red and then green.
       const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure) : [];
@@ -3101,7 +3103,9 @@ export const burndown = async (
       log: gatesLog(project, id),
     }, priority, from, rerunOnRed);
     // A ticket's gates only (the landing's own red is judged against these): the first run's failures and a re-run's alike.
-    if (!priority) rememberFailed(failedBefore, id, gated);
+    // Not a requeued ticket's: its gates run on a tree the base was merged into, so a test a landed ticket broke
+    // there would read as the branch's own, and a second red at landing would name no ticket.
+    if (!priority && !ledger.requeuedAs.has(id)) rememberFailed(failedBefore, id, gated);
     for (const path of gated.rewrote ?? []) {
       if (gateRewrites.has(path)) continue;
       gateRewrites.add(path);
@@ -3233,7 +3237,8 @@ export const burndown = async (
     timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
   };
 
-  const results: PromiseSettledResult<Outcome>[] = [];
+  // A crash carries its ticket: the per-ticket line of a rejected pipeline would otherwise name none, nor its tokens.
+  const results: (PromiseSettledResult<Outcome> & { issue?: string })[] = [];
   const uncommittedWork = (o: Outcome) => keptFor(o, keptWorktrees);
   // A requeued ticket's second pipeline replaces its first in the per-issue lines.
   const dropFirstResult = (id: string) => {
@@ -3408,7 +3413,7 @@ export const burndown = async (
     const ended = result.status === "fulfilled" ? { ...result, value: handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
     // A requeued ticket's second pipeline replaces its first in the per-issue lines.
     dropFirstResult(issue.id);
-    results.push(ended);
+    results.push(ended.status === "rejected" ? { ...ended, issue: issue.id } : ended);
     // The state it ends on is the ledger's, as the scheduler tells the ending; written here are the
     // facts of the pipeline, and a green branch's wait for landing.
     if (ended.status === "fulfilled") {
@@ -3699,7 +3704,8 @@ export const burndown = async (
   const final = run.tickets();
   for (const r of results) {
     if (r.status === "rejected") {
-      console.log(`  CRASHED  ${String(r.reason).split("\n")[0].slice(0, 200)}`);
+      const cost = r.issue && spent.has(r.issue) ? `  tokens ${tokenLine(spent.get(r.issue)!)}` : "";
+      console.log(`  ${r.issue ? `${ref(r.issue)} ` : ""}CRASHED  ${String(r.reason).split("\n")[0].slice(0, 200)}${cost}`);
       continue;
     }
     const o = r.value;
