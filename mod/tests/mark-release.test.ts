@@ -113,3 +113,12 @@ test("a stored choice of today's form still holds its dismissal", async ($, on) 
   await $.session.start(START);
   expect(await markNow($)).toBe("sandcastle 0.17.0 · 0.18.0 out - /sandcastle update");
 });
+
+test("dismiss does not claim a dismissed release a newer tag has already ended", async ($, on) => {
+  // 0.16.0 was dismissed; the kit is now at 0.17.0, the newest tag, so nothing newer is out to record.
+  const w = world(on, ["1"], "0.17.0", [], { [MARK_KEY]: { hidden: false, dismissedRelease: "0.16.0" } });
+  await $.session.start(START);
+  const out = await $.command.run(MARK("dismiss"));
+  expect(out.text).toMatch(/^Dismissed: the count stays quiet until a ticket not ready now becomes ready\.\nIdle mark: shown without a count: dismissed until a new ticket becomes ready \(\/sandcastle-mark show ends it\)\./);
+  expect(w.store.get(MARK_KEY)).toEqual({ hidden: false, dismissed: ["1"], dismissedRelease: "0.16.0" });
+});

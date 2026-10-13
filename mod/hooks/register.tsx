@@ -17,7 +17,7 @@ import type { EngineInterface, Register } from "claude-code";
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
 import { activity, afterTurn, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
-import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Tone, type Trigger } from "./idle.ts";
+import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, heldRelease, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Tone, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
@@ -312,7 +312,7 @@ async function adopt($: EngineInterface, root: string) {
     seenAt(root).since = kept?.since;
   }
   await $.command.register({ name: "sandcastle-status", description: "Show the sandcastle run in this project, with no model turn", immediate: true });
-  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count, or hide or show the mark, with no model turn", argumentHint: "[dismiss|hide|show]", immediate: true });
+  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count and newer release, or hide or show the mark, with no model turn", argumentHint: "[dismiss|hide|show]", immediate: true });
 }
 
 /** The shared cache entry's key: one per project root, apart from the session entry under the bare root. */
@@ -465,7 +465,9 @@ async function choose($: EngineInterface, root: string, args: string): Promise<s
     if (idling) await place($, await mark($, root));
   }
   const input = await facts($, root);
-  const out = action === "dismiss" && input.dismissedRelease ? ` The ${input.dismissedRelease} release stays quiet until a newer one is tagged.` : "";
+  // A release kept from an earlier dismissal that a newer tag has ended is not named: the report below would contradict it.
+  const held = action === "dismiss" ? heldRelease(input) : undefined;
+  const out = held ? ` The ${held} release stays quiet until a newer one is tagged.` : "";
   const done = { dismiss: `Dismissed: the count stays quiet until a ticket not ready now becomes ready.${out}`, hide: "Hidden in this project until /sandcastle-mark show.", show: "Shown." };
   return action === "report" ? markReport(input) : `${done[action]}\n${markReport(input)}`;
 }

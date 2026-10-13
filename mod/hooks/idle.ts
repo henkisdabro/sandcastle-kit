@@ -103,6 +103,10 @@ export const releaseDismissalEnded = (dismissedRelease: string, facts: VersionFa
   return out !== undefined && newer(out, dismissedRelease);
 };
 
+/** The dismissed release while its dismissal holds, else undefined: what the report and the `dismiss` reply name. */
+export const heldRelease = (input: Pick<MarkInput, "dismissedRelease" | "versionRead" | "now">): string | undefined =>
+  input.dismissedRelease !== undefined && !releaseDismissalEnded(input.dismissedRelease, currentFacts(input.versionRead, input.now)) ? input.dismissedRelease : undefined;
+
 /** A tone of the mark's line: `name` the row's sand, `hint` the castle's bright sand in bold. */
 export type Tone = "name" | "hint";
 
@@ -220,7 +224,7 @@ const ago = (ms: number): string => {
 export const markReport = (input: MarkInput): string => {
   const { entry, now } = input;
   const dismissed = input.dismissed !== undefined && !dismissalEnded(input.dismissed, entry, now);
-  const release = input.dismissedRelease !== undefined && !releaseDismissalEnded(input.dismissedRelease, currentFacts(input.versionRead, now)) ? input.dismissedRelease : undefined;
+  const release = heldRelease(input);
   const state = !input.setUp
     ? "not shown: this project is not set up (no .sandcastle/config.ts)"
     : !input.idleMark
