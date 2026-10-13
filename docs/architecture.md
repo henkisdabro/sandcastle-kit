@@ -436,7 +436,9 @@ fences, tags, inline code and text in double quotes (a Markdown heading or a sho
 most six words, no sentence punctuation, no colon with words after it - is no sentence either; a
 bold sentence is read as prose, its bold markers dropped), become the pipeline result's `gap` (a
 sentence opening with `That`, `This`, `It`, `These`, `Those` or `Which` is quoted with the sentences
-before it in its paragraph, up to `UNGATED_MAX`; "remaining ..., which is correct", "found ... and
+before it in its paragraph, up to `UNGATED_MAX`, and a lead-in that names nothing itself ("One edge case I
+left alone.": no path, identifier, code span, quote, digit or proper name) is quoted with the sentences
+after it in its unit, within the same cap; "remaining ..., which is correct", "found ... and
 fixed" (unless a gap is named after the fix) and "left alone, as the ticket asked" are negated too),
 the ticket record's `gap`, and for a merged ticket (`gapLines` in `src/report.ts`) a
 `Worth a glance - the reviewer's prose may name a gap: #N "..."` line in the summary's header: it is

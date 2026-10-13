@@ -572,10 +572,25 @@ const sentencesOf = (text: string): { text: string; unit: number }[] => {
 // A sentence that points back at the one before it ("That is a coverage gap ..."): quoted alone, the person
 // has to open the review log to learn what "That" is.
 const ANAPHOR = /^(?:That|This|It|These|Those|Which)\b/;
+// A lead-in names nothing itself ("One edge case I left alone.", "Two things I did not change:"): no digit,
+// code span, quote, path or identifier (a dot, slash, underscore or camelCase inside a word) and no proper name
+// (a capital after the first word, "I" apart), and it ends the thought with a full stop or a colon. What it
+// leads into is the sentences after it, so quoted alone it tells the person nothing. A number word is no digit.
+const LEAD_IN_END = /[.:]$/;
+const NAMING = /[\d`"\u201c/\\_]|[a-z][A-Z]|\w\.\w/;
+const isLeadIn = (sentence: string): boolean => {
+  const text = sentence.trim();
+  if (!LEAD_IN_END.test(text) || NAMING.test(text)) return false;
+  return text
+    .split(/\s+/)
+    .slice(1)
+    .every((w) => !/^[A-Z]/.test(w.replace(/^[(*]+/, "")) || /^I(?:['\u2019]\w+)?\W*$/.test(w));
+};
 // The gap sentences of a reviewer's final message, when it filed none: a message with a `<followup>` or an
 // `<unmet>` line has said it the way the kit reads. Several sentences are one note. A gap sentence that opens
 // with an anaphor brings the sentences before it in its paragraph, as many as fit under UNGATED_MAX (the
-// nearest first), because what it points at is one of them.
+// nearest first), because what it points at is one of them. A gap sentence that is a lead-in (`isLeadIn`)
+// brings the sentences after it in its unit instead, in order, within the same size.
 const gapOf = (text: string): string | undefined => {
   if (followUpsOf(text).length || unmetOf(text)) return undefined;
   const all = sentencesOf(text);
@@ -583,6 +598,13 @@ const gapOf = (text: string): string | undefined => {
   all.forEach((s, i) => {
     if (!isGap(withoutCode(withoutQuotes(s.text)))) return;
     take.add(i);
+    if (isLeadIn(s.text)) {
+      let size = s.text.length;
+      for (let j = i + 1; j < all.length && all[j].unit === s.unit && size + all[j].text.length < UNGATED_MAX; j++) {
+        take.add(j);
+        size += all[j].text.length + 1;
+      }
+    }
     if (!ANAPHOR.test(s.text)) return;
     let size = s.text.length;
     for (let j = i - 1; j >= 0 && all[j].unit === s.unit && size + all[j].text.length < UNGATED_MAX; j--) {
