@@ -836,8 +836,8 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
 /**
  * Seconds per step (the 75th percentile of the window's steps of a phase), and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
  * `LANDING_GATES` is one ticket's landing gates summed, the median over the window's tickets that landed (a fast-forward,
- * with no gate, counts 0; a held, red or conflicted ticket, or one from before landings were timed, is no landing), and
- * absent when the window has no landing.
+ * with no gate, counts 0; a held, red or conflicted ticket, or one from before landings were timed, is no landing; a re-run
+ * inside the landing gate's slot, marked `rerun`, is left out), and absent when the window has no landing.
  */
 export const typicalTimes = (project: Project, extra: number[] = []) => {
   let lines: { project?: string; run?: string; issue?: unknown; phase?: string; ms?: number; ok?: boolean }[] = [];
