@@ -104,10 +104,15 @@ export const repairWords = (o: { repairs: number; idleRepairs?: number }) => {
   return `${o.repairs ? ` repaired=${o.repairs}` : ""}${idle ? ` ${idle === 1 ? "repair made" : `${idle} repairs made`} no change` : ""}`;
 };
 
+// A review that committed reworked the branch, and the implementer's record above can describe what it removed:
+// one line per review commit (short hash and subject) says so on the ticket.
+const reviewedLines = (log: readonly string[] | undefined) =>
+  log?.length ? `\n\nThe review changed the branch (${log.length} commit(s)):\n${log.map((l) => `- ${l}`).join("\n")}` : "";
+
 // The ticket closes on the local merge, so the comment says the work is not on
 // the remote yet: a repo that deploys on push has nothing live when this reads "done".
 export const closeComment = (
-  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
+  o: { branch: string; commits: number; repairs: number; reviewLog?: string[]; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
   gateNames: string,
   report?: string,
 ): string =>
@@ -117,13 +122,14 @@ export const closeComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
+  reviewedLines(o.reviewLog) +
   (overrunNoted(o.overrun) ? `\n\n${overrunLine(o.overrun!)}` : "") +
   (report ? `\n\n${report}` : "");
 
 // A merged ticket left open, an acceptance criterion undone: the comment says what, and that the
 // next run picks up the remainder (or whose decision it is). Posted after the schedule, as the comment on any ticket not closed.
 export const partlyDoneComment = (
-  o: { branch: string; commits: number; repairs: number; unmet: string; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
+  o: { branch: string; commits: number; repairs: number; reviewLog?: string[]; unmet: string; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
   gateNames: string,
   report?: string,
 ): string =>
@@ -134,6 +140,7 @@ export const partlyDoneComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
+  reviewedLines(o.reviewLog) +
   (overrunNoted(o.overrun) ? `\n\n${overrunLine(o.overrun!)}` : "") +
   (report ? `\n\n${report}` : "");
 
