@@ -563,7 +563,7 @@ export type Ending<G, O> =
    * Its branch no longer merged onto the base before its review or its gates (`conflict`), and it was not sent back:
    * a second conflict (`again` is the first, and `conflict.with` then names the tickets of both), or a run that starts
    * nothing. `unstarted`: it was sent back and its next attempt never began - `withdrawn` when the tracker took it back meanwhile.
-   * `wouldRetry`: a conflict the requeue-once rule would have sent back, had the run not stopped starting tickets (on a landing ending too).
+   * `wouldRetry`: a conflict the requeue-once rule would have sent back, had the run not stopped starting tickets (on a landing ending too); its `with` then names only its own tickets.
    */
   | { kind: "conflict"; outcome: O; conflict: Conflict; attempts: number; again?: Again; unstarted?: true; withdrawn?: string; wouldRetry?: true }
   /** `green` when the land port threw, rather than the pipeline. */
@@ -1224,10 +1224,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           if (requeue(g, got)) return;
           const id = g.issue;
           const again = first.get(id);
-          // A second collision names the tickets of both attempts.
-          const landed = again && (got.kind === "conflict" || got.kind === "red") ? { ...got, with: [...new Set([...again.with, ...got.with])] } : got;
+          const unretried = wouldRetry.has(id) && got.kind === "conflict";
+          // A second collision names the tickets of both attempts; one that would have been retried names only its own.
+          const landed = again && !unretried && (got.kind === "conflict" || got.kind === "red") ? { ...got, with: [...new Set([...again.with, ...got.with])] } : got;
           const closed = landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier";
-          await end(id, { kind: "landing", green: g, landed, attempts: attempts.get(id) ?? 1, ...(again && { again }), ...(wouldRetry.has(id) && landed.kind === "conflict" && { wouldRetry: true as const }) }, closed);
+          await end(id, { kind: "landing", green: g, landed, attempts: attempts.get(id) ?? 1, ...(again && { again }), ...(unretried && { wouldRetry: true as const }) }, closed);
         },
         stopped: (g) => {
           dealt++;
@@ -1407,9 +1408,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               for (const c of r.causes ?? []) stop.add(c);
               if (sendBack(t.id, { kind: "conflict", ...r.conflict }, { outcome: r.outcome, conflict: r.conflict })) return;
               const again = first.get(t.id);
-              // A second collision names the tickets of both attempts, as a landing's does.
-              const conflict = again ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
-              return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }), ...(wouldRetry.has(t.id) && { wouldRetry: true as const }) });
+              const unretried = wouldRetry.has(t.id);
+              // A second collision names the tickets of both attempts, as a landing's does; one that would have been retried names only its own.
+              const conflict = again && !unretried ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
+              return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }), ...(unretried && { wouldRetry: true as const }) });
             }
             case "crashed": {
               for (const c of r.causes ?? []) stop.add(c);

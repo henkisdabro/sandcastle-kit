@@ -563,7 +563,8 @@ state.
 - **Ports.** `attempt` (with `last()`, true once nothing more will start), `land`, `host` and `tell`.
 - **Requeue once.** A first conflict or red at landing gets a second attempt carrying what it
   collided with, unless the run starts nothing (a conflict the rule would have sent back ends with
-  `wouldRetry`, and its line says it would have been retried, not that it came after a requeue).
+  `wouldRetry`, and its line says it would have been retried, not that it came after a requeue,
+  naming only that conflict's tickets).
   The pipeline can requeue too: a branch that no
   longer merges onto the base, by git's own merge on the host after implement (before review) and
   again before the gates (`conflictBefore` in `createPipeline`; a conflict only in `generated` files

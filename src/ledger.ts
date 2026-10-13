@@ -410,7 +410,7 @@ const describeConflict = (e: Extract<TicketEnding, { kind: "conflict" }>, c: Con
     };
   const line = e.wouldRetry ? unretriedLine(conflict) : e.again ? againNoteOf({ kind: "conflict", ...conflict }, e.again.kind) : conflictLine(conflict);
   return {
-    record: { state: "conflict", note: e.again ? line : `no longer merges onto ${c.base}: ${line}`, files: conflict.files, ...(unstarted && { requeued: null }) },
+    record: { state: "conflict", note: e.again && !e.wouldRetry ? line : `no longer merges onto ${c.base}: ${line}`, files: conflict.files, ...(unstarted && { requeued: null }) },
     outcome: { kind: "conflict", ...(conflict.with.length ? { with: conflict.with } : {}), text: `merge conflict before landing: ${line}` },
     view: { word: "merge conflict", landed: false },
     tracker: comment(notLandedComment(c.report, { branch: o.branch, base: c.base, files: conflict.files, with: conflict.with })),

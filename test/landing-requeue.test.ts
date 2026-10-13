@@ -569,7 +569,7 @@ test("red, requeued, red again: no doubled 'red', and the comment names both att
   assert.match(r.seen.comment("2") ?? "", /since this branch forked, changing a file it also changed: #1, #3/);
 });
 
-test("a first red or conflict that is not requeued keeps the plain outcome lines", async () => {
+test("a first red that is not requeued keeps the plain outcome line, and a first conflict says it would have been retried", async () => {
   // 1 finds a usage limit before it begins; 2 and 3, already running, land after it and are not requeued.
   let found!: () => void;
   const limit = new Promise<void>((resolve) => (found = resolve));
@@ -753,4 +753,34 @@ test("a conflict after a real requeue keeps its wording, with no 'would have bee
   assert.equal(r.attempts.get("2"), 2);
   assert.equal(r.states["2"].note, "conflicted again with #1 after a requeue: shared.txt");
   assert.doesNotMatch(r.states["2"].note ?? "", /would have been retried/);
+});
+
+test("a second conflict that would have sent the ticket back once more, after the run stopped starting tickets, names only that conflict", async () => {
+  // 2 meets 1 and is requeued; while its second attempt runs, 3 lands and 4 finds a usage limit. The second try then
+  // conflicts with 3, which the resolve could not have merged: the rule would send it back again, but nothing starts.
+  const usage: StopCause = { kind: "usage limit", line: "usage 97% of the 5-hour window" };
+  const told = endings();
+  let secondBegun!: () => void;
+  const atSecond = new Promise<void>((resolve) => (secondBegun = resolve));
+  const r = await settle(["2", "3", "4"], { 2: [conflictWith1, { kind: "conflict", files: ["other.txt"], with: ["3"] }] }, () => ({
+    workers: 3,
+    onTell: told.tell,
+    attempt: async (t, { n }) => {
+      if (t.id === "2" && n === 2) {
+        secondBegun();
+        await told.of("4");
+      }
+      if (t.id === "3") await atSecond;
+      if (t.id === "4") {
+        await told.of("3");
+        return { kind: "not begun", why: usage };
+      }
+      return { kind: "green", green: waiting(t.id) };
+    },
+  }));
+  const line = "with #3: other.txt; would have been retried, but the run had stopped starting tickets";
+  assert.equal(r.seen.line("2"), `merge conflict: ${line}`);
+  assert.equal(r.written()["2"].note, line);
+  assert.deepEqual(r.written()["2"].files, ["other.txt"]);
+  assert.deepEqual(r.seen.outcomes.get("2")?.with, ["3"]);
 });
