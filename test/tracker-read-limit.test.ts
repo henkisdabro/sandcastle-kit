@@ -71,11 +71,13 @@ test("a tracker with no asynchronous read is read by get, and a throw is a rejec
   await assert.rejects(readTicketState({ get: () => { throw new Error("gh: HTTP 502"); } }, "9"), /HTTP 502/);
 });
 
-test("the run's reads before a ticket starts, before it lands and for the overrun warning go through the time-limited read", () => {
+test("the run's reads before a ticket starts, before it lands, for the overrun warning and for a head record's comments go through the time-limited read", () => {
   const burndown = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   const landing = readFileSync(new URL("../src/landing.ts", import.meta.url), "utf8");
   assert.match(burndown, /const withdrawal = async [^\n]*\n\s*const now = await readTicketState\(tracker, id\);/);
   assert.match(burndown, /\(await readTicketState\(tracker, o\.issue\)\)\.held/);
+  assert.match(burndown, /const ticketComments = async [^\n]*\n\s*try \{\n\s*return \(await readTicketState\(tracker, id\)\)\.comments;/);
+  assert.doesNotMatch(burndown, /tracker\.get\(id\)\.comments/);
   assert.match(landing, /const called = await withdrawal\(o\.issue\);/);
   assert.match(landing, /\(await readTicketState\(tracker, o\.issue\)\)\.body/);
   assert.doesNotMatch(landing, /tracker\.get\(/);
