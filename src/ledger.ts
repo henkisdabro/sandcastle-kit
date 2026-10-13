@@ -20,7 +20,7 @@ import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { agentFailure } from "./agents.ts";
 import { remainderNote } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
-import { promptExpansionLine } from "./errors.ts";
+import { githubServerError, promptExpansionLine } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine, unretriedLine } from "./landing.ts";
@@ -659,10 +659,15 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
 /**
  * The words of a run that stopped starting tickets because every one crashed expanding its prompt the same way: a
  * setup problem (a token that cannot see the repo, `gh` not signed in), not the tickets', so the error is quoted once
- * and `doctor --verify` is the next step - never the per-ticket "add a comment for the implementer".
+ * and `doctor --verify` is the next step - never the per-ticket "add a comment for the implementer". A GitHub 5xx is
+ * GitHub's failure, not the setup's: the tokens are fine, so it names the status and githubstatus.com instead.
  */
-export const setupProblemWords = (line: string): string =>
-  `a setup problem, not the tickets': their prompts could not be expanded - ${line}. Run \`sandcastle doctor --verify\``;
+export const setupProblemWords = (line: string): string => {
+  const status = githubServerError(line);
+  return status
+    ? `GitHub failed (HTTP ${status}), not the tickets' or the setup: their prompts could not be expanded - ${line}. Check githubstatus.com`
+    : `a setup problem, not the tickets': their prompts could not be expanded - ${line}. Run \`sandcastle doctor --verify\``;
+};
 
 /**
  * How a stop's cause reads in the notes of the tickets it left unstarted and in the closing
