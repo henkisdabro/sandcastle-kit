@@ -89,17 +89,22 @@ test("a failed open's clean-up waits for a host git write in progress, then remo
   const { exclusive, hold } = mutex();
   const path = join(root, ".sandcastle/worktrees/sandcastle-base-gates-3");
   let landing: ReturnType<typeof hold> | undefined;
+  // Resolved where the landing takes the mutex: under load the open has not got that far after one tick.
+  let landingHolds = () => {};
+  const holding = new Promise<void>((r) => (landingHolds = r));
   const open = openOrAbandon(
     project,
     "sandcastle/base-gates-3",
     async () => {
       // A landing takes the mutex while the container starts, and the start then fails.
       landing = hold();
+      landingHolds();
       throw new Error("container start timed out after 120 s");
     },
     exclusive,
   );
   const outcome = assert.rejects(open, /timed out/);
+  await holding;
   await tick();
   assert.ok(existsSync(path), "the clean-up has not run while the landing's write holds the mutex");
   landing!.release();
