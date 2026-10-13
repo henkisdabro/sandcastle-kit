@@ -121,18 +121,25 @@ test("a landing that gates spends its own claim with its priority wait, so a tic
 });
 
 test("a landing that gates ends only its own claim: another landing's still holds a ticket gate back", async () => {
+  // Older than the landing's own: a wait that spent the oldest claim would end this one, and the landing's end its own.
   const other = claimSlot("gates");
   releases.push(other.release);
-  let ticketHeld: boolean | undefined;
+  let ticket: ReturnType<typeof ticketGate> | undefined;
+  let heldWhileRunning: boolean | undefined;
   const kind = await land(async (_box, _id, _how, claim) => {
     await withSlot("gates", "landing gate", async () => {}, undefined, POLL, true, false, undefined, claim);
-    const ticket = ticketGate();
+    ticket = ticketGate();
     await sleep(150);
-    ticketHeld = ticket.held;
+    heldWhileRunning = ticket.held;
     return green;
   });
   assert.equal(kind, "merged");
-  assert.equal(ticketHeld, false);
+  assert.equal(heldWhileRunning, false);
+  // The landing has ended: the other landing's claim still stands, and the ticket gate goes only once it ends.
+  await sleep(150);
+  assert.equal(ticket!.held, false, "the other landing's claim ended with this landing");
+  other.release();
+  await until(() => ticket!.held, "the ticket gate's slot, once the other claim ends");
 });
 
 test("a landing that ends without gating releases its claim", async () => {
