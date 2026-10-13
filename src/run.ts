@@ -854,6 +854,8 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
   for (const l of steps) {
     const key = `${l.run}|${l.issue}`;
     if (l.phase === LANDING_GATES) {
+      // An in-slot re-run's line (`timingLines`) is the first run's repeat: a requeued ticket's second landing has no mark.
+      if ((l as { rerun?: unknown }).rerun === true) continue;
       landing.set(key, (landing.get(key) ?? 0) + l.ms!);
       continue;
     }

@@ -108,3 +108,14 @@ test("a three-run result writes three lines in order, the wait on the first only
   assert.deepEqual(lines.map((l) => l.pressureSome), [40, 30, 2]);
   assert.deepEqual(ticketPasses(text, "7", "run-1").map((p) => [p.phase, p.ok, p.red]), [["gates", false, ["test"]], ["gates", false, ["test"]], ["gates", true, undefined]]);
 });
+
+test("the re-run lines carry rerun: true and the first line does not", () => {
+  const redFail = (output: string) => ({ name: "test", command: "run-tests", exitCode: 1, output });
+  const one = { gates: [{ name: "test", pass: false, ms: 2000 }], failure: redFail("a"), failures: [], ms: 2000 };
+  const two = { gates: [{ name: "test", pass: false, ms: 2000 }], failure: redFail("b"), failures: [], ms: 2000, rerunOf: one };
+  const result = { gates: [{ name: "test", pass: true, ms: 1000 }], failures: [], rerunOf: two };
+  const pair = written(two, 4000).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(pair.map((l) => l.rerun), [undefined, true]);
+  const three = written(result, 5000).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(three.map((l) => l.rerun), [undefined, true, true]);
+});

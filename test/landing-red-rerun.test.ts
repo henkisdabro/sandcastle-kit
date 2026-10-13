@@ -232,3 +232,22 @@ test("the tests of all three runs of a ticket gate are kept, the first run's inc
   rememberFailed(kept, "9", { ...redOn("test", "z.test.ts"), rerunOf: { ...redOn("test", "y.test.ts"), rerunOf: redOn("test", "x.test.ts") } });
   assert.deepEqual([...kept.get("9")!].sort(), ["x.test.ts", "y.test.ts", "z.test.ts"]);
 });
+
+const { landingFlaked } = await import("../src/gates.ts");
+
+test("landingFlaked gives the red run's tests after the pipeline's entries when the in-slot re-run went green", () => {
+  const result: GateRun = { ...GREEN, rerunOf: redOn("test", "test/b.test.ts", "test/a.test.ts") };
+  assert.deepEqual(landingFlaked(result, ["test/a.test.ts", "test/old.test.ts"]), ["test/a.test.ts", "test/old.test.ts", "test/b.test.ts"]);
+  assert.deepEqual(landingFlaked(result, undefined), ["test/b.test.ts", "test/a.test.ts"]);
+});
+
+test("landingFlaked gives nothing for a red re-run, a green run, or a result with no re-run", () => {
+  assert.equal(landingFlaked({ ...redOn("test", "test/a.test.ts"), rerunOf: redOn("test", "test/a.test.ts") }, ["x"]), undefined);
+  assert.equal(landingFlaked(GREEN, ["x"]), undefined);
+  assert.equal(landingFlaked(redOn("test", "test/a.test.ts"), undefined), undefined);
+});
+
+test("burndown's landing gate port records what landingFlaked returns on the ticket", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  assert.match(src, /const flaked = landingFlaked\(result, run\.tickets\(\)\[id\]\?\.flaked\);\n\s+if \(flaked\) run\.ticket\(id, \{ flaked \}\);/);
+});
