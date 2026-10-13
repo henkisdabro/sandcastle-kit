@@ -1,56 +1,114 @@
-// The slot a run keeps for landing (src/pool.ts `keptForLanding`) is not idle while no landing of that run waits:
-// another run at or above its share may take it, which the owner's share sums count as the owner's own
-// (`heldWithKept`). The owner's landing then goes first when a slot frees. Six slots between four runs of demand 5
-// split 2, 2, 1, 1 (the earlier registrations get the odd slots), worked by hand. A pool of 3 split 2 + 1 is the same
-// stand-off: the run of share 2 holds one ticket and keeps one slot, the run of share 1 holds one and gave way.
-// No Docker, no model.
+// The one slot the pool keeps for landing (src/pool.ts `lastFreeSlot`, `shareable`): beside another run the shares
+// split the pool less one slot, a run's tickets use their whole share, and the slot left over is any run's landing's -
+// a ticket never takes the pool's last free sandbox slot while another run is live, and waits with the reason
+// `landing`; a landing may take it whatever its run holds against its share. Figures are worked by hand: six slots
+// between three runs of demand 5 split 2, 2, 1 of the five (the earlier registrations get the odd slots), between two
+// 3 + 2, between four 2, 1, 1, 1. No Docker, no model.
 //
 //   pnpm test:file test/kept-slot-idle.test.ts
 
 import assert from "node:assert/strict";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { cleanup, heldBy, mine, other, pool, steady, ticket, until, waiting } from "./pool-sim.ts";
+import { cleanup, end, heldBy, mine, other, pool, slots, steady, ticket, until, waiting } from "./pool-sim.ts";
 
 afterEach(cleanup);
 
-/** Runs a (share 2, one ticket, the kept slot idle), b (share 2, full), c (share 1, full) and this run (share 1). */
-const beside = () => {
-  other("a", { demand: 5, held: 1, since: 1 });
-  other("b", { demand: 5, held: 2, since: 2 });
-  other("c", { demand: 5, held: 1, since: 3 });
+/** Later than any run this test file starts: a registration whose `since` puts it after this run's. */
+const later = (n: number) => Date.now() + 60_000 + n;
+
+/** Runs a (share 2) and b (share 1) beside this run (share 2, the earliest): five tickets fit, the sixth slot is the landing's. */
+const three = (heldA: number, heldB: number) => {
   pool.joinPool("mine", 5, 5);
+  other("a", { demand: 5, held: heldA, since: later(1) });
+  other("b", { demand: 5, held: heldB, since: later(2) });
+  assert.deepEqual(pool.members().map((m) => m.share).sort(), [1, 2, 2]);
 };
 
-test("a run of share 1 takes the slot another run of share 2 keeps for landing while no landing of it waits", async () => {
-  beside();
-  const first = ticket("first", { keep: true });
-  await until(() => first.taken, "a ticket to take the run's one slot");
-  // Five of six held; the sixth is run a's kept slot, idle: a has no wait entry and nothing to land.
-  const second = ticket("second", { keep: true });
-  await until(() => second.taken, "a second ticket to take the idle kept slot");
-  assert.equal(mine(), 2);
-  assert.equal(heldBy(), "1,1,2,2");
-});
-
-test("run a's landing, once it waits, makes this run give way: the next freed slot is not taken", async () => {
-  beside();
+test("three runs of demand 5 on 6 slots: five tickets and one free slot, the next ticket waits to land and a landing takes the slot", async () => {
+  three(2, 1);
   const first = ticket("first", { keep: true });
   const second = ticket("second", { keep: true });
-  await until(() => first.taken && second.taken, "two tickets to take the run's slot and the idle kept one");
-  waiting("a", Date.now());
-  first.release();
-  await until(() => mine() === 1, "a slot to free");
+  await until(() => first.taken && second.taken, "two tickets to take this run's whole share");
+  assert.equal(heldBy(), "1,2,2", "five tickets are held");
+  // One slot is free and no run is below its share, but it is not a ticket's.
   const third = ticket("third", { keep: true });
-  await steady(() => !third.taken, "a ticket took the slot freed for run a's landing");
+  await steady(() => !third.taken, "a ticket took the pool's last free slot");
+  assert.deepEqual(third.why, ["landing"]);
+  const landing = ticket("land", { priority: true });
+  await until(() => landing.taken, "this run's landing to take the free slot");
+  assert.equal(mine(), 3, "a landing takes it though the run holds its share");
+  assert.equal(heldBy(), "1,2,3");
+  await steady(() => !third.taken, "a ticket took a slot beside the landing");
 });
 
-test("a run of share 1 still gives way to a run of share 2 that has a ticket waiting below its share", async () => {
-  beside();
+test("a ticket of a run at its share still never takes the last free slot while another run is live, and goes first once a ticket ends", async () => {
+  three(2, 1);
   const first = ticket("first", { keep: true });
-  await until(() => first.taken, "a ticket to take the run's one slot");
-  // Run a's ticket waits (visible: it is not kept back, a holds fewer than share - 1 tickets' worth): a is below its share.
-  other("a", { demand: 5, held: 0, since: 1 });
-  waiting("a", Date.now());
   const second = ticket("second", { keep: true });
-  await steady(() => !second.taken, "a ticket took a slot run a waits for below its share");
+  await until(() => first.taken && second.taken, "two tickets to take this run's whole share");
+  const third = ticket("third", { keep: true });
+  await steady(() => !third.taken, "a ticket took the pool's last free slot");
+  first.release();
+  await until(() => third.taken, "the third ticket to take the slot its own ticket freed");
+  assert.equal(mine(), 2);
+});
+
+test("a ticket takes the slots before the last free one: a run below its share keeps its whole share", async () => {
+  three(2, 0);
+  const first = ticket("first", { keep: true });
+  const second = ticket("second", { keep: true });
+  await until(() => first.taken && second.taken, "two tickets to take this run's whole share");
+  assert.equal(heldBy(), "2,2");
+  // Run b, below its share of 1, has a free slot to take; this run, at its share, leaves it.
+  const third = ticket("third", { keep: true });
+  await steady(() => !third.taken, "a ticket took a slot run b is below its share for");
+  assert.deepEqual(third.why, ["share"]);
+  other("b", { demand: 5, held: 1, since: later(2) });
+  await steady(() => !third.taken, "a ticket took the slot kept for landing once run b had its share");
+  assert.deepEqual(third.why, ["share", "landing"]);
+});
+
+test("a landing of this run takes the last free slot ahead of another run's younger landing, and waits for an older one", async () => {
+  three(2, 1);
+  const first = ticket("first", { keep: true });
+  const second = ticket("second", { keep: true });
+  await until(() => first.taken && second.taken, "two tickets to take this run's whole share");
+  // Run a holds its share and its landing has waited longer: it goes first, though a is not below its share.
+  waiting("a", Date.now() - 5000, true);
+  const landing = ticket("land", { priority: true });
+  await steady(() => !landing.taken, "this run's landing took the slot ahead of an older landing of run a");
+  // A younger landing of run a does not hold this one back.
+  end("a");
+  other("a", { demand: 5, held: 2, since: later(1) });
+  waiting("a", Date.now() + 60_000, true);
+  await until(() => landing.taken, "this run's landing to take the slot ahead of a younger landing");
+});
+
+test("a ticket's wait for the last free slot is not on file: it would hold another run's landing back and take nothing", async () => {
+  pool.joinPool("mine", 5, 5);
+  other("a", { demand: 5, held: 4, since: later(1) });
+  other("b", { demand: 5, held: 0, since: later(2) });
+  const first = ticket("first", { keep: true });
+  await until(() => first.taken, "a ticket to take a slot of the share");
+  // Five held and one free: this run holds 1 of its share of 2 and still may not take the last free slot.
+  const second = ticket("second", { keep: true });
+  await until(() => second.why.includes("landing"), "the second ticket to wait to land");
+  await steady(() => !second.taken && existsSync(join(slots, "waits")) && readdirSync(join(slots, "waits")).length === 0, "the kept-back ticket's wait entry is on file");
+});
+
+test("a run over its share after the split keeps every slot it holds and shrinks as its tickets end", async () => {
+  pool.joinPool("mine", 5, 5);
+  const held = [1, 2, 3, 4, 5].map((n) => ticket(`t${n}`, { keep: true }));
+  await until(() => held.every((t) => t.taken), "a run alone to take its demand");
+  other("a", { demand: 5, since: Date.now() - 1000 });
+  assert.deepEqual(pool.members().map((m) => m.share).sort(), [2, 3]);
+  await steady(() => mine() === 5, "a slot was taken back from a running ticket");
+  held[0]!.release();
+  held[1]!.release();
+  held[2]!.release();
+  await until(() => mine() === 2, "the run to shrink to its share as its tickets end");
+  const next = ticket("next", { keep: true });
+  await steady(() => !next.taken && mine() === 2, "a ticket took a slot above the share");
 });

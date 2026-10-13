@@ -1,7 +1,7 @@
-// The start estimate and the split line count the slot kept for landing (src/pool.ts `keptForLanding`):
-// beside another live run, a share of 2 or more gives the tickets share - 1 slots. `estimateSlots` and
-// `startLines` are pure; `burndown()` needs Docker, so a source match holds that it passes `!DRY_RUN`
-// (a dry run keeps nothing). No Docker, model or network.
+// The start estimate and the split line count the one slot the pool keeps for landing (src/pool.ts `shareable`,
+// `lastFreeSlot`): beside another live run the shares split the pool less that slot, so the whole share is the
+// tickets'. `estimateSlots`, `splitAtStart` and `startLines` are pure; `burndown()` needs Docker, so a source match
+// holds what it passes. No Docker, model or network.
 //
 //   pnpm test:file test/start-kept-slot.test.ts
 
@@ -23,26 +23,37 @@ const member: Member = { run: "other", project: "webshop", pid: 1, demand: 5, he
 const at = (share: number) => ({ share, free: 0 });
 const neighbour: Neighbour = { project: "webshop", registered: true, held: 2, demand: 2 };
 
-test("the estimate's slots are the share less the one kept for landing, from a share of 2", () => {
-  assert.equal(estimateSlots(5, at(3)), 2);
-  assert.equal(estimateSlots(5, at(2)), 1);
-  assert.equal(estimateSlots(5, at(3), false), 3, "a dry run keeps nothing");
-  assert.equal(estimateSlots(5, at(1)), 1, "a share of 1 is a ticket's");
+test("the estimate's slots are the whole share beside another run: the landing slot is outside it", () => {
+  assert.equal(estimateSlots(5, at(3)), 3);
+  assert.equal(estimateSlots(5, at(2)), 2);
+  assert.equal(estimateSlots(5, at(1)), 1);
+  assert.equal(estimateSlots(2, at(3)), 2, "never more than the run's workers");
   assert.equal(estimateSlots(5, undefined), 5, "a run alone keeps the machine's figure");
 });
 
-test("the start line says the tickets' share and the slot kept for landing", () => {
-  const [line] = startLines({ share: 2, free: 0 }, [neighbour]);
-  assert.match(line, /this run's share is 2, its tickets 1 at a time \(one slot is kept for landing\); it starts as webshop's tickets finish/);
-  assert.match(startLines({ share: 3, free: 0 }, [neighbour])[0], /share is 3, its tickets 2 at a time \(one slot/);
+test("the pool is split less one slot beside another run, and whole when the run is alone", () => {
+  // 6 slots, a run of demand 5 beside one of demand 5 (the other registered first): 3 + 2.
+  assert.equal(splitAtStart(5, [member]).share, 2);
+  assert.equal(splitAtStart(5, [{ ...member, since: 1_000_000_000_000_000 }]).share, 3);
+  // 3 slots between two runs of demand 5: 1 + 1 and one slot for landing.
+  assert.equal(splitAtStart(5, [{ ...member, held: 1 }], 3).share, 1);
+  assert.deepEqual(splitAtStart(5, [{ ...member, held: 1 }], 3), { share: 1, free: 1 });
+  assert.deepEqual(splitAtStart(5, []), { share: 5, free: 6 });
+  assert.equal(splitAtStart(5, [{ ...member, demand: 0, held: 0 }]).share, 5, "a run that wants and holds nothing keeps no slot back");
+  assert.equal(splitAtStart(5, [{ ...member, held: 0, since: 1_000_000_000_000_000 }], 1).share, 1, "a pool of one slot keeps none: no ticket would ever run");
 });
 
-test("the start line is as before at a share of 1 and in a dry run", () => {
-  assert.match(startLines({ share: 1, free: 0 }, [neighbour])[0], /this run's share is 1; it starts as/);
+test("the start line says the share and that one of the pool's slots is kept for any run's landing", () => {
+  const [line] = startLines({ share: 2, free: 0 }, [neighbour]);
+  assert.match(line, /this run's share is 2 \(one of the pool's slots is kept for any run's landing\); it starts as webshop's tickets finish/);
+  assert.match(startLines({ share: 1, free: 0 }, [neighbour])[0], /this run's share is 1 \(one of the pool's slots is kept for any run's landing\); it starts as/);
+});
+
+test("the start line of a dry run, which lands nothing, says nothing of a landing slot", () => {
   assert.match(startLines({ share: 2, free: 0 }, [neighbour], false)[0], /this run's share is 2; it starts as/);
 });
 
-test("the estimate beside another run counts the tickets' slots, not the whole share", () => {
+test("the estimate beside another run divides by the run's share", () => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-kept-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   const tok = { input: 0, cacheWrite: 0, cacheRead: 1_000_000, output: 10_000 };
@@ -51,14 +62,14 @@ test("the estimate beside another run counts the tickets' slots, not the whole s
     { issue: "1", phase: "gates", ms: 600_000 },
   ];
   writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), lines.map((l) => JSON.stringify({ project: "fixture", run: "r1", ...l })).join("\n") + "\n");
-  // Six wanted, a share of 3 beside the other run: two tickets at a time.
+  // Six wanted, a share of 2 beside the other run (5 slots split 3 + 2): two tickets at a time.
   const line = estimate({ root, name: "fixture" } as Parameters<typeof estimate>[0], 6, estimateSlots(6, splitAtStart(6, [member])));
   assert.match(line!, /for 6 ticket\(s\), 2 at a time/);
   rmSync(root, { recursive: true, force: true });
 });
 
-test("burndown() hands the estimate and the start line whether it is a dry run", () => {
+test("burndown() hands the start line whether it is a dry run, and the estimate the split", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(src, /estimateSlots\(workers, split, !DRY_RUN\)/);
+  assert.match(src, /estimateSlots\(workers, split\)/);
   assert.match(src, /, neighbours, !DRY_RUN, project\.name, project\.root\)\) console\.log\(line\)/);
 });
