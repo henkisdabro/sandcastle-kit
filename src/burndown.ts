@@ -918,10 +918,12 @@ export const createFollowUpBook = (
         named: o.named,
         triage: o.triage,
       });
-      if (settled.length) {
-        for (const s of settled) listed.set(titleKey(s.title), s);
-        keep();
-      }
+      // One met as a repeat of an issue already there (an open ticket awaiting triage) is a comment, not returned: left
+      // listed with no id, the summary would tell a person to file by hand the very duplicate the comment avoided.
+      const commented = unfiled.map((f) => titleKey(f.title)).filter((key) => seen.has(key) && !settled.some((s) => titleKey(s.title) === key));
+      for (const key of commented) listed.delete(key);
+      if (settled.length) for (const s of settled) listed.set(titleKey(s.title), s);
+      if (settled.length || commented.length) keep();
       if (!o.dryRun && !refuse) {
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
         const ready = repeats.filter((f) => placeOf(places, placeSeat(f, o.exists, o.named)));

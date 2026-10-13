@@ -109,3 +109,20 @@ test("the run hands the book the project's triage label", async () => {
   const { readFileSync } = await import("node:fs");
   assert.match(readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8"), /dryRun: DRY_RUN,\n\s+triage: project\.tracker\.triage,/);
 });
+
+test("a follow-up that became a comment on an open triage ticket leaves no unfiled entry in the run record", async () => {
+  // An entry with neither an id nor a failure reads in the closing summary as "not filed - file it by hand": the
+  // person would be told to file the very duplicate the comment avoided.
+  const { createFollowUpBook } = await import("../src/burndown.ts");
+  const r = recording(() => [FLAKY]);
+  let record: { title: string; id?: string; failed?: string }[] = [];
+  const book = createFollowUpBook(
+    { update: (f) => void (record = f.followUps) },
+    { tracker: r.tracker, dryRun: false, write: direct, exists: anyPath, triage: "needs-triage" },
+  );
+  book.push(named("Idle timer test is flaky under load in test/x.test.ts", "it asserts after one tick"));
+  book.push(named("Missing export in test/y.test.ts breaks the typecheck", "tsc fails"));
+  await book.file();
+  assert.deepEqual(r.comments.map((c) => c.id), ["744"]);
+  assert.deepEqual(record.map((e) => [e.title, e.id]), [["Missing export in test/y.test.ts breaks the typecheck", "801"]]);
+});
