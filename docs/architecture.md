@@ -275,6 +275,17 @@ cut to the VM's. `burndown()` resolves both once per turn and carries each on a 
 as `sandboxConfig` reads it: `project` is the ticket's from there, and `gateProject` goes to
 `sandboxOpener`, `requireGreenBase` and `gateBase`, so `src/gates.ts` and `src/land.ts` take no
 argument for it. `gateOnly` in `src/cli.ts` does the same for `gates` and `land`.
+A ticket's own gates run in its ticket sandbox, whose limit was fixed at its creation, so they would
+run at half the gate share with one gates slot: `runGates` (`src/gates.ts`) takes `progress.cpus`
+(both shares, handed in by `burndown()`'s `runGates` for a ticket's gates only) and, inside the gates
+slot's lease, `withContainerCpus` (`src/sandbox.ts`) raises the container to the gate share with
+`docker update --cpus` and puts it back to the ticket share when the lease ends - after a red, a
+throw or a timeout too, the in-slot re-runs inside the one raise.
+The container's id is the sandbox's own `hostname` (the kit holds no name for it), taken only when it
+reads as a container id: an agent can put its own `hostname` on the sandbox's PATH.
+Nothing is raised when `cpus: false` leaves no limit, or when the gate share is no larger than the
+ticket's (a numeric `cpus`, or `maxGates` above the concurrency).
+A failed read or update says one line and leaves the limit as it was; it never fails the gate.
 A new place that opens a gate-only sandbox takes the gate project, or its gates run on a ticket's
 share; `test/sandbox-cpus-commands.test.ts` runs both commands against a fake `docker` and reads the
 `--cpus` each container got.

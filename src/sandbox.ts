@@ -1028,6 +1028,52 @@ export const sandboxCpus = (
   return Math.min(ncpu, Math.max(2, Math.floor(ncpu / Math.max(1, sharers))));
 };
 
+/**
+ * Runs `run` with the sandbox's container limited to `cpus.gate`, and puts it back to `cpus.ticket` after, whatever `run`
+ * did. A ticket's gates hold a gates slot, so while they run the sandbox is one of at most `maxGates` suites at once and
+ * its share is the gate share, not the ticket share it was created with (`docker run --cpus` is fixed at creation).
+ * The kit holds no name for the container: its short id is the container's `hostname`, read through the sandbox's own
+ * exec. No limit to move (`cpus` unset, or the gate share no larger than the ticket's, which is a project's own `cpus`
+ * number or a pool whose gate share is the smaller) runs it as it is. A failed read or update says one line and leaves the
+ * limit as it was; it never fails `run`, and a limit that was not raised is not "put back".
+ */
+export const withContainerCpus = async <T>(
+  sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> },
+  cpus: { gate: number; ticket: number } | undefined,
+  run: () => Promise<T>,
+  say: (line: string) => void = console.log,
+): Promise<T> => {
+  if (!cpus || !(cpus.gate > cpus.ticket)) return run();
+  const set = async (id: string, n: number) => {
+    try {
+      await dockerAsync(["update", "--cpus", String(n), id]);
+      return true;
+    } catch (e) {
+      say(`  could not set the sandbox's CPU limit to ${n}: ${saidOf(e).split("\n")[0]}`);
+      return false;
+    }
+  };
+  let id = "";
+  try {
+    const r = await sandbox.exec("hostname");
+    // Read inside the sandbox, where an agent can put its own `hostname` on PATH: only a container id reaches the host's
+    // `docker update`, never another name or a flag.
+    id = r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
+  } catch {
+    /* said below */
+  }
+  if (!id) {
+    say("  could not read the sandbox's container id: its gates run at the ticket's CPU limit");
+    return run();
+  }
+  const raised = await set(id, cpus.gate);
+  try {
+    return await run();
+  } finally {
+    if (raised) await set(id, cpus.ticket);
+  }
+};
+
 /** The run's start line for the limits `sandboxCpus` chose: a ticket's sandbox, then a gate-only one when it differs. */
 export const cpusLine = (project: Pick<Project, "cpus">, ticket: number | undefined, gate: number | undefined) =>
   ticket === undefined
