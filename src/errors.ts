@@ -65,11 +65,23 @@ export const cutAtWord = (text: string, max = 160): string => {
 };
 
 /**
+ * The status code of a GitHub server failure (an HTTP 5xx) in a prompt-expansion line, undefined for anything else.
+ * `gh` words it `HTTP 502: Bad Gateway (https://...)`; a 5xx is GitHub's outage, not the setup's.
+ */
+export const githubServerError = (line: string): string | undefined => /\bHTTP (5\d\d)\b/.exec(line)?.[1];
+
+/**
  * Whether two prompt-expansion lines are the same failure: equal once the command (which names the ticket) and an
- * elapsed time are set aside. The command's own output stays: a 404 and a 500 are two failures.
+ * elapsed time are set aside. The command's own output stays: a 404 and a 500 are two failures. Every HTTP 5xx is
+ * one failure, whatever follows the status: a 502 and then a 504 are the same GitHub outage.
  */
 export const sameExpansionFailure = (a: string, b: string): boolean => {
-  const key = (line: string) => line.replace(/`[^`]*`/g, "``").replace(/\d+ms/g, "#ms");
+  const key = (line: string) =>
+    line
+      .replace(/`[^`]*`/g, "``")
+      .replace(/\d+ms/g, "#ms")
+      // From the status on: `gh` words the rest by the response (`502 Bad Gateway`, a JSON message, the URL called).
+      .replace(/\bHTTP 5\d\d\b.*$/s, "HTTP 5xx");
   return key(a) === key(b);
 };
 

@@ -26,7 +26,7 @@ import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
 import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf, withOpenList } from "./tracker.ts";
-import { OperatorError, sameExpansionFailure } from "./errors.ts";
+import { githubServerError, OperatorError, sameExpansionFailure } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
 import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunEstimate, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -1482,7 +1482,10 @@ export const render = (f: Facts, plain = false): string => {
   // Crashed alike expanding their prompt: the setup's fault, so no step asks for a comment on a ticket.
   const setupCrashed = f.setupProblem ? fixing.filter((id) => f.tickets[id].state === "crashed" && sameExpansionFailure(f.tickets[id].note ?? "", f.setupProblem!)) : [];
   if (f.setupProblem) {
-    next.push(`Fix the setup problem (above): run \`sandcastle doctor --verify\`, put right what it names, then \`sandcastle run\` again for ${list([...setupCrashed, ...skipped])} - the tickets themselves are fine.`);
+    const status = githubServerError(f.setupProblem);
+    const again = `\`sandcastle run\` again for ${list([...setupCrashed, ...skipped])} - the tickets themselves are fine.`;
+    // GitHub's own failure: the tokens are fine, so `doctor --verify` would send the person to check the wrong thing.
+    next.push(status ? `GitHub failed (HTTP ${status}, above): check githubstatus.com, and once it has recovered, ${again}` : `Fix the setup problem (above): run \`sandcastle doctor --verify\`, put right what it names, then ${again}`);
   }
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)) && !setupCrashed.includes(id));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
