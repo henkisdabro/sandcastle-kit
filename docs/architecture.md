@@ -2134,18 +2134,23 @@ matches the line; `OUTCOME_STATE` in `src/status-rows.ts` is a `Record<OutcomeKi
 `tsc` holds the status view to the kinds, both ways), log archive, status pane
 
 A carried branch's head record (`heads.json`) also keeps `comments`: the ticket's comment count,
-read from the tracker each time the pipeline writes `reviewed`, `green` or `repaired` (`noteHead`),
-so a comment an agent made during its pass is inside the count.
+read from the tracker just before a full review's pass starts and recorded with its `reviewed` write
+(`fullReview`), and by no other write.
+The gates, a repair, the re-review after a repair and the two narrow reviews (after a conflict
+resolution, after a base merge) keep the count the last full review recorded, so a person's comment
+posted during any of them is still past it at the next carry.
 At carry time a branch that would be land-only (`landOnlyHead`, `reviewedOnlyHead`) is told apart
 by `personCommentsSince`, in `src/ledger.ts` beside the comment texts it knows: the comments past
 that count that do not open with the kit's own fixed openings (`KIT_COMMENT`: "did not land",
-"held", "Named again", the merge comments) and are not a Markdown ticket file's `### <date> - sandcastle`
+"held", "Named again", the merge comments) or with `AGENT_COMMENT_MARKER` (`src/tracker.ts`, which the
+GitHub tracker's words - `SAY`, `RECORD`, `NOCHANGE`, `BLOCKED`, `LOST` - ask every agent comment to open with: an agent that drops it costs one
+unneeded full review, never a missed comment) and are not a Markdown ticket file's `### <date> - sandcastle`
 entry.
 Such a comment, which no reviewer has read, keeps the branch land-only for the implementer and the
 gates, but the full review (`fullReview` in the pipeline, which shows the comments) runs after any
 merge resolution, in place of the narrow review or none at all; the carried line says "a comment since
 its review - full review".
-The review writes the new count, so a comment is acted on once.
+The full review writes the new count, so a comment is acted on once.
 A record with no `comments` (written before the count was kept), or a tracker that cannot be read,
 never sends a branch to the full review.
 A Markdown ticket file keeps its comments in one section, so only a new `### ` entry in it counts.

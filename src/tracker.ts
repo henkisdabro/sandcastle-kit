@@ -22,6 +22,9 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { MANAGED_SETTINGS, sh, shAsync } from "./sandbox.ts";
 
+/** The words every comment an agent posts on a ticket opens with (the GitHub tracker's `words`): the kit's own, to `personCommentsSince`. */
+export const AGENT_COMMENT_MARKER = "Sandcastle agent:";
+
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
 
@@ -436,20 +439,22 @@ const github = (project: Project): Tracker => {
       }
     },
     words: {
-      LOST: "comment on the ticket that the sandbox's git record was lost",
       // Through container/gh-retry.sh: a GitHub 5xx or timeout is retried there, a 4xx fails at once.
       TICKET_VIEW: `!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}}\``,
       COMMENTS_VIEW: `# Comments on the ticket\n\n!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}} --comments\`\n\n`,
+      // Every comment an agent posts opens with the marker, as `SAY` below says why.
+      LOST: `comment on the ticket, opening with the words "${AGENT_COMMENT_MARKER}", that the sandbox's git record was lost`,
       RECORD:
-        "**Before you finish, comment on the ticket** with what you changed, the commit(s), and anything a\n" +
-        "human must still do. The ticket is closed automatically when your branch merges, so that comment is\n" +
-        "the record.",
-      NOCHANGE: "Comment on the ticket with the evidence.",
+        `**Before you finish, comment on the ticket**, opening with the words "${AGENT_COMMENT_MARKER}", with what you changed,\n` +
+        "the commit(s), and anything a human must still do. The ticket is closed automatically when your branch merges,\n" +
+        "so that comment is the record.",
+      NOCHANGE: `Comment on the ticket with the evidence, opening with the words "${AGENT_COMMENT_MARKER}".`,
       BLOCKED:
-        "Comment on ticket {{TICKET}} explaining what you\nlearned and what a human must decide, then add the labels:\n\n" +
+        `Comment on ticket {{TICKET}}, opening with the words "${AGENT_COMMENT_MARKER}", explaining what you\nlearned and what a human must decide, then add the labels:\n\n` +
         `\`\`\`\ngh label create ${project.tracker.held} --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label ${project.tracker.held} --remove-label {{KIT_LABEL}}\n\`\`\``,
       // A repair agent that was told only "in a comment" said it had no tool to post one, and skipped it.
-      SAY: "in a comment on the ticket (`gh issue comment {{ISSUE_NUMBER}} --body-file <file>`)",
+      // The marker is how `personCommentsSince` tells the agent's comment from a person's: one that drops it costs a full review.
+      SAY: `in a comment on the ticket (\`gh issue comment {{ISSUE_NUMBER}} --body-file <file>\`) that opens with the words "${AGENT_COMMENT_MARKER}"`,
     },
     dryRunNote:
       "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any ticket " +
