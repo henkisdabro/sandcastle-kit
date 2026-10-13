@@ -129,8 +129,8 @@ A red's failing tests are read from the gate's whole output, never from the clip
 tail is raised to 8 MiB (`EXEC_TAIL_CHARS`, `dockerOptions` in `src/sandbox.ts`) so Sandcastle's 64
 KiB default cuts nothing; a stream over half of that cap may have been cut, and so may a stdout
 whose lines `onLine` saw add up to more than came back (the tail drops whole lines and reports no
-drop, so one very long line can leave under half), so its run has no `tests` and is unreadable. `wholeTests` is what `flakedTests`, `disjointReds` and `threeRunsNote`
-read: `tests`, else the output's own ids when it holds no clip marker (a Failure built elsewhere),
+drop, so one very long line can leave under half), so its run has no `tests` and is unreadable.
+`wholeTests` is what `flakedTests`, `disjointReds` and `threeRunsNote` read: `tests`, else the output's own ids when it holds no clip marker (a Failure built elsewhere),
 else none, which keeps the unreadable meaning above (no `flaked` entry from a run before it, never
 disjoint).
 The other readers of `failingTests(output)` keep the clipped output.
