@@ -358,18 +358,39 @@ export type LandContext = {
   timed?: (issue: string, took: { elapsed: number; slotWaitMs: number }, landed: Landed) => void;
 };
 
-/** Keeps the test ids a ticket gate run failed (`LandContext.failedBefore`), its first run and its re-run alike: the run went red on them even where the re-run was green. */
-export const rememberFailed = <R extends Pick<GateRun, "failures" | "rerunOf">>(failedBefore: Map<string, Set<string>>, id: string, run: R): R => {
-  // Every run of the chain (`GateRun.rerunOf`): the third run's result, the re-run, the first red.
-  const failures: GateRun["failures"] = [];
-  for (let r: Pick<GateRun, "failures" | "rerunOf"> | undefined = run; r; r = r.rerunOf) failures.push(...r.failures);
-  for (const f of failures) {
-    const tests = failingTests(f.output, Infinity);
-    if (!tests.length) continue;
-    const known = failedBefore.get(id) ?? new Set<string>();
-    for (const t of tests) known.add(t);
-    failedBefore.set(id, known);
+// The head each test of a ticket's set went red on (undefined: the run had none), beside the set `LandContext.failedBefore` hands the landing.
+const wentRedOn = new WeakMap<Set<string>, Map<string, string | undefined>>();
+
+/**
+ * Keeps the test ids a ticket gate run failed (`LandContext.failedBefore`), its first run and its re-run alike: the run went red on them even where the re-run was green.
+ * A test stays only while nothing says the branch fixed it: a green run drops every test that went red on another head, a commit between the two - a repair -
+ * having fixed it, so a landed ticket that breaks it again is named. Red and then green on the same head (a re-run in the slot, a pass that committed nothing)
+ * is a flake and stays. A red run drops nothing: its test list can be clipped or cut short. A run with no head (`GateRun.head`) counts as the same head.
+ */
+export const rememberFailed = <R extends Pick<GateRun, "failures" | "rerunOf" | "failure" | "head">>(failedBefore: Map<string, Set<string>>, id: string, run: R): R => {
+  const known = failedBefore.get(id) ?? new Set<string>();
+  const heads = wentRedOn.get(known) ?? new Map<string, string | undefined>();
+  wentRedOn.set(known, heads);
+  failedBefore.set(id, known);
+  if (!run.failure) {
+    for (const t of known) {
+      const was = heads.get(t);
+      if (was !== undefined && run.head !== undefined && was !== run.head) {
+        known.delete(t);
+        heads.delete(t);
+      }
+    }
   }
+  // Every run of the chain (`GateRun.rerunOf`): the third run's result, the re-run, the first red.
+  for (let r: Pick<GateRun, "failures" | "rerunOf" | "head"> | undefined = run; r; r = r.rerunOf) {
+    for (const f of r.failures) {
+      for (const t of failingTests(f.output, Infinity)) {
+        known.add(t);
+        heads.set(t, r.head ?? run.head);
+      }
+    }
+  }
+  if (!known.size) failedBefore.delete(id);
   return run;
 };
 
