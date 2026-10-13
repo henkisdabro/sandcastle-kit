@@ -1,4 +1,4 @@
-// The full review's prompt quotes the last paragraph of the implementer's final message, so a caveat there
+// The full review's prompt quotes the implementer's whole final message, so a caveat there
 // ("I did not check that the new test fails without the change") reaches the reviewer, who would otherwise
 // take the tests' word for it. A narrow review is not shown it. The pipeline (`createPipeline`,
 // src/burndown.ts) runs over a temp repo with a scripted agent, on the prompts `renderPrompts` really
@@ -19,7 +19,7 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merges pass process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { createPipeline, closingParagraphOf, implSaidView } = await import("../src/burndown.ts");
+const { createPipeline, implementerSaidOf, implSaidView, IMPL_SAID_MAX } = await import("../src/burndown.ts");
 const { readHeads, renderPrompts } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
 const { fakeTracker } = await import("./fixtures.ts");
@@ -137,7 +137,7 @@ const implementing = (say: string) => (wt: string) => {
   return say;
 };
 
-test("the full review's rendered prompt quotes the implementer's closing paragraph, without its tags", async () => {
+test("the full review's rendered prompt quotes the implementer's whole final message, without its tags", async () => {
   const h = harness();
   h.agents.impl = implementing(MESSAGE);
   h.gates.push(GREEN);
@@ -147,7 +147,7 @@ test("the full review's rendered prompt quotes the implementer's closing paragra
   const prompt = filled(review.promptFile, review.args);
   assert.ok(prompt.includes(`> ${CAVEAT}`), `the caveat is quoted:\n${prompt.slice(prompt.indexOf("What the implementer said"))}`);
   assert.doesNotMatch(prompt, /\{\{IMPL_SAID\}\}/);
-  assert.ok(!prompt.includes("> Changed src/wait.ts"), "only the last paragraph is passed on");
+  assert.ok(prompt.includes("> Changed src/wait.ts and test/wait.test.ts."), "the earlier paragraphs are passed on too");
   assert.doesNotMatch(prompt, /^> .*<(promise|unmet|changelog)>/m, "the kit's own tags are not part of the quote");
 });
 
@@ -162,7 +162,7 @@ test("a review of an implementer that said nothing in prose gets an empty IMPL_S
   assert.doesNotMatch(filled(review.promptFile, review.args), /What the implementer said last/);
 });
 
-test("the review after a repair is narrow and is not shown the closing paragraph, and the head record keeps it", async () => {
+test("the review after a repair is narrow and is not shown the message, and the head record keeps it", async () => {
   const h = harness();
   h.agents.impl = implementing(MESSAGE);
   h.agents.repair = (wt) => {
@@ -176,14 +176,37 @@ test("the review after a repair is narrow and is not shown the closing paragraph
   assert.match(reviews[0].args.IMPL_SAID, /did not check/);
   assert.ok(!("IMPL_SAID" in reviews[1].args) || reviews[1].args.IMPL_SAID === "", "the narrow review is shown nothing of it");
   assert.doesNotMatch(filled(reviews[1].promptFile, reviews[1].args), /did not check/);
-  assert.equal(readHeads(h.root)[ID]?.implSaid, CAVEAT, "land-only and requeued attempts still have it");
+  // Land-only and requeued attempts still have it, in full and without the kit's tags.
+  assert.equal(readHeads(h.root)[ID]?.implSaid, `Added the wait report.\n\nChanged src/wait.ts and test/wait.test.ts.\n\n${CAVEAT}`);
 });
 
-test("closingParagraphOf takes the last prose paragraph, past tags and fenced blocks", () => {
-  assert.equal(closingParagraphOf(MESSAGE), CAVEAT);
-  assert.equal(closingParagraphOf("First.\n\nSecond line one\nsecond line two.\n\n```\ncode\n```\n<promise>COMPLETE</promise>"), "Second line one\nsecond line two.");
-  assert.equal(closingParagraphOf("<unmet>Left.</unmet>\n<promise>COMPLETE</promise>"), undefined);
-  assert.equal(closingParagraphOf(""), undefined);
+test("implementerSaidOf keeps every prose paragraph, past tags and fenced blocks", () => {
+  assert.equal(implementerSaidOf(MESSAGE), `Added the wait report.\n\nChanged src/wait.ts and test/wait.test.ts.\n\n${CAVEAT}`);
+  assert.equal(implementerSaidOf("First.\n\nSecond line one\nsecond line two.\n\n```\ncode\n```\n<promise>COMPLETE</promise>"), "First.\n\nSecond line one\nsecond line two.");
+  assert.equal(implementerSaidOf("<unmet>Left.</unmet>\n<promise>COMPLETE</promise>"), undefined);
+  assert.equal(implementerSaidOf(""), undefined);
+});
+
+test("a caveat in a mid-message bullet, followed by a status line, reaches the full review's prompt", async () => {
+  const bullet = "- I did not run the new tests against the old code.";
+  const h = harness();
+  h.agents.impl = implementing(`Fixed the wait.\n\nWhat I did not do:\n${bullet}\n- I ran the suite on Linux only.\n\nThe commit is abc1234, the working tree is clean, and I commented on the ticket.\n\n<promise>COMPLETE</promise>`);
+  h.gates.push(GREEN);
+  await h.attempt();
+  const review = h.passes.find((p) => p.name === `review-${ID}`);
+  assert.ok(review, "the full review ran");
+  const prompt = filled(review.promptFile, review.args);
+  assert.ok(prompt.includes(`> ${bullet}`), "the bullet is quoted");
+  assert.ok(prompt.includes("> The commit is abc1234, the working tree is clean"), "the status line is quoted too");
+  assert.match(prompt, /make that check yourself/);
+});
+
+test("a final message over the cap is cut at a word", () => {
+  const said = implementerSaidOf(`${"word ".repeat(1500)}\n\n<promise>COMPLETE</promise>`);
+  assert.ok(said);
+  assert.ok(said.length <= IMPL_SAID_MAX, `${said.length} characters`);
+  assert.ok(said.endsWith("word…"), "no word is left half-written");
+  assert.equal(implementerSaidOf("short message"), "short message");
 });
 
 test("implSaidView is empty with no paragraph, and quotes every line of one", () => {

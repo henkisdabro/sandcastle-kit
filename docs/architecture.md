@@ -506,9 +506,10 @@ The ticket ledger: one place that turns each ending (`src/schedule.ts`) into eve
   implementer's line as `{{IMPL_UNMET}}` - empty when there is none, and for a narrow review - and
   asks the reviewer to finish the criterion or restate it, so a line it does neither with is dropped
   from the ticket's leftovers; that prompt also shows the ticket's comments, as the implement prompt
-  does, and the last paragraph of the implementer's final message as `{{IMPL_SAID}}`
-  (`closingParagraphOf`, `implSaidView`), so a check the implementer says it did not make reaches
-  the reviewer; the paragraph is kept in the head record's `implSaid`, as `unmet` is) merges, but
+  does, and the implementer's whole final message as `{{IMPL_SAID}}`
+  (`implementerSaidOf`, `implSaidView`: the kit's tags and fenced blocks taken out, cut at a word to
+  `IMPL_SAID_MAX`, about 4,000 characters), so a check the implementer says it did not make reaches
+  the reviewer wherever the message puts it, not only in its last paragraph; the message is kept in the head record's `implSaid`, as `unmet` is) merges, but
   the ticket is neither closed nor released to its dependants, and the ledger's comment names the
   criterion.
   Its merge subject says `part of` the ticket, not `closes` it (`mergeSubject`), so `mergedEarlier`

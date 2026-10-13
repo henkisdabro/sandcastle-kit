@@ -632,7 +632,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
     // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
-    // And the closing paragraph of its final message, which the same prompts hold the place of.
+    // And its final message, which the same prompts hold the place of.
     if (kind === "review" || kind === "rereview" || kind === "remerge") for (const k of ["IMPL_UNMET", "IMPL_SAID"]) allowed.add(k);
     // Likewise the implementer's changelog lines, in the full review's changelog ask only (CHANGELOG_REVIEW).
     if (kind === "review") allowed.add("IMPL_CHANGELOG");
@@ -1414,7 +1414,7 @@ export type BranchHead = {
   red?: string;
   /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
   unmet?: string;
-  /** The last paragraph of the implementer's final message (`closingParagraphOf`), which a full review is shown: carried like `unmet`, for a land-only or requeued attempt. */
+  /** The implementer's final message (`implementerSaidOf`), cut at a word, which a full review is shown: carried like `unmet`, for a land-only or requeued attempt. */
   implSaid?: string;
   /** The gate results at `green`, for a ticket the kit holds after its gates: a land-only re-run runs none before it holds, and would report none. */
   gates?: Gate[];
