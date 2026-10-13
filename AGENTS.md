@@ -171,6 +171,10 @@ directory, never in a real project.
 - Every file write outside a temp dir targets the project root. Every shell call passes arguments
   as an array; an interpolated string is only for a script run inside the container.
 - British English in prose; hyphens with spaces ( - ) rather than em dashes.
+- Wrap prose in `docs/*.md` at about 100 columns, a sentence to start a line, and never keep a
+  paragraph on one line: a grep or diff of a 10,000-character line overflows an agent's tool output,
+  and two tickets that append to it conflict on it. `test/docs-line-length.test.ts` refuses a line
+  over 400 characters outside tables and fenced code.
 - Commit messages: `type: subject` (Conventional Commits), imperative, body says why.
 - A change made by hand goes on a `feature/`, `fix/`, `docs/` or `refactor/` branch cut from
   `origin/main`, and reaches main through a pull request the maintainer merges. A run's own
