@@ -459,7 +459,7 @@ test("each landing and each hand-back says its result in the run's output; a gat
   ledger.record("4", landing({ kind: "conflict", files: ["a"], with: [] }));
   ledger.record("5", pipeline({ status: "gate-failed" }));
   ledger.record("6", pipeline({ handedBack: true }));
-  assert.deepEqual(said, ["#1: merged.", "#4: merge conflict.", "#6: handed back - for a human."]);
+  assert.deepEqual(said, ["#1: merged.", "#4: merge conflict: a.", "#6: handed back - for a human."]);
 });
 
 test("a hold note prints the hand-back line; a conflict-resolution hold prints none (burndown does)", () => {

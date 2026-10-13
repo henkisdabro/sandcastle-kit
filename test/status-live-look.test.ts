@@ -28,6 +28,13 @@ const firstFrame = async (env: Record<string, string>) => {
   return (await session.frame()).raw;
 };
 
+/** The first frame with the run record read (not `loading…`): the view paints before its sources answer, and under load the first frame has no ticket of the record yet (#744). */
+const loadedFrame = async (env: Record<string, string>) => {
+  const session = await startSession(fixture, { env });
+  opened.push(session);
+  return (await session.frame(0, (f) => !f.text.includes("loading…"), 15_000)).raw;
+};
+
 const TRUECOLOR = /\x1b\[38;2;[0-9;]+m/;
 const PALETTE_256 = /\x1b\[38;5;[0-9]+m/;
 const LINK = /\x1b\]8;;file:\/\/[^\x1b]*\/\.sandcastle\/logs\/agent-issue-[^\x1b]*\.log\x1b\\/;
@@ -43,6 +50,6 @@ test(`the live view is coloured on a terminal, in 24-bit when COLORTERM says so,
 });
 
 test(`the live view links each ticket to its log with SANDCASTLE_LINKS=1, and not without`, needsScript, async () => {
-  assert.match(await firstFrame({ SANDCASTLE_LINKS: "1" }), LINK);
-  assert.doesNotMatch(await firstFrame({ SANDCASTLE_LINKS: "0" }), /\x1b\]8;/);
+  assert.match(await loadedFrame({ SANDCASTLE_LINKS: "1" }), LINK);
+  assert.doesNotMatch(await loadedFrame({ SANDCASTLE_LINKS: "0" }), /\x1b\]8;/);
 });

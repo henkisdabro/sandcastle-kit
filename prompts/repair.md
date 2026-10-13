@@ -15,7 +15,7 @@ without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD -- 
 Give that test run a time limit (the test runner's timeout option, or `timeout`): without the change
 it may hang. Run `git apply /tmp/p` as a command of its own, never chained after the test, so a hang
 or a move to the background cannot leave the worktree without your change. Never `pgrep -f` or
-`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. A long repeat in a `grep` pattern (`.{200}`, `.\{200\}`) fails as too complex: cut a long line with `cut -c`, `awk`, or `grep -o` and a short pattern.
+`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. A range repeat in a `grep` pattern (`.{0,300}`, `.\{0,300\}`) fails as too complex: cut a long line with `cut -c`, `awk`, or `grep -o` and a short pattern.
 
 # The ticket
 
@@ -50,6 +50,11 @@ see the whole set, and fix all of them.
   `git archive {{TARGET_BRANCH}} | tar -x -C <temp dir>`; the guard refuses `git worktree add`):
   it is not this branch's, so it gets no commit. Several branches fixing one test, each its own way,
   conflict at landing.
+  When you judge the failure outside this branch and commit nothing (a flaky test, a failure the
+  branch does not touch), also end your final message with `<verdict>outside-branch</verdict>` and, on
+  the line after it, `Flaky: ` and the failing tests you judge flaky, separated by `; `. The kit then
+  runs the gate once more and starts no further repair pass. Never write the verdict on a pass that
+  commits: it is ignored there.
 - **A problem outside the ticket is not lost in prose.** For each one you found - the failure from
   code this branch did not touch included - end your final message with a line of its own:
 

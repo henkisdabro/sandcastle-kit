@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -39,10 +39,10 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
+import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, ticketTokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -60,7 +60,7 @@ import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -95,9 +95,13 @@ type Outcome = {
   /** The repair passes that committed: one that changed nothing (the repairer judged the red a flake) is `idleRepairs`. */
   repairs: number;
   idleRepairs?: number;
+  /** The last repair pass committed nothing and ended with `<verdict>outside-branch</verdict>` (`repairVerdict`): its line and the tests it judged flaky. */
+  outside?: { line: string; tests: string[] };
   gates: Gate[];
   /** Test ids the last red gate named. */
   failing?: string[];
+  /** Test ids that went red on one run of a gate and green on a later one: a flake the re-runs ruled out. */
+  flaked?: string[];
   /** Its branch had work from an earlier run: landing takes it first. */
   carried?: boolean;
   /** Repaired green, but the review of the repair failed: held, never merged unreviewed. */
@@ -221,6 +225,19 @@ const tags = (text: string) => {
   const report = last("report");
   const blocked = last("blocked");
   return blocked && (!report || blocked.at > report.at) ? { blocked: blocked.text } : { report: report?.text };
+};
+
+/**
+ * A repair pass that judged the red outside its branch (`<verdict>outside-branch</verdict>`, as `prompts/repair.md` asks) and
+ * the line it gave: `Flaky: a; b`, the tests it judged flaky separated by semicolons (a test title may hold a comma). The last
+ * verdict tag counts; a line is the verdict's own without the tests too.
+ */
+export const repairVerdict = (text: string): { line: string; tests: string[] } | undefined => {
+  const at = [...text.matchAll(/<verdict>\s*outside-branch\s*<\/verdict>/g)].at(-1);
+  if (!at) return undefined;
+  const line = [...text.matchAll(/^[ \t]*Flaky:[ \t]*(.+)$/gm)].map((m) => m[1].trim()).filter((l) => l && l !== "...").at(-1);
+  const tests = (line ?? "").split(";").map((t) => t.trim()).filter(Boolean);
+  return { line: line ?? "", tests };
 };
 
 // A spent plan allowance fails every issue after it the same way, each one
@@ -1096,6 +1113,9 @@ export const heartbeatLine = (o: {
 export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "landing") => void, now: () => number = Date.now) => {
   const open = new Map<object, { since: number; why?: "share" | "landing" }>();
   let told: "share" | "landing" | undefined;
+  // The time with at least one wait open, closed waits summed: workers wait side by side, and their sum is not time the run lost.
+  let waitedTotal = 0;
+  let waitedSince = 0;
   const tell = () => {
     const whys = [...open.values()].map((w) => w.why);
     const waitsFor = whys.includes("share") ? "share" : whys.includes("landing") ? "landing" : undefined;
@@ -1106,6 +1126,7 @@ export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "lan
   return {
     begin() {
       const key = {};
+      if (!open.size) waitedSince = now();
       open.set(key, { since: now() });
       return {
         onWait(why: WaitReason) {
@@ -1115,10 +1136,14 @@ export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "lan
           tell();
         },
         end() {
-          open.delete(key);
+          if (open.delete(key) && !open.size) waitedTotal += now() - waitedSince;
           tell();
         },
       };
+    },
+    /** Milliseconds with a wait open so far, the one still open counted up to now. */
+    get waitedMs(): number {
+      return waitedTotal + (open.size ? now() - waitedSince : 0);
     },
     get since(): number | undefined {
       const all = [...open.values()].map((w) => w.since);
@@ -1221,7 +1246,7 @@ export const createHoldRecord = (o: {
           return;
         }
         case "resolve starts":
-          o.say(`  ${o.ref(c.id)} resolves its conflict now: nothing that shares its files is left to land`);
+          o.say(`  ${o.ref(c.id)} resolves its conflict now: the tickets it waited for have landed or left the run`);
           run.ticket(c.id, { note: null });
       }
     },
@@ -1290,8 +1315,13 @@ export type PipelineContext = {
   overrides: ReadonlyMap<string, Override>;
   /** Opens the ticket's sandbox on its branch: Sandcastle's `createSandbox` in a run. */
   open: (branch: string) => Promise<PipelineBox>;
-  /** One run of the project's gates in the ticket's sandbox. */
-  gate: (box: PipelineBox, id: string) => Promise<GateRun>;
+  /**
+   * One run of the project's gates in the ticket's sandbox. With `rerunOnRed` it runs a red gate again once, from that
+   * gate on, inside the same gates slot (the result is the re-run's, its `rerunOf` the run that went red): the
+   * pipeline then makes no `regate` call of its own, which would queue for a second slot. A port that ignores it is
+   * followed by `regate`.
+   */
+  gate: (box: PipelineBox, id: string, rerunOnRed?: boolean) => Promise<GateRun>;
   /**
    * The gates from the one named on (`from`) - that one, then each after it in config order - in the ticket's sandbox:
    * what an attempt's first red gets before any repair pass, in case it was only the machine being busy. A pipeline
@@ -2187,7 +2217,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             (ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
         );
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
-      } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+      } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
       // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
       // the tip looking reviewed with no gate result, and a re-run would only gate it again.
       if (gated.failure) noteHead(issue.id, branch, { red: sh("git", ["rev-parse", branch], project.root) });
@@ -2226,13 +2256,39 @@ export const createPipeline = (ctx: PipelineContext) => {
       // this runs before the loop, and only once.
       const first = gated.failure;
       const redAt = first ? gated.gates.findIndex((g) => g.name === first.name) : -1;
-      if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
+      // The red runs of the gate so far, before the one `gated` holds: the first red, then a red re-run's.
+      const earlier: Failure[] = [];
+      if (gated.rerunOf) {
+        // The gate port ran the re-run inside the slot of the run that went red (`rerunOnRed`).
+        if (gated.rerunOf.failure) earlier.push(gated.rerunOf.failure);
+        if (!gated.failure) console.log(`${ref(issue.id)}: ${gated.rerunOf.failure?.name ?? "a gate"} red, then green on a re-run - a flake, no repair pass`);
+      } else if (ctx.regate && first && first.exitCode !== 124 && !forced && attempts > 0 && redAt >= 0) {
         const again = ctx.regate;
         const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, first.name));
+        earlier.push(first);
         // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
         gated = { ...rerun, gates: [...gated.gates.slice(0, redAt), ...rerun.gates] };
         if (!gated.failure) console.log(`${ref(issue.id)}: ${first.name} red, then green on a re-run - a flake, no repair pass`);
       }
+      // A re-run that went red on tests the first red did not name is another flake, not a failure to repair: the gate
+      // runs a third time. Red again, on any tests, goes to repair with all three runs' tests named; unreadable test
+      // ids (a lint or type gate) keep the re-run's result as it was. Only the same gate: a re-run that passed the red
+      // gate and went red on a later one (which never ran before) is a first red there, not a flake.
+      let threeRuns: { red: Failure; note: string } | undefined;
+      const second = gated.failure;
+      if (ctx.regate && second && earlier.length === 1 && earlier[0].name === second.name && second.exitCode !== 124 && disjointReds(earlier[0], second)) {
+        const again = ctx.regate;
+        const secondAt = gated.gates.findIndex((g) => g.name === second.name);
+        console.log(`${ref(issue.id)}: ${second.name} red on different tests from the first red - a flake each time, gating once more with no repair pass`);
+        const third = await timed(issue.id, "gates", () => again(sandbox, issue.id, second.name));
+        earlier.push(second);
+        gated = { ...third, gates: [...gated.gates.slice(0, Math.max(0, secondAt)), ...third.gates] };
+        if (!gated.failure) console.log(`${ref(issue.id)}: ${second.name} red twice on different tests, then green on a third run - a flake, no repair pass`);
+        // The note says the gate ran three times: only true when the third run went red on that same gate.
+        else if (gated.failure.name === second.name) threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
+      }
+      // Kept on the ticket's record whatever follows (a repair may still fail): these went red and then green.
+      const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure) : [];
       let preRepair = sh("git", ["rev-parse", branch], project.root);
       const seen = new Set<string>();
       // The failures this ticket has already waited a fix for: a second wait on one would never end the loop's own repair.
@@ -2240,9 +2296,13 @@ export const createPipeline = (ctx: PipelineContext) => {
       let repairs = 0;
       // Passes that left the branch where it was: the repairer judged the red a flake, or could do nothing.
       let idle = 0;
+      // Whether the pass before committed: only then is a new failure an effect of the repair worth the extra pass.
+      let lastCommitted = true;
+      // The last pass committed nothing and said the red is outside the branch: one gate run, then no more passes.
+      let outside: { line: string; tests: string[] } | undefined;
       for (
         let red = gated.failure;
-        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || !seen.has(failureKey(red)));
+        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
         red = gated.failure
       ) {
         const failure = red;
@@ -2315,6 +2375,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         );
         forced = false;
         const beforePass = sh("git", ["rev-parse", branch], project.root);
+        let verdict: ReturnType<typeof repairVerdict>;
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
@@ -2329,7 +2390,8 @@ export const createPipeline = (ctx: PipelineContext) => {
               ...promptArgs,
               GATE_NAME: failure.name,
               GATE_COMMAND: failure.command,
-              GATE_OUTPUT: fence(failure.output),
+              // Only for the third run's own red: a later one is what a repair or a merged fix left, not a flake.
+              GATE_OUTPUT: (failure === threeRuns?.red ? threeRuns.note : "") + fence(failure.output),
             }),
             maxIterations: project.repair.maxIterations ?? 4,
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
@@ -2341,6 +2403,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           (fixedRun) => {
             const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
             if (said) addReport(issue.id, "Repair", said);
+            verdict = repairVerdict(fixedRun.stdout);
             return true;
           },
           (error) => {
@@ -2349,9 +2412,16 @@ export const createPipeline = (ctx: PipelineContext) => {
             return false;
           },
         );
-        if (sh("git", ["rev-parse", branch], project.root) === beforePass) idle++;
+        lastCommitted = sh("git", ["rev-parse", branch], project.root) !== beforePass;
+        if (!lastCommitted) idle++;
         if (!fixed) break;
+        // A tag on a pass that committed is ignored: the commits are the repair, and they are gated as ever.
+        outside = verdict && !lastCommitted ? verdict : undefined;
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        if (outside) {
+          console.log(`${ref(issue.id)}: the repair judged the red outside this branch${outside.line ? ` (${outside.line})` : ""} - one gate run, no further repair pass`);
+          break;
+        }
       }
       // Remembered across attempts and runs: a repair fixes what the gate named, often a file the ticket's
       // `Touches:` line has no reason to list, so landing leaves what only these commits changed out of its overrun.
@@ -2423,8 +2493,10 @@ export const createPipeline = (ctx: PipelineContext) => {
         reviewCommits,
         repairs: earlierRepairs + repairs - idle,
         idleRepairs: earlierIdle + idle,
+        ...(outside && { outside }),
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
+        ...(flaked.length ? { flaked } : {}),
         head,
         carried,
         unreviewed,
@@ -2677,13 +2749,15 @@ export const burndown = async (
   const slots = estimateSlots(workers, split, !DRY_RUN);
   // The path count of each ticket's `Touches:` line (0 with none): the estimate prices a ticket by its size, and each timings line records it for later runs.
   const touchPaths = new Map(candidates.map((i) => [i.id, parseTouches(i.body ?? "").length]));
+  // The length of each ticket's body: with the path count it sizes the ticket (`sizeOf`, src/run.ts), and each timings line records it.
+  const bodyChars = new Map(candidates.map((i) => [i.id, (i.body ?? "").length]));
   const chainIds = blockerChain(project, tracker, candidates);
-  const rough = estimate(
+  const rough = priceRun(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
-    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
+    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), bodyChars: candidates.map((i) => bodyChars.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
   );
-  if (rough) console.log(rough);
+  if (rough) console.log(rough.text);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${await keepAwake()}`);
   console.log(baseIsTheRunsLine(project.baseBranch));
@@ -2721,6 +2795,8 @@ export const burndown = async (
     stage: "starting",
     concurrency: slots,
     load: { concurrency: slots, tickets: candidates.length },
+    // The line printed above, as figures: history.jsonl then holds the estimate beside what the turn took.
+    ...(rough ? { estimate: rough.figures } : {}),
     ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),
@@ -2730,15 +2806,25 @@ export const burndown = async (
   // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
   // until the scheduler tells its own demand, for the base gates that come first.
   joinPool(project.name, CONCURRENCY, 1);
+  // The time held below the slots it asked for by another live run, and the time a worker waited for a sandbox slot
+  // (set once `slotWaits` exists): the closing summary names both when the run took far longer than its estimate.
+  const shared = createSharedMeter();
+  let sandboxWaitedMs = () => 0;
+  const lostTimes = (): RunRecord => {
+    const sharedMs = shared.ms();
+    const sandboxWaitMs = Math.round(sandboxWaitedMs());
+    return { ...(sharedMs > 0 ? { sharedMs } : {}), ...(sandboxWaitMs > 0 ? { sandboxWaitMs } : {}) };
+  };
   // The ticket slots the run could use, over the time its tickets work at full demand: the record keeps their mean, not the start's share, which moves.
   const load = createLoadMeter(slots);
   run.finishWith(() => {
     const concurrency = load.mean();
-    return { concurrency, load: { concurrency, tickets: candidates.length } };
+    return { concurrency, load: { concurrency, tickets: candidates.length }, ...lostTimes() };
   });
   // The run record's live values (not settings): what the run wants and its share of the pool now.
   // The share moves as other runs begin and end, so it is read again as well as on a demand change.
   let shown: { demand: number; share: number; cap?: number } = { demand: -1, share: -1 };
+  let shownLost: RunRecord = {};
   const poolValues = () => {
     // A finished record is the next turn's to replace: a timer writing to it would undo that.
     if (run.finished) return clearInterval(poolWatch);
@@ -2749,6 +2835,13 @@ export const burndown = async (
     // Counted only while the run asks for all the slots its startable tickets can use: the base gates (one slot) and the tail
     // where the last tickets finish are bound by demand, and would pull the figure down to what the run asked for, not what it ran at.
     load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN), mine.demand >= Math.min(CONCURRENCY, issues.length));
+    shared.sample(sharedBelowAsk(mine, otherRuns().length));
+    // The live figures of a run that is not finished yet (a killed run never writes the end's): rewritten as they grow, so a partial summary has them.
+    const lost = lostTimes();
+    if (lost.sharedMs !== shownLost.sharedMs || lost.sandboxWaitMs !== shownLost.sandboxWaitMs) {
+      shownLost = lost;
+      run.update(lost);
+    }
     if (mine.demand === shown.demand && mine.share === shown.share && mine.cap === shown.cap) return;
     // `cap` is set by `sandcastle cap` from outside: a lifted one is written as absent, which drops it from the record.
     shown = { demand: mine.demand, share: mine.share, cap: mine.cap };
@@ -2809,8 +2902,10 @@ export const burndown = async (
     let pressure: ReturnType<typeof pressureOf>;
     let red: string[] | undefined;
     let times: ReturnType<typeof stepTimes> | undefined;
+    let ended: unknown;
     try {
       const result = await fn();
+      ended = result;
       times = stepTimes(Date.now() - since, result);
       // Only the wait inside the step is in `took`; the slot wait before it never was (see `withQueued`).
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
@@ -2831,7 +2926,9 @@ export const burndown = async (
     } finally {
       // The pass is over, and its result carries its own figure (in `spent` above, with nothing in between that a
       // tick could interleave with): what its log showed stops counting as live. A pass that threw has none, and nothing of it is kept.
-      if (issue) usageWatch?.settle(issue);
+      // Its largest turn's context (`peakContext`) goes to the timings line and the ticket's record, even when the pass threw.
+      const peakContext = issue ? usageWatch?.settle(issue) : undefined;
+      if (issue && peakContext) run.ticket(issue, { peakContext: peakContexts(run.tickets()[issue]?.peakContext, phase, peakContext) });
       active.delete(issue);
       const m = model?.();
       const line = {
@@ -2839,14 +2936,17 @@ export const burndown = async (
         ...(carriedAtStart.has(issue) ? { carried: true } : {}),
         ...(remainderAtStart.has(issue) ? { remainder: true } : {}),
         ...(touchPaths.has(issue) ? { touches: touchPaths.get(issue) } : {}),
+        ...(bodyChars.has(issue) ? { bodyChars: bodyChars.get(issue) } : {}),
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
+        ...(peakContext ? { peakContext } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
         ...(peakMib ? { peakMib } : {}),
         ...pressureFields(pressure),
         ...(red?.length ? { red } : {}),
       };
-      appendFileSync(timings, JSON.stringify(line) + "\n");
+      // A red gate's re-run inside its slot is a line of its own after the red run's (`timingLines`).
+      appendFileSync(timings, timingLines(line, ended).map((l) => JSON.stringify(l) + "\n").join(""));
     }
   };
 
@@ -2969,10 +3069,12 @@ export const burndown = async (
   // the output as it arrives - a gate run is minutes of nothing otherwise.
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
   // `from`: a red gate's re-run, which starts at that gate (`gatesIn`'s own).
-  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string) => {
+  // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false) => {
+    const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
-    if (from !== undefined) appendFileSync(gatesLog(project, id), `# run again from ${from}: the first red gate's re-run, before any repair pass\n`);
+    if (from !== undefined) appendFileSync(gatesLog(project, id), rerunNote(from));
     let gateStarted = false;
     const gated = await gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => {
@@ -2993,8 +3095,17 @@ export const burndown = async (
         gateStarted = true;
         run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` });
       },
+      // The re-run inside the slot gets the section header and note a separate run would have had.
+      again: (name) => {
+        markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
+        appendFileSync(gatesLog(project, id), rerunNote(name));
+      },
       log: gatesLog(project, id),
-    }, priority, from);
+    }, priority, from, rerunOnRed);
+    // A ticket's gates only (the landing's own red is judged against these): the first run's failures and a re-run's alike.
+    // Not a requeued ticket's: its gates run on a tree the base was merged into, so a test a landed ticket broke
+    // there would read as the branch's own, and a second red at landing would name no ticket.
+    if (!priority && !ledger.requeuedAs.has(id)) rememberFailed(failedBefore, id, gated);
     for (const path of gated.rewrote ?? []) {
       if (gateRewrites.has(path)) continue;
       gateRewrites.add(path);
@@ -3014,6 +3125,7 @@ export const burndown = async (
       /* the record's note only: a throw here would end the wait it describes */
     }
   });
+  sandboxWaitedMs = () => slotWaits.waitedMs;
   // A run is silent for as long as its agents are, which for a review can be
   // half an hour. One line every five minutes says it is alive and where, and says when the run
   // has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.
@@ -3079,6 +3191,8 @@ export const burndown = async (
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
+  // The test ids each ticket's own gates failed in this run: a red landing gate that fails only these is not a landed ticket's doing (`ctx.failedBefore`).
+  const failedBefore = new Map<string, Set<string>>();
 
   const gateNames = project.gates.map((g) => g.name).join(", ");
 
@@ -3100,8 +3214,8 @@ export const burndown = async (
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
-    gate: async (box, id) => {
-      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true));
+    gate: async (box, id, how) => {
+      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed));
       const times = gateMs(result);
       if (times) landingGateMs.set(id, times);
       return result;
@@ -3119,10 +3233,12 @@ export const burndown = async (
       }
     },
     reds,
+    failedBefore,
     timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
   };
 
-  const results: PromiseSettledResult<Outcome>[] = [];
+  // A crash carries its ticket: the per-ticket line of a rejected pipeline would otherwise name none, nor its tokens.
+  const results: (PromiseSettledResult<Outcome> & { issue?: string })[] = [];
   const uncommittedWork = (o: Outcome) => keptFor(o, keptWorktrees);
   // A requeued ticket's second pipeline replaces its first in the per-issue lines.
   const dropFirstResult = (id: string) => {
@@ -3172,7 +3288,7 @@ export const burndown = async (
     prompts,
     overrides,
     open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }), host.exclusive),
-    gate: (box, id) => runGates(box, id),
+    gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>
       timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () =>
@@ -3297,7 +3413,7 @@ export const burndown = async (
     const ended = result.status === "fulfilled" ? { ...result, value: handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
     // A requeued ticket's second pipeline replaces its first in the per-issue lines.
     dropFirstResult(issue.id);
-    results.push(ended);
+    results.push(ended.status === "rejected" ? { ...ended, issue: issue.id } : ended);
     // The state it ends on is the ledger's, as the scheduler tells the ending; written here are the
     // facts of the pipeline, and a green branch's wait for landing.
     if (ended.status === "fulfilled") {
@@ -3310,6 +3426,8 @@ export const burndown = async (
           minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
           ...(tokens ? ticketTokens(tokens) : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
+          ...(value.flaked?.length ? { flaked: value.flaked } : {}),
+          ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
@@ -3586,7 +3704,8 @@ export const burndown = async (
   const final = run.tickets();
   for (const r of results) {
     if (r.status === "rejected") {
-      console.log(`  CRASHED  ${String(r.reason).split("\n")[0].slice(0, 200)}`);
+      const cost = r.issue && spent.has(r.issue) ? `  tokens ${tokenLine(spent.get(r.issue)!)}` : "";
+      console.log(`  ${r.issue ? `${ref(r.issue)} ` : ""}CRASHED  ${String(r.reason).split("\n")[0].slice(0, 200)}${cost}`);
       continue;
     }
     const o = r.value;

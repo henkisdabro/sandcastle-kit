@@ -77,7 +77,7 @@ test("a conflict before landing is sent back once; the second ends the ticket as
   assert.equal(r.record.state, "conflict");
   assert.equal(r.record.note, "conflicted again with #1 after a requeue: a.txt");
   assert.deepEqual(r.record.files, ["a.txt"]);
-  assert.deepEqual(r.said, ["#2: requeued after conflict with #1; it is tried again in this run.", "#2: merge conflict."]);
+  assert.deepEqual(r.said, ["#2: requeued after conflict with #1; it is tried again in this run.", "#2: merge conflict: conflicted again with #1 after a requeue: a.txt."]);
   assert.equal(r.counts.notLanded, 1);
 });
 

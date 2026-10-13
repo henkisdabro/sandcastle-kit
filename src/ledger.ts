@@ -48,6 +48,8 @@ export type Finished = {
   commits: number;
   head?: string;
   repairs: number;
+  /** The line of a repair's `<verdict>outside-branch</verdict>`: a red ticket says the repairer judged the failure not this branch's. */
+  outside?: { line: string };
   gates: Gate[];
 };
 
@@ -140,7 +142,7 @@ export const partlyDoneComment = (
 export const notLandedComment = (
   report: string | undefined,
   conflict: { branch: string; base: string; files: string[]; with: string[] } | undefined,
-  red?: { branch: string; base: string; with: string[]; gates: string[]; failing?: string[] },
+  red?: { branch: string; base: string; with: string[]; gates: string[]; failing?: string[]; seen?: boolean },
 ): string | undefined => {
   if (red) {
     return (
@@ -148,7 +150,9 @@ export const notLandedComment = (
       (red.failing?.length ? `Failing: ${red.failing.join(", ")}. ` : "") +
       (red.with.length
         ? `Landed on \`${red.base}\` since this branch forked, changing a file it also changed: ${red.with.map(refOf).join(", ")}. `
-        : "Red on the merged tree: no ticket landed since this branch forked changed a file it changed. ") +
+        : red.seen
+          ? "Every failing test was already failing on this branch's own ticket gates in this run, so no landed ticket is named. "
+          : "Red on the merged tree: no ticket landed since this branch forked changed a file it changed. ") +
       `Nothing was merged. The next run merges \`${red.base}\` into the branch and tries again.` +
       (report === undefined ? "" : `\n\nWhat the agents reported:\n\n${report}`)
     );
@@ -248,9 +252,9 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
             note: e.again ? againNoteOf(landed, e.again.kind) : redNote(landed),
             ...(landed.failing?.length ? { failing: landed.failing } : {}),
           },
-          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed, e.again.kind) : `red when merged${landed.with.length ? ` with ${refs}` : ""}${redDetail(landed)}` },
+          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed, e.again.kind) : `red when merged${landed.with.length ? ` with ${refs}` : landed.seen ? ", as seen on the branch before" : ""}${redDetail(landed)}` },
           view: { word: "red when merged", landed: false },
-          tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates, failing: landed.failing })),
+          tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates, failing: landed.failing, seen: landed.seen })),
         };
       }
       case "held": {
@@ -329,7 +333,7 @@ const describePipeline = (o: Finished, c: Context): Said => {
       case "merged-earlier":
         return { state: "ready", note: `merged earlier (${o.head}) - to close` };
       case "gate-failed":
-        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}` };
+        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}${o.outside ? ` - the repair judged it outside this branch${o.outside.line ? `: ${o.outside.line}` : ""}` : ""}` };
       case "held":
         return { state: "held", note: o.heldNote ?? "held for a human" };
       // The scheduler ends such a branch as a `conflict` (`describeConflict`): this is the pipeline's own word for it.
@@ -503,8 +507,9 @@ export const createLedger = (d: {
     // The landing worker's only voice in the run's output: without it, a run that spends its last
     // half hour landing prints nothing between the last agent pass and the closing summary.
     // A hold carries its reason: "needs a human" alone sent the reader to run.json for the paths.
-    // A conflict found before landing ends the ticket as finally as one at landing: said the same way.
-    if (view && (ending.kind === "landing" || ending.kind === "conflict")) d.say(`${d.ref(id)}: ${view.word}${record?.state === "held" && record.note ? `: ${record.note}` : ""}.`);
+    // A conflict found before landing ends the ticket as finally as one at landing: said the same way. A conflict
+    // carries its note too (with whom, which files): "merge conflict." alone left the reader to the closing summary.
+    if (view && (ending.kind === "landing" || ending.kind === "conflict")) d.say(`${d.ref(id)}: ${view.word}${(record?.state === "held" || record?.state === "conflict") && record.note ? `: ${record.note}` : ""}.`);
     // A hand-back is as final as a landing, and nothing else prints it before the closing summary. A
     // conflict-resolution hold (status `held`) is excluded: burndown prints that one as it holds it.
     if (ending.kind === "pipeline" && ending.outcome.status !== "held" && record?.state === "held") d.say(`${d.ref(id)}: ${record.note}.`);

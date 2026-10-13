@@ -152,9 +152,15 @@ export type TicketRecord = {
   tokens?: string;
   /** Input tokens served from the cache, of the ticket's passes so far (the same passes as `tokens`): the status view shows its share of the input. Absent in an older record. */
   cacheRead?: number;
+  /** The largest context one turn of the ticket's passes held (input + cache write + cache read tokens of one assistant message), by the pass that held it (`implement`, `review`, `repair`): the closing summary flags a pass over `PEAK_CONTEXT_WARN`. Absent in an older record and for a Codex pass. */
+  peakContext?: Record<string, number>;
   minutes?: number;
   /** Test ids a red gate named. */
   failing?: string[];
+  /** Test ids that went red on one run of a gate and green on a later one (the ticket gate's re-runs), whatever became of the ticket. */
+  flaked?: string[];
+  /** The tests a repair pass judged flaky (its `<verdict>outside-branch</verdict>` line) when it committed nothing: the closing summary's likely-flaky list reads them. */
+  flaky?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];
   /** The ticket's second attempt after a conflict (at landing, or found before its review or gates) or a red at landing ("requeued after conflict before review with #3"); null once that attempt is not going to run. */
@@ -185,6 +191,16 @@ export type TicketRecord = {
  * digits, `-` and `_` passes.
  */
 export const sessionId = (value: unknown): string | undefined => (typeof value === "string" && /^[\w-]{1,100}$/.test(value) ? value : undefined);
+
+/** The estimate a turn printed at its start (`estimate` in `src/run.ts`): time and tokens as a median and a high figure, the slots it divided by and the tickets it priced. */
+export type RunEstimate = {
+  /** The run's time in milliseconds, base gates and verify included. */
+  ms: { mid: number; high: number };
+  tokensIn: { mid: number; high: number };
+  tokensOut: { mid: number; high: number };
+  slots: number;
+  tickets: number;
+};
 
 /**
  * The run's settings as one turn's record holds them (GLOSSARY.md: run setting): the autonomy
@@ -280,6 +296,22 @@ export type RunRecord = {
    * count. An older kit's record has none, and the estimate counts that run as unknown.
    */
   load?: { concurrency: number; tickets: number };
+  /**
+   * The estimate printed at the turn's start, kept so the history line can be set beside what the run took. Absent when
+   * none was printed (no history to price from). The figures are the line's, unrounded: milliseconds and tokens.
+   */
+  estimate?: RunEstimate;
+  /**
+   * Milliseconds the run spent with another run live in the pool while its share was below the slots it asked for
+   * (`share` under `demand`), summed as the run goes: the closing summary names it as a cause of a run that took far
+   * longer than its estimate. Absent until there is some.
+   */
+  sharedMs?: number;
+  /**
+   * Milliseconds in which at least one of the run's workers was waiting for a sandbox slot (the union, not the sum over
+   * workers), written as the run goes and at its end. Absent until there is some.
+   */
+  sandboxWaitMs?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
   /**

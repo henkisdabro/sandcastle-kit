@@ -215,6 +215,29 @@ test("a red first gate that is green on its re-run gets no repair pass, and the 
   assert.ok(o.said.includes("#7: lint red, then green on a re-run - a flake, no repair pass"), o.said.join("\n"));
 });
 
+test("a gate run that already re-ran its red inside its slot is not re-run again by the pipeline", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  // What `runGates` returns for `rerunOnRed`: the re-run's result, carrying the run that went red.
+  h.gates.push({ ...green("lint", "test"), rerunOf: red("test", "FAIL: a test timed out under load", ["lint"]) });
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate"], "no regate call: it would lease a second gates slot");
+  assert.equal(o.status, "green");
+  assert.ok(o.said.includes("#7: test red, then green on a re-run - a flake, no repair pass"), o.said.join("\n"));
+});
+
+test("a re-run inside the slot that is red again goes to the repair loop from the re-run's failure, with no regate call", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt");
+  h.gates.push({ ...red("test", "FAIL: the re-run's output", ["lint"]), rerunOf: red("test", "FAIL: first run", ["lint"]) });
+  h.gates.push(BOTH);
+  await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "repair", "gate", "review"]);
+  const repair = h.passes.find((p) => p.name === `repair-${ID}`);
+  assert.match(repair?.args.GATE_OUTPUT ?? "", /the re-run's output/);
+});
+
 test("a red that comes back on the re-run gets one repair pass, fed the re-run's output", async () => {
   const h = harness();
   h.agents.impl = implementing("a.txt");
@@ -368,6 +391,12 @@ test("burndown() hands createPipeline the re-run port, built on its own runGates
   assert.match(src, /createPipeline\(\{[\s\S]*?regate: \(box, id, from\) => runGates\(box, id, undefined, false, from\),/);
   // A re-run is a ticket's gate run, never the landing's priority one: it waits for a gates slot behind a landing gate.
   assert.doesNotMatch(src, /regate: \(box, id, from\) => runGates\([^)]*true/);
+});
+
+test("burndown() has the first ticket gate run re-run its red inside the slot, and the pipeline asks for it only with a re-run port and repair passes", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  assert.match(src, /gate: \(box, id, rerunOnRed\) => runGates\(box, id, undefined, false, undefined, rerunOnRed\),/);
+  assert.match(src, /gate\(sandbox, issue\.id, !!ctx\.regate && repair > 0\)/);
 });
 
 // runGates itself: the gate to start from, with the configured numbering in its log and progress.

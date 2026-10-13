@@ -16,12 +16,12 @@ import { red } from "./api-key.ts";
 import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenLine } from "./run.ts";
+import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { PRESSURE_WARN_FULL } from "./peaks.ts";
-import { readPlanUsages } from "./usage.ts";
-import { LANDING_GATES, rewroteLine } from "./gates.ts";
+import { PEAK_CONTEXT_WARN, readPlanUsages } from "./usage.ts";
+import { LANDING, LANDING_GATES, rewroteLine } from "./gates.ts";
 import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
 import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
@@ -29,7 +29,25 @@ import { makeTracker, refOf, withOpenList } from "./tracker.ts";
 import { OperatorError, sameExpansionFailure } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
-import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
+import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunEstimate, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
+
+/**
+ * One line per ticket with a pass whose largest turn held more than `PEAK_CONTEXT_WARN` tokens of context (`peakContext` in
+ * its run record): the pass and the peak, in the order of the passes. Every turn of a long pass re-reads its context, so
+ * the cost of a pass that grows unchecked shows nowhere else.
+ */
+export const contextLines = (f: Pick<Facts, "tickets">): string[] => {
+  const passes = ["implement", "resolve", "review", "repair"];
+  const rank = (pass: string) => (passes.includes(pass) ? passes.indexOf(pass) : passes.length);
+  return Object.entries(f.tickets).flatMap(([id, t]) => {
+    const over = Object.entries(t.peakContext ?? {})
+      .filter(([, n]) => typeof n === "number" && n > PEAK_CONTEXT_WARN)
+      .sort(([a], [b]) => rank(a) - rank(b));
+    if (!over.length) return [];
+    const name = `${refOf(id)}${t.title ? ` ${t.title}` : ""}`;
+    return [`Large context: ${name} - ${over.map(([pass, n]) => `${pass} pass reached ${Math.round(n / 1000)}k tokens in one turn`).join(", ")} (over ${Math.round(PEAK_CONTEXT_WARN / 1000)}k): a ticket this long may be too big for one pass, so consider splitting it`];
+  });
+};
 
 /** "stopped by `sandcastle stop`", "stopped by Ctrl-C": what a run's `stoppedBy` reads as in the summary and the notify line. */
 export const stoppedByText = (by: string) => `stopped by ${by === "sandcastle stop" ? "`sandcastle stop`" : by}`;
@@ -50,6 +68,14 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
+  /** The start estimate this turn printed (the run record's `estimate`); absent when none was, and from an older kit. */
+  estimate?: RunEstimate;
+  /** Milliseconds the run was held below the slots it asked for by another live run (the run record's `sharedMs`). */
+  sharedMs?: number;
+  /** Milliseconds in which a worker waited for a sandbox slot (the run record's `sandboxWaitMs`). */
+  sandboxWaitMs?: number;
+  /** What this run's timings lines say of its re-runs and its slot waits (`timeLostFromTimings`). */
+  timeLost?: TimeLost;
   /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
   pressure?: { some: number; full: number; where: string };
   verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string }; notRun?: string } | null;
@@ -312,6 +338,51 @@ export const pressureFromTimings = (text: string, runId: string): { some: number
   return found;
 };
 
+/**
+ * Where a run's time went beyond the work itself, from its timings lines: `gateWaitMs` is the waits for a gates slot (the
+ * `waitMs` of the gate, landing gate, base and verify lines), `landingWaitMs` the landings' waits for a sandbox slot (the
+ * `waitMs` of a `landing` line, which is no gates slot's, and which the run record's `sandboxWaitMs` does not hold: a
+ * landing leases its slot apart from the ticket workers), `reruns` the gate runs of a ticket after its first and `repairs`
+ * its repair passes, each with the time they took (`ms` of the lines, the slot wait already out of it).
+ */
+export type TimeLost = { gateWaitMs: number; landingWaitMs: number; reruns: number; rerunMs: number; repairs: number; repairMs: number };
+
+const GATE_SLOT_PHASES: readonly string[] = ["gates", LANDING_GATES, "base gates", "verify"];
+
+/** One run's `TimeLost` from timings.jsonl text; undefined when the run has no line. */
+export const timeLostFromTimings = (text: string, runId: string): TimeLost | undefined => {
+  const lost: TimeLost = { gateWaitMs: 0, landingWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 };
+  const gated = new Set<string>();
+  let any = false;
+  for (const raw of text.split("\n")) {
+    let line: { run?: unknown; issue?: unknown; phase?: unknown; ms?: unknown; waitMs?: unknown };
+    try {
+      line = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!line || line.run !== runId || typeof line.phase !== "string") continue;
+    any = true;
+    const ms = typeof line.ms === "number" && line.ms > 0 ? line.ms : 0;
+    const waitMs = typeof line.waitMs === "number" && line.waitMs > 0 ? line.waitMs : 0;
+    if (GATE_SLOT_PHASES.includes(line.phase)) lost.gateWaitMs += waitMs;
+    if (line.phase === LANDING) lost.landingWaitMs += waitMs;
+    const issue = String(line.issue ?? "");
+    if (line.phase === "gates" && issue) {
+      if (gated.has(issue)) {
+        lost.reruns++;
+        lost.rerunMs += ms;
+      }
+      gated.add(issue);
+    }
+    if (line.phase === "repair") {
+      lost.repairs++;
+      lost.repairMs += ms;
+    }
+  }
+  return any ? lost : undefined;
+};
+
 /** The phases of a ticket's timings lines that are a pass of it: its sandbox's setup is not one. */
 export const PASS_PHASES = ["implement", "resolve", "review", "cross-review", "gates", "repair", LANDING_GATES] as const;
 
@@ -481,6 +552,8 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   const timingsText = !earlier && existsSync(timingsFile) ? readFileSync(timingsFile, "utf8") : undefined;
   const timed = timingsText ? tokensFromTimings(timingsText, run.startedAt) : undefined;
   const pressure = timingsText ? pressureFromTimings(timingsText, run.startedAt) : undefined;
+  const timeLost = timingsText ? timeLostFromTimings(timingsText, run.startedAt) : undefined;
+  const ms = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
 
   return {
     base,
@@ -495,6 +568,10 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     tokenTotal: timed?.total,
     byModel: timed?.byModel,
     ...(pressure ? { pressure } : {}),
+    ...(timeLost ? { timeLost } : {}),
+    ...(run.estimate && typeof run.estimate === "object" ? { estimate: run.estimate } : {}),
+    ...(ms(run.sharedMs) ? { sharedMs: ms(run.sharedMs) } : {}),
+    ...(ms(run.sandboxWaitMs) ? { sandboxWaitMs: ms(run.sandboxWaitMs) } : {}),
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
@@ -946,6 +1023,69 @@ const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
 /** Ends a carried bullet with the turn it comes from; the indented rows under one are commands to copy, and stay as they are. */
 const fromTurn = (turn: number, lines: string[]) => lines.map((l) => (l.startsWith("- ") ? `${l} (turn ${turn})` : l));
 
+const SLOW = 2;
+
+/**
+ * The run's time and tokens beside the estimate it was given, when either is more than twice off, and for a run that took
+ * more than twice its estimate the largest causes the record can measure (a minute or more each, largest first): the time
+ * held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. The estimate
+ * comes from the record (a file in a repository): only finite positive figures count. None for a run still going, which
+ * has neither its time nor its tokens yet.
+ */
+const estimateLines = (f: Facts, end: string | undefined): string[] => {
+  const est = f.estimate;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
+  const estMs = num(est?.ms?.mid);
+  if (!est || f.live || f.dryRun || !end || estMs === undefined) return [];
+  const took = Date.parse(end) - Date.parse(f.started);
+  if (!(took > 0)) return [];
+  const off = (actual: number, estimated: number | undefined) => estimated !== undefined && (actual / estimated > SLOW || actual / estimated < 1 / SLOW);
+  const t = f.tokenTotal;
+  const inTokens = t ? t.input + t.cacheWrite + t.cacheRead : 0;
+  const estIn = num(est.tokensIn?.mid);
+  const estOut = num(est.tokensOut?.mid);
+  const tokensOff = !!t && (off(inTokens, estIn) || off(t.output, estOut));
+  if (!off(took, estMs) && !tokensOff) return [];
+  const times = `${span(took)} against an estimate of ${span(estMs)}${took / estMs >= 1 ? ` (${(took / estMs).toFixed(1)}x)` : ""}`;
+  const tokens = t && estIn !== undefined && estOut !== undefined
+    ? `; tokens ${tokenBrief(t)} against an estimate of ${tokenBrief({ input: estIn, cacheWrite: 0, cacheRead: 0, output: estOut })}`
+    : "";
+  const lines = [`Against the estimate: ${times}${tokens}.`];
+  if (took / estMs <= SLOW) return lines;
+  const lost = f.timeLost;
+  const causes = [
+    ...(f.sharedMs ? [{ ms: f.sharedMs, text: `${span(f.sharedMs)} at a share below what it asked for, beside another run` }] : []),
+    ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets` }] : []),
+    ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
+    ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
+    ...(lost && lost.reruns + lost.repairs
+      ? [{
+          ms: lost.rerunMs + lost.repairMs,
+          text: `${[lost.reruns ? `${lost.reruns} gate re-run${lost.reruns === 1 ? "" : "s"}` : "", lost.repairs ? `${lost.repairs} repair pass${lost.repairs === 1 ? "" : "es"}` : ""].filter(Boolean).join(" and ")} (${span(lost.rerunMs + lost.repairMs)} of pass time)`,
+        }]
+      : []),
+  ].filter((c) => c.ms >= 60_000).sort((a, b) => b.ms - a.ms);
+  lines.push(causes.length ? `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` : "No cause measured: no time beside another run, slot wait, re-run or repair reached a minute.");
+  return lines;
+};
+
+/**
+ * Likely flaky tests, on any ticket: each once, with the tickets it hit. Two fields name them - `flaked` (red on one run of a
+ * gate, green on a later one) and `flaky` (a repair pass's verdict) - and a test either names is one test. The record is a
+ * file in a repository: only strings count.
+ */
+const flakyLines = (f: Facts): string[] => {
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x) : []);
+  const hit = new Map<string, string[]>();
+  for (const [id, t] of Object.entries(f.tickets)) {
+    for (const test of new Set([...strings(t.flaked), ...strings(t.flaky)])) hit.set(test, [...(hit.get(test) ?? []), id]);
+  }
+  if (!hit.size) return [];
+  const all = [...hit].sort(([, a], [, b]) => b.length - a.length);
+  const shown = all.slice(0, 8).map(([test, ids]) => `${test} (${ids.map(refOf).join(", ")})`);
+  return [`Likely flaky - red, then green on a re-run, or judged flaky by a repair pass: ${shown.join("; ")}${all.length > 8 ? `; and ${all.length - 8} more` : ""}.`];
+};
+
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
@@ -1043,11 +1183,14 @@ export const render = (f: Facts, plain = false): string => {
   if (f.pressure && f.pressure.full >= PRESSURE_WARN_FULL) {
     out.push(`Memory pressure: high - full ${f.pressure.full}% (some ${f.pressure.some}%) in a sandbox during ${f.pressure.where}, so the sandboxes stalled on memory at once and gates ran slower for it. \`sandcastle size\` shows the VM's memory against the pool; lower maxSandboxes or maxGates, or give the VM more memory.`);
   }
+  out.push(...estimateLines(f, end));
+  out.push(...flakyLines(f));
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
+  out.push(...contextLines(f));
   out.push(...settingsLines(f, plain));
   // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.
   if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);

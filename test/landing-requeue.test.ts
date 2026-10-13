@@ -590,7 +590,7 @@ test("a first red or conflict that is not requeued keeps the plain outcome lines
   assert.deepEqual([r.seen.outcomes.get("2"), r.seen.outcomes.get("3")?.kind, r.seen.outcomes.get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1 (gate test)" }, "conflict", ["1"]]);
   assert.deepEqual([r.written()["2"].state, r.written()["2"].note], ["red", "red with #1 (gate test)"]);
   // Each landing's own line, and no requeue line.
-  assert.deepEqual(r.seen.said, ["#2: red when merged.", "#3: merge conflict."]);
+  assert.deepEqual(r.seen.said, ["#2: red when merged.", "#3: merge conflict: with #1: a.txt, b.txt, c.txt and 1 more."]);
 });
 
 test("requeued, then withdrawn before the second start: withdrawn, not green, and the first pipeline's entry dropped", async () => {
@@ -692,7 +692,7 @@ test("a closed queue is checked before a requeue: the normal conflict outcome, n
   });
   await assert.rejects(run, boom);
   assert.equal(seen.told.some((c) => c.kind === "requeued"), false);
-  assert.deepEqual(seen.said, ["#2: merge conflict."]);
+  assert.deepEqual(seen.said, ["#2: merge conflict: with #1: shared.txt."]);
   assert.equal(seen.ledger.requeuedAs.has("2"), false);
   assert.deepEqual(seen.ledger.entries.get("2")?.ending, { kind: "landing", green: waiting("2"), landed: conflictWith1, attempts: 1 });
   assert.deepEqual(seen.outcomes.get("2"), { kind: "conflict", with: ["1"], text: "merge conflict: with #1: shared.txt" });

@@ -210,11 +210,14 @@ This continues SKILL.md: run its "Before every action" first.
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, blocked (left out at 0), tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
       ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent; if it says `RED twice, likely load`, the failures were only test timeouts or a gate far slower than recorded, so `sandcastle gates` on a quiet machine is the check: say which, and still do not push.
+      If an `Against the estimate:` line follows, the run's time or tokens were more than twice the start estimate's (or under half): relay it, and for a slow run the `Largest causes measured:` line under it (time beside another run, slot waits, re-runs and repairs). A `Likely flaky` line lists tests that went red and then green on a re-run, or that a repair pass judged flaky, with the tickets they hit: mention them, as a flaky test is worth a ticket of its own.
       If it reads `NOT re-gated: the verify could not open its sandbox`, the merged base is ungated (a worktree or container start timed out): run `sandcastle gates`, and do not push until it is green.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       A `Memory pressure: high` line (a sandbox's `full` memory pressure reached 5% during a gate pass)
       says the VM ran short of memory at that pool size: relay it with the pass it names and its fix.
+      A `Large context:` line names a ticket with an agent pass whose largest turn held over 150,000
+      tokens of context: relay it with the pass and the peak it names.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
@@ -327,7 +330,8 @@ In the status view, a landing ticket holds no sandbox slot, and the RUN lane's e
   git command in that worktree: have them inspect `.git/worktrees/<name>` and the worktree's `.git`
   file first - the run removed its container and left the worktree as it was.
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
-  outside the branch: read the repair log and its ticket comment, then check that gate with
+  outside the branch (when it said so with its verdict, the ticket's note ends `the repair judged it
+  outside this branch: <tests>`): read the repair log and its ticket comment, then check that gate with
   `sandcastle gates` (once the run has ended: it refuses while one is live) before blaming the branch.
 - **"red on <base> before any agent ran"**: the run spent no allowance, and the cause is the
   image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`).

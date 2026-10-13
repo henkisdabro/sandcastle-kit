@@ -501,7 +501,7 @@ export const createLanding = <G extends Green>(
 };
 
 /** What a ticket's first attempt collided with, at landing or in its pipeline: its second attempt carries it. */
-export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[]; found?: ConflictFound };
+export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[]; seen?: true; found?: ConflictFound };
 
 /** Where a conflict was found: by the merge check before the ticket's review or before its gates, or when landing it. */
 export type ConflictFound = "review" | "gates" | "landing";
@@ -1194,7 +1194,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         if (first.has(t.id) && !(met.kind === "conflict" && met.with.some((id) => (landedAt.get(id) ?? 0) > (resolveFrom.get(t.id) ?? Infinity)))) return false;
         // Where it was found: a pipeline's conflict says which check (`Conflict.found`), a landing's is the landing.
         const found = "conflict" in back ? back.conflict.found : "landing";
-        const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }) } : { kind: "conflict", with: met.with, ...(found && { found }) };
+        const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }), ...(met.seen && { seen: true as const }) } : { kind: "conflict", with: met.with, ...(found && { found }) };
         first.set(t.id, again);
         if (met.kind === "conflict") conflicted.set(t.id, met.files);
         sentBack.set(t.id, back);
