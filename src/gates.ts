@@ -175,7 +175,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         progress.gate?.(i, g.name);
         if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${localStamp()}\n`);
         const since = Date.now();
-        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, stripVTControlCharacters(line) + "\n") } : undefined);
+        // Every stdout line the tail was offered, with its separator: more than the tail returned means it dropped some.
+        let seen = 0;
+        let lines = 0;
+        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => { seen += line.length + (lines++ > 0 ? 1 : 0); appendFileSync(log, stripVTControlCharacters(line) + "\n"); } } : undefined);
         const ms = Date.now() - since;
         const timedOut = r.exitCode === 124;
         const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
@@ -194,9 +197,12 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // prompt, `failureKey` and `failingTests` read plain text. The gates log is stripped as it is written, too: a
         // `grep "Test Files"` over colour-coded lines misses or garbles them.
         const whole = stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim();
-        // The exec tail drops whole items, so after any drop more than half of its cap remains: a stream over half
-        // may have been cut, and a test missing from it is not known to be green.
-        const mayBeCut = r.stdout.length > EXEC_TAIL_CHARS / 2 || r.stderr.length > EXEC_TAIL_CHARS / 2;
+        // The exec tail reports no drop. Stdout's items are whole lines, so one very long line can evict most of the
+        // cap and leave far less than half of it: stdout is cut when the lines `onLine` saw add up to more than came
+        // back. Stderr's items are pipe chunks of at most 64 KiB, so after a drop more than half of the cap remains:
+        // a stream over half may have been cut, and a test missing from it is not known to be green. (Stdout keeps
+        // the half rule too: with no log there is no `onLine` to count by.)
+        const mayBeCut = seen > r.stdout.length || r.stdout.length > EXEC_TAIL_CHARS / 2 || r.stderr.length > EXEC_TAIL_CHARS / 2;
         failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output: clip(whole), ...(mayBeCut ? {} : { tests: failingTests(whole, Infinity) }) });
         // A timed-out gate may still be running in this container (or Docker
         // may not be answering): a later gate would run beside it, or wait out
