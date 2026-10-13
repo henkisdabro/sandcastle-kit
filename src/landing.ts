@@ -23,7 +23,7 @@ import { OperatorError, SlowStartError } from "./errors.ts";
 import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type LandingGate, type Opener, squashBody } from "./land.ts";
-import { dropHandOff, handOffId, withSlot } from "./pool.ts";
+import { claimSlot, dropHandOff, handOffId, withSlot } from "./pool.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
@@ -653,13 +653,17 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
             // As above.
           }
           at?.slotWaited?.(Date.now() - asked);
+          // Claimed from the moment the sandbox is held: opening it and merging take seconds, and a ticket gate asked in
+          // them would take the gates slot and hold it for a whole gate run. The landing's own gates wait spends the claim;
+          // a landing that ends without gating (a conflict, a throw) releases it here.
+          const claim = claimSlot("gates");
           return landInSandbox(
             project,
             { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId },
             opener,
             (box, how) => ctx.gate(box, o.issue, how),
             host.expected,
-          );
+          ).finally(claim.release);
         }, undefined, undefined, true, false, () => (at?.behind?.() ?? 0) > 0);
       } finally {
         if (waiting) wanted.n--;
