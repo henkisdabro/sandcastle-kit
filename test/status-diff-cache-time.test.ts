@@ -56,10 +56,12 @@ test("a ticket's record entry gains the cache-read count when its tokens are rec
   assert.deepEqual([entry().state, entry().tokens, entry().cacheRead], ["implement", "2.2M in / 2k out", 2_200_000]);
 });
 
-test("burndown writes a ticket's tokens through ticketTokens, in the pass and when its pipeline ends", () => {
+test("burndown writes a ticket's tokens through ticketTokens (the token count), in the pass and when its pipeline ends", () => {
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(src, /if \(issue\) run\.ticket\(issue, \{ \.\.\.ticketTokens\(spent\.get\(issue\)!\) \}\);/);
-  assert.match(src, /\.\.\.\(tokens \? ticketTokens\(tokens\) : \{\}\),/);
+  const counting = readFileSync(new URL("../src/run.ts", import.meta.url), "utf8");
+  assert.match(counting, /if \(issue\) run\.ticket\(issue, \{ \.\.\.\(spent\.has\(issue\) \? ticketTokens\(spent\.get\(issue\)!\) : \{\}\), tokensNote: noteOf\(issue\) \}\);/);
+  assert.match(src, /count\.ended\(issue, tokens\);/);
+  assert.match(src, /\.\.\.count\.fields\(issue\.id\),/);
   assert.doesNotMatch(src, /tokens: tokenBrief\(spent\.get\(issue\)!\)|\{ tokens: tokenBrief\(tokens\) \}/);
 });
 

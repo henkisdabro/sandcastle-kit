@@ -447,20 +447,27 @@ export type UsageWatch = {
   /** Reads what the logs gained since the last look and writes the record when a newer reading came (not more often than the interval, unless `final`). */
   poll(final?: boolean): void;
   /**
-   * A ticket's agent pass has ended and the run counts its tokens itself (its result's own figure): what the logs showed of
-   * the passes so far stops counting as live, and so does anything of them read later. Reads what the logs gained first.
-   * Returns the largest context one assistant message of those passes had (`peakContext`), undefined when none showed.
+   * A ticket's step has ended and the run counts its tokens itself (the result's own figure): what the logs showed of
+   * the agent passes so far stops counting as live, and so does anything of them read later. Reads what the logs gained first.
+   * Returns the largest context one assistant message of those passes had (`peakContext`, undefined when none showed) and
+   * what each agent pass it settled spent, oldest first (`passes`): a pass whose stream showed no usage has no `tokens`.
+   * Which of them the step's result already counted is the caller's to say (`SettledPass`).
    */
-  settle(issue: string): number | undefined;
+  settle(issue: string): Settled;
   /** One last look, written whatever the interval says, and no more after it. */
   stop(): void;
 };
+
+/** What one agent pass spent as its stream showed it: `tokens` is undefined when the stream showed no usage at all. */
+export type SettledPass = { tokens?: Tokens };
+
+export type Settled = { peakContext: number | undefined; passes: SettledPass[] };
 
 /**
  * One agent pass's tokens as its log shows them so far: Claude Code writes an assistant line per content block of a
  * message, each with the message's `usage`, so a message counts once, by its id (the latest usage it showed).
  */
-type PassTokens = { seen: Map<string, Tokens>; total: Tokens };
+type PassTokens = { seen: Map<string, Tokens>; total: Tokens; shown: boolean };
 
 type Tail = {
   ino: number; offset: number; decoder: StringDecoder; carry: string; skipping: boolean; mine: boolean;
@@ -469,7 +476,11 @@ type Tail = {
   /** This run's passes in the file so far (each starts at a marker line), and how many of them `settle` handed to the run's own count. */
   pass: number;
   settled: number;
+  /** The pass that is running (or ran last) in the file, and the order it started in across files. */
   tokens: PassTokens;
+  seq: number;
+  /** Passes of the file that a later marker ended before `settle` came: kept, so a pass that threw before a retry in the same file is not lost. */
+  done: { seq: number; pass: PassTokens }[];
   /** The largest context of one message since the last `settle` - kept across a marker, which resets `tokens`, so two passes in one file both count. */
   peak: number;
 };
@@ -480,7 +491,7 @@ export const contextOf = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead;
 /** A pass whose largest turn held more context than this is flagged in the closing summary: long passes grow it unchecked, and every turn re-reads it. */
 export const PEAK_CONTEXT_WARN = 150_000;
 
-const NO_PASS = (): PassTokens => ({ seen: new Map(), total: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 } });
+const NO_PASS = (): PassTokens => ({ seen: new Map(), total: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }, shown: false });
 
 /** The usage an assistant line of Claude's raw stream carries, with its message's id; undefined for any other line. */
 export const tokensFromEvent = (line: string): { id?: string; tokens: Tokens } | undefined => {
@@ -536,6 +547,8 @@ export const watchUsage = ({
   tokens?: { owner: (name: string) => string | undefined; write: (issue: string, live: Tokens) => void };
 }): UsageWatch => {
   const tails = new Map<string, Tail>();
+  // The order passes started in, across files: the oldest first is how `settle` hands them back.
+  let started = 0;
   let lastWrite = -Infinity;
   const pending = new Map<UsageProvider, UsageReading>();
   // Tickets whose live figure changed since it was last written.
@@ -547,10 +560,12 @@ export const watchUsage = ({
     const sum = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
     for (const tail of tails.values()) {
       if (tail.owner !== issue || tail.pass <= tail.settled) continue;
-      sum.input += tail.tokens.total.input;
-      sum.cacheWrite += tail.tokens.total.cacheWrite;
-      sum.cacheRead += tail.tokens.total.cacheRead;
-      sum.output += tail.tokens.total.output;
+      for (const { total } of [...tail.done.map((d) => d.pass), tail.tokens]) {
+        sum.input += total.input;
+        sum.cacheWrite += total.cacheWrite;
+        sum.cacheRead += total.cacheRead;
+        sum.output += total.output;
+      }
     }
     return sum;
   };
@@ -559,6 +574,7 @@ export const watchUsage = ({
     const found = tokensFromEvent(line);
     if (!found) return;
     const { seen, total } = tail.tokens;
+    tail.tokens.shown = true;
     const before = found.id === undefined ? undefined : seen.get(found.id);
     if (found.id !== undefined) seen.set(found.id, found.tokens);
     tail.peak = Math.max(tail.peak, contextOf(found.tokens));
@@ -573,7 +589,7 @@ export const watchUsage = ({
     let tail = tails.get(name);
     // A file that shrank or changed identity is another file under the same name (archived, then started again).
     if (!tail || st.size < tail.offset || st.ino !== tail.ino) {
-      tail = { ino: st.ino, offset: 0, decoder: new StringDecoder("utf8"), carry: "", skipping: false, mine: false, owner: tokens?.owner(name), pass: 0, settled: 0, tokens: NO_PASS(), peak: 0 };
+      tail = { ino: st.ino, offset: 0, decoder: new StringDecoder("utf8"), carry: "", skipping: false, mine: false, owner: tokens?.owner(name), pass: 0, settled: 0, tokens: NO_PASS(), seq: 0, done: [], peak: 0 };
       tails.set(name, tail);
     }
     if (st.size === tail.offset) return undefined;
@@ -602,8 +618,11 @@ export const watchUsage = ({
             } catch {
               tail.mine = false;
             }
-            // Each of the run's markers starts a pass, which counts from nothing.
-            if (tail.mine) Object.assign(tail, { pass: tail.pass + 1, tokens: NO_PASS() });
+            // Each of the run's markers starts a pass, which counts from nothing; the one it ends is kept for `settle`.
+            if (tail.mine) {
+              if (tail.owner !== undefined && tail.pass > tail.settled) tail.done.push({ seq: tail.seq, pass: tail.tokens });
+              Object.assign(tail, { pass: tail.pass + 1, tokens: NO_PASS(), seq: ++started });
+            }
           } else if (tail.mine) {
             if (tail.owner !== undefined && tail.pass > tail.settled) countTokens(tail, line);
             for (const provider of providers) {
@@ -661,16 +680,21 @@ export const watchUsage = ({
     }
   };
 
-  const settle = (issue: string) => {
+  const settle = (issue: string): Settled => {
     scan();
     let peak = 0;
+    const passes: { seq: number; pass: PassTokens }[] = [];
     for (const tail of tails.values()) {
       if (tail.owner !== issue) continue;
       peak = Math.max(peak, tail.peak);
-      Object.assign(tail, { settled: tail.pass, peak: 0 });
+      if (tail.pass > tail.settled) passes.push(...tail.done, { seq: tail.seq, pass: tail.tokens });
+      Object.assign(tail, { settled: tail.pass, peak: 0, done: [] });
     }
     changed.delete(issue);
-    return peak > 0 ? peak : undefined;
+    return {
+      peakContext: peak > 0 ? peak : undefined,
+      passes: passes.sort((a, b) => a.seq - b.seq).map(({ pass }) => (pass.shown ? { tokens: { ...pass.total } } : {})),
+    };
   };
 
   const timer = setInterval(() => (finished() ? stop() : poll()), interval);
