@@ -43,6 +43,8 @@ const READ_TIMEOUT_MS = 20000;
 const IDLE_MS = 15000;
 // Room for the control Claude Code draws at the band's right end.
 const BAND_MARGIN = 4;
+// The mark, the band and the cache row stand one column in from the screen's edge: flush to it, they read as cut off.
+const BAND_INDENT = 1;
 
 const NOTE =
   "\n\n---\nThe sandcastle mod is loaded in this Claude Code session. When a run this session started ends, in this project or any other directory, the mod submits a prompt that says so: skip `sandcastle wait` in step 3 of the run action, and close the run (run.md) when that prompt arrives. The mod also keeps this session's prompt cache warm while the run is live, so skip the skill's keep-warm tick.";
@@ -678,38 +680,41 @@ export const register: Register = (on) => {
     const { Box, Text } = $.ui.resolve(e);
     return (
       <Box flexDirection="column">
-        {/* A session reloaded from an older mod still holds the mark as a string: draw nothing until it is set again. */}
-        {!Array.isArray(line) ? null : (
-          <Box flexDirection="row" columnGap={1}>
-            <Text color={SAND.top} bold>
-              {MARK_ICON}
-            </Text>
-            {line.map((part) => (
-              <Text color={TONES[part.tone].color} bold={TONES[part.tone].bold}>
-                {part.text}
+        <Box flexDirection="column" paddingLeft={BAND_INDENT}>
+          {/* A session reloaded from an older mod still holds the mark as a string: draw nothing until it is set again. */}
+          {!Array.isArray(line) ? null : (
+            <Box flexDirection="row" columnGap={1}>
+              <Text color={SAND.top} bold>
+                {MARK_ICON}
               </Text>
-            ))}
-          </Box>
-        )}
-        {now === null
-          ? null
-          : band(now, e.props.bodyColumns - BAND_MARGIN, frame).map((row) => (
-              <Box flexDirection="row" columnGap={2}>
-                {row.map((seg) => (
-                  <Box flexDirection="row" columnGap={1}>
-                    <Text color={seg.colour} bold={seg.bold}>
-                      {seg.text}
-                    </Text>
-                    {seg.count === undefined ? null : (
-                      <Text color={seg.colour} bold>
-                        {String(seg.count)}
+              {line.map((part) => (
+                <Text color={TONES[part.tone].color} bold={TONES[part.tone].bold}>
+                  {part.text}
+                </Text>
+              ))}
+            </Box>
+          )}
+          {now === null
+            ? null
+            : band(now, e.props.bodyColumns - BAND_MARGIN - BAND_INDENT, frame, cache).map((row) => (
+                <Box flexDirection="row" columnGap={2}>
+                  {row.map((seg) => (
+                    <Box flexDirection="row" columnGap={1}>
+                      <Text color={seg.colour} bold={seg.bold}>
+                        {seg.text}
                       </Text>
-                    )}
-                  </Box>
-                ))}
-              </Box>
-            ))}
-        {cache === null ? null : <Text color={SAND.name}>{cache}</Text>}
+                      {seg.count === undefined ? null : (
+                        <Text color={seg.colour} bold>
+                          {String(seg.count)}
+                        </Text>
+                      )}
+                    </Box>
+                  ))}
+                </Box>
+              ))}
+          {/* With a run on screen the band places the cache row itself (beside the title, or lined up with it). */}
+          {cache === null || now !== null ? null : <Text color={SAND.name}>{cache}</Text>}
+        </Box>
         {await next(e)}
       </Box>
     );

@@ -40,6 +40,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The closing summary names the largest causes of a run's time whenever one took a fifth of it or
   more**, not only for a run over twice its estimate; a run bound by its gates slot is pointed at
   `sandcastle size`.
+- **The Claude Code mod's cache row sits beside the run's name** above the prompt and reads
+  `cache refresh in 55m` (`· last 158k` after a refresh: what it read), not flush under the castle - on a narrow screen, on a row of its
+  own lined up with the text - and the band and the idle mark stand one column in from the screen's
+  edge.
 - **A prompt's ticket reads ride out a minute of GitHub trouble**: the kit's patch of
   `@ai-hero/sandcastle` gives a prompt's shell expression 120 s instead of 30 s, and the retries of
   a GitHub 5xx wait 15 s and 45 s. (#782)

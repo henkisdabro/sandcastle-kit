@@ -57,11 +57,6 @@ export const missed = (last: Refresh): boolean => last.cacheRead < last.contextT
 /** The most misses a run puts up with: the second turns the refresh off for the run. */
 const MAX_MISSES = 2;
 
-const clock = (at: number): string => {
-  const d = new Date(at);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
-
 const tokens = (n: number): string => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
 /**
@@ -80,10 +75,9 @@ export const keepWarm = (input: KeepWarmInput): KeepWarmVerdict => {
   const lastActivity = input.lastActivity ?? now;
   const nextAt = lastActivity + INTERVAL_MS;
   if (now >= nextAt) return { refresh: true, mode: "1h", nextAt };
-  const band =
-    last !== undefined && last.at >= lastActivity
-      ? `cache refreshed ${clock(last.at)} · ${tokens(last.cacheRead)} read`
-      : `cache warm · refresh in ${Math.max(1, Math.ceil((nextAt - now) / 60000))}m`;
+  // "warm" said nothing (the refresh keeps it so): the countdown is the news, and after a refresh what it read.
+  const countdown = `cache refresh in ${Math.max(1, Math.ceil((nextAt - now) / 60000))}m`;
+  const band = last !== undefined && last.at >= lastActivity ? `${countdown} · last ${tokens(last.cacheRead)}` : countdown;
   return { refresh: false, mode: "1h", nextAt, band };
 };
 

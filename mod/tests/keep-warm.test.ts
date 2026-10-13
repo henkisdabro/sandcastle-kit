@@ -91,10 +91,10 @@ test("a tick past 55 minutes of silence refreshes the cache once and redraws the
   const w = world(on);
   await begin($, w);
   expect(w.forks).toEqual([]);
-  expect(await rowNow($)).toMatch(/^cache warm · refresh in \d+m$/);
+  expect(await rowNow($)).toMatch(/^cache refresh in \d+m$/);
   await w.clock.advance(55 * MIN);
   expect(w.forks).toEqual(["Reply with the single word: ok"]);
-  expect(await rowNow($)).toMatch(/^cache refreshed \d\d:\d\d · 158k read$/);
+  expect(await rowNow($)).toMatch(/^cache refresh in \d+m · last 158k$/);
   // The next refresh is 55 minutes after this one, not at every tick.
   await w.clock.advance(5 * MIN);
   expect(w.forks.length).toBe(1);
