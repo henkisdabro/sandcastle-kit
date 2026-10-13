@@ -1633,6 +1633,49 @@ export const pruneArchive = (project: Project, now = Date.now()): number => {
   return pruned;
 };
 
+/**
+ * Drops the head record of a ticket whose branch is gone and whose last write is past `ARCHIVE_KEEP_DAYS`, so `heads.json`
+ * stays the size of the tickets in play. A recent merged ticket keeps its record: the closing summary and `report --changelog`
+ * read a hand-landed ticket's. A record with no readable `at` stays. Returns how many went.
+ */
+export const pruneHeads = (project: Project, now = Date.now()): number => {
+  const all = readHeads(project.root);
+  let dropped = 0;
+  for (const [id, head] of Object.entries(all)) {
+    const at = Date.parse(head?.at);
+    if (!(now - at > ARCHIVE_KEEP_DAYS * DAY_MS)) continue;
+    if (typeof head.branch !== "string" || !head.branch) continue;
+    try {
+      sh("git", ["show-ref", "-q", "--verify", `refs/heads/${head.branch}`], project.root);
+      continue; // the branch is still there
+    } catch {
+      // gone: the record is history
+    }
+    delete all[id];
+    dropped++;
+  }
+  if (!dropped) return 0;
+  const file = headsFile(project.root);
+  writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
+  renameSync(`${file}.tmp`, file);
+  return dropped;
+};
+
+/** Keeps the turns of `file-shares.log` whose `--- <time>, run pid <pid> ---` header is inside the archive window; lines before the first header predate the headers and go. Returns how many turns went. */
+export const trimSharesLog = (project: Project, now = Date.now()): number => {
+  const file = join(project.root, ".sandcastle/logs/file-shares.log");
+  if (!existsSync(file)) return 0;
+  const turns = readFileSync(file, "utf8").split(/^(?=--- )/m);
+  const kept = turns.filter((turn) => {
+    const at = Date.parse(/^--- ([^,\n]+),/.exec(turn)?.[1] ?? "");
+    return Number.isNaN(at) ? turn.startsWith("--- ") : now - at <= ARCHIVE_KEEP_DAYS * DAY_MS;
+  });
+  if (kept.length === turns.length) return 0;
+  writeFileSync(`${file}.tmp`, kept.join(""));
+  renameSync(`${file}.tmp`, file);
+  return turns.length - kept.length;
+};
+
 export const archiveFinishedLogs = (project: Project) => {
   const logs = join(project.root, ".sandcastle/logs");
   if (!existsSync(logs)) return;
@@ -1665,6 +1708,9 @@ export const archiveFinishedLogs = (project: Project) => {
   if (moved) console.log(`Archived ${moved} log(s) of finished branches to .sandcastle/logs/archive/.`);
   const pruned = pruneArchive(project);
   if (pruned) console.log(prunedLine(pruned));
+  const heads = pruneHeads(project);
+  if (heads) console.log(`Dropped ${heads} head record(s) of finished tickets past ${ARCHIVE_KEEP_DAYS} days from .sandcastle/logs/heads.json.`);
+  trimSharesLog(project);
 };
 
 // ---------------------------------------------------------------------------
