@@ -101,8 +101,12 @@ action's categories and its closed-spec test, so keep queue.md to hand.
       it), a `Touches:` line, and a blocker line.
     - Apply only labels that already exist in the repo's vocabulary (area, severity). Create none
       except the queue label (`gh label create`, as the queue action does).
-    - A ready or decided finding gets the queue label. Human-only, parked and declined findings
-      are filed only when the user asks.
+    - A ready or decided finding gets queue.md's cold read (its step 5, with its brief, its
+      narrow reject rule and its record, kept in the finding's file as `coldRead`) on the body
+      just written, before the queue label goes on: file the ticket, read it cold, put any
+      answer in it, then label. Do not repeat the step here. Human-only, parked and declined
+      findings are filed only when the user asks, and get no cold read.
+    - A ready or decided finding then gets the queue label.
     - Files tracker: write `<dir>/audit-<YYYYMMDD>/issues/<NN>-<slug>.md` (`<dir>` is the
       tracker's, default `.scratch`; take the date from your own context, not from a shell
       command) with a `# ` title, a `Status: <label>` line for queued ones, and a `Blocked by: NN`
