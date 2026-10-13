@@ -42,7 +42,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, isCarried, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -1054,6 +1054,16 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
     if (!t.open) throw new OperatorError(`${tracker.ref(t.id)} is closed, so a run would not work on it. Leave it out, or reopen it first.`);
     return t;
   });
+
+/**
+ * A carried branch as the start estimate and the timings lines class it (`carriedKind`). A land-only branch with a
+ * person's comment since its review gets the full review all the same (the pipeline's `lateComment`), so it costs a
+ * whole ticket and is priced as one to review. The comments are those the queue read, which the pipeline falls back to.
+ */
+export const carriedKindAtStart = (root: string, base: string, issue: Pick<Issue, "id" | "comments">): "carried" | "unreviewed" | undefined => {
+  const kind = carriedKind(root, base, issue.id);
+  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments).length > 0 ? "unreviewed" : kind;
+};
 
 /**
  * What a ticket's gates run is called in the pool's wait line. It names the project, as the landing
@@ -2893,8 +2903,11 @@ export const burndown = async (
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
   });
   for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, neighbours, !DRY_RUN, project.name, project.root)) console.log(line);
-  // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
-  const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
+  // Carried branches, read before any agent touches them: a land-only or narrowly reviewed one is dearer than a fresh ticket's landing,
+  // so the estimate and the timings say so; one that gets a full review is priced as a fresh ticket (`carriedKindAtStart`).
+  const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i)] as const));
+  const carriedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "carried").map((i) => i.id));
+  const unreviewedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "unreviewed").map((i) => i.id));
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
   const remainderAtStart = new Set(candidates.filter((i) => isRemainder(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. Beside another run the share is the tickets' whole: the pool's one landing slot is outside it.
@@ -2907,7 +2920,7 @@ export const burndown = async (
   const rough = priceRun(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
-    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), bodyChars: candidates.map((i) => bodyChars.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
+    { gateSlots: limit("gates"), carried: candidates.map((i) => carriedAtStart.has(i.id)), remainder: candidates.map((i) => remainderAtStart.has(i.id)), unreviewed: candidates.map((i) => unreviewedAtStart.has(i.id)), touches: candidates.map((i) => touchPaths.get(i.id) ?? 0), bodyChars: candidates.map((i) => bodyChars.get(i.id) ?? 0), beside: split ? estimateBeside(neighbours, project.name, project.root) : undefined, chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
   );
   if (rough) console.log(rough.text);
   console.log(`Machine-wide: ${usage()}`);
@@ -3094,6 +3107,7 @@ export const burndown = async (
       const line = {
         ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ...(times ?? withQueued({ ms: Date.now() - since }, queuedMs)), ok,
         ...(carriedAtStart.has(issue) ? { carried: true } : {}),
+        ...(unreviewedAtStart.has(issue) ? { unreviewed: true } : {}),
         ...(remainderAtStart.has(issue) ? { remainder: true } : {}),
         ...(touchPaths.has(issue) ? { touches: touchPaths.get(issue) } : {}),
         ...(bodyChars.has(issue) ? { bodyChars: bodyChars.get(issue) } : {}),
@@ -3382,7 +3396,7 @@ export const burndown = async (
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
     gate: async (box, id, how) => {
-      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed));
+      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed));
       const times = gateMs(result);
       if (times) landingGateMs.set(id, times);
       const flaked = landingFlaked(result, run.tickets()[id]?.flaked);
@@ -3406,7 +3420,7 @@ export const burndown = async (
     timed: (id, took, landed) => {
       // A ticket's landings add up (a requeue lands again); the summary line shows them only for a ticket that merged.
       landingMs.set(id, (landingMs.get(id) ?? 0) + took.elapsed);
-      writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind });
+      writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind });
     },
   };
 
@@ -3464,7 +3478,7 @@ export const burndown = async (
     gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>
-      timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () =>
+      timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () =>
         gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when), undefined, host.exclusive),
       ).then((r) => {
         // The wait for the gates slot is inside the ticket's time but not its usual time, as a gates step's is.
