@@ -462,6 +462,13 @@ A tracker read made while a run is under way (the check before a ticket starts a
 lands, `handBack`, the overrun warning, the comments a head record counts) goes through
 `readTicketState`: `Tracker.getAsync` where the tracker has one (GitHub: `gh` through `shAsync`,
 which never blocks the event loop and gives up at `TRACKER_READ_MS`), else `get`. A timeout is a failed read, which each caller already handles.
+The run's other tracker reads are asynchronous and time-limited the same way, optional on `Tracker` beside
+the sync forms commands outside a run keep (`queue`, `lint`, `report`): `reopenedSinceAsync` (`mergedEarlier`
+through `notReopened`; unreadable means reopened, so the ticket runs normally), `openAsync` (the follow-up
+filing's list of open tickets; unreadable means an empty list, and the follow-up is still filed), and the
+blocker checks (`openOnQueue` at the start, `openBlockersNow` as tickets land), whose `declaredBlockersAsync`
+and state reads go through `blockerResolver`'s `limitMs`. A ticket whose native blocker links cannot be read
+is held by a `links` blocker that is never closed, and starts once a later read gets them.
 What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it
 asks the ledger's `describe` for
 

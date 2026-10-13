@@ -14,16 +14,18 @@ import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
 import { mergedByHand, mergedPartly } from "./run.ts";
-import { USER_CONFIG } from "./sandbox.ts";
-import { DEFAULT_DONE, refOf, slug, statusOf, type Tracker } from "./tracker.ts";
+import { shAsync, USER_CONFIG } from "./sandbox.ts";
+import { DEFAULT_DONE, refOf, slug, statusOf, TRACKER_READ_MS, type Tracker } from "./tracker.ts";
 
 // `remote`: an issue of another GitHub repository (a native blocker across repositories), id `owner/repo#N`.
 // It is none of this run's tickets, so it is never queued and no landing here releases it.
-export type Ref = { kind: "github" | "remote" | "linear" | "file" | "ticket"; id: string };
+// `links`: a ticket's own native blocker links, which a run's time-limited read could not get. It stands for the
+// blockers it could not name, always `unreadable` (so the ticket waits), and no landing here releases it.
+export type Ref = { kind: "github" | "remote" | "linear" | "file" | "ticket" | "links"; id: string };
 // `closed-unmerged`: closed as not planned, so the work it stood for will never land.
 export type Blocker = Ref & { state: "open" | "closed" | "closed-unmerged" | "unreadable" };
 
-export const refLabel = (r: Ref) => (r.kind === "github" ? `#${r.id}` : r.id);
+export const refLabel = (r: Ref) => (r.kind === "github" ? `#${r.id}` : r.kind === "links" ? `${refOf(r.id)}'s blocker links` : r.id);
 
 const TRIGGER = "(?:blocked by|depends on):?\\s+";
 
@@ -137,8 +139,22 @@ const githubState = (id: string, repo = "{owner}/{repo}"): Blocker["state"] => {
   }
 };
 
+// The same read for a run, asynchronously and given up at `limitMs`: the run's heartbeat, slot hand-offs and
+// status writes go on while gh answers, and one that does not answer is unreadable.
+const githubStateAsync = async (id: string, limitMs: number, repo = "{owner}/{repo}"): Promise<Blocker["state"]> => {
+  try {
+    const out = await shAsync("gh", ["api", `repos/${repo}/issues/${id}`, "--jq", '.state + " " + (.state_reason // "")'], limitMs);
+    const [state, reason] = out.split(/\s+/);
+    return state !== "closed" ? "open" : reason === "not_planned" ? "closed-unmerged" : "closed";
+  } catch {
+    return "unreadable";
+  }
+};
+
 // `known`: ids of tickets in the queue, which are open by definition - no lookup.
-export const blockerResolver = (project: Project, tracker: Tracker, known = new Set<string>()) => {
+// `limitMs`: the resolver of a run, whose GitHub reads are asynchronous and time-limited (`TRACKER_READ_MS`); without it
+// they are the synchronous reads of a command outside a run (`queue`, `lint`, `report`).
+export const blockerResolver = (project: Project, tracker: Tracker, known = new Set<string>(), limitMs?: number) => {
   const cache = new Map<string, Promise<Blocker>>();
   return (ref: Ref): Promise<Blocker> => {
     const key = `${ref.kind}:${ref.id}`;
@@ -149,8 +165,11 @@ export const blockerResolver = (project: Project, tracker: Tracker, known = new 
           ...ref,
           state:
             (ref.kind === "github" || ref.kind === "ticket") && known.has(ref.id) ? "open"
-            : ref.kind === "github" ? githubState(ref.id)
-            : ref.kind === "remote" ? githubState(ref.id.slice(ref.id.lastIndexOf("#") + 1), ref.id.slice(0, ref.id.lastIndexOf("#")))
+            : ref.kind === "links" ? "unreadable"
+            : ref.kind === "github" ? (limitMs === undefined ? githubState(ref.id) : await githubStateAsync(ref.id, limitMs))
+            : ref.kind === "remote" ? (limitMs === undefined
+              ? githubState(ref.id.slice(ref.id.lastIndexOf("#") + 1), ref.id.slice(0, ref.id.lastIndexOf("#")))
+              : await githubStateAsync(ref.id.slice(ref.id.lastIndexOf("#") + 1), limitMs, ref.id.slice(0, ref.id.lastIndexOf("#"))))
             : ref.kind === "linear" ? await linearState(project, ref.id)
             : ref.kind === "ticket" ? (tracker.isClosed(ref.id) === undefined ? "unreadable" : tracker.isClosed(ref.id) ? "closed" : "open")
             : fileState(project, ref.id),
@@ -198,22 +217,37 @@ export const blockerWhy = (project: Project, tracker: Tracker, queued?: Set<stri
   };
 };
 
-/** Every blocker a ticket names: in its body, and any its tracker declares (a ticket file's `Blocked by:` line, GitHub's native edge). */
-export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] => {
-  const refs = parseRefs(project, t.body ?? "");
-  // On GitHub a declared blocker is a native "blocked by" edge: an issue gh reads the state of, closed
-  // as not planned included. One the body names too is one blocker.
-  // One from another repository is `owner/repo#N`: read from that repository, never taken for this one's #N.
-  for (const id of tracker.declaredBlockers(t.id)) {
+// On GitHub a declared blocker is a native "blocked by" edge: an issue gh reads the state of, closed
+// as not planned included. One the body names too is one blocker.
+// One from another repository is `owner/repo#N`: read from that repository, never taken for this one's #N.
+const withDeclared = (tracker: Tracker, refs: Ref[], declared: string[]): Ref[] => {
+  for (const id of declared) {
     const kind = tracker.kind !== "github" ? "ticket" : id.includes("#") ? "remote" : "github";
     if (!refs.some((r) => r.kind === kind && r.id === id)) refs.push({ kind, id });
   }
   return refs;
 };
 
-/** The blockers of a ticket that are not closed. */
-export const openBlockers = async (project: Project, tracker: Tracker, resolve: ReturnType<typeof blockerResolver>, t: Blocked) =>
-  (await Promise.all(refsOf(project, tracker, t).map(resolve))).filter((b) => b.state !== "closed");
+/** Every blocker a ticket names: in its body, and any its tracker declares (a ticket file's `Blocked by:` line, GitHub's native edge). */
+export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] => withDeclared(tracker, parseRefs(project, t.body ?? ""), tracker.declaredBlockers(t.id));
+
+/**
+ * `refsOf` for a run: the tracker's declared blockers are read asynchronously and given up at `limitMs`. Links that cannot
+ * be read stand as one `links` blocker, which is never closed, so the ticket waits and starts once a later read
+ * gets them - the sync read's `[]` would start it with a blocker it never saw.
+ */
+export const refsOfAsync = async (project: Project, tracker: Tracker, t: Blocked, limitMs: number): Promise<Ref[]> => {
+  const refs = parseRefs(project, t.body ?? "");
+  try {
+    return withDeclared(tracker, refs, tracker.declaredBlockersAsync ? await tracker.declaredBlockersAsync(t.id, limitMs) : tracker.declaredBlockers(t.id));
+  } catch {
+    return [...refs, { kind: "links", id: t.id }];
+  }
+};
+
+/** The blockers of a ticket that are not closed. `limitMs`: a run's reads (see `blockerResolver`), which `resolve` must share. */
+export const openBlockers = async (project: Project, tracker: Tracker, resolve: ReturnType<typeof blockerResolver>, t: Blocked, limitMs?: number) =>
+  (await Promise.all((limitMs === undefined ? refsOf(project, tracker, t) : await refsOfAsync(project, tracker, t, limitMs)).map(resolve))).filter((b) => b.state !== "closed");
 
 // A ticket file's own "Blocked by: 01, 02" line names siblings by number; written in a comment it
 // is read by nobody, as a body-style line in a comment is not.
@@ -404,10 +438,12 @@ export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: Readon
   const lands = on.filter(here).map(refLabel);
   // One group per state, in the order each first appears.
   const words = [...new Set(on.map(wordOf).filter((w): w is string => w !== undefined))];
-  const away = on.filter((b) => !here(b) && wordOf(b) === undefined).map(refLabel);
+  const unread = on.filter((b) => b.kind === "links").map(refLabel);
+  const away = on.filter((b) => b.kind !== "links" && !here(b) && wordOf(b) === undefined).map(refLabel);
   const groups = [
     lands.length && `${lands.join(", ")} (lands this run)`,
     ...words.map((w) => `${on.filter((b) => wordOf(b) === w).map(refLabel).join(", ")} (${w})`),
+    unread.length && `${unread.join(", ")} (could not be read)`,
     away.length && `${away.join(", ")} (not in this run)`,
   ];
   return `waits for ${groups.filter(Boolean).join(", ")}`;
@@ -422,13 +458,13 @@ export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: Readon
  * `landed` is closed for its dependants whatever the tracker says: its work is on the base, and a
  * close the tracker refused (a transient error, `closeFailed`) is the tracker's lag, not the work's.
  */
-export const openBlockersNow = (project: Project, tracker: Tracker, queued: Iterable<string>) => {
+export const openBlockersNow = (project: Project, tracker: Tracker, queued: Iterable<string>, limitMs = TRACKER_READ_MS) => {
   const ids = [...queued];
   return async (tickets: Blocked[], landed: ReadonlySet<string>): Promise<Blocker[][]> => {
-    const lookup = blockerResolver(project, tracker, new Set(ids.filter((id) => !landed.has(id))));
+    const lookup = blockerResolver(project, tracker, new Set(ids.filter((id) => !landed.has(id))), limitMs);
     const resolve = async (ref: Ref): Promise<Blocker> => ((ref.kind === "github" || ref.kind === "ticket") && landed.has(ref.id) ? { ...ref, state: "closed" } : lookup(ref));
     const open: Blocker[][] = [];
-    for (const t of tickets) open.push(await openBlockers(project, tracker, resolve, t));
+    for (const t of tickets) open.push(await openBlockers(project, tracker, resolve, t, limitMs));
     return open;
   };
 };
