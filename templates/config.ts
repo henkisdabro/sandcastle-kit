@@ -1,20 +1,25 @@
 // Sandcastle project config - read by sandcastle-kit (https://github.com/henkisdabro/sandcastle-kit).
-// Only what differs from the kit's defaults belongs here.
+// Only what differs from the kit's defaults belongs here. Every other key is listed commented out,
+// at its default or with an example; README -> Configuration says what each does.
 
 export default {
   name: "my-project",
   // baseBranch: "main",
   // label: "ready-for-agent",
   // concurrency: 4,
+  // cpus: 2,                               // per sandbox; unset shares the VM's CPUs out, false lifts the limit
   // land: "merge",                         // or "squash": one commit per ticket on the base branch
   // autonomy: 0,                           // 1 asks to re-run conflicted and unblocked tickets; 2 or 3 re-run them
   // autonomy: "drain",                     // runs turns until the queue is drained or a stop condition holds (20 at most)
+  // usagePause: 95,                        // pause at this % of a plan window and resume after its reset (USAGE_PAUSE)
   // keepWarm: true,                        // false: the session that started the run stops keeping its prompt cache warm
+  // herdr: { panes: "none" },              // "all": a Herdr pane per sandbox (SANDBOX_PANES)
 
   // Claude Code in the sandbox image follows its "stable" release channel. "latest" follows the
   // faster one; an exact version pins it if a release misbehaves (CLAUDE_CODE_VERSION in the
   // environment overrides this for one command).
   // claudeCode: "latest",                  // or an exact version: "2.1.285"
+  // autoCompactWindow: 400000,             // tokens at which a sandbox's Claude agent compacts; unset: Claude Code's default
 
   // Where tickets live. Unset, the kit reads docs/agents/issue-tracker.md (written by
   // Matt Pocock's /setup-matt-pocock-skills, if you ran it) and otherwise uses GitHub.
@@ -26,15 +31,26 @@ export default {
 
   // {{KIT_STACK}}
 
+  // Extra bind mounts; never the project root, .sandcastle/ or .git.
+  // mounts: [{ hostPath: "~/.cache/my-tool", sandboxPath: "/home/agent/.cache/my-tool", readonly: true }],
+
   // Committed files a command writes. A merge conflict only in these is resolved by taking
   // either side and running `regen` in a sandbox. README -> A gate for generated files.
   // generated: [{ paths: ["dist/site.css"], regen: "pnpm run build:css" }],
 
+  // Paths a branch may not change and still land by itself, on top of the kit's own list.
+  // protectedPaths: ["migrations/"],
+
   rules: ".sandcastle/rules.md",
+
+  // When rules.md keeps agents out of CHANGELOG.md: they give each line in a <changelog> tag
+  // instead, and the closing summary lists the lines of the tickets that merged.
+  // changelog: true,
 
   // Models and effort differ from the kit's defaults only when set here, per agent.
   // IMPL_* / REVIEW_* env vars still override them for one run. Repair uses implement's.
-  // review: { model: "claude-opus-5-5", effort: "medium" },
+  // implement: { model: "claude-sonnet-5-5", effort: "high" },
+  // review: { model: "claude-opus-5-5", effort: "high" },
 
   // A red gate gets this many repair passes, fed its output. 0 turns it off.
   // repair: { attempts: 1 },
