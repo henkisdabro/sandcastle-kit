@@ -68,7 +68,8 @@ test("pnpm: a lockfile gives a frozen install and asks for the host store, namin
   const { config } = run(t, { "package.json": pkg({ test: "vitest" }), "pnpm-lock.yaml": "" });
   assert.ok(config.includes("pnpm install --frozen-lockfile"));
   assert.ok(config.includes("pnpmStore: true"));
-  assert.ok(!config.includes("hostPath") && !config.includes("/fake/pnpm-store") && !config.includes("store-dir"));
+  // The template's commented-out `mounts` example names `hostPath`; only a mount actually set would commit a path.
+  assert.ok(!/^\s*mounts:/m.test(config) && !config.includes("/fake/pnpm-store") && !config.includes("store-dir"));
 });
 
 test("yarn: a Berry lockfile gets --immutable", (t) => {

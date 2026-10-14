@@ -9,6 +9,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- **`sandcastle init` lists every project config key** in the `.sandcastle/config.ts` it writes,
+  commented out at its default or with an example: `cpus`, `usagePause`, `herdr`,
+  `autoCompactWindow`, `mounts`, `protectedPaths`, `changelog` and `implement` were missing, so a
+  new project could not see they existed. An existing project's config is unchanged; the README's
+  Configuration table lists the same keys.
+
 ## [0.17.0] - 2026-10-13
 
 ### Added
