@@ -25,6 +25,10 @@ export default {
     { name: "test", command: "pnpm run test" },
   ],
 
+  // The site's renderer copy, held to src/ by test/site-renderer-copy.test.ts: two tickets that both
+  // change the status renderer would otherwise conflict on it and neither would land.
+  generated: [{ paths: ["site/js/status-render.js"], regen: "pnpm site:renderer" }],
+
   rules: ".sandcastle/rules.md",
 
   // rules.md keeps agents out of CHANGELOG.md: they give each line in a <changelog> tag instead,
