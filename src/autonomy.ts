@@ -145,9 +145,12 @@ export const drainStop = (turn: DrainTurn, earlier: DrainTurn | undefined, ref: 
   if (partly.length) return `${partly.map(ref).join(", ")} left partly done in two turns running`;
   const unlanded = earlier?.unlanded ? (turn.unlanded ?? []).filter((id) => earlier.unlanded!.includes(id)) : [];
   if (unlanded.length) return `${unlanded.map(ref).join(", ")} failed to land in two turns running`;
-  if (turn.landed === 0 && turn.released.length === 0) return "no progress: the turn landed nothing and released nothing";
+  if (turn.landed === 0 && turn.released.length === 0) return NO_PROGRESS;
   return undefined;
 };
+
+/** `drainStop`'s last cause, named so the loop can tell it from the others: it is about re-running the same tickets, not about new work. */
+export const NO_PROGRESS = "no progress: the turn landed nothing and released nothing";
 
 /** The tickets a run recorded as a merge conflict, by id: outcomes.json keeps one entry per ticket, with the run that wrote it. */
 export const conflictedIn = (outcomes: Record<string, OutcomeEntry>, run: string): string[] =>
@@ -159,27 +162,62 @@ export const drainLine = (turns: number, landed: number, cause: string): string 
   `Drain: ${turns} turn${turns === 1 ? "" : "s"}, ${landed} landed, stopped because ${cause}`;
 
 /**
- * The closing lines for tickets the queue holds now that no turn of the run had: queued after it
- * started, so the drain does not take them (a turn takes only the last turn's re-runnable tickets,
- * never the whole queue) and the next `sandcastle run` does. `held` names the ones a blocker holds
- * back, which a bare `sandcastle run` would not start either. Unreadable queue: no line, as the
- * run is over and the lines are only a courtesy. `scope` is a named run's own tickets: one the operator
- * left out is not late for it, so the lines name none outside the set.
+ * The tickets the queue holds now that no turn of the run had and no blocker holds back: queued
+ * after the run started, so a turn (which takes the last turn's re-runnable tickets only, never the
+ * whole queue) did not take them. `held` names the ones an open blocker holds, which a bare
+ * `sandcastle run` would not start either. `scope` is a named run's own tickets: one the operator
+ * left out is not late for it. Unreadable queue: none, as the lines are a courtesy and a follow-on turn needs a reading.
  */
+export const lateTickets = async (
+  tracker: Tracker,
+  inRun: ReadonlySet<string>,
+  held: (queue: Ticket[]) => Promise<ReadonlySet<string>>,
+  scope?: ReadonlySet<string>,
+): Promise<Ticket[]> => {
+  try {
+    const late = tracker.queued(false).filter((t) => !inRun.has(t.id) && (!scope || scope.has(t.id)));
+    if (late.length === 0) return [];
+    const blocked = await held(late);
+    return late.filter((t) => !blocked.has(t.id));
+  } catch {
+    return [];
+  }
+};
+
+/** The closing lines for the late tickets a follow-on turn did not take (a stop, the cap or the one-follow-on limit): the next `sandcastle run` does. */
 export const lateQueueLines = async (
   tracker: Tracker,
   inRun: ReadonlySet<string>,
   held: (queue: Ticket[]) => Promise<ReadonlySet<string>>,
   scope?: ReadonlySet<string>,
-): Promise<string[]> => {
-  try {
-    const late = tracker.queued(false).filter((t) => !inRun.has(t.id) && (!scope || scope.has(t.id)));
-    if (late.length === 0) return [];
-    const blocked = await held(late);
-    return late.filter((t) => !blocked.has(t.id)).map((t) => `${tracker.ref(t.id)} was queued after this run started: \`sandcastle run\` takes it`);
-  } catch {
-    return [];
-  }
+): Promise<string[]> => (await lateTickets(tracker, inRun, held, scope)).map((t) => `${tracker.ref(t.id)} was queued after this run started: \`sandcastle run\` takes it`);
+
+/**
+ * How the loop would end: a `stop` (a cause that ends the run), nothing left to run again, the level's
+ * own turn cap, or `no progress` (a drain turn that re-ran the same tickets to no avail). `undefined`:
+ * it goes on (a further turn, or the level-1 question).
+ */
+export type LoopEnd = "stop" | "nothing left" | "cap" | "no progress";
+
+/** `after` is `afterTurn`'s answer for the turn that just ended. */
+export const endOf = (after: ReturnType<typeof afterTurn>): LoopEnd | undefined =>
+  !after ? "stop" : after.verdict === "stop" ? "nothing left" : after.verdict === "cap" ? "cap" : undefined;
+
+/** A drain stop's cause as the loop's end: only the no-progress stop leaves room for new work. */
+export const endOfDrainStop = (cause: string): LoopEnd => (cause === NO_PROGRESS ? "no progress" : "stop");
+
+/**
+ * Whether the run takes one more turn for the tickets queued while it was live. At `2`, `3` and `drain`
+ * only, when the loop would end with nothing left to run again, at the level's cap or on the drain's no-progress stop
+ * (never on a stop that ends the run); under the `DRAIN_CAP` of all turns. `drain` may repeat; `2` and `3` take
+ * one per run (`followedOn`), even past the level's own cap, since the run keeps that count, not the turn number.
+ * `turn` is the number of the turn that just ended.
+ */
+export const followOnTurn = (a: { level: Level; turn: number; end: LoopEnd | undefined; late: readonly string[]; followedOn: boolean }): boolean => {
+  if (a.level === 0 || a.level === 1) return false;
+  if (a.end === undefined || a.end === "stop" || a.late.length === 0) return false;
+  if (a.turn >= DRAIN_CAP) return false;
+  return a.level === "drain" || !a.followedOn;
 };
 
 export const rerunList = (again: Rerun, ref: (id: string) => string): string => {
