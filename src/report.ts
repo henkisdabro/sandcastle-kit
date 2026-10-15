@@ -361,19 +361,37 @@ export const pressureFromTimings = (text: string, runId: string): { some: number
 
 /**
  * Where a run's time went beyond the work itself, from its timings lines: `gateWaitMs` is the waits for a gates slot (the
- * `waitMs` of the gate, landing gate, base and verify lines), `landingWaitMs` the landings' waits for a sandbox slot (the
- * `waitMs` of a `landing` line, which is no gates slot's, and which the run record's `sandboxWaitMs` does not hold: a
- * landing leases its slot apart from the ticket workers), `reruns` the gate runs of a ticket after its first and `repairs`
- * its repair passes, each with the time they took (`ms` of the lines, the slot wait already out of it).
+ * `waitMs` of the gate, landing gate, base and verify lines) and `landingGateWaitMs` the landing gates' share of it,
+ * `landingWaitMs` the landings' waits for a sandbox slot (the `waitMs` of a `landing` line, which is no gates slot's, and
+ * which the run record's `sandboxWaitMs` does not hold: a landing leases its slot apart from the ticket workers), and
+ * `repairs` the repair passes. A gate run after a ticket's first is one of three, each with the time it took (`ms` of the
+ * lines, the slot wait already out of it): `redReruns`, a red gate run again inside its slot (a line marked `rerun`);
+ * `afterRepair`, one that follows a repair pass; `afterRequeue`, any other later one, a requeued attempt's.
  */
-export type TimeLost = { gateWaitMs: number; landingWaitMs: number; reruns: number; rerunMs: number; repairs: number; repairMs: number };
+export type TimeLost = {
+  gateWaitMs: number;
+  landingGateWaitMs: number;
+  landingWaitMs: number;
+  redReruns: number;
+  redRerunMs: number;
+  afterRepair: number;
+  afterRepairMs: number;
+  afterRequeue: number;
+  afterRequeueMs: number;
+  repairs: number;
+  repairMs: number;
+};
 
 const GATE_SLOT_PHASES: readonly string[] = ["gates", LANDING_GATES, "base gates", "verify"];
 
 /** One run's `TimeLost` from timings.jsonl text; undefined when the run has no line. */
 export const timeLostFromTimings = (text: string, runId: string): TimeLost | undefined => {
-  const lost: TimeLost = { gateWaitMs: 0, landingWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 };
+  const lost: TimeLost = {
+    gateWaitMs: 0, landingGateWaitMs: 0, landingWaitMs: 0, redReruns: 0, redRerunMs: 0, afterRepair: 0, afterRepairMs: 0, afterRequeue: 0, afterRequeueMs: 0, repairs: 0, repairMs: 0,
+  };
   const gated = new Set<string>();
+  // The tickets with a repair pass since their previous gates line: their next unmarked gate run follows that repair.
+  const repaired = new Set<string>();
   let any = false;
   for (const raw of text.split("\n")) {
     let line: { run?: unknown; issue?: unknown; phase?: unknown; ms?: unknown; waitMs?: unknown };
@@ -387,21 +405,30 @@ export const timeLostFromTimings = (text: string, runId: string): TimeLost | und
     const ms = typeof line.ms === "number" && line.ms > 0 ? line.ms : 0;
     const waitMs = typeof line.waitMs === "number" && line.waitMs > 0 ? line.waitMs : 0;
     if (GATE_SLOT_PHASES.includes(line.phase)) lost.gateWaitMs += waitMs;
+    if (line.phase === LANDING_GATES) lost.landingGateWaitMs += waitMs;
     if (line.phase === LANDING) lost.landingWaitMs += waitMs;
     const issue = String(line.issue ?? "");
+    const marked = (line as { rerun?: unknown }).rerun === true;
     // A landing re-run inside its slot is a line of its own, marked; a requeued ticket's second landing is no re-run.
-    if (line.phase === LANDING_GATES && (line as { rerun?: unknown }).rerun === true) {
-      lost.reruns++;
-      lost.rerunMs += ms;
+    if (marked && (line.phase === LANDING_GATES || line.phase === "gates")) {
+      lost.redReruns++;
+      lost.redRerunMs += ms;
+    } else if (line.phase === "gates" && gated.has(issue)) {
+      // Unmarked and after the ticket's first: a repair pass since its previous gate run was the cause, else a requeue.
+      if (repaired.has(issue)) {
+        lost.afterRepair++;
+        lost.afterRepairMs += ms;
+      } else {
+        lost.afterRequeue++;
+        lost.afterRequeueMs += ms;
+      }
     }
     if (line.phase === "gates" && issue) {
-      if (gated.has(issue)) {
-        lost.reruns++;
-        lost.rerunMs += ms;
-      }
       gated.add(issue);
+      repaired.delete(issue);
     }
     if (line.phase === "repair") {
+      repaired.add(issue);
       lost.repairs++;
       lost.repairMs += ms;
     }
@@ -1097,17 +1124,32 @@ const causesOf = (f: Facts): { ms: number; text: string; gates?: true }[] => {
   const lost = f.timeLost;
   return [
     ...(f.sharedMs ? [{ ms: f.sharedMs, text: `${span(f.sharedMs)} at a share below what it asked for, beside another run` }] : []),
-    ...(lost?.gateWaitMs ? [{ ms: lost.gateWaitMs, text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets`, gates: true as const }] : []),
+    ...(lost?.gateWaitMs
+      ? [{
+          ms: lost.gateWaitMs,
+          // A landing's wait is also inside its `landing Nm` of the ticket lines, so the share is named.
+          text: `${span(lost.gateWaitMs)} waiting for gates slots, summed over tickets${lost.landingGateWaitMs >= 60_000 ? ` (of which ${span(lost.landingGateWaitMs)} landings)` : ""}`,
+          gates: true as const,
+        }]
+      : []),
     ...(f.pausedMs ? [{ ms: f.pausedMs, text: `${span(f.pausedMs)} paused (sandcastle pause or the plan's usage)` }] : []),
     ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
     ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
-    ...(lost && lost.reruns + lost.repairs
-      ? [{
-          ms: lost.rerunMs + lost.repairMs,
-          text: `${[lost.reruns ? `${lost.reruns} gate re-run${lost.reruns === 1 ? "" : "s"}` : "", lost.repairs ? `${lost.repairs} repair pass${lost.repairs === 1 ? "" : "es"}` : ""].filter(Boolean).join(" and ")} (${span(lost.rerunMs + lost.repairMs)} of pass time)`,
-        }]
-      : []),
+    ...(lost && lost.redReruns + lost.afterRepair + lost.afterRequeue + lost.repairs ? [passCause(lost)] : []),
   ].filter((c) => c.ms >= 60_000).sort((a, b) => b.ms - a.ms);
+};
+
+// The gate runs after a ticket's first by cause, then the repair passes: "2 red gates run again, 1 gate run after repair and 2 repair passes".
+const passCause = (lost: TimeLost) => {
+  const ms = lost.redRerunMs + lost.afterRepairMs + lost.afterRequeueMs + lost.repairMs;
+  const parts = [
+    lost.redReruns ? `${lost.redReruns} red gate${lost.redReruns === 1 ? "" : "s"} run again` : "",
+    lost.afterRepair ? `${lost.afterRepair} gate run${lost.afterRepair === 1 ? "" : "s"} after repair` : "",
+    lost.afterRequeue ? `${lost.afterRequeue} gate run${lost.afterRequeue === 1 ? "" : "s"} after a requeue` : "",
+    lost.repairs ? `${lost.repairs} repair pass${lost.repairs === 1 ? "" : "es"}` : "",
+  ].filter(Boolean);
+  const words = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0]!;
+  return { ms, text: `${words} (${span(ms)} of pass time)` };
 };
 
 // Led by the gates wait, the line names the check that says whether the machine has room for another gates slot.
@@ -1252,6 +1294,10 @@ export const render = (f: Facts, plain = false): string => {
   if (notClosed.length) done.push(`${notClosed.length} merged, but still open in the tracker: ${list(notClosed)} (see Needs you)`);
   // Merged, but not closed on purpose: a criterion is unmet, so the next run does the rest.
   if (partly.length) done.push(`${partly.length} merged, partly done, and left open in the tracker: ${list(partly)} (see Needs you)`);
+  // A warning on a ticket that landed: the line is agent-written, so nothing was held for it. It leads the push note, so
+  // it is not read as part of it.
+  const overran = merged.filter((id) => overrunNoted(f.tickets[id].overrun));
+  if (overran.length) done.push("Changed files beyond their Touches line:", ...overran.map((id) => `  ${name(id)}: ${overrunPaths(f.tickets[id].overrun!)}`));
   if (closed.length && f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   else if (merged.length) done.push(`The code is only on your local ${f.base} until you push it.`);
   // A ticket the scheduler sent back once (a conflict or a red gate at landing) and landed on its second attempt.
@@ -1271,8 +1317,6 @@ export const render = (f: Facts, plain = false): string => {
     const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";
     done.push(`Dry run - green, would merge: ${list(wouldMerge)}. Nothing was merged or closed.${together}`);
   }
-  // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
-  for (const id of merged.filter((id) => overrunNoted(f.tickets[id].overrun))) done.push(`${name(id)} - beyond Touches: ${overrunPaths(f.tickets[id].overrun!)}`);
   const byHandShut = byHand.filter((id) => f.mergedByHandClosed?.includes(id));
   const byHandPart = byHand.filter((id) => !byHandShut.includes(id) && f.mergedByHandPartly?.includes(id));
   const byHandOpen = byHand.filter((id) => !byHandShut.includes(id) && !byHandPart.includes(id));

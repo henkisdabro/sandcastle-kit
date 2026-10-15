@@ -48,5 +48,5 @@ test("the closing report separates the title from the note", () => {
     runnable: [], blocked: [], standing: [], keptWorktrees: [], changed: {}, stage: "report", exitCode: 0,
   } as unknown as Parameters<typeof render>[0];
   const text = render(facts, true);
-  assert.ok(text.includes("#241 nest a second store inside the host's - beyond Touches: src/ledger.ts, src/run.ts, +2 docs files"), text);
+  assert.ok(text.includes("  #241 nest a second store inside the host's: src/ledger.ts, src/run.ts, +2 docs files"), text);
 });

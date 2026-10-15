@@ -105,8 +105,8 @@ test("an overrun of tests and docs stays in the record but is neither in the clo
       gateCount: 1, tickets: { "1": { state: "merged", title: "t", overrun } },
       runnable: [], blocked: [], standing: [], keptWorktrees: [], changed: {}, stage: "report", exitCode: 0,
     }) as unknown as Facts;
-  assert.ok(!render(facts(paths), true).includes("beyond Touches"));
-  assert.ok(render(facts(["src/x.ts", ...paths]), true).includes("#1 t - beyond Touches: src/x.ts, +2 test files, +1 docs file"));
+  assert.ok(!render(facts(paths), true).includes("beyond their Touches"));
+  assert.ok(render(facts(["src/x.ts", ...paths]), true).includes("  #1 t: src/x.ts, +2 test files, +1 docs file"));
 });
 
 test("landing reads the repair commits from the ticket's head record", async () => {
