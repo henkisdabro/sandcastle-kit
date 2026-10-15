@@ -703,12 +703,15 @@ export const onBase = (landed: Landed) => landed.kind === "merged" || landed.kin
  * not come. A cycle (A waits on B's fix while B waits on A's) is refused at `fixing`, so no two
  * tickets wait on each other. A waiter holds its sandbox slot, and the landing it waits for may need
  * one: while `starved` says a landing waits for a slot, every waiter stops waiting (asked every
- * `pause` ms), so the two never wait on each other. A ticket whose landing put a commit on the base
+ * `pause` ms), so the two never wait on each other. The same holds for a worker: a ticket off its worker on an uncounted
+ * lock (`at.gateWait`) that claimed a repair asks for one again before its pass (`at.retake`), and a waiter that holds a worker
+ * would hold the one it waits for - while `stuck` says so of the ticket waited on, or of one that ticket waits on in turn,
+ * the waiter stops waiting. A ticket whose landing put a commit on the base
  * (`landedAt`, read as it ends) has it remembered, and `fixing` hands it on: a ticket whose branch
  * holds that commit already got the fix when it started, so a merge brings it nothing. In memory, one
  * per run.
  */
-export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?: (id: string) => string | undefined) => {
+export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?: (id: string) => string | undefined, stuck?: (waiter: string, on: string) => boolean) => {
   const claims = new Map<string, string>();
   // A ticket that ended: whether it landed.
   const ended = new Map<string, boolean>();
@@ -754,8 +757,16 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?:
       try {
         return await new Promise<boolean>((resume) => {
           resumes.set(on, [...(resumes.get(on) ?? []), resume]);
-          const poll = () => (starved?.() || paused?.() ? resume(false) : (timer = setTimeout(poll, pause)));
-          if (starved || paused) timer = setTimeout(poll, pause);
+          // Along the chain of waits from `on`: a cycle is refused at `fixing`, and `seen` ends one anyway.
+          const blocked = () => {
+            for (let at: string | undefined = on, seen = new Set<string>(); at !== undefined && !seen.has(at); at = waitingOn.get(at)) {
+              if (stuck!(id, at)) return true;
+              seen.add(at);
+            }
+            return false;
+          };
+          const poll = () => (starved?.() || paused?.() || (stuck && blocked()) ? resume(false) : (timer = setTimeout(poll, pause)));
+          if (starved || paused || stuck) timer = setTimeout(poll, pause);
         });
       } finally {
         clearTimeout(timer);

@@ -685,7 +685,8 @@ state.
   attempts off their worker; one that reaches its gates wait at the cap is told no, keeps its slot and its worker and
   waits as before. Every wait for a gates slot of a ticket gate asks, not only the first (a gate run after a repair does).
   A red ticket takes a counted slot again just before its repair pass (and the review after it), not at the result: through
-  a fix-board wait it stays on the uncounted lock. `at.retake()` queues it in the pipeline queue at the top rank, so it is served as a
+  a fix-board wait it stays on the uncounted lock (a waiter that holds a worker stops waiting on it meanwhile: the fix board
+  below). `at.retake()` queues it in the pipeline queue at the top rank, so it is served as a
   worker's ask - the pool's order, a landing first (`landingWaits`), the run's share - ahead of tickets that have not started;
   the worker that gets the slot hands it over and stays with the attempt until it goes off again or ends, so the run never has
   more agent passes than workers, and the uncounted lock goes once the slot is held. A pause answers a queued retake with nothing:
@@ -734,6 +735,13 @@ state.
   waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
   ticket that repaired before it waited keeps those commits under the review after repair.
   `test/fix-wait.test.ts`.
+  The same holds for a worker: a fixer off its worker on an uncounted lock asks for one again
+  before its repair pass (`at.retake`), and with one worker a waiter that holds it would wait on a
+  fixer that waits for it.
+  So while the ticket waited on, or one it waits on in turn, asks for a worker (`stuck`:
+  `fixWaitStuck` over each ticket's `createGateSeat` in `src/burndown.ts`), a waiter that holds its
+  worker stops waiting and repairs; a waiter off its worker holds none and keeps waiting
+  (`test/fix-wait-retake.test.ts`).
 - **The pause** (`Work.pause`, a `PauseSource`: `read()` answers the pause in force, `{ since }` in
   seconds, or none).
   The scheduler reads it at each juncture and every `pollMs` (1 s; the timer is not unref'd - with

@@ -318,3 +318,87 @@ test("source: a ticket gate's wait for a gates slot moves the lease off the coun
   assert.match(src, /gateWaiters: limit\("gates"\), attempt,/);
   assert.equal(src.match(/await at\?\.agent\?\.\(\);/g)?.length, 2, "before the repair pass and before the review after it");
 });
+
+test("every wait for a gates slot moves the lease: a repaired ticket's next gates wait frees the worker it took back", async () => {
+  const order: string[] = [];
+  const gatesAgain = later();
+  const passB = later();
+  const counted = countedPool(1);
+  const uncounted = new Set<string>();
+  const running = run(["A", "B", "C"], {
+    slot: counted.slot,
+    attempt: async (t, at) => {
+      order.push(`start ${t.id}`);
+      if (t.id === "A") {
+        assert.equal(moveOff(at, uncounted, t.id), true);
+        // Red while B implements: its retake waits for B's pass, ahead of C.
+        await until(() => order.includes("start B"), "B to start");
+        const asked = at.retake();
+        passB.open();
+        const taken = await asked;
+        uncounted.delete("A");
+        order.push("A repair");
+        // The gates after the repair wait for a slot again: the counted slot it took back moves off, and the worker with it.
+        assert.equal(moveOff({ gateWait: at.gateWait, slot: taken!.slot }, uncounted, t.id), true);
+        await gatesAgain.done;
+        order.push("end A");
+        return green(t.id);
+      }
+      if (t.id === "B") await passB.done;
+      if (t.id === "C") gatesAgain.open();
+      at.slot?.release();
+      order.push(`end ${t.id}`);
+      return green(t.id);
+    },
+  });
+  await running;
+  assert.deepEqual(order.slice(0, 6), ["start A", "start B", "end B", "A repair", "start C", "end C"]);
+  assert.equal(counted.free(), 1);
+});
+
+test("a ticket that crashes off its worker ends as crashed, and the run goes on", async () => {
+  const counted = countedPool(1);
+  const uncounted = new Set<string>();
+  const { endings } = await run(["A", "B"], {
+    slot: counted.slot,
+    attempt: async (t, at) => {
+      if (t.id === "A") {
+        assert.equal(moveOff(at, uncounted, t.id), true);
+        await until(() => counted.free() === 0, "B to hold the slot");
+        return { kind: "crashed", error: new Error("agent died") };
+      }
+      await tick();
+      at.slot?.release();
+      return green(t.id);
+    },
+  });
+  assert.equal(endings.get("A")?.kind, "crashed");
+  assert.equal(endings.get("B")?.kind, "landing");
+  assert.equal(counted.free(), 1);
+});
+
+test("a run stopped while a ticket waits off its worker starts nothing more, and the ticket's retake answers at once with no slot", async () => {
+  const counted = countedPool(1);
+  const uncounted = new Set<string>();
+  let retaken: { slot?: Slot } | undefined;
+  const ended = new Set<string>();
+  const { endings } = await run(["A", "B", "C"], {
+    slot: counted.slot,
+    attempt: async (t, at) => {
+      if (t.id === "A") {
+        assert.equal(moveOff(at, uncounted, t.id), true);
+        await until(() => ended.has("B"), "B to stop the run");
+        retaken = await at.retake();
+        return green(t.id);
+      }
+      at.slot?.release();
+      ended.add(t.id);
+      return { kind: "crashed", error: new Error("limit reached"), causes: [{ kind: "plan limit", ticket: t.id }] };
+    },
+  });
+  assert.ok(retaken, "answered, not left waiting for a worker");
+  assert.equal(retaken.slot, undefined, "a stopped run grants no slot: the pass runs as a stopped run lets a ticket finish");
+  assert.equal(endings.get("C")?.kind, "not begun", "a stopped run begins no ticket");
+  assert.equal(endings.get("A")?.kind, "landing", "the ticket that was waiting finishes, as a stopped run lets one");
+  assert.equal(counted.free(), 1);
+});

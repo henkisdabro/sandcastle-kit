@@ -1584,10 +1584,15 @@ const worktreeIsClean = (project: Project, path: string) => {
 export const createGateSeat = (ports: { gateWait(): boolean; retake(): Promise<{ slot?: SlotLease } | undefined>; uncount(lease: SlotLease): SlotLease }) => {
   let waiting: SlotLease | undefined;
   let off = false;
+  let asking = false;
   return {
     /** The ticket's sandbox is on the uncounted lock and its worker is not its own. */
     get off() {
       return off;
+    },
+    /** It waits for a worker to take a counted slot again (`retake`): a fix-board waiter holding one must not wait for it (`fixWaitStuck`). */
+    get asking() {
+      return asking;
     },
     /** Whether `lease` was moved to the uncounted lock; the lease is spent then. False: the ticket keeps it. */
     move(lease: SlotLease): boolean {
@@ -1604,7 +1609,8 @@ export const createGateSeat = (ports: { gateWait(): boolean; retake(): Promise<{
     },
     /** A counted slot again; undefined when the run is paused (the caller parks and asks again). None to hold without the port or on a stopped run: the uncounted lock stays. */
     async retake(): Promise<{ slot?: SlotLease } | undefined> {
-      const taken = await ports.retake();
+      asking = true;
+      const taken = await ports.retake().finally(() => (asking = false));
       if (!taken) return undefined;
       off = false;
       if (taken.slot) {
@@ -1620,6 +1626,13 @@ export const createGateSeat = (ports: { gateWait(): boolean; retake(): Promise<{
     },
   };
 };
+
+/**
+ * The fix board's `stuck` (`createFixBoard`): a waiter that holds its worker stops waiting on a ticket that waits for a worker
+ * to take back a counted slot (`createGateSeat`'s `asking`) - with one worker, each would wait for the other for good. A
+ * waiter off its worker holds none, and keeps waiting.
+ */
+export const fixWaitStuck = (seats: { get(id: string): { off: boolean; asking: boolean } | undefined }) => (waiter: string, on: string) => !seats.get(waiter)?.off && !!seats.get(on)?.asking;
 
 /** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
 export const createPipeline = (ctx: PipelineContext) => {
@@ -3582,7 +3595,9 @@ export const burndown = async (
   // Who is repairing which failure: the scheduler's endings (`tell`) tell a waiting ticket whether the fix landed.
   // A landing left waiting for a sandbox slot may be waiting for the very slots the waiters hold (the run's
   // share shrank, a cap): they stop waiting and repair, so no wait outlasts the landing it waits for.
-  const fixes = createFixBoard(() => slotWanted.n > 0, undefined, (id) => ctx.landed.get(id)?.commit);
+  // Each ticket's seat while its attempt runs (`createGateSeat`), for the fix board's `stuck`.
+  const seats = new Map<string, ReturnType<typeof createGateSeat>>();
+  const fixes = createFixBoard(() => slotWanted.n > 0, undefined, (id) => ctx.landed.get(id)?.commit, fixWaitStuck(seats));
   const pipeline = createPipeline({
     project,
     tracker,
@@ -3664,6 +3679,7 @@ export const burndown = async (
     // While it only waits for a gates slot the ticket's sandbox sits on an uncounted lock and its worker is free (`createGateSeat`);
     // a slot it takes again then goes through the scheduler's `retake`, as a worker's does.
     const seat = createGateSeat({ gateWait, retake, uncount: (l) => uncountSlot(l, `${project.name} ${ref(issue.id)} gates`) });
+    seats.set(issue.id, seat);
     const take = async () => {
       if (seat.off) {
         const retaken = await seat.retake();
@@ -3722,6 +3738,7 @@ export const burndown = async (
       } finally {
         give();
         gateWaits.delete(issue.id);
+        seats.delete(issue.id);
       }
     })().then(
       (value) => ({ status: "fulfilled", value }) as const,
