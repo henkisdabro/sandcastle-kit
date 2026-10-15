@@ -298,6 +298,9 @@ export const withLockSync = <T>(file: string, label: string, fn: () => T, timeou
 
 export type SlotLock = { pid: number; run: string; label: string };
 
+/** In the name of a lock outside the count (`uncountSlot`): `<pool>-waiting-<run>-<n>.lock`, so the status view's `<pool>-*.lock` count reads it as it reads a slot. */
+const UNCOUNTED = "-waiting-";
+
 /**
  * A slot lock's content ("<pid> <token> run=<id> <label>"). A lock from a kit that did not name
  * its run reads as a run of its own pid: it still counts, and is never mistaken for another's.
@@ -308,11 +311,15 @@ const parseLock = (content: string): SlotLock => {
   return { pid: Number(pid), run: named ? second.slice(4) : `pid:${pid}`, label: (named ? rest : [second, ...rest]).filter(Boolean).join(" ") };
 };
 
-/** The pool's slots held by a live run now. */
-export const liveSlots = (pool: PoolName, seen?: Seen): SlotLock[] => {
+/**
+ * The pool's slots held by a live run now. A lock moved off the count (`uncountSlot`) is left out unless `uncounted`: the
+ * shares, the slot kept for landing and the waits' look at a full pool count the slots the limit is spent on; `usage()`
+ * and the status view count every lock a sandbox holds.
+ */
+export const liveSlots = (pool: PoolName, seen?: Seen, uncounted = false): SlotLock[] => {
   if (!existsSync(DIR)) return [];
   return readdirSync(DIR)
-    .filter((f) => f.startsWith(`${pool}-`) && f.endsWith(".lock")) // not a `.takeover` guard: that is a slot changing hands
+    .filter((f) => f.startsWith(`${pool}-`) && f.endsWith(".lock") && (uncounted || !f.includes(UNCOUNTED))) // not a `.takeover` guard: that is a slot changing hands
     .flatMap((f) => {
       const content = read(join(DIR, f));
       const lock = content ? parseLock(content) : undefined;
@@ -897,6 +904,9 @@ export type WaitReason = "slots" | "share" | "landing";
 /** A slot taken with `leaseSlot`: `release` frees it, once; a second call does nothing. */
 export type SlotLease = { release(): void };
 
+/** The numbered lock behind each lease, for `uncountSlot`. */
+const leased = new WeakMap<SlotLease, { pool: PoolName; file: string; mine: string }>();
+
 /**
  * Waits for a slot and hands it over: the caller frees it with `release()`. `withSlot` is this with
  * the release tied to a function's end; a ticket that closes its sandbox mid-way (a paused run) gives
@@ -990,7 +1000,7 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
   const taken = slot;
   held.set(taken.file, taken.mine);
   let released = false;
-  return await use({
+  const lease: SlotLease = {
     release() {
       if (released) return;
       released = true;
@@ -1005,7 +1015,9 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       held.delete(taken.file);
       releaseLock(taken.file, taken.mine);
     },
-  });
+  };
+  leased.set(lease, { pool, file: taken.file, mine: taken.mine });
+  return await use(lease);
 }
 
 /** Waits for a slot, runs `fn`, frees the slot. */
@@ -1021,6 +1033,50 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
 let extras = 0;
 
 /**
+ * Removes the locks named for one process (an extra slot's, an uncounted one's) whose holder is gone. The name is unique
+ * to its process, so a killed holder's lock is never taken over: it would stay for good.
+ */
+const sweepOwnNamed = () => {
+  mkdirSync(DIR, { recursive: true });
+  for (const f of readdirSync(DIR).filter((f) => (f.includes("-extra-") || f.includes(UNCOUNTED)) && f.endsWith(".lock"))) {
+    const content = read(join(DIR, f));
+    if (content && !holderRunning(parseLock(content).pid)) rmSync(join(DIR, f), { force: true });
+  }
+};
+
+let waiters = 0;
+
+/**
+ * Moves a held sandbox lease to a lock outside the count (`<pool>-waiting-<run>-<n>.lock`, the content a slot has) while
+ * its container lives on, and frees the numbered slot: a ticket whose sandbox only waits for a gates slot takes
+ * none of the limit, so another ticket's agent pass can run meanwhile. Like an extra slot (`withExtraSlot`) it is outside the
+ * numbered locks `tryAcquire` takes, is released with the returned lease and at exit, and counts for nothing once its holder
+ * is dead (`holderRunning`; the next one taken removes its file). Unlike it, it is not in `members()`' `held` (the shares)
+ * and not in `lastFreeSlot`'s count (`liveSlots` leaves it out); `usage()` and the status view's slot count read it, so
+ * the live containers can pass the limit by as many as are waiting. The uncounted lock is written before the numbered
+ * one is freed, so the sandbox is never unseen. The lease moved is released (a second `release` does nothing).
+ */
+export const uncountSlot = (lease: SlotLease, label: string): SlotLease => {
+  const from = leased.get(lease);
+  if (!from) throw new Error("uncountSlot: not a lease of this pool");
+  sweepOwnNamed();
+  const file = join(DIR, `${from.pool}${UNCOUNTED}${RUN_ID}-${waiters++}.lock`);
+  const mine = `${process.pid} ${randomUUID()} run=${RUN_ID} ${label}\n`;
+  writeFileSync(file, mine, { flag: "wx" });
+  held.set(file, mine);
+  lease.release();
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      held.delete(file);
+      releaseLock(file, mine);
+    },
+  };
+};
+
+/**
  * Runs `fn` with an extra slot of `pool`: a lock outside the numbered ones
  * (`<pool>-extra-<run>-<n>.lock`, the content a slot has), taken at once and never waited for. It is
  * for a sandbox started inside a slot the caller already holds - the mid-run base check - which
@@ -1033,12 +1089,7 @@ let extras = 0;
  * nothing (`holderRunning`) and is removed by the next extra slot taken.
  */
 export const withExtraSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T> | T): Promise<T> => {
-  mkdirSync(DIR, { recursive: true });
-  // The name is unique to this process, so a killed holder's lock is never taken over: it would stay for good.
-  for (const f of readdirSync(DIR).filter((f) => f.includes("-extra-") && f.endsWith(".lock"))) {
-    const content = read(join(DIR, f));
-    if (content && !holderRunning(parseLock(content).pid)) rmSync(join(DIR, f), { force: true });
-  }
+  sweepOwnNamed();
   const file = join(DIR, `${pool}-extra-${RUN_ID}-${extras++}.lock`);
   const mine = `${process.pid} ${randomUUID()} run=${RUN_ID} ${label}\n`;
   writeFileSync(file, mine, { flag: "wx" });
@@ -1052,7 +1103,7 @@ export const withExtraSlot = async <T>(pool: PoolName, label: string, fn: () => 
 };
 
 /** "sandboxes 3/6 · gates 1/2" - live slots only; the status view counts them the same way. */
-export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool).length}/${limit(pool)}`).join(" · ");
+export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool, undefined, true).length}/${limit(pool)}`).join(" · ");
 
 /** One live run's demand, share and cap, as `sandcastle cap` shows them. */
 export type Standing = { project: string; demand: number; share: number; held: number; concurrency: number; cap?: number };
