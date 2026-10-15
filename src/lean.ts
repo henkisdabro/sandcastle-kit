@@ -260,7 +260,9 @@ export const hiddenReferences = (root: string, p: Plan, dropHooks: string[] = []
   };
   const droppedBy = dropHooks.filter((d) => p.items.some((i) => i.kind === "hook" && !i.kept && i.id.includes(d)));
   return [
-    ...p.hide.map((path) => ({ path, by: grep(path, p.hide) })),
+    // CODEOWNERS names paths by design and no gate reads it, and the project's own .sandcastle config
+    // naming a path it hides is no reader either: either one alone printed this warning every run.
+    ...p.hide.map((path) => ({ path, by: grep(path, [...p.hide, ".sandcastle", "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"]) })),
     // The hook's own script names the string too, and the config that drops
     // it; only other files count.
     ...droppedBy.map((d) => ({

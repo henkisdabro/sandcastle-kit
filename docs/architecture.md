@@ -2393,9 +2393,10 @@ Claude Code moves a Bash command that runs past its default 2-minute timeout to 
 an agent that ran the full suite without passing a `timeout` then could not see it finish, would not
 claim the gates green and ended without `<promise>COMPLETE</promise>`, so the kit started a second
 implement session that re-checked the work and ran the suite again (about 10-17 min each, twice in
-one 22-ticket run). 15 minutes is above the 10 minutes (`timeout: 600000`) the prompts tell an agent
-to pass, so a suite run with or without an explicit `timeout` stays in the foreground; the prompts'
-advice stays, as the one that also works where a sandbox's settings are not these.
+one 22-ticket run).
+The prompts tell an agent to pass `timeout: 900000`, the same 15 minutes (`test/managed-settings-env.test.ts`
+holds the two equal): an explicit `timeout` caps the call, and the 10 minutes they once advised cut
+off a suite that ran 11 minutes under load, below what the agent would have got by passing none.
 The maximum is raised with the default because Claude Code's own maximum is 10 minutes and a default
 above it may be clamped to it.
 

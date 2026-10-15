@@ -1084,7 +1084,7 @@ export const withContainerCpus = async <T>(
 export const cpusLine = (project: Pick<Project, "cpus">, ticket: number | undefined, gate: number | undefined) =>
   ticket === undefined
     ? `Sandbox CPUs: no limit${project.cpus === false ? " (cpus: false)" : " (docker info gave no CPU count)"}`
-    : `Sandbox CPUs: ${ticket} each${gate === undefined || gate === ticket ? "" : `, ${gate} for landing and base gates`}${
+    : `Sandbox CPUs: ${ticket} each${gate === undefined || gate === ticket ? "" : `, ${gate} while gates run`}${
         typeof project.cpus !== "number" ? "" : ticket < project.cpus ? ` (cpus ${project.cpus} in the project config, but the VM has ${ticket})` : " (cpus in the project config)"
       }`;
 

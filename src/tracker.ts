@@ -158,6 +158,9 @@ const nativeIds = (blockedBy: unknown, here: () => string | undefined): string[]
   });
 };
 
+// How an agent posts a comment, named wherever one is asked for: given only "comment on the ticket", agents passed an inline `--body`.
+const BODY_FILE = "(`gh issue comment {{ISSUE_NUMBER}} --body-file <file>`; an inline `--body` can match a permission rule by its words and be refused)";
+
 const github = (project: Project): Tracker => {
   // A failed gh call is the operator's to act on (signed out, no such issue, no network): its own
   // first stderr line, not a stack trace. Callers that match a message (`already exists`) still can.
@@ -449,16 +452,16 @@ const github = (project: Project): Tracker => {
       // Every comment an agent posts opens with the marker, as `SAY` below says why.
       LOST: `comment on the ticket, opening with the words "${AGENT_COMMENT_MARKER}", that the sandbox's git record was lost`,
       RECORD:
-        `**Before you finish, comment on the ticket**, opening with the words "${AGENT_COMMENT_MARKER}", with what you changed,\n` +
+        `**Before you finish, comment on the ticket** ${BODY_FILE}, opening with the words "${AGENT_COMMENT_MARKER}", with what you changed,\n` +
         "the commit(s), and anything a human must still do. The ticket is closed automatically when your branch merges,\n" +
         "so that comment is the record.",
-      NOCHANGE: `Comment on the ticket with the evidence, opening with the words "${AGENT_COMMENT_MARKER}".`,
+      NOCHANGE: `Comment on the ticket ${BODY_FILE} with the evidence, opening with the words "${AGENT_COMMENT_MARKER}".`,
       BLOCKED:
-        `Comment on ticket {{TICKET}}, opening with the words "${AGENT_COMMENT_MARKER}", explaining what you\nlearned and what a human must decide, then add the labels:\n\n` +
+        `Comment on ticket {{TICKET}} ${BODY_FILE}, opening with the words "${AGENT_COMMENT_MARKER}", explaining what you\nlearned and what a human must decide, then add the labels:\n\n` +
         `\`\`\`\ngh label create ${project.tracker.held} --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label ${project.tracker.held} --remove-label {{KIT_LABEL}}\n\`\`\``,
       // A repair agent that was told only "in a comment" said it had no tool to post one, and skipped it.
       // The marker is how `personCommentsSince` tells the agent's comment from a person's: one that drops it costs a full review.
-      SAY: `in a comment on the ticket (\`gh issue comment {{ISSUE_NUMBER}} --body-file <file>\`) that opens with the words "${AGENT_COMMENT_MARKER}"`,
+      SAY: `in a comment on the ticket ${BODY_FILE} that opens with the words "${AGENT_COMMENT_MARKER}"`,
     },
     dryRunNote:
       "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any ticket " +

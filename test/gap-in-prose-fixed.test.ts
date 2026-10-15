@@ -126,6 +126,7 @@ test("prose about a gap already fixed, or a point rightly left alone, is no gap"
     "In the test, each unfixed case waits out a 60-second fake, so the red run is slow.\n",
     "The earlier edit moved the check, so the branch had opened this gap; the follow-up commit closes it.\n",
     "The remaining heredoc mentions are different rules that still apply.\n",
+    "**One gap, now covered:** when the saved range is a single day, the picker returns `undefined`.\n",
   ]) assert.equal(await gapOfReview(review), undefined, review);
 });
 
@@ -136,6 +137,7 @@ test("a point the reviewer left alone and named is still a gap", async () => {
     "The helpers were left alone, but the same gap remains in docs/INSTALL.md.",
     "This branch has opened a gap in the Linux path that I did not fix.",
     "The remaining heredoc mentions are wrong.",
+    "One gap is not covered: the picker still closes after one click.",
     // The fixed-gap phrasings are narrow: an unfixed thing that is no test case, and a remaining thing that still
     // applies and is not fixed, are gaps.
     "Every unfixed caller still reads the old key.",

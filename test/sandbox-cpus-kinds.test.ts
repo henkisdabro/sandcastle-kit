@@ -38,7 +38,7 @@ test("12 CPUs, concurrency 5 and 2 gates: a ticket's sandbox gets 2, a landing, 
   const gate = sandboxCpus(project, "gate", pool, info(12));
   assert.equal(ticket, 2);
   assert.equal(gate, 6);
-  assert.equal(cpusLine(project, ticket, gate), "Sandbox CPUs: 2 each, 6 for landing and base gates");
+  assert.equal(cpusLine(project, ticket, gate), "Sandbox CPUs: 2 each, 6 while gates run");
 });
 
 test("a project's cpus above the VM's CPUs is cut to what the VM has, for a ticket's sandbox and a gate-only one", async () => {

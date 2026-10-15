@@ -250,6 +250,7 @@ export const landInSandbox = async (
   } finally {
     try {
       sh("git", ["branch", "-D", scratch], project.root);
+      forgetFork(project.root, scratch);
     } catch {
       /* never created, or held by a kept worktree - `sandcastle clean` removes those */
     }

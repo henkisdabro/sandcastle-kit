@@ -78,7 +78,7 @@ file you have read stays in your context, so never read it whole again.
 - **Run the gates in the foreground, with their output in a file.** Redirect each gate to a file
   outside the worktree (`<gate> > /tmp/gate.log 2>&1; echo $?`), then read or grep the file, so a
   long suite is run once and not again to find the line you wanted. Give the command the tool's longest timeout
-  (`timeout: 600000` in Claude Code, whose 2-minute default moves a longer suite to the background;
+  (`timeout: 900000` in Claude Code, the sandbox's maximum: a smaller one moves a longer suite to the background;
   other sandboxes run at the same moment and slow it). Never start it in the background and wait on
   it with `sleep`, which Claude Code blocks, or `pgrep -f`, which matches its own loop. Run each gate once per check, and never to time or compare it: other sandboxes share the machine, so a timing taken here is noise
   and slows them. When a ticket asks for a wall time or a before-and-after figure, leave it as an

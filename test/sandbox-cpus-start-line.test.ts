@@ -76,12 +76,12 @@ esac
 
 test("12 CPUs, concurrency 5 and 2 gates: the start line gives a ticket's sandbox 2 and the landing and base gates 6", { skip: !linux || !normalUser }, () => {
   const out = start({ ncpu: 12, args: ["--concurrency", "5"] });
-  assert.match(out, /^Sandbox CPUs: 2 each, 6 for landing and base gates$/m, out);
+  assert.match(out, /^Sandbox CPUs: 2 each, 6 while gates run$/m, out);
 });
 
 test("the gates' share follows the machine's maxGates", { skip: !linux || !normalUser }, () => {
   const out = start({ ncpu: 12, machine: '{"maxGates": 3}', args: ["--concurrency", "5"] });
-  assert.match(out, /^Sandbox CPUs: 2 each, 4 for landing and base gates$/m, out);
+  assert.match(out, /^Sandbox CPUs: 2 each, 4 while gates run$/m, out);
 });
 
 test("a project's cpus is the one limit of both, cut to the VM's CPUs", { skip: !linux || !normalUser }, () => {

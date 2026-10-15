@@ -18,7 +18,7 @@ import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, G
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
-import { EXEC_TAIL_CHARS, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -487,6 +487,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       await sandbox.close();
       try {
         sh("git", ["branch", "-D", branch]);
+        forgetFork(project.root, branch);
       } catch {
         /* never created */
       }
