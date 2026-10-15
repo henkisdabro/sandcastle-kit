@@ -3086,7 +3086,7 @@ export const burndown = async (
     // The line printed above, as figures: history.jsonl then holds the estimate beside what the turn took.
     ...(rough ? { estimate: rough.figures } : {}),
     ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
-    typical: typicalTimes(project),
+    typical: typicalTimes(project, [], slots),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
   // The machine-wide list of live runs (the Herdr tab bar, the Claude Code mod), Herdr or not.
@@ -3777,7 +3777,7 @@ export const burndown = async (
           ...(value.changelogDroppedWhy?.length ? { changelogDroppedWhy: value.changelogDroppedWhy } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
         });
-        run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0))) });
+        run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)), slots) });
         // With nothing left to start, the pane closes: five panes each
         // frozen on a finished agent's summary read as five stuck sandboxes.
         // A stopped run starts nothing, whatever is still queued or parked.

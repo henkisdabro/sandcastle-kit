@@ -845,12 +845,39 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
 };
 
 /**
+ * Each run's effective concurrency (`load.concurrency` of its `history.jsonl` line), by the run's `startedAt`, which a timings line
+ * names in `run`. A run with no recorded load is absent: its load is unknown. `estimate` and `typicalTimes` read it through here.
+ */
+const runLoads = (project: Project): Map<string, number> => {
+  const loads = new Map<string, number>();
+  try {
+    for (const raw of readFileSync(join(project.root, ".sandcastle/logs/history.jsonl"), "utf8").split("\n").filter(Boolean)) {
+      try {
+        const r = JSON.parse(raw);
+        const c = r?.load?.concurrency;
+        if (typeof r?.startedAt === "string" && typeof c === "number" && Number.isFinite(c)) loads.set(r.startedAt, c);
+      } catch {
+        /* a line that does not parse is skipped */
+      }
+    }
+  } catch {
+    /* no history: every run's load is unknown */
+  }
+  return loads;
+};
+
+/** Whether a run recorded at concurrency 1 has landings that say nothing about a run at `slots`: at 1 the base never moves under a branch, so each landing is a gate-free fast-forward. */
+const landsFree = (load: number | undefined, slots: number | undefined) => load === 1 && slots !== undefined && slots >= 2;
+
+/**
  * Seconds per step (the 75th percentile of the window's steps of a phase), and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
  * `LANDING_GATES` is one ticket's landing gates summed, the median over the window's tickets that landed (a fast-forward,
  * with no gate, counts 0; a held, red or conflicted ticket, or one from before landings were timed, is no landing; a re-run
  * inside the landing gate's slot, marked `rerun`, is left out), and absent when the window has no landing.
+ * With `slots` of 2 or more, a landing of a run recorded at concurrency 1 is left out too (`landsFree`): when none remains,
+ * `LANDING_GATES` is the window's `gates` figure (one ticket's gate run), when there is one. Without `slots` the result is the window's alone.
  */
-export const typicalTimes = (project: Project, extra: number[] = []) => {
+export const typicalTimes = (project: Project, extra: number[] = [], slots?: number) => {
   let lines: { project?: string; run?: string; issue?: unknown; phase?: string; ms?: number; ok?: boolean }[] = [];
   try {
     lines = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -862,9 +889,12 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
   const byPhase = new Map<string, number[]>();
   const byIssue = new Map<string, number>();
   const landing = new Map<string, number>();
+  const loads = slots === undefined ? new Map<string, number>() : runLoads(project);
   for (const l of steps) {
     const key = `${l.run}|${l.issue}`;
+    const free = landsFree(loads.get(String(l.run)), slots);
     if (l.phase === LANDING_GATES) {
+      if (free) continue;
       // An in-slot re-run's line (`timingLines`) is the first run's repeat: a requeued ticket's second landing has no mark.
       if ((l as { rerun?: unknown }).rerun === true) continue;
       landing.set(key, (landing.get(key) ?? 0) + l.ms!);
@@ -873,7 +903,7 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
     // A landing's own line holds its landing gates' time already: left out, or it counts them twice. A merged one
     // does say the ticket landed: a fast-forward's, with no gates, is a landing of 0. A conflict's is none.
     if (l.phase === LANDING) {
-      if (l.ok === true) landing.set(key, landing.get(key) ?? 0);
+      if (l.ok === true && !free) landing.set(key, landing.get(key) ?? 0);
       continue;
     }
     byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);
@@ -890,6 +920,9 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
     // counting it as 0 made the median 0 when most of a window had none.
     const landMs = median([...landing.values()]);
     if (landMs !== undefined) out[LANDING_GATES] = Math.round(landMs / 1000);
+  } else if (slots !== undefined && slots >= 2 && out.gates !== undefined) {
+    // No landing of a run that could have gated: the first lands free, every other one runs the gates, as the estimate prices it.
+    out[LANDING_GATES] = out.gates;
   }
   return out;
 };
@@ -1037,6 +1070,10 @@ export const SIZE_WORDS: Record<TicketSize, string> = {
  * runs are in the window; a run with no `load` is unknown and counts only in the fallback, which prices them from all the window's
  * runs and says there is no history at this concurrency, so the estimate may be low.
  *
+ * A run at concurrency 1 is of a similar load only to a run at 1 slot, and for `slots` of 2 or more its landings are no landing
+ * figure (the base never moved under its branches, so each landing was a fast-forward); a pool left with no figure prices every
+ * landing but the run's first as its own `gateMs`.
+ *
  * `detail.gateSlots` is the machine's gates pool (`limit("gates")`): every ticket's gate passes (the
  * pre-landing `gates` lines, and the `landing gates` lines) share it, so the run takes at least their
  * summed time over those slots, and the larger of that and the sandbox-bound or chain figure sets the
@@ -1064,6 +1101,8 @@ export const priceRun = (
     run?: string;
     // A `remainder` field on a line: the ticket was re-run for what an earlier "part of" merge left.
     remainder?: boolean;
+    // The ticket's landing merged (its `landing` line says `ok`; older lines, with no `landing` line, count by their landing gates): only such a ticket gives a landing figure.
+    landed?: boolean;
     // Seen while grouping: a `carried` field on a line, a resolve pass, an implement pass.
     flagged?: boolean; resolved?: boolean; implemented?: boolean; unreviewed?: boolean;
     // A ticket implemented and requeued in the same run: what came after its first resolve, the cost of a carried branch's attempt.
@@ -1092,10 +1131,19 @@ export const priceRun = (
   // One ticket's lines are one group; the window's and the older lines' are grouped alike.
   const grouped = (ls: Line[]): Group[] => {
     const groups = new Map<string, Group>();
+    // Per ticket: whether a `landing` line exists, whether it merged, and whether landing gates were timed.
+    const lands = new Map<string, { line: boolean; merged: boolean; gated: boolean }>();
     for (const l of ls) {
-      // A landing's own line (`LANDING`) holds its landing gates' time, which is `landMs`: priced once, there.
-      if (l.phase === LANDING) continue;
       const key = `${l.run}|${l.issue}`;
+      const land = lands.get(key) ?? { line: false, merged: false, gated: false };
+      lands.set(key, land);
+      // A landing's own line (`LANDING`) holds its landing gates' time, which is `landMs`: priced once, there.
+      if (l.phase === LANDING) {
+        land.line = true;
+        if ((l as { ok?: unknown }).ok === true) land.merged = true;
+        continue;
+      }
+      if (l.phase === LANDING_GATES) land.gated = true;
       const g = groups.get(key) ?? { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: false, run: String(l.run) };
       // A landing gate is the landing worker's time, not the ticket's own pipeline.
       if (l.phase === LANDING_GATES) g.landMs += l.ms as number;
@@ -1141,6 +1189,11 @@ export const priceRun = (
       g.carried = g.unreviewed !== true && (g.flagged === true || (g.resolved === true && !g.implemented));
       if (g.carried || g.implemented !== true || !g.tail?.tokened) g.tail = undefined;
     }
+    for (const [key, g] of groups) {
+      const land = lands.get(key)!;
+      g.landed = land.line ? land.merged : land.gated;
+      if (g.tail) g.tail.landed = g.landed;
+    }
     return [...groups.values()];
   };
   const inWindow = new Set(window);
@@ -1155,23 +1208,11 @@ export const priceRun = (
   // Gate and landing-gate times slow with the load (a full queue runs several suites at once), so they are priced from the runs
   // that ran at about this run's concurrency - within `LOAD_BAND` of `slots` - when the window holds `LOAD_RUNS` of them. The
   // history says each run's load (its line's `load`, joined by `startedAt`); a run with none is unknown, used in the fallback only.
-  const loads = new Map<string, number>();
-  try {
-    for (const raw of readFileSync(join(project.root, ".sandcastle/logs/history.jsonl"), "utf8").split("\n").filter(Boolean)) {
-      try {
-        const r = JSON.parse(raw);
-        const c = r?.load?.concurrency;
-        if (typeof r?.startedAt === "string" && typeof c === "number" && Number.isFinite(c)) loads.set(r.startedAt, c);
-      } catch {
-        /* a line that does not parse is skipped */
-      }
-    }
-  } catch {
-    /* no history: every run's load is unknown */
-  }
+  const loads = runLoads(project);
   const similar = new Set([...new Set(window.map((l) => String(l.run)))].filter((r) => {
     const c = loads.get(r);
-    return c !== undefined && Math.abs(c - slots) <= LOAD_BAND;
+    // A run at concurrency 1 landed every branch as a fast-forward: it is similar to a run at 1 slot only.
+    return c !== undefined && !landsFree(c, slots) && Math.abs(c - slots) <= LOAD_BAND;
   }));
   const byLoad = similar.size >= LOAD_RUNS;
   const figures = (gs: Group[], at: (xs: number[]) => number) => {
@@ -1181,7 +1222,19 @@ export const priceRun = (
     const gateMs = at(gates.map((g) => g.gateMs));
     // A ticket's pipeline time holds its gate passes: with the gate time priced by load, each history ticket's own passes are swapped for it.
     const ms = loaded.length ? at(gs.map((g) => g.ms - g.gateMs + gateMs)) : at(gs.map((g) => g.ms));
-    return { inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms, gateMs, landMs: at(gates.map((g) => g.landMs)) };
+    // At 2 slots or more the base moves under a branch, so a landing runs the gates; a run at concurrency 1 landed by fast-forward and
+    // says nothing of it, and of a run with a recorded load only a merged landing is a figure. With none, every landing after the run's
+    // first costs this pool's gate time.
+    if (slots >= 2) {
+      // A ticket of a run with no recorded load is unknown: it stays as before, whatever its landing line says.
+      const landed = gates.filter((g) => {
+        const load = loads.get(g.run ?? "");
+        return !landsFree(load, slots) && (load === undefined || g.landed === true);
+      });
+      if (!landed.length) return { inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms, gateMs, landMs: gateMs, firstFree: gateMs };
+      return { inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms, gateMs, landMs: at(landed.map((g) => g.landMs)), firstFree: 0 };
+    }
+    return { inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms, gateMs, landMs: at(gates.map((g) => g.landMs)), firstFree: 0 };
   };
   // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
@@ -1195,7 +1248,7 @@ export const priceRun = (
   // A model with too few tickets in the window is topped up from older ones (newest first): the tickets it was priced from beyond the window.
   const widened = new Map<string, number>();
   const olderSet = new Set<Group>(olderGroups);
-  const per = Array.from({ length: tickets }, (_, at) => {
+  const pricedAt = Array.from({ length: tickets }, (_, at) => {
     const carried = detail.carried?.[at] ?? false;
     // An unreviewed carried branch is priced as a fresh ticket: it is told apart only in the start line.
     const unreviewed = !carried && (detail.unreviewed?.[at] ?? false);
@@ -1248,6 +1301,8 @@ export const priceRun = (
       Object.fromEntries((Object.keys(a) as (keyof Figures)[]).map((k) => [k, w * a[k] + (1 - w) * b[k]])) as Figures;
     return { mid: mix(own.mid, all.mid), high: mix(own.high, all.high) };
   });
+  // The first ticket in run order lands free (a fast-forward): what a pool priced by the gate time (`firstFree`) charges it is taken off.
+  const per = pricedAt.map((p, at) => (at === 0 ? { mid: { ...p.mid, landMs: p.mid.landMs - p.mid.firstFree }, high: { ...p.high, landMs: p.high.landMs - p.high.firstFree } } : p));
   const sum = (pick: (p: (typeof per)[number]) => number) => per.reduce((n, p) => n + pick(p), 0);
   // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots: its tickets' own times.
   const minutes = (pick: (p: (typeof per)[number]) => number, gate: (p: (typeof per)[number]) => number, land: (p: (typeof per)[number]) => number) => {

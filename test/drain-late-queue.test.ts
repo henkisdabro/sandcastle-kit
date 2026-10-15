@@ -1,5 +1,6 @@
-// A ticket queued while a `drain` run is live waits for the next `sandcastle run`: no turn takes
-// it (a turn takes the last turn's re-runnable tickets only), and the closing lines name it.
+// A turn takes the last turn's re-runnable tickets only, never one queued meanwhile; a follow-on
+// turn (test/follow-on-turn.test.ts) takes it where the run would end, and the closing lines
+// name the late tickets that no turn took.
 // A fake tracker and made-up facts; no Docker, gh, model calls or network.
 //
 //   pnpm test:file test/drain-late-queue.test.ts
@@ -22,7 +23,7 @@ const none = async () => new Set<string>();
 const facts = (tickets: Facts["tickets"], runnable: string[]): Facts =>
   ({ base: "main", tracker: "github", started: "t", live: false, dryRun: false, verify: { green: true, line: "" }, gateCount: 1, tickets, runnable, blocked: [], standing: [], keptWorktrees: [], changed: {} }) as Facts;
 
-test("a drain turn takes the last turn's re-runnable tickets, never one queued meanwhile", async () => {
+test("a drain turn takes the last turn's re-runnable tickets, and the late ticket is left for the closing lines", async () => {
   let queue = ["1", "2", "3"];
   const tracker = fake(() => queue);
   const inRun = new Set<string>();
