@@ -670,6 +670,12 @@ export type Change<G, O, B = unknown> =
   /** How many sandbox slots the run could use now, told whenever the count changes (`demand` in `createSchedule`). */
   | { kind: "demand"; n: number }
   /**
+   * Whether a landing is near, told whenever it changes (`landingNear` in `createSchedule`): a ticket of the run is in its
+   * gates (from `at.gates()` until a repair or review juncture or the attempt's end) or a green branch is queued to land
+   * or landing. The pool keeps its last free slot idle for a landing only while some live run says so (`lastFreeSlot`).
+   */
+  | { kind: "landing near"; near: boolean }
+  /**
    * A person paused the run (`since`, seconds since the epoch): `finishing` are the tickets still
    * doing something - an agent pass, a gate run, a landing - told again whenever they change, until
    * the last one has reached a juncture or landed. Nothing is in flight when it is empty. `usage`
@@ -1079,6 +1085,14 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         demanded = n;
         tell({ kind: "demand", n });
       };
+      // Whether a landing is near: a ticket in its gates or a green queued or landing. Told when it changes, never twice in a row.
+      let nearTold = false;
+      const landingNear = () => {
+        const near = gating.size > 0 || greens.size > 0;
+        if (near === nearTold) return;
+        nearTold = near;
+        tell({ kind: "landing near", near });
+      };
       // The tickets still doing something while paused; told again each time the list changes.
       const tellPaused = () => {
         // After a stop the pause is over (`noticeStop` told it): the finishing list changing is not a pause to record again.
@@ -1113,6 +1127,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         for (const wake of settles.splice(0)) wake();
         noticeStop();
         demand();
+        landingNear();
         tellPaused();
         // A ticket waiting to resolve runs nothing and is no attempt: with none left in a pipeline, the run is landing.
         if (working === 0 && pipelines.size - retaking === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
@@ -1556,9 +1571,15 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               stepped ||= phase !== "start";
               // Out of its gates: a repair (and the review after it) can take an hour, which a resolve that shares its files
               // does not wait out. It counts again from its next gate run (`gates`).
-              if (phase === "repair" || phase === "review") gating.delete(t.id);
+              if (phase === "repair" || phase === "review") {
+                gating.delete(t.id);
+                landingNear();
+              }
               return juncture(t.id, phase, park);
-            }, paused: () => (sync(), pausedSince !== undefined), gates: () => void gating.add(t.id), gateWait, retake, ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
+            }, paused: () => (sync(), pausedSince !== undefined), gates: () => {
+              gating.add(t.id);
+              landingNear();
+            }, gateWait, retake, ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {
@@ -1578,6 +1599,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             case "green":
               pushed++;
               greens.add(r.green.issue);
+              landingNear();
               landing.push(r.green);
               return;
             case "pipeline":

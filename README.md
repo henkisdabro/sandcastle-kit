@@ -1752,7 +1752,7 @@ a run over its share keeps every slot it holds and shrinks as its tickets finish
 that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
 fills up, and when a run ends the others grow back. One slot of the pool is kept for any run's landing, not one per run: beside another run the shares
 split the pool less that slot, so a run's tickets use their whole share, and no ticket takes the pool's
-last free slot while another run is live. A landing may take it, whatever its run holds against its
+last free slot while another run is live and a landing is near (a ticket of either run in its gates, or a branch queued to land or landing; with none near the slot is any ticket's, and a run from an older kit counts as near). A landing may take it, whatever its run holds against its
 share, and any other free slot one past its run's share, and when two runs' landings want it, the longer wait goes first (a run alone keeps one of the
 machine's slots the same way, in its worker count). With two runs wanting 5 each on 6 slots that is
 3 + 2 tickets and a free slot for landing; with three, 2 + 2 + 1; with four, 2 + 1 + 1 + 1; on 3 slots

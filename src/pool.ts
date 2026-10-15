@@ -353,8 +353,12 @@ const waits = (pool: PoolName, seen?: Seen): Wait[] => {
     });
 };
 
-/** A live run's registration: who it is and how many sandbox slots it could use now. */
-export type Registration = { pid: number; run: string; project: string; demand: number; concurrency: number; since: number; cap?: number };
+/**
+ * A live run's registration: who it is and how many sandbox slots it could use now. `landingNear`: the run has a ticket in its
+ * gates or a green branch queued to land or landing (`setLandingNear`); a registration without it is an older kit's, which
+ * counts as near (`lastFreeSlot`).
+ */
+export type Registration = { pid: number; run: string; project: string; demand: number; concurrency: number; since: number; cap?: number; landingNear?: boolean };
 
 type Joined = { file: string; registration: Omit<Registration, "cap"> };
 
@@ -364,7 +368,7 @@ const parseRegistration = (text: string | undefined): Registration | undefined =
     // `shares` is the mark of a kit that knows them; a file without it is not one of ours.
     if (r.shares !== true || typeof r.run !== "string" || !Number.isInteger(r.pid) || !Number.isInteger(r.demand) || !Number.isInteger(r.since)) return undefined;
     const cap = Number.isInteger(r.cap) && r.cap! >= 1 ? r.cap : undefined;
-    return { pid: r.pid!, run: r.run, project: String(r.project ?? ""), demand: Math.max(0, r.demand!), concurrency: Number(r.concurrency) || 0, since: r.since!, ...(cap ? { cap } : {}) };
+    return { pid: r.pid!, run: r.run, project: String(r.project ?? ""), demand: Math.max(0, r.demand!), concurrency: Number(r.concurrency) || 0, since: r.since!, ...(cap ? { cap } : {}), ...(typeof r.landingNear === "boolean" ? { landingNear: r.landingNear } : {}) };
   } catch {
     return undefined;
   }
@@ -411,8 +415,15 @@ const writeRegistration = (j: Joined) => {
  */
 export const joinPool = (project: string, concurrency: number, demand = 0) => {
   mkdirSync(RUNS, { recursive: true });
-  joined ??= { file: join(RUNS, `${RUN_ID}.run`), registration: { pid: process.pid, run: RUN_ID, project, demand, concurrency, since: clock() } };
+  joined ??= { file: join(RUNS, `${RUN_ID}.run`), registration: { pid: process.pid, run: RUN_ID, project, demand, concurrency, since: clock(), landingNear: false } };
   joined.registration = { ...joined.registration, project, concurrency, demand };
+  writeRegistration(joined);
+};
+
+/** Updates whether a landing is near this run (a ticket in its gates, a green queued or landing), when it changed. Not registered: nothing to update. */
+export const setLandingNear = (near: boolean) => {
+  if (!joined || joined.registration.landingNear === near) return;
+  joined.registration = { ...joined.registration, landingNear: near };
   writeRegistration(joined);
 };
 
@@ -457,7 +468,7 @@ const shareable = (total: number, runs: { demand: number; held?: number }[]) =>
   total >= 2 && runs.filter((r) => r.demand > 0 || (r.held ?? 0) > 0).length >= 2 ? total - 1 : total;
 
 /** One live run as the pool sees it: what it wants, what it holds and, for the sandbox pool, its share. */
-export type Member = { run: string; project?: string; pid: number; demand: number; held: number; share: number; registered: boolean; since: number; cap?: number; concurrency?: number };
+export type Member = { run: string; project?: string; pid: number; demand: number; held: number; share: number; registered: boolean; since: number; cap?: number; concurrency?: number; landingNear?: boolean };
 
 /**
  * The limit split equally between the runs that want slots, none above its demand: a run that
@@ -492,7 +503,7 @@ export const members = (pool: PoolName = "sandboxes", seen?: Seen): Member[] => 
   const locks = liveSlots(pool, seen);
   const heldBy = new Map<string, number>();
   for (const { run } of locks) heldBy.set(run, (heldBy.get(run) ?? 0) + 1);
-  const rows: Omit<Member, "share">[] = registered.map((r) => ({ run: r.run, project: r.project, pid: r.pid, demand: r.demand, held: heldBy.get(r.run) ?? 0, registered: true, since: r.since, cap: r.cap, concurrency: r.concurrency }));
+  const rows: Omit<Member, "share">[] = registered.map((r) => ({ run: r.run, project: r.project, pid: r.pid, demand: r.demand, held: heldBy.get(r.run) ?? 0, registered: true, since: r.since, cap: r.cap, concurrency: r.concurrency, landingNear: r.landingNear }));
   const known = new Set(registered.map((r) => r.run));
   for (const [run, count] of heldBy) {
     if (known.has(run)) continue;
@@ -664,14 +675,17 @@ const overShare = (pool: PoolName, ms: Member[], seen: Seen, landingOnLast = fal
 };
 
 /**
- * The slot the pool keeps for landing is free now: another run is live and exactly one sandbox slot is free. A ticket
- * pipeline's lease (`keep`) never takes it; a landing's (priority) may, whatever its run holds against its share. The shares
+ * The slot the pool keeps for landing is free now: another run is live, exactly one sandbox slot is free and some live run,
+ * this one included, has a landing near (`setLandingNear`: a ticket in its gates, a green queued or landing). With none the
+ * slot is any free slot's, and a ticket takes it. A run that publishes nothing (an older kit, or slots held with no
+ * registration) counts as near, so beside one the slot is kept as before. A ticket pipeline's lease (`keep`) never takes it; a landing's (priority) may, whatever its run holds against its share. The shares
  * split the pool less this slot (`shareable`), so a run's tickets use their whole share and no run keeps a slot of its own.
  * A run alone keeps nothing here: `pipelineWorkers` leaves one of the machine's slots in its worker count.
  */
 const lastFreeSlot = (ms: Member[], seen: Seen) => {
   if (!joined || limit("sandboxes") < 2) return false;
   if (!ms.some((m) => m.run !== RUN_ID && (m.held > 0 || m.demand > 0))) return false;
+  if (ms.every((m) => m.landingNear === false)) return false;
   return liveSlots("sandboxes", seen).length === limit("sandboxes") - 1;
 };
 
