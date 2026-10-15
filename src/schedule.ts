@@ -390,7 +390,7 @@ export type StopState = {
 };
 
 /** The stop state with its `add`, which only the scheduler holds. */
-export type StopWriter = StopState & { add(cause: StopCause): void };
+export type StopWriter = StopState & { add(cause: StopCause): void; /** Told after each cause is added: the landing worker's claim ends at once with a stop. */ watch(told: () => void): void };
 
 /** The readings of `stop`, without its `add`: what the scheduler hands out. */
 const readings = (stop: StopState): StopState => ({
@@ -414,13 +414,18 @@ const readings = (stop: StopState): StopState => ({
  */
 export const createStopState = (host?: { readonly failed: unknown }): StopWriter => {
   const added: StopCause[] = [];
+  const watchers: (() => void)[] = [];
   const causes = (): StopCause[] => {
     const failed = host?.failed;
     const live = failed !== undefined && !added.some((c) => c.kind === "host failed" && c.error === failed);
     return live ? [...added, { kind: "host failed", error: failed }] : added;
   };
   return {
-    add: (cause) => void added.push(cause),
+    add: (cause) => {
+      added.push(cause);
+      for (const told of watchers) told();
+    },
+    watch: (told) => void watchers.push(told),
     get causes() {
       return [...causes()];
     },
@@ -448,8 +453,22 @@ export type HostPort = {
   readonly failed: unknown;
 };
 
+/** The landing queue's side of the run's gates claim: `RunClaim` in `src/pool.ts`, which `landOne` drives with `take` and `gateEnded`. */
+export type LandingClaim = {
+  bind(source: { waiting(): number; stopped(): boolean }): void;
+  pushed(): void;
+  started(): void;
+  ended(): void;
+  settle(): void;
+};
+
 /** What the landing worker needs of a run: the landing itself (`landOne`), and the check before it. */
 export type LandPorts<G extends Green> = {
+  /**
+   * The run's one claim on the gates pool, from a green branch queued to land until the queue empties (`createRunClaim`, `src/pool.ts`; this
+   * file imports nothing from the pool, so the shape is here). The worker tells it the queue's events; the land port hands it to `landOne`.
+   */
+  claim?: LandingClaim;
   /** Lands one green branch. A refused write or a failed `.git` check throws an `OperatorError`; anything else is the port's own to turn into a `Landed`. */
   land(green: G, behind?: () => number): Promise<Landed>;
   host: HostPort;
@@ -477,8 +496,13 @@ export const createLanding = <G extends Green>(
   },
 ) => {
   const queue = createQueue<G>((g) => (g.carried ? 1 : 0));
+  ports.claim?.bind({ waiting: () => queue.size, stopped: () => stop.landsNothing });
+  stop.watch(() => ports.claim?.settle());
   return {
-    push: (g: G) => queue.push(g),
+    push: (g: G) => {
+      queue.push(g);
+      ports.claim?.pushed();
+    },
     close: () => queue.close(),
     get size() {
       return queue.size;
@@ -486,6 +510,7 @@ export const createLanding = <G extends Green>(
     run: () =>
       queue.run(1, async (g) => {
         if (stop.landsNothing) return on.stopped(g);
+        ports.claim?.started();
         let landed: Landed;
         try {
           await ports.host.check(g.issue);
@@ -502,6 +527,9 @@ export const createLanding = <G extends Green>(
           }
           if (!on.crashed) throw error;
           return on.crashed(g, error);
+        } finally {
+          // Over before `settled` runs its tracker calls: a landing that never gated must not hold the claim through them.
+          ports.claim?.ended();
         }
         // A write refused after its merge (the close, the branch delete): this one landed, and the
         // stop state reads the host's failure live, so nothing after it does.
@@ -1031,6 +1059,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             tell({ kind: "pause stopped" });
           }
         }
+        // The refused write the host's failure reads live adds no cause, so the landing queue's claim learns of it here.
+        if (stop.landsNothing) work.claim?.settle();
         if (toldStop || !stop.landsNothing) return;
         toldStop = true;
         tell({ kind: "stopped landing", cause: stop.headline! });
