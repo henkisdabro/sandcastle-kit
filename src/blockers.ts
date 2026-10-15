@@ -253,7 +253,7 @@ export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] =>
 /**
  * `refsOf` for a run: the tracker's declared blockers are read asynchronously and given up at `limitMs`. Links that cannot
  * be read stand as one `links` blocker, which is never closed, so the ticket waits and starts once a later read
- * gets them - the sync read's `[]` would start it with a blocker it never saw.
+ * gets them (the run's next landing reads it again; a ticket held from the start waits for the next run) - the sync read's `[]` would start it with a blocker it never saw.
  */
 export const refsOfAsync = async (project: Project, tracker: Tracker, t: Blocked, limitMs: number): Promise<Ref[]> => {
   const refs = parseRefs(project, t.body ?? "");
