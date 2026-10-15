@@ -826,7 +826,7 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
  * What the start line says of the slot `pipelineWorkers` leaves. Alone, it is one of the machine's slots, left in the
  * run's worker count. Beside another run it is still one of the machine's, kept for any run's landing rather than a
  * part of this run's share: the shares split the pool less that slot, and a ticket never takes the pool's last free slot
- * while another run is live (`leaseSlot`'s `keep`). `beside` is true when another run is live at the run's start: only
+ * while another run is live and a landing is near (`leaseSlot`'s `keep`). `beside` is true when another run is live at the run's start: only
  * the clause that applies is said, as every clause at once read as though another run were live.
  */
 export const landingSlotNote = (pool: number, beside = false) => {

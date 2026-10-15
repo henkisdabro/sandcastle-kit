@@ -94,8 +94,7 @@ test("a landing is near from a green's push, stays on while a green is queued, a
   assert.deepEqual(nears(told), [true]);
   // The first landing ends with the second green still queued: still near, nothing told.
   landings["1"].open();
-  await tick();
-  await tick();
+  await until(() => told.some((c) => c.kind === "ended" && c.id === "1"), "the first landing to settle");
   assert.deepEqual(nears(told), [true]);
   landings["2"].open();
   await done;

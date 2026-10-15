@@ -3658,7 +3658,7 @@ export const burndown = async (
 
   // A sandbox slot of the machine pool, for a worker's next ticket (the schedule's `slot`) or a ticket's own after a
   // pause. A landing that waits for a slot goes first (`slotTurn`). `giveUp` ends a wait that is no longer wanted.
-  // `keep`: beside another run the tickets never take the pool's last free slot, which is any run's landing's, as
+  // `keep`: beside another run, while a landing is near, the tickets never take the pool's last free slot, which is any run's landing's, as
   // `pipelineWorkers` leaves one of the machine's for a run alone. A dry run lands nothing, but keeps off that slot too:
   // it is the pool's, so a dry run's ticket taking it held a real run's landing back.
   const sandboxSlot = async (label: string, giveUp: () => boolean): Promise<SlotLease | undefined> => {

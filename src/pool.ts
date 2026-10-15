@@ -42,8 +42,8 @@
 // `handOff`): the freed slot would go to the longest wait across runs, and the queued landing would wait for another run.
 // One slot of the pool is kept for any run's landing, not one per run: from the second run asking for sandbox slots the
 // shares split the pool less one slot (`shareable`), a run's ticket pipelines use their whole share, and a ticket's
-// lease (`keep`) never takes the pool's last free slot while another run is live (`lastFreeSlot`; it waits with the reason
-// `landing`). A landing's lease (priority) may take that slot whatever its run holds against its share, and two runs'
+// lease (`keep`) never takes the pool's last free slot while another run is live and some live run has a landing near
+// (`lastFreeSlot`; it waits with the reason `landing`). A landing's lease (priority) may take that slot whatever its run holds against its share, and two runs'
 // landings go in the order they began waiting. A run alone has the whole pool; its workers leave one slot for its landing.
 // The gates pool has no shares.
 //
@@ -678,7 +678,8 @@ const overShare = (pool: PoolName, ms: Member[], seen: Seen, landingOnLast = fal
  * The slot the pool keeps for landing is free now: another run is live, exactly one sandbox slot is free and some live run,
  * this one included, has a landing near (`setLandingNear`: a ticket in its gates, a green queued or landing). With none the
  * slot is any free slot's, and a ticket takes it. A run that publishes nothing (an older kit, or slots held with no
- * registration) counts as near, so beside one the slot is kept as before. A ticket pipeline's lease (`keep`) never takes it; a landing's (priority) may, whatever its run holds against its share. The shares
+ * registration) counts as near, so beside one the slot is kept as before. While it is kept, a ticket pipeline's lease
+ * (`keep`) never takes it; a landing's (priority) may, whatever its run holds against its share. The shares
  * split the pool less this slot (`shareable`), so a run's tickets use their whole share and no run keeps a slot of its own.
  * A run alone keeps nothing here: `pipelineWorkers` leaves one of the machine's slots in its worker count.
  */
@@ -930,7 +931,8 @@ const leased = new WeakMap<SlotLease, { pool: PoolName; file: string; mine: stri
  * slot is free, a wait that is no longer wanted (the run was paused) ends with no lease and no trace.
  * `priority` puts this wait before the run's other waits for the pool (the ones that did not ask for
  * it), without changing which run is served. `keep` is a ticket pipeline's sandbox slot: beside another run it
- * never takes the pool's last free slot (`lastFreeSlot`), which is any run's landing's, and waits with the reason `landing`.
+ * never takes the pool's last free slot while a landing is near (`lastFreeSlot`), which is any run's landing's, and waits with
+ * the reason `landing`.
  */
 export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number, giveUp?: undefined, priority?: boolean, keep?: boolean): Promise<SlotLease>;
 export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean, priority?: boolean, keep?: boolean): Promise<SlotLease | undefined>;
