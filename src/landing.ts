@@ -660,21 +660,21 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
           // and merging take seconds, and a ticket gate asked in them would take the gates slot and hold it for a whole gate run. The
           // landing's own gates wait spends this claim (handed to `ctx.gate`) and no other landing's; a landing that ends without
           // gating (a conflict, a throw) releases it here. A run's landing has had the run's claim since its branch was queued.
-          const run = at?.claim;
-          const own = run ? undefined : claimSlot("gates");
+          const runClaim = at?.claim;
+          const own = runClaim ? undefined : claimSlot("gates");
           return landInSandbox(
             project,
             { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId, ref: ref(o.issue) },
             opener,
-            run
+            runClaim
               ? async (box, how) => {
-                  const handed = run.take();
+                  const handed = runClaim.take();
                   try {
                     return await ctx.gate(box, o.issue, how, handed);
                   } finally {
                     // The wait spent it, or the gate threw before it began; and the run claims again for the next green, with the slot not yet seen free.
                     handed?.release();
-                    run.gateEnded();
+                    runClaim.gateEnded();
                   }
                 }
               : (box, how) => ctx.gate(box, o.issue, how, own),

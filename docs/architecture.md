@@ -1570,6 +1570,9 @@ A `landOne` given no run claim (`sandcastle land`, a direct caller) keeps the ea
 landing sandbox slot and releases when `landInSandbox` ends.
 A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than the run's claims, so
 with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
+Nor while a landing of the run waits for a sandbox slot (a priority wait of the sandboxes pool): a ticket's gate runs
+in the sandbox slot its pipeline holds, so with that slot the last one free (a pool of one) the landing waited for it
+while the ticket's gate waited behind the claim, and neither moved (`test/landing-claim-sandbox-wait.test.ts`).
 The claim is kept in this process (`claims`), not in the pool's files, so a crash leaves nothing behind;
 `test/pool-landing-claim-queued.test.ts` (gates limit 1) and `test/pool-landing-claim-queued-spare.test.ts` (2) for
 the run's claim, `test/pool-landing-claim.test.ts`, `test/pool-landing-claim-spare.test.ts` and

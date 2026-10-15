@@ -846,11 +846,15 @@ export const createRunClaim = (pool: PoolName = "gates"): RunClaim => {
 /**
  * This run has a priority wait for `pool` that is not `wait`, or a claim on a free slot's worth of it: `wait` leaves the
  * slot to it. A claim holds a ticket back only while the free slots are no more than the claims, so with a slot to spare
- * the ticket goes on, where it would idle through every landing's merge.
+ * the ticket goes on, where it would idle through every landing's merge. Nor while a landing of the run waits for a sandbox
+ * slot (only a landing's sandbox wait is a priority one): the run's claim stands from a branch queued to land, and a ticket's
+ * gate runs in the sandbox slot its pipeline holds, so with that slot the last free one the landing waited for it while the
+ * ticket's gate waited behind the claim, for ever.
  */
 const priorityAhead = (wait: OwnWait, seen: Seen) => {
   if (wait.priority) return false;
   if ([...waiting].some((w) => w.pool === wait.pool && w.priority)) return true;
+  if ([...waiting].some((w) => w.pool === "sandboxes" && w.priority)) return false;
   const claimed = claims.get(wait.pool)?.size ?? 0;
   return claimed > 0 && limit(wait.pool) - liveSlots(wait.pool, seen).length <= claimed;
 };
