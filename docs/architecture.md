@@ -1865,6 +1865,22 @@ pipeline time are swapped for that `gateMs` (the four bounds combine as before).
 Otherwise - too few such runs, or older lines with no `load`, which count as unknown - all the
 window's runs price them and the line ends `No history at N at a time ..., so it may be low.`
 (`test/estimate-load.test.ts`).
+A run recorded at concurrency 1 counts as similar only to a run at 1 slot: at concurrency 1 the base
+never moves under a branch, so every landing was a gate-free fast-forward, and at 2 or more almost
+every landing after the first runs the full gates.
+For a run at 2 slots or more `landMs` never comes from a ticket of such a run, in the `byLoad` path
+and in the fallback alike, and (for a run with a recorded `load`) only a ticket with a merged
+`landing` line gives a landing figure; a run with no recorded `load` stays as before.
+When that leaves a pool (a model's own tickets, the blended pool, a size or carried class: each is
+priced alone) with no figure, its landings are priced as the pool's own `gateMs`, at the median and at
+the high end, for every ticket of the run but the first in run order, which lands free as a
+fast-forward (`firstFree` in `figures()`, taken off the first ticket's `landMs`); `minutes()` sees
+them in `sum(land)`, so the gated, landed and serial bounds and the slot note follow.
+`typicalTimes(project, extra, slots)` applies the same filter with `slots` of 2 or more (`burndown()`
+passes it where it writes the run record's `typical`): landings of runs recorded at concurrency 1 are
+left out of the `landing gates` median, and with none left it is the window's `gates` figure, so the
+status view's projected end, which reads `typical`, prices them alike. Both read each run's
+concurrency through `runLoads` (`test/estimate-landing-load.test.ts`).
 A ticket re-run for what an earlier "part of" merge left (`isRemainder`: `mergedPartly` and no
 branch ahead of the base, read once at the start into `remainderAtStart`, handed to `estimate` as
 `detail.remainder` and written on its timings lines as `remainder`) is a third class beside carried
