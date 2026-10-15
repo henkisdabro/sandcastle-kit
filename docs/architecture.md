@@ -1117,11 +1117,12 @@ per commit), and `isTestPath` (conventional test names; a test file a branch add
 `Touches:` overrun, and `overrunPaths` (`src/report.ts`) folds the modified ones into a count, "+7
 test files"), `isDocPath` (any `*.md`, and `docs/` and `skill/`: the docs a repo's rules have every
 change edit, folded by `overrunPaths` into "+2 docs files", so the listed paths are the source files
-a ticket missed; the close comment says "changed beyond its Touches line: ...", the report lists "<title>: ..." lines
-under "Changed files beyond their Touches line:", directly before the push note), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one
-is not an overrun when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out
-a file only a repair pass or a merge commit (a conflict resolution) changed: the repair commits are
-recorded as `repaired` in the ticket's head record (`heads.json`), across attempts.
+a ticket missed; the close comment says "changed beyond its Touches line: ...", the report lists
+"<title>: ..." lines under "Changed files beyond their Touches line:", directly before the push
+note), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun
+when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out a file only
+a repair pass or a merge commit (a conflict resolution) changed: the repair commits are recorded as
+`repaired` in the ticket's head record (`heads.json`), across attempts.
 An overrun of only test and docs files stays in the run record, and `overrunNoted` (`src/report.ts`)
 keeps it out of the close comment and the report.
 A scheduling hint and warning source, never a guard
