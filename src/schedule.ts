@@ -329,14 +329,23 @@ const createDependants = <T extends { id: string }, B>(
      * an unread blocker (its read timed out; nothing else would read it again), in one call, and takes
      * out and returns the ones with none open, in held order. Only those: re-reading every held ticket
      * after every landing cost one tracker call per blocker, in turn, on the landing worker. Nothing
-     * changes when the read throws (the unread ones stay unread, read again at the next landing), or
+     * changes when the read throws (the unread ones stay unread, read again at the next landing; the
+     * error is thrown on only when a ticket waited for `id`), or
      * when `stillStarts` is false once it is back (the run stopped meanwhile).
      */
     async release(id: string, stillStarts: () => boolean): Promise<T[]> {
       if (!ports.open) return [];
       const waiting = [...held.values()].filter((h) => waitsOn(h, id) || hasUnread(h));
       if (!waiting.length) return [];
-      const open = await ports.open(waiting.map((h) => h.ticket), new Set(landed));
+      let open: B[][];
+      try {
+        open = await ports.open(waiting.map((h) => h.ticket), new Set(landed));
+      } catch (error) {
+        // The run's `unreleased` line says the tickets that waited for `id` wait for the next run:
+        // with none, it would name a landing nothing waited for, and the unread ones are read again.
+        if (waiting.some((h) => waitsOn(h, id))) throw error;
+        return [];
+      }
       if (!stillStarts()) return [];
       const free: T[] = [];
       waiting.forEach((h, at) => {

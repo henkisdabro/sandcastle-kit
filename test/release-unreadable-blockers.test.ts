@@ -146,7 +146,7 @@ test("the last pipeline's pane stays open while an unread ticket may be freed by
   assert.equal(lastWhileUnread, false);
 });
 
-test("a read that throws leaves the unread ticket unread for the next landing, and the line names the landing's own", async () => {
+test("a read that throws leaves the unread ticket unread for the next landing, and tells no line for a landing nothing waited for", async () => {
   // 4 waits for 1 (unreadable after it); 2's landing throws; 3's landing answers.
   const { order, lines, asked } = await play(
     ["1", "2", "3"],
@@ -155,8 +155,23 @@ test("a read that throws leaves the unread ticket unread for the next landing, a
     (_ids, _landed, call) => (call === 1 ? [[unreadable]] : call === 2 ? new Error("gh: HTTP 502") : [[]]),
   );
   assert.deepEqual(asked, ["4 after 1", "4 after 1,2", "4 after 1,2,3"]);
+  // Nothing waited for 2: a line saying its dependants wait for the next run would name none, and 4 is read again.
+  assert.deepEqual(lines.filter((l) => l.startsWith("unreleased")), []);
+  assert.ok(order.indexOf("attempt 4") > order.indexOf("land 3"), order.join(" | "));
+});
+
+test("a read that throws at a landing a ticket waited for is told for that landing, and the unread one is read again", async () => {
+  // 4 is unreadable after 1's landing; 6 waits for 2, whose read throws; 3's landing answers 4.
+  const { order, lines, asked } = await play(
+    ["1", "2", "3"],
+    { 4: [{ id: "1" }], 6: [{ id: "2" }] },
+    { 1: 5, 2: 60, 3: 120 },
+    (ids, _landed, call) => (call === 1 ? [[unreadable]] : call === 2 ? new Error("gh: HTTP 502") : ids.map(() => [])),
+  );
+  assert.deepEqual(asked, ["4 after 1", "4,6 after 1,2", "4 after 1,2,3"]);
   assert.deepEqual(lines.filter((l) => l.startsWith("unreleased")), ["unreleased 2"]);
   assert.ok(order.indexOf("attempt 4") > order.indexOf("land 3"), order.join(" | "));
+  assert.ok(!order.includes("attempt 6"), order.join(" | "));
 });
 
 test("burndown tells the scheduler which blockers were not read", () => {
