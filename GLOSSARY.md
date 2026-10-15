@@ -45,6 +45,12 @@ merges before review or the gates, is requeued for a second attempt; a run gives
 a ticket two, and one more for each conflict that a landing after its resolve began caused.
 _Avoid_: try, retry, run (one `sandcastle run` is the whole run)
 
+**Agent pass**:
+One agent's run inside an attempt - implement, review, cross-review, repair or resolve - from its
+start to its final message. An attempt holds several; a review that fails and the fallback review
+after it are two.
+_Avoid_: pass alone (an attempt is also one pass through the pipeline), iteration, session
+
 **Ending**:
 How one ticket's part in a run ends - at landing, in its pipeline, a conflict found before landing,
 crashed, stopped, never begun,
