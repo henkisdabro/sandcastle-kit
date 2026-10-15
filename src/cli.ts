@@ -421,11 +421,12 @@ try {
           drain.last = now;
           drain.unblocked = left.unblocked;
           if (why) {
+            // The turn's summary said the loop runs again for these tickets; it does not, so the steps are the operator's
+            // after all - also ahead of a follow-on turn, which takes only the late tickets and leaves these unnamed.
+            console.log(await operatorSteps(project));
             // The no-progress stop is about re-running the same tickets; a late ticket is new work, so it still gets its turn.
             if (await followOn(tracker, turn, endOfDrainStop(why))) continue;
             drain.cause = why;
-            // The turn's summary said the loop runs again; it does not, so the steps are the operator's after all.
-            console.log(await operatorSteps(project));
             break;
           }
         }

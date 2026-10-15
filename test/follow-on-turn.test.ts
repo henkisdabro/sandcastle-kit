@@ -6,7 +6,7 @@
 //   pnpm test:file test/follow-on-turn.test.ts
 
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -163,4 +163,14 @@ test("a stop that ends the run takes no follow-on turn: dry run, stopped run, re
 test(`no follow-on turn once ${DRAIN_CAP} turns have run`, async () => {
   assert.equal(await decide({ level: "drain", turn: DRAIN_CAP, turnFacts: landedAll, queue: ["9"], inRun: ["1"] }), false);
   assert.equal(await decide({ level: "drain", turn: DRAIN_CAP - 1, turnFacts: landedAll, queue: ["9"], inRun: ["1"] }), true);
+});
+
+test("drain's no-progress stop prints the operator's steps for the tickets it does not re-run, follow-on turn or not", () => {
+  // The turn's summary said the loop re-runs them; a follow-on turn takes the late tickets only, so
+  // without the steps those tickets would go unnamed. The loop has no harness: its source holds the order.
+  const cli = readFileSync(join(import.meta.dirname, "../src/cli.ts"), "utf8");
+  const block = cli.slice(cli.indexOf("if (why) {"), cli.indexOf("drain.cause = why;"));
+  assert.ok(block.includes("followOn(tracker, turn, endOfDrainStop(why))"), "the follow-on decision sits in the drain-stop block");
+  assert.ok(block.indexOf("console.log(await operatorSteps(project));") >= 0, "the steps print before the follow-on decision");
+  assert.ok(block.indexOf("console.log(await operatorSteps(project));") < block.indexOf("followOn(tracker, turn, endOfDrainStop(why))"));
 });
