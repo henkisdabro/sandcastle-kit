@@ -6,7 +6,7 @@
 //   pnpm test:file test/estimate-landing-load.test.ts
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -114,4 +114,11 @@ test("a window whose only concurrency-2 run has no merged landing uses the rule"
 test("a run with no recorded concurrency stays in the fallback for landings", () => {
   const p = project([{ tickets: [merged(5, { landGates: 2 }), merged(5, { landGates: 2 })] }, { tickets: [merged(5, { landGates: 2 }), merged(5, { landGates: 2 })] }]);
   assert.deepEqual(minutes(estimate(p, 4, 2, 0, undefined, gated)), [28]);
+});
+
+test("burndown() hands typicalTimes the run's slots wherever it writes the run record's typical", () => {
+  // burndown() needs Docker, so no test drives it: without its slots, `typical` would price landings from concurrency-1 runs again.
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  assert.equal(src.match(/typical: typicalTimes\(/g)?.length, 2);
+  assert.equal(src.match(/typical: typicalTimes\([^\n]*, slots\)/g)?.length, 2);
 });
