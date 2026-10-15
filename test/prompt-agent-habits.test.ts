@@ -14,7 +14,7 @@ const read = (...p: string[]) => readFileSync(join(import.meta.dirname, "..", ..
 test("the implementer runs the gates in the foreground, output in a file, with a long enough timeout", () => {
   const p = read("prompts", "implement.md");
   assert.match(p, /Run the gates in the foreground, with their output in a file\./);
-  assert.match(p, /the tool's longest timeout \(`timeout: 600000` in Claude Code/);
+  assert.match(p, /the tool's longest timeout \(`timeout: 900000` in Claude Code, the sandbox's maximum/);
   assert.match(p, /Never start it in the background and wait on it with `sleep`/);
   assert.match(p, /how the test runner reports a pass and a failure/);
 });

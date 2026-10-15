@@ -18,12 +18,12 @@ const mount = sandboxMounts({ mounts: [] } as unknown as Project).find((m) => m.
 const env: Record<string, unknown> = JSON.parse(readFileSync(join(mount!.hostPath, "managed-settings.json"), "utf8")).env ?? {};
 
 // The `timeout` the prompts tell an agent to pass to a gate run, in milliseconds.
-const PROMPTED_TIMEOUT_MS = 600_000;
+const PROMPTED_TIMEOUT_MS = 900_000;
 
 // Claude Code reads an env value from settings as a string.
 const ms = (name: string) => Number(env[name]);
 
-test("a Bash command run without a timeout may take at least ten minutes", () => {
+test("a Bash command run without a timeout may take as long as the prompts advise", () => {
   assert.equal(typeof env.BASH_DEFAULT_TIMEOUT_MS, "string", "settings env values are strings");
   assert.ok(ms("BASH_DEFAULT_TIMEOUT_MS") >= PROMPTED_TIMEOUT_MS, `${env.BASH_DEFAULT_TIMEOUT_MS} ms`);
 });
@@ -32,10 +32,11 @@ test("the maximum a command may ask for is not below the default, so the default
   assert.ok(ms("BASH_MAX_TIMEOUT_MS") >= ms("BASH_DEFAULT_TIMEOUT_MS"), `${env.BASH_MAX_TIMEOUT_MS} ms`);
 });
 
-test("the prompts still tell an agent to pass a long timeout, and it fits the maximum", () => {
+test("the prompts tell an agent to pass a long timeout, and it is the maximum", () => {
   for (const name of ["implement", "review", "repair", "resolve"]) {
     const prompt = readFileSync(join(KIT, "prompts", `${name}.md`), "utf8");
     assert.ok(prompt.includes(`timeout: ${PROMPTED_TIMEOUT_MS}`), `${name}.md names timeout: ${PROMPTED_TIMEOUT_MS}`);
   }
-  assert.ok(PROMPTED_TIMEOUT_MS <= ms("BASH_MAX_TIMEOUT_MS"));
+  // An explicit timeout caps the call: the 600000 once advised cut off a suite the sandbox would have let finish.
+  assert.equal(PROMPTED_TIMEOUT_MS, ms("BASH_MAX_TIMEOUT_MS"));
 });

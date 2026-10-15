@@ -17,6 +17,24 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   new project could not see they existed. An existing project's config is unchanged; the README's
   Configuration table lists the same keys.
 
+### Fixed
+
+- **The run's `Lean warning` and `sandcastle lean` no longer count CODEOWNERS or the project's own
+  `.sandcastle/` files** as readers of a hidden path: a hidden `.mcp.json` that only CODEOWNERS
+  named printed the warning at every run's start. The run's warning now names the files that
+  mention each hidden item, as `sandcastle lean` does.
+- **Agents are told to post a ticket comment with `--body-file`** wherever they are asked for
+  one, not only in the repair prompt: an inline `--body` whose words matched a project's
+  `permissions.ask` rule was refused in the sandbox.
+- **A reviewer's "One gap, now covered" is no longer flagged** under "Worth a glance".
+- **The run's start line says `N while gates run`** for the raised CPU limit, not `N for landing
+  and base gates`: a ticket's own gates get it too.
+- **`.sandcastle/logs/forks.json` no longer keeps an entry for every landing and base-gate
+  sandbox**: their scratch branches' fork points were recorded and never dropped.
+- **Agents are told to give a long command the sandbox's 15-minute Bash timeout**, not 10 minutes:
+  the explicit `timeout: 600000` the prompts advised capped a suite below the sandbox's own default,
+  so a full suite that ran over 10 minutes under load was moved to the background and its result lost.
+
 ## [0.17.0] - 2026-10-13
 
 ### Added

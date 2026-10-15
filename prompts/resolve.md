@@ -55,8 +55,8 @@ Run only the typecheck gate (the gate above that type-checks or builds, if there
 files that cover the conflicted files, and make them pass. A conflict in a README or another document
 that no test file covers needs the typecheck gate alone.
 
-Run each gate in the foreground with the tool's longest timeout (`timeout: 600000` in Claude Code,
-whose 2-minute default moves a longer suite to the background) and its output in a file outside the
+Run each gate in the foreground with the tool's longest timeout (`timeout: 900000` in Claude Code,
+the sandbox's maximum: a smaller one moves a longer suite to the background) and its output in a file outside the
 worktree; never wait on a backgrounded run with `sleep`, `pgrep` or Monitor, and never run the suite
 to time it.
 
