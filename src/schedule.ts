@@ -285,12 +285,14 @@ const createDependants = <T extends { id: string }, B>(
   held: Map<string, { ticket: T; on: B[] }>,
   outside: { ticket: T; on: B[] }[],
   inFlight: Set<string>,
-  ports: Pick<NonNullable<Plan<T, B>["blockers"]>, "ticketOf" | "open">,
+  ports: Pick<NonNullable<Plan<T, B>["blockers"]>, "ticketOf" | "open" | "unread">,
 ) => {
   const landed = new Set<string>();
   // Candidates that ended without landing: still in this run's endings, never "not in this run".
   const ended = new Set<string>();
   const waitsOn = (h: { on: B[] }, id: string) => h.on.some((b) => ports.ticketOf(b) === id);
+  // A blocker whose read failed, so the ticket is held on a guess: the next landing reads it again.
+  const hasUnread = (h: { on: B[] }) => h.on.some((b) => ports.unread?.(b) === true);
   return {
     /** The ticket is on the base and closed: a blocker no more. */
     landed(id: string) {
@@ -305,9 +307,12 @@ const createDependants = <T extends { id: string }, B>(
     get size() {
       return held.size;
     },
-    /** A held ticket waits on a blocker that is still in flight: it may start in this run. */
+    /**
+     * A held ticket waits on a blocker that is still in flight: it may start in this run. So may one
+     * with an unread blocker while any ticket is in flight, as that ticket's landing reads it again.
+     */
     get waitsForFlight() {
-      return [...held.values()].some((h) => h.on.some((b) => among(inFlight, ports.ticketOf(b))));
+      return [...held.values()].some((h) => h.on.some((b) => among(inFlight, ports.ticketOf(b))) || (inFlight.size > 0 && hasUnread(h)));
     },
     /**
      * What each held ticket waits for now, with the candidates still in flight and the tickets
@@ -320,14 +325,16 @@ const createDependants = <T extends { id: string }, B>(
       ...outside.filter((h) => waitsOn(h, id)).map((h) => ({ id: h.ticket.id, on: h.on, inFlight: [...inFlight], landed: [...landed], ended: [...ended] })),
     ],
     /**
-     * Reads again the blockers of each held ticket that waited for `id`, and takes out and returns
-     * the ones with none open, in held order. Only those: re-reading every held ticket after every
-     * landing cost one tracker call per blocker, in turn, on the landing worker. Nothing changes
-     * when the read throws, or when `stillStarts` is false once it is back (the run stopped meanwhile).
+     * Reads again the blockers of each held ticket that waited for `id`, and of each held ticket with
+     * an unread blocker (its read timed out; nothing else would read it again), in one call, and takes
+     * out and returns the ones with none open, in held order. Only those: re-reading every held ticket
+     * after every landing cost one tracker call per blocker, in turn, on the landing worker. Nothing
+     * changes when the read throws (the unread ones stay unread, read again at the next landing), or
+     * when `stillStarts` is false once it is back (the run stopped meanwhile).
      */
     async release(id: string, stillStarts: () => boolean): Promise<T[]> {
       if (!ports.open) return [];
-      const waiting = [...held.values()].filter((h) => waitsOn(h, id));
+      const waiting = [...held.values()].filter((h) => waitsOn(h, id) || hasUnread(h));
       if (!waiting.length) return [];
       const open = await ports.open(waiting.map((h) => h.ticket), new Set(landed));
       if (!stillStarts()) return [];
@@ -824,6 +831,12 @@ export type Plan<T extends { id: string }, B = unknown> = {
   blockers?: {
     held: { ticket: T; on: B[] }[];
     ticketOf(blocker: B): string | undefined;
+    /**
+     * Whether a blocker's read failed, so its state is a guess. A held ticket with one is read again
+     * (in the same `open` call) after every later landing, not only after a landing it waited for.
+     * A ticket held from the start behind one (not a candidate) is never read again.
+     */
+    unread?(blocker: B): boolean;
     open?(tickets: T[], landed: ReadonlySet<string>): Promise<B[][]>;
   };
   /** Candidates decided elsewhere that start later in this run, if at all. */
@@ -962,7 +975,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         new Map(dependants.map((h) => [h.ticket.id, h] as const)),
         (blockers?.held ?? []).filter((h) => !dependants.includes(h)),
         new Set([...now, ...later].map((c) => c.ticket.id)),
-        { ticketOf: blockers?.ticketOf ?? (() => undefined), open: blockers?.open },
+        { ticketOf: blockers?.ticketOf ?? (() => undefined), open: blockers?.open, unread: blockers?.unread },
       );
       // Attempts that began, by ticket.
       const attempts = new Map<string, number>();

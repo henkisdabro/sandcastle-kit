@@ -470,7 +470,8 @@ blocker checks (`openOnQueue` at the start, then the start's `commentOnlyBlocks`
 with the same `limitMs`, and `blockerWhyAsync` for a blocker's reason; `openBlockersNow` as tickets land,
 each dependant read side by side), whose `declaredBlockersAsync` and state reads go through
 `blockerResolver`'s `limitMs`. A ticket whose native blocker links cannot be read is held by a `links`
-blocker that is never closed, and starts once a later read gets them. The repository's own name
+blocker that is never closed, and starts once a later read gets them: the run's next landing reads it
+again, or the next run does for a ticket held from the start. The repository's own name
 (`thisRepoAsync`) is one read shared by the callers that ask meanwhile; one that fails or times out is
 asked again later, so a same-repo native blocker is never read as another repository's for the run.
 What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it
@@ -649,7 +650,12 @@ state.
   and closes, the blockers of the ones that waited for it are read again through the plan's
   `blockers.open` port, and each with none open starts through the file hold. Any other ending, a
   run that starts nothing or a dry run releases none, and each held ticket is told what it waits
-  for now.
+  for now. A held ticket with a blocker whose read failed (the plan's `blockers.unread`: burndown
+  wires `unreadable`, which a `links` blocker always is) is read again at every later landing of the
+  run, in the same `open` call as the landed ticket's dependants, so a read that timed out once does
+  not hold it for the rest of the run; a read that throws leaves it unread for the next landing, and
+  while any ticket is in flight it keeps `last()` false. A ticket held from the start behind such a
+  blocker (not a candidate) is read again by the next run only.
 - **Start order.** The pipeline queue ranks what waits for a sandbox slot: a requeued ticket first,
   then a released dependant, then every ticket not yet started, each group in the order it arrived.
   Both have waited already, and every landing before they start moves the base under them; behind the

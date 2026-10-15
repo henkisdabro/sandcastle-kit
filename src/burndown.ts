@@ -2859,7 +2859,7 @@ export const burndown = async (
     files: DRY_RUN ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
     // A held ticket that also waits on something outside this run is the next run's. A dry run
     // lands nothing, so it releases nothing.
-    blockers: { held: [...held.values()], ticketOf: blockerTicket, ...(DRY_RUN ? {} : { open: openBlockersNow(project, tracker, queued.map((i) => i.id)) }) },
+    blockers: { held: [...held.values()], ticketOf: blockerTicket, unread: (b) => b.state === "unreadable", ...(DRY_RUN ? {} : { open: openBlockersNow(project, tracker, queued.map((i) => i.id)) }) },
     // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket
     // that starts now costs nothing. A waiting ticket's label is checked when it is released (it
     // holds that ticket, never the run), but its model is still read now, for the preflight.
