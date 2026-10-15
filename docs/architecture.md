@@ -116,7 +116,7 @@ A landing gate that goes red and then green on its in-slot re-run keeps the red 
 ticket's `flaked` (`landingFlaked`, written by burndown's landing `gate` port, so the closing
 summary's "Likely flaky" list has it), and `timedGate` writes the re-run as a `LANDING_GATES` line
 of its own after the red run's through `timingLines`, which marks every line after the first
-`rerun: true`: `timeLostFromTimings` counts a marked landing line as a re-run, and `typicalTimes`
+`rerun: true`: `timeLostFromTimings` counts a marked line as a red gate run again, and `typicalTimes`
 leaves it out of the landing-gates sum (a requeued ticket's second landing has no mark and is
 summed).
 Green on the third run goes on as after any green gate; red on it, on any tests, goes to repair as
@@ -1117,11 +1117,12 @@ per commit), and `isTestPath` (conventional test names; a test file a branch add
 `Touches:` overrun, and `overrunPaths` (`src/report.ts`) folds the modified ones into a count, "+7
 test files"), `isDocPath` (any `*.md`, and `docs/` and `skill/`: the docs a repo's rules have every
 change edit, folded by `overrunPaths` into "+2 docs files", so the listed paths are the source files
-a ticket missed; the close comment says "changed beyond its Touches line: ...", the report "<title> -
-beyond Touches: ..."), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one
-is not an overrun when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out
-a file only a repair pass or a merge commit (a conflict resolution) changed: the repair commits are
-recorded as `repaired` in the ticket's head record (`heads.json`), across attempts.
+a ticket missed; the close comment says "changed beyond its Touches line: ...", the report lists
+"<title>: ..." lines under "Changed files beyond their Touches line:", directly before the push
+note), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun
+when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out a file only
+a repair pass or a merge commit (a conflict resolution) changed: the repair commits are recorded as
+`repaired` in the ticket's head record (`heads.json`), across attempts.
 An overrun of only test and docs files stays in the run record, and `overrunNoted` (`src/report.ts`)
 keeps it out of the close comment and the report.
 A scheduling hint and warning source, never a guard
@@ -2189,7 +2190,12 @@ beside the estimate when either is more than twice off, and for a run that took 
 estimate names the causes of a minute or more, largest first: `pausedMs`, `sharedMs`, the gates-slot
 waits summed from the timings lines' `waitMs` (`timeLostFromTimings`), `sandboxWaitMs`, the
 landings' waits for a sandbox slot (the `landing` lines' `waitMs`, which `sandboxWaitMs` does not
-hold), and the gate re-runs and repair passes counted from the timings lines.
+hold), and the gate runs after a ticket's first and the repair passes counted from the timings lines. A
+gate run after the first is one of three: a red gate run again (a `rerun: true` line), a gate run
+after repair (a repair line came since the ticket's previous gates line) and a gate run after a
+requeue (any other); their time and the repair passes' make one "of pass time". The gates-slot wait
+carries the landing gates' share apart ("of which 1h 16m landings", from a minute), because a
+landing's wait also sits inside its `landing Nm` in the ticket lines.
 It lists each likely flaky test once with the tickets it hit, from both fields that name one: a
 ticket's `flaked` (red on one run of a gate, green on a later one) and its `flaky` (a repair pass's
 verdict).
