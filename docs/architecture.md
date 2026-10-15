@@ -677,6 +677,21 @@ state.
   A worker still asking then ends its wait once nothing is queued (`wanted()` again), or a run with
   no
   demand left beside a hungry run would wait for ever (`test/schedule-slot-stale-ask.test.ts`).
+  **A gates wait frees the worker.** An attempt that only waits for a gates slot says so (`at.gateWait()`) and
+  moves its sandbox lease to the pool's uncounted lock (`createGateSeat`, `src/burndown.ts`; `uncountSlot`,
+  `src/pool.ts`): the worker goes back to the queue (`occupy`: it awaits the attempt only until the attempt ends or goes
+  off) while the attempt goes on, as a resolve's wait does. The ticket stays open until its ending and in `gating`
+  (a resolve that shares its files still waits for it) until its gates end. `Work.gateWaiters`, the gates limit, caps the
+  attempts off their worker; one that reaches its gates wait at the cap is told no, keeps its slot and its worker and
+  waits as before. Every wait for a gates slot of a ticket gate asks, not only the first (a gate run after a repair does).
+  A red ticket takes a counted slot again just before its repair pass (and the review after it), not at the result: through
+  a fix-board wait it stays on the uncounted lock (a waiter that holds a worker stops waiting on it meanwhile: the fix board
+  below). `at.retake()` queues it in the pipeline queue at the top rank, so it is served as a
+  worker's ask - the pool's order, a landing first (`landingWaits`), the run's share - ahead of tickets that have not started;
+  the worker that gets the slot hands it over and stays with the attempt until it goes off again or ends, so the run never has
+  more agent passes than workers, and the uncounted lock goes once the slot is held. A pause answers a queued retake with nothing:
+  the attempt parks at a juncture and asks again after the resume. A green ticket asks for none. A stopped run grants no slot,
+  and the pass runs on the uncounted lock. `test/schedule-gate-wait-worker.test.ts`.
   A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
   `src/burndown.ts`: the run record's `waitsForShare` and `waitsFor`, which the status view's next-to-start rows say,
   and the heartbeat's `waiting for a sandbox slot`). The demand is counted as before, from the push.
@@ -720,6 +735,13 @@ state.
   waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
   ticket that repaired before it waited keeps those commits under the review after repair.
   `test/fix-wait.test.ts`.
+  The same holds for a worker: a fixer off its worker on an uncounted lock asks for one again
+  before its repair pass (`at.retake`), and with one worker a waiter that holds it would wait on a
+  fixer that waits for it.
+  So while the ticket waited on, or one it waits on in turn, asks for a worker (`stuck`:
+  `fixWaitStuck` over each ticket's `createGateSeat` in `src/burndown.ts`), a waiter that holds its
+  worker stops waiting and repairs; a waiter off its worker holds none and keeps waiting
+  (`test/fix-wait-retake.test.ts`).
 - **The pause** (`Work.pause`, a `PauseSource`: `read()` answers the pause in force, `{ since }` in
   seconds, or none).
   The scheduler reads it at each juncture and every `pollMs` (1 s; the timer is not unref'd - with
@@ -1615,6 +1637,20 @@ and `members()` counts it in its run's `held`, so that run's other tickets may w
 the share arithmetic is left as it is, since hiding the slot there would hide it from the other
 runs too.
 
+An **uncounted lock** (`uncountSlot`) is where a ticket's sandbox lease goes while its container only waits
+for a gates slot: `<pool>-waiting-<run>-<n>.lock`, a slot's content, written before the numbered
+slot is freed (the sandbox is never unseen) and released with the lease it returns and at exit.
+Like an extra slot it sits outside the numbered locks `tryAcquire` takes, and one left by a killed
+holder counts for nothing (`holderRunning`) and is removed by the next extra slot or uncounted lock
+taken.
+Unlike one, it is not counted against `maxSandboxes`: `liveSlots` leaves it out, so it is not in
+`members()`' `held` (the shares) nor in `lastFreeSlot`'s count, and a waiting ticket's agent pass can
+take its numbered slot.
+`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - its name starts
+with `sandboxes-` and ends in `.lock`, which is all that count asks - so other runs and the views see
+every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run.
+`test/gate-wait-frees-sandbox.test.ts`.
+
 **A wait that holds a slot.**
 Code that waits while holding a pool slot must not wait on anything that needs another slot - a
 ticket keeping its sandbox slot while it waits for a fix, a landing or another ticket's attempt that
@@ -1624,6 +1660,9 @@ or two slots shows it.
 Release the slot before such a wait, or wait before taking it.
 Waiting for a gates slot while holding a sandbox slot is the one sanctioned case, as no gates slot
 holder waits for a sandbox slot.
+A ticket gate's wait moves the lease to an uncounted lock instead, while the run has fewer than
+`maxGates` such waiters (`createGateSeat` in `src/burndown.ts`, the scheduler's `gateWait`); one kept at
+that cap is still a wait that holds a slot.
 
 The base image's build is one more lock of the same kind, `withLock` on
 `<cache>/locks/base-image.lock`: `ensureImage` holds it across every image a project's sandbox

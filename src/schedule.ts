@@ -703,12 +703,15 @@ export const onBase = (landed: Landed) => landed.kind === "merged" || landed.kin
  * not come. A cycle (A waits on B's fix while B waits on A's) is refused at `fixing`, so no two
  * tickets wait on each other. A waiter holds its sandbox slot, and the landing it waits for may need
  * one: while `starved` says a landing waits for a slot, every waiter stops waiting (asked every
- * `pause` ms), so the two never wait on each other. A ticket whose landing put a commit on the base
+ * `pause` ms), so the two never wait on each other. The same holds for a worker: a ticket off its worker on an uncounted
+ * lock (`at.gateWait`) that claimed a repair asks for one again before its pass (`at.retake`), and a waiter that holds a worker
+ * would hold the one it waits for - while `stuck` says so of the ticket waited on, or of one that ticket waits on in turn,
+ * the waiter stops waiting. A ticket whose landing put a commit on the base
  * (`landedAt`, read as it ends) has it remembered, and `fixing` hands it on: a ticket whose branch
  * holds that commit already got the fix when it started, so a merge brings it nothing. In memory, one
  * per run.
  */
-export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?: (id: string) => string | undefined) => {
+export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?: (id: string) => string | undefined, stuck?: (waiter: string, on: string) => boolean) => {
   const claims = new Map<string, string>();
   // A ticket that ended: whether it landed.
   const ended = new Map<string, boolean>();
@@ -754,8 +757,16 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?:
       try {
         return await new Promise<boolean>((resume) => {
           resumes.set(on, [...(resumes.get(on) ?? []), resume]);
-          const poll = () => (starved?.() || paused?.() ? resume(false) : (timer = setTimeout(poll, pause)));
-          if (starved || paused) timer = setTimeout(poll, pause);
+          // Along the chain of waits from `on`: a cycle is refused at `fixing`, and `seen` ends one anyway.
+          const blocked = () => {
+            for (let at: string | undefined = on, seen = new Set<string>(); at !== undefined && !seen.has(at); at = waitingOn.get(at)) {
+              if (stuck!(id, at)) return true;
+              seen.add(at);
+            }
+            return false;
+          };
+          const poll = () => (starved?.() || paused?.() || (stuck && blocked()) ? resume(false) : (timer = setTimeout(poll, pause)));
+          if (starved || paused || stuck) timer = setTimeout(poll, pause);
         });
       } finally {
         clearTimeout(timer);
@@ -804,6 +815,21 @@ export const RESOLVE_SETTLE_MS = 5000;
 const FIRST = 0;
 const RELEASED = 1;
 const REQUEUED = 2;
+// A ticket on the uncounted lock asking for a sandbox slot again (`retake`): it goes before any ticket that has not started.
+const RETAKE = 3;
+
+/**
+ * A worker's seat in an attempt. `off`: the attempt waits for a gates slot on an uncounted lock and the worker is free for
+ * the next ticket; `over`: the attempt ended. The worker `occupy`s the seat: it returns once the attempt ends (rejecting
+ * with its failure) or goes off the worker.
+ */
+type Seat = { off: boolean; over: boolean; settle?: () => void; failed?: { error: unknown } };
+
+/** An attempt off its worker, queued for a counted sandbox slot (`at.retake`); `dead`: asked no more (the run paused), already answered. */
+type Retake = { id: string; seat: Seat; slot: { slot?: Slot }; resolve(taken: { slot?: Slot } | undefined): void; dead: boolean };
+
+/** What the pipeline queue holds: a ticket to start, or an attempt that needs a sandbox slot again (`RETAKE`). */
+type Next<T> = { ticket: T; retake?: undefined; rank: number } | { retake: Retake; ticket?: undefined; rank: number };
 
 /** One candidate at the start, in start order: `wait` when it starts later, and `file` when that is behind a file git cannot merge. */
 export type Start<T> = { ticket: T; wait?: "file" | "blockers"; file?: FileWait; shares?: FileShare[] };
@@ -876,6 +902,11 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
   landingWaits?(): boolean;
   /** The run's concurrency, the most its demand for slots is ever told as; `workers` when not given. */
   concurrency?: number;
+  /**
+   * The most attempts of the run that wait for a gates slot on an uncounted lock at once (`at.gateWait`): the pool's gates
+   * limit. None (or 0) when not given: every attempt keeps its slot and its worker through its gates wait.
+   */
+  gateWaiters?: number;
   /** The clock the resolve wait's settling reads, in milliseconds; `Date.now` when not given. */
   now?: () => number;
   /** A person's pause, if the run takes one (a dry run may: it simply has nothing to hold). Without it nothing is held. */
@@ -894,8 +925,17 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
    * `slot`: the sandbox slot the worker leased for it (`slot` above), the attempt's to give back and lease again across
    * a pause and to release as it ends. None without the port, or when the run was paused as the attempt began: the
    * scheduler gave that one back before the ticket waited for the resume, and the attempt leases its own.
+   * `gateWait()`: the attempt now only waits for a gates slot and is about to move its slot to an uncounted lock (its
+   * container lives on). True: its worker goes back to the queue while the attempt goes on off it, and the attempt moves the
+   * slot; false, when the run already has `gateWaiters` such attempts (or none is allowed): it keeps its slot and its worker, and
+   * waits as before. Asked again at each wait for a gates slot (a gate run after a repair is one), and true again while it is off.
+   * `retake()`: an attempt off its worker needs a counted sandbox slot again (before an agent pass). It waits as a worker
+   * does - concurrency, the run's share, a waiting landing first - and ahead of the tickets that have not started, so the run never has
+   * more agent passes than workers; the attempt then holds a worker again, until its next `gateWait` or its end. Resolves with the
+   * slot (none without the port, or when the run stops: the pass then runs as the stopped run lets a ticket finish), or
+   * with undefined when the run is paused - the attempt parks at a juncture and asks again after the resume. Only after a true `gateWait`.
    */
-  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; resolveWaitMs?: number; slot?: Slot }): Promise<Attempted<G, O>>;
+  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; retake(): Promise<{ slot?: Slot } | undefined>; resolveWaitMs?: number; slot?: Slot }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
   tell(change: Change<G, O, B>): void;
 };
@@ -1003,7 +1043,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // What waits for a sandbox slot. A requeued ticket and a released dependant go before the tickets
       // that have not started: they have waited already, and every landing that happens before they
       // start moves the base under them (a requeued one first, as it is the older work).
-      const pipelines = createQueue<{ ticket: T; rank: number }>((q) => q.rank);
+      const pipelines = createQueue<Next<T>>((q) => q.rank);
+      // The attempts off their worker, waiting for a gates slot on an uncounted lock (`at.gateWait`), and the retakes queued in `pipelines`.
+      const uncounted = new Set<string>();
+      let retaking = 0;
+      const retakes = new Set<Retake>();
       // The sandbox slots the run could use now (the machine pool's demand): the tickets in a
       // pipeline or ready for one, plus one while a green branch waits to land or is landing,
       // never more than the concurrency. A ticket held for a blocker or a file adds nothing until
@@ -1071,7 +1115,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         demand();
         tellPaused();
         // A ticket waiting to resolve runs nothing and is no attempt: with none left in a pipeline, the run is landing.
-        if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
+        if (working === 0 && pipelines.size - retaking === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
       };
       // Reads the pause: at each juncture, and every `pollMs` for a run none reaches. A resume drops every
       // parked ticket from the demand before any of them asks for a slot again, and wakes them.
@@ -1088,6 +1132,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           pauseBegan = clock();
           pausedFor = now.usage;
           toldFinishing = undefined;
+          // An attempt off its worker waiting for a slot parks at a juncture instead (burndown), as a pause asks of every ticket.
+          for (const r of retakes) declineRetake(r);
           tellPaused();
           demand();
         } else if (now && JSON.stringify(now.usage) !== JSON.stringify(pausedFor)) {
@@ -1307,7 +1353,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         stop.add({ kind: "setup problem", line });
         tell({ kind: "setup problem", line });
       };
-      const last = () => stop.startsNothing || (pipelines.size === 0 && !waits.waitsForFlight && !hold?.size);
+      const last = () => stop.startsNothing || (pipelines.size - retaking === 0 && !waits.waitsForFlight && !hold?.size);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
       const notBegun = (t: T, why: StopCause | Withdrawn) => {
@@ -1349,7 +1395,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const resolveComes = (self = false) => {
         if (pausedSince !== undefined || stop.startsNothing) return false;
         const next = pipelines.peek();
-        if (!next || next.rank === REQUEUED) return false;
+        if (!next || next.rank >= REQUEUED) return false;
         // Counted until it is pushed, not only while it waits: the landing that ends the wait wakes the worker too, and a worker
         // that looked between the wait's end and the push would find no resolve and take the next ticket.
         const coming = [...offWorker].filter((id) => {
@@ -1414,9 +1460,42 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           },
         );
       };
+      // A retake answered with nothing: the pause is the reason, and the attempt asks again after its juncture.
+      const declineRetake = (r: Retake) => {
+        if (r.dead) return;
+        r.dead = true;
+        retakes.delete(r);
+        r.resolve(undefined);
+      };
+      // Settles once the attempt ends (rejecting with its failure) or goes off the worker (`gateWait`). One promise settled by the
+      // attempt's own last step, with no hop between: the worker takes its next ticket in the tick it always did, which the order of
+      // an ending, a landing and the next start depends on.
+      const occupy = (seat: Seat) =>
+        new Promise<void>((resolve, reject) => {
+          seat.settle = () => {
+            seat.settle = undefined;
+            const failed = seat.failed;
+            seat.failed = undefined;
+            if (failed) reject(failed.error);
+            else resolve();
+          };
+        });
       // `held.slot`: the worker's slot. The attempt takes it over, unless the ticket waits off the worker to resolve, which
-      // leaves it to the worker for the next ticket.
-      const attempt = async (t: T, held: { slot?: Slot }) => {
+      // leaves it to the worker for the next ticket. The worker is released from the attempt when it ends or goes off for its
+      // gates wait (`gateWait`): an attempt that fails then has no worker to throw to, so it closes the run as a resolve's wait does.
+      const attempt = (t: T, held: { slot?: Slot }): Promise<void> => {
+        const seat: Seat = { off: false, over: false };
+        const occupied = occupy(seat);
+        // Its failure is told through the seat, to the worker or the run; one before the attempt's own try (the pause check) has not been.
+        attemptIn(t, held, seat, {}).catch((error) => {
+          if (seat.over) return;
+          seat.over = true;
+          seat.failed = { error };
+          seat.settle?.();
+        });
+        return occupied;
+      };
+      const attemptIn = async (t: T, held: { slot?: Slot }, seat: Seat, retaken: { slot?: Slot }) => {
         // A paused run starts no ticket: it waits here, holding nothing - the worker's slot goes back first - until the resume, or a stop.
         for (sync(); pausedSince !== undefined && !stop.startsNothing; sync()) {
           held.slot?.release();
@@ -1427,11 +1506,38 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         const n = (attempts.get(t.id) ?? 0) + 1;
         const resolves = n >= 2 && first.get(t.id)?.kind === "conflict";
         // Something is ahead of its resolve (checked again here: a landing may have queued since it was pushed): wait off the worker.
-        if (resolves && !stop.startsNothing && aheadOf(t).length) return waitToResolve(t);
+        if (resolves && !stop.startsNothing && aheadOf(t).length) {
+          seat.over = true;
+          waitToResolve(t);
+          seat.settle?.();
+          return;
+        }
         const slot = held.slot;
         held.slot = undefined;
         working++;
         running.add(t.id);
+        // See `Work.attempt`'s `gateWait` and `retake`.
+        const gateWait = () => {
+          if (seat.off) return true;
+          if (!work.gateWaiters || uncounted.size >= work.gateWaiters) return false;
+          uncounted.add(t.id);
+          seat.off = true;
+          seat.settle?.();
+          return true;
+        };
+        const retake = (): Promise<{ slot?: Slot } | undefined> => {
+          sync();
+          if (!seat.off) return Promise.resolve({});
+          if (pausedSince !== undefined && !stop.startsNothing) return Promise.resolve(undefined);
+          // The queues closed on a failure: no worker would take it. The attempt goes on as it is and the run rejects.
+          if (pipelines.closed) return Promise.resolve({});
+          return new Promise((resolve) => {
+            const r: Retake = { id: t.id, seat, slot: retaken, resolve, dead: false };
+            retakes.add(r);
+            retaking++;
+            pipelines.push({ retake: r, rank: RETAKE });
+          });
+        };
         // A resolve that waited records its time from the requeue: the wait, and the queue for a free slot after it.
         const sentAt = requeuedAt.get(t.id);
         const resolveWaitMs = resolves && resolveWaited.delete(t.id) && sentAt ? Math.max(0, clock() - sentAt.at - (pausedMs - sentAt.pausedMs)) : undefined;
@@ -1452,7 +1558,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               // does not wait out. It counts again from its next gate run (`gates`).
               if (phase === "repair" || phase === "review") gating.delete(t.id);
               return juncture(t.id, phase, park);
-            }, paused: () => (sync(), pausedSince !== undefined), gates: () => void gating.add(t.id), ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
+            }, paused: () => (sync(), pausedSince !== undefined), gates: () => void gating.add(t.id), gateWait, retake, ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {
@@ -1498,14 +1604,25 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               stop.add(r.cause);
               return await end(t.id, { kind: "stopped", cause: r.cause, finished: false });
           }
+        } catch (error) {
+          // Told to the worker still in the attempt, else to the run: no worker is left to throw to.
+          if (seat.off) {
+            failures.push(error);
+            closeAll();
+          } else seat.failed = { error };
+          throw error;
         } finally {
           // The attempt's to release, and a second release does nothing: a ticket that never reached its port gives it back here.
           slot?.release();
+          retaken.slot?.release();
+          uncounted.delete(t.id);
           working--;
           running.delete(t.id);
           gating.delete(t.id);
           inPipeline--;
           stage();
+          seat.over = true;
+          seat.settle?.();
         }
       };
 
@@ -1577,6 +1694,22 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             if (!next) {
               held.slot?.release();
               held.slot = undefined;
+              continue;
+            }
+            if (next.retake) {
+              // An attempt off its worker needs a counted slot again: this worker's, which it then holds until the attempt goes
+              // off again or ends - so a repair never runs beside a full set of workers' passes.
+              const r = next.retake;
+              retaking--;
+              if (r.dead) continue;
+              retakes.delete(r);
+              uncounted.delete(r.id);
+              r.seat.off = false;
+              r.slot.slot = held.slot;
+              held.slot = undefined;
+              const occupied = occupy(r.seat);
+              r.resolve({ slot: r.slot.slot });
+              await occupied;
               continue;
             }
             await attempt(next.ticket, held);
