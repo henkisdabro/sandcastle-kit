@@ -23,7 +23,7 @@ import { OperatorError, SlowStartError } from "./errors.ts";
 import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type LandingGate, type Opener, squashBody } from "./land.ts";
-import { claimSlot, dropHandOff, handOffId, type SlotClaim, withSlot } from "./pool.ts";
+import { claimSlot, createRunClaim, dropHandOff, handOffId, type RunClaim, type SlotClaim, withSlot } from "./pool.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
@@ -459,7 +459,8 @@ export const isAncestor = (root: string, ancestor: string, of: string) => {
 
 /** `at.slotWaited`: told how long the landing waited for its sandbox slot, once it has it. */
 /** `at.behind`: how many green branches are queued to land after this one; one or more and its sandbox slot is handed to the next landing, not freed. */
-export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(ms: number): void; behind?(): number }): Promise<Landed> => {
+/** `at.claim`: the run's one gates claim (`createRunClaim`), held since this branch was queued: its gates spend that, and `landOne` takes none of its own. With none, the landing claims for itself once it holds its sandbox slot. */
+export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(ms: number): void; behind?(): number; claim?: RunClaim }): Promise<Landed> => {
   const { project, tracker, base, gateNames, reports, run, dryRun, opener, withdrawal, host, landed } = ctx;
   const ref = tracker.ref;
   const root = project.root;
@@ -655,17 +656,30 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
             // As above.
           }
           at?.slotWaited?.(Date.now() - asked);
-          // Claimed from the moment the sandbox is held: opening it and merging take seconds, and a ticket gate asked in
-          // them would take the gates slot and hold it for a whole gate run. The landing's own gates wait spends this claim (handed
-          // to `ctx.gate`) and no other landing's; a landing that ends without gating (a conflict, a throw) releases it here.
-          const claim = claimSlot("gates");
+          // With no run claim handed in (`sandcastle land`, a direct caller), claimed from the moment the sandbox is held: opening it
+          // and merging take seconds, and a ticket gate asked in them would take the gates slot and hold it for a whole gate run. The
+          // landing's own gates wait spends this claim (handed to `ctx.gate`) and no other landing's; a landing that ends without
+          // gating (a conflict, a throw) releases it here. A run's landing has had the run's claim since its branch was queued.
+          const runClaim = at?.claim;
+          const own = runClaim ? undefined : claimSlot("gates");
           return landInSandbox(
             project,
             { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId, ref: ref(o.issue) },
             opener,
-            (box, how) => ctx.gate(box, o.issue, how, claim),
+            runClaim
+              ? async (box, how) => {
+                  const handed = runClaim.take();
+                  try {
+                    return await ctx.gate(box, o.issue, how, handed);
+                  } finally {
+                    // The wait spent it, or the gate threw before it began; and the run claims again for the next green, with the slot not yet seen free.
+                    handed?.release();
+                    runClaim.gateEnded();
+                  }
+                }
+              : (box, how) => ctx.gate(box, o.issue, how, own),
             host.expected,
-          ).finally(claim.release);
+          ).finally(() => own?.release());
         }, undefined, undefined, true, false, () => (at?.behind?.() ?? 0) > 0);
       } finally {
         if (waiting) wanted.n--;
@@ -835,7 +849,11 @@ export const didMerge = (landed: Landed) => landed.kind === "merged" || landed.k
  * tracker call that failed, a full disk, a branch gone) costs this ticket only. Thrown on, it ended
  * the process while pipelines still ran: no summary, and tickets already landed went unreported.
  */
-export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
+export const landingWork = (ctx: LandContext): LandPorts<Waiting> => portsOver(ctx, createRunClaim("gates"));
+
+// `claim`: the run's one gates claim, from a green branch queued to land: the landing queue tells it of each push (`createLanding`), `landOne` takes it for the gates.
+const portsOver = (ctx: LandContext, claim: RunClaim): LandPorts<Waiting> => ({
+  claim,
   land: async (o, behind) => {
     const since = Date.now();
     let slotWaitMs = 0;
@@ -843,7 +861,7 @@ export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
     // A slot the previous landing handed on that this one did not take (a conflict found on the host, a fast-forward) goes back to the pool.
     const handed = handOffId();
     try {
-      landed = await landOne(ctx, o, { slotWaited: (ms) => (slotWaitMs = ms), behind });
+      landed = await landOne(ctx, o, { slotWaited: (ms) => (slotWaitMs = ms), claim, behind });
     } catch (error) {
       if (error instanceof OperatorError) throw error;
       landed = { kind: "not-landed", reason: errorLine(error) };

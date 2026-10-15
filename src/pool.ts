@@ -759,7 +759,8 @@ const claims = new Map<PoolName, Set<object>>();
 export type SlotClaim = { release(): void };
 
 /**
- * A landing that will gate the merged tree claims the gates pool when it holds its sandbox slot: a ticket gate of this run
+ * A landing that will gate the merged tree claims the gates pool: a run's landings through its one claim (`createRunClaim`, from a
+ * branch queued to land), a landing given none (`sandcastle land`) for itself once it holds its sandbox slot. A ticket gate of this run
  * yields to it (`priorityAhead`) while the pool's free slots are no more than the run's claims. Held until the landing's
  * own priority wait for the pool begins (it is handed the claim, `beginWait`) or the landing ends without gating (`release`).
  * Claims are tied to their landing, not anonymous: a priority wait made without one (a base or verify gate) spends none,
@@ -774,13 +775,86 @@ export const claimSlot = (pool: PoolName): SlotClaim => {
 };
 
 /**
+ * The run's one claim on a pool for its landings, held from the moment a green branch is queued to land (`claimSlot` alone
+ * is taken once a landing holds its sandbox slot, seconds after the previous landing's merge: a ticket gate took the slot in
+ * that gap, nearly every time, and every landing's gates waited out its run). The scheduler tells it the landing queue's
+ * events (`pushed`, `started`, `ended`) and `landOne` the gate's (`take`, `gateEnded`); it keeps a claim standing while
+ * a landing is in flight and has not begun its gate run, or a green is queued, and no stop holds: never more than one.
+ * While a landing's gates run no claim stands for the next branch - with a spare slot a ticket gate takes it - and the
+ * run claims again the moment that gate run ends, so the slot it frees goes to the next landing. Held in this process only.
+ */
+export type RunClaim = {
+  /** The landing queue's size (greens waiting, not the one in flight) and whether a stop holds: read live at every event. */
+  bind(source: { waiting(): number; stopped(): boolean }): void;
+  /** A green branch was queued. */
+  pushed(): void;
+  /** A landing took a branch off the queue. */
+  started(): void;
+  /** That landing is over, gated or not (a merge, a conflict, a throw, a stop): its claim, if it never gated, goes or stays for the next one. */
+  ended(): void;
+  /** The landing's gates are about to ask: the claim it spends with its priority wait, if one stands. */
+  take(): SlotClaim | undefined;
+  /** That gate run is over (green, red or thrown), the slot not yet seen by anyone else: claims for the next queued green. */
+  gateEnded(): void;
+  /** Reads the queue and the stop again: a stop that arrived releases the claim at once. */
+  settle(): void;
+};
+
+export const createRunClaim = (pool: PoolName = "gates"): RunClaim => {
+  let source: { waiting(): number; stopped(): boolean } | undefined;
+  let claim: SlotClaim | undefined;
+  // A landing is in flight and its gate run has not begun / a gate run is going.
+  let ahead = false;
+  let gating = false;
+  const settle = () => {
+    const want = !(source?.stopped() ?? false) && !gating && (ahead || (source?.waiting() ?? 0) > 0);
+    if (want && !claim) claim = claimSlot(pool);
+    if (!want && claim) {
+      claim.release();
+      claim = undefined;
+    }
+  };
+  return {
+    bind: (s) => void (source = s),
+    pushed: settle,
+    started: () => {
+      ahead = true;
+      settle();
+    },
+    ended: () => {
+      ahead = false;
+      gating = false;
+      settle();
+    },
+    take: () => {
+      const handed = claim;
+      // Handed over, not released: the landing's priority wait spends it (`beginWait`).
+      claim = undefined;
+      ahead = false;
+      gating = true;
+      settle();
+      return handed;
+    },
+    gateEnded: () => {
+      gating = false;
+      settle();
+    },
+    settle,
+  };
+};
+
+/**
  * This run has a priority wait for `pool` that is not `wait`, or a claim on a free slot's worth of it: `wait` leaves the
  * slot to it. A claim holds a ticket back only while the free slots are no more than the claims, so with a slot to spare
- * the ticket goes on, where it would idle through every landing's merge.
+ * the ticket goes on, where it would idle through every landing's merge. Nor while a landing of the run waits for a sandbox
+ * slot (only a landing's sandbox wait is a priority one): the run's claim stands from a branch queued to land, and a ticket's
+ * gate runs in the sandbox slot its pipeline holds, so with that slot the last free one the landing waited for it while the
+ * ticket's gate waited behind the claim, for ever.
  */
 const priorityAhead = (wait: OwnWait, seen: Seen) => {
   if (wait.priority) return false;
   if ([...waiting].some((w) => w.pool === wait.pool && w.priority)) return true;
+  if ([...waiting].some((w) => w.pool === "sandboxes" && w.priority)) return false;
   const claimed = claims.get(wait.pool)?.size ?? 0;
   return claimed > 0 && limit(wait.pool) - liveSlots(wait.pool, seen).length <= claimed;
 };

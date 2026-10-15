@@ -1550,19 +1550,34 @@ left behind another run that began waiting after its own run did, and any other 
 yields while one of the run's priority waits is waiting (`priorityAhead`).
 A run with no priority wait is served as it always was, and a run that has waited less than another
 is still behind it, priority or not.
-A landing that will gate **claims** the gates pool before its gates ask (`claimSlot`, `src/pool.ts`):
-it opens its sandbox and merges for seconds first, and a ticket gate asked in that window took the
-slot and held it for a whole gate run.
-`landOne` takes the claim once it holds its landing sandbox slot (not while it waits for one; a
-fast-forward or a conflict found on the host never takes it) and releases it when `landInSandbox`
-ends, gated or not.
-The claim is handed down with the gate (`ctx.gate` -> `runGates` -> `withSlot`) and the landing's own
-priority wait spends that claim and no other: a priority wait made without one (the base check's, the
-verify's) spends none, and another landing's claim keeps holding ticket gates back.
-A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than
-the run's claims, so with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
-The claim is kept in this process (`claims`), not in the pool's files; `test/pool-landing-claim.test.ts`, and
-`test/pool-landing-claim-spare.test.ts` for the slot to spare.
+The run holds **one claim** on the gates pool (`createRunClaim`, `src/pool.ts`; `claimSlot` is its unit) from the
+moment a green branch is queued to land: a landing opens its sandbox and merges for seconds first, and a ticket
+gate asked in that window took the slot and held it for a whole gate run, so nearly every landing's gates waited out
+one ticket-gate run.
+`createLanding` (`src/schedule.ts`) tells the claim of each push, of each landing that starts and of each that ends
+(`LandPorts.claim`, which `landingWork` makes and hands to `landOne`), and of a stop (`StopWriter.watch`, and the
+scheduler's `noticeStop` for the host's live failure), so `src/schedule.ts` still imports nothing from the pool.
+It is taken at the push when no landing gate is running (a branch queued while one runs is claimed when that gate
+run ends, so with `maxGates` above 1 a spare slot stays free for ticket gates), and never more than one stands.
+`landOne` hands it to `ctx.gate` when its gates begin (`take`) and takes none of its own; the gate's priority wait
+spends it and no other: a priority wait made without one (the base check's, the verify's) spends none.
+The moment that gate run ends, green, red or thrown, and before anyone else sees the slot free, the run claims again
+if another green is queued (`gateEnded`), so the freed slot goes to that landing.
+The claim is released when the queue empties after the last landing, on a stop (the worker hands the queued greens to
+`stopped`, and nothing claims again when the in-flight landing's gates end) and on a crash of the land port, and by every
+landing that ends without gating (an in-place fast-forward, a conflict found on the host, `not-landed`, the no-merge
+endings): the claim then stays for the next queued green, or goes.
+A `landOne` given no run claim (`sandcastle land`, a direct caller) keeps the earlier bound: it claims once it holds its
+landing sandbox slot and releases when `landInSandbox` ends.
+A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than the run's claims, so
+with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
+Nor while a landing of the run waits for a sandbox slot (a priority wait of the sandboxes pool): a ticket's gate runs
+in the sandbox slot its pipeline holds, so with that slot the last one free (a pool of one) the landing waited for it
+while the ticket's gate waited behind the claim, and neither moved (`test/landing-claim-sandbox-wait.test.ts`).
+The claim is kept in this process (`claims`), not in the pool's files, so a crash leaves nothing behind;
+`test/pool-landing-claim-queued.test.ts` (gates limit 1) and `test/pool-landing-claim-queued-spare.test.ts` (2) for
+the run's claim, `test/pool-landing-claim.test.ts`, `test/pool-landing-claim-spare.test.ts` and
+`test/landing-claim-gates.test.ts` for the single claim.
 The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is
 this process's, and another run needs only a wait's start - and, for the pool's last free slot,
 whether it is a landing's, which the entry's file name says (a `-priority` before `.wait`; the
