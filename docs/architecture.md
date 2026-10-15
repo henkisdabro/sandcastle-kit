@@ -1988,8 +1988,19 @@ and `splitAtStart` split the limit less one slot (`shareable`; a pool of one slo
 run's ticket pipelines use their whole share, and the slot left over is any run's landing's.
 A ticket pipeline's lease (`leaseSlot`'s `keep`, which `burndown()` sets unless it is a dry run)
 never takes the pool's last free sandbox slot while another run is live (`lastFreeSlot`: exactly one
-slot free); it waits with the reason `landing`, and its wait entry is out of the waits directory
-meanwhile, as a wait that cannot take the slot would make a landing of another run yield it.
+slot free) and some live run, this one included, has a landing near; it waits with the reason
+`landing`, and its wait entry is out of the waits directory meanwhile, as a wait that cannot take
+the slot would make a landing of another run yield it. A landing is near when a run's registration
+says so (`Registration.landingNear`, written whole and renamed in like the demand, only when it
+changes, and kept beside a cap): `createSchedule` tells `{ kind: "landing near" }` when the run has
+a ticket in its gates (`gating`: from `at.gates()` until a repair or review juncture or the
+attempt's end, so a ticket parked for a gates slot on an uncounted lock is in it) or a green branch
+queued to land or landing (`greens`), and `burndown()` hands it to `setLandingNear`. With no run
+saying so the slot is any free slot's: a ticket takes it, shares, `overShare` and `olderWait`
+applying as to any free slot, and nothing is taken back if a landing comes near after (it waits for
+a slot like any priority wait, at most one agent pass). A registration without the field (an older
+kit's) and slots held with no registration count as near, so beside one the slot is kept as before
+(`test/kept-slot-near-landing.test.ts`, `test/schedule-landing-near.test.ts`).
 A landing's lease (priority) may take that slot whatever its run holds against its share, and any
 other free slot while its run holds no more than its share (`overShare`'s `landingOnLast`; a
 person's cap still applies): the run's tickets fill the whole share, so a landing held to it waited
@@ -1998,7 +2009,8 @@ with slots free, and when two runs' landings want it at once the longest wait go
 `-priority` for a landing's, so another run can tell it from a ticket's).
 While a landing runs, the slot it holds is not free, and a ticket that ends then frees the pool's
 last free slot again, so the tickets wait until the landing is done: the pool holds one slot for
-landing, and tickets use only the rest.
+landing, and tickets use only the rest while a landing is near; with none near a ticket takes
+it too.
 Nothing is taken back from a running ticket (ADR 0001): a run over its share after the split keeps
 what it holds and shrinks as its tickets end.
 A run alone is unchanged: the whole pool as its share, nothing held back from its tickets, one slot

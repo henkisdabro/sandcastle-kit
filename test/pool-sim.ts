@@ -110,12 +110,12 @@ export const setHeld = (run: string, n: number) => {
   }
 };
 
-export type Other = { project?: string; demand: number; held?: number; since?: number; cap?: number; concurrency?: number; pid?: number };
+export type Other = { project?: string; demand: number; held?: number; since?: number; cap?: number; concurrency?: number; pid?: number; landingNear?: boolean };
 /** Another live run: its registration, written whole as the pool writes one, and the slots it holds. Again with new values to change it. */
 export const other = (run: string, o: Other) => {
   mkdirSync(registrations, { recursive: true });
-  const { pid = pidOf(run), project = run, demand, since = Date.now(), concurrency = demand, cap } = o;
-  writeFileSync(join(registrations, `${run}.run`), JSON.stringify({ pid, run, project, demand, concurrency, since, shares: true, ...(cap ? { cap } : {}) }) + "\n");
+  const { pid = pidOf(run), project = run, demand, since = Date.now(), concurrency = demand, cap, landingNear } = o;
+  writeFileSync(join(registrations, `${run}.run`), JSON.stringify({ pid, run, project, demand, concurrency, since, shares: true, ...(cap ? { cap } : {}), ...(landingNear === undefined ? {} : { landingNear }) }) + "\n");
   if (o.held !== undefined) setHeld(run, o.held);
 };
 /** A wait entry of another run, `since` ms since the epoch; `landing` is a landing's (priority) wait, as the pool names its file. */
