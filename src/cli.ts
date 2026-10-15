@@ -139,7 +139,7 @@ import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
@@ -344,7 +344,7 @@ try {
       // off the run record, and the closing lines must not say those were queued after the run started.
       // Unreadable: no closing lines rather than wrong ones.
       let queuedAtStart: Set<string> | undefined;
-      if (level === "drain") {
+      if (level === 2 || level === 3 || level === "drain") {
         try {
           queuedAtStart = new Set(makeTracker(project).queued(false).map((t) => t.id));
         } catch {}
@@ -356,6 +356,30 @@ try {
       // The last turn's facts, for the exit code: a turn that ended the loop before gathering (level 0) leaves them unread.
       let lastFacts: Awaited<ReturnType<typeof gather>> | undefined;
       let ranTurn = false;
+      // Levels 2 and 3 take one follow-on turn per run, whatever the turn number; `drain` may repeat.
+      let followedOn = false;
+      // The ids of the follow-on turn about to run: a turn that ran them has them in drain.inRun.
+      let followOnIds: string[] = [];
+      // The tickets queued while the run was live that no turn had and no blocker holds back; unreadable: none, so no follow-on turn.
+      const lateNow = async (tracker: ReturnType<typeof makeTracker>) =>
+        queuedAtStart
+          ? lateTickets(tracker, new Set([...queuedAtStart, ...drain.inRun]), async (late) => new Set((await openOnQueue(project, tracker, late)).keys()), scope?.ids)
+          : [];
+      // Where the loop would end with no work left for it: a follow-on turn for the late tickets, else false and the loop ends as it would.
+      const followOn = async (tracker: ReturnType<typeof makeTracker>, turn: number, end: ReturnType<typeof endOf>): Promise<boolean> => {
+        if (end === undefined || end === "stop") return false;
+        const late = (await lateNow(tracker)).map((t) => t.id);
+        if (!followOnTurn({ level, turn, end, late, followedOn })) return false;
+        followedOn = true;
+        followOnIds = late;
+        // New work, not a re-run: the drain's two-turns-running comparisons start again.
+        drain.last = undefined;
+        drain.unblocked = [];
+        console.log(`Autonomy level ${level}: running a follow-on turn (turn ${turn + 1} of ${level === "drain" ? `at most ${DRAIN_CAP}` : "the run"}) for ${late.map(tracker.ref).join(", ")}, queued after this run started.`);
+        delete process.env.ISSUES;
+        process.env.TICKETS = late.join(",");
+        return true;
+      };
       for (let turn = 1; ; turn++) {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
         if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
@@ -363,6 +387,8 @@ try {
           break;
         }
         ranTurn = true;
+        for (const id of followOnIds) drain.inRun.add(id);
+        followOnIds = [];
         if (level === 0) break;
         const facts = await gather(project);
         lastFacts = facts;
@@ -377,6 +403,7 @@ try {
           break;
         }
         if (after.verdict === "stop") {
+          if (await followOn(tracker, turn, endOf(after))) continue;
           drain.cause = "no ticket is left to run again";
           break;
         }
@@ -394,6 +421,8 @@ try {
           drain.last = now;
           drain.unblocked = left.unblocked;
           if (why) {
+            // The no-progress stop is about re-running the same tickets; a late ticket is new work, so it still gets its turn.
+            if (await followOn(tracker, turn, endOfDrainStop(why))) continue;
             drain.cause = why;
             // The turn's summary said the loop runs again; it does not, so the steps are the operator's after all.
             console.log(await operatorSteps(project));
@@ -404,6 +433,7 @@ try {
         const manual = `\`sandcastle run ${ids.join(" ")}\``;
         if (verdict === "cap") {
           console.log(capLine(level as Exclude<typeof level, 0 | 1>, ids, list));
+          if (await followOn(tracker, turn, endOf(after))) continue;
           drain.cause = `the cap of ${DRAIN_CAP} turns was reached`;
           break;
         }
@@ -427,10 +457,9 @@ try {
         delete process.env.ISSUES;
         process.env.TICKETS = ids.join(",");
       }
-      if (level === "drain" && drain.turns > 0) {
-        const cause = drain.cause ?? "the run ended";
-        console.log(drainLine(drain.turns, drain.landed, cause));
-        // One more queue read: a ticket queued while the drain ran is not in any turn's list, so it waits for the next run.
+      if ((level === 2 || level === 3 || level === "drain") && drain.turns > 0) {
+        if (level === "drain") console.log(drainLine(drain.turns, drain.landed, drain.cause ?? "the run ended"));
+        // One more queue read: a ticket queued while the run was live that no turn took (a stop, the cap or the one follow-on turn's limit) waits for the next run.
         const tracker = makeTracker(project);
         const known = queuedAtStart && new Set([...queuedAtStart, ...drain.inRun]);
         if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()), scope?.ids)) console.log(line);

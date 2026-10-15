@@ -76,8 +76,9 @@ This continues SKILL.md: run its "Before every action" first.
      blocker lands with its work done (a close the tracker refuses holds nothing back). With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
-     before left conflicted, released, partly done (still queued) or green but not landed; a red ticket is not run again, and a ticket queued after
-     the run started waits for the next `sandcastle run`. A drain stops when no ticket is left to
+     before left conflicted, released, partly done (still queued) or green but not landed; a red ticket is not run again. A ticket queued after
+     the run started (unblocked) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
+     (`drain` may repeat it; `2` and `3` take one per run); one a stop leaves unrun waits for the next `sandcastle run`. A drain stops when no ticket is left to
      run again or a stop holds: no progress, the same ticket conflicting, left partly done or failing to land in two
      turns running, a red merged base, a usage limit or a stopped run, 20 turns at most.
    - **How long.** Once the project has run before, the run prints a rough estimate at its start
@@ -190,8 +191,9 @@ This continues SKILL.md: run its "Before every action" first.
    only its latest ending). A turn the loop goes on from says so in one line instead of its steps.
    The earlier turns' other lines (what they merged, the `Autonomy level` lines) are in the run's
    output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
-   `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line for each ticket
-   queued after the run started: quote the cause and name those tickets in the hand-back.
+   `Drain: <N> turns, <landed> landed, stopped because <cause>`; at `2`, `3` and `drain`, a line for each ticket
+   queued after the run started that no turn took (a follow-on turn takes the unblocked ones when the run would
+   end, once at `2` and `3`): quote the cause and name those tickets in the hand-back.
 
    **A shorter hand-back, when the user asked for one.** If the user has asked for a short or plain
    hand-back - in this conversation, or as a standing preference in their own memory or

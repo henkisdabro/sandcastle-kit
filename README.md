@@ -895,6 +895,13 @@ after a turn it re-runs only the tickets that ended in a merge conflict, whose b
 landed, or that merged partly done and are still queued - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary, and the last one also carries what the earlier turns left for a person (a held branch, a partly done remainder, a check by hand, a follow-up to triage), each line ending `(turn N)`, so `sandcastle report` and `sandcastle wait` never say "Needs you: none" while work waits on you.
 A dry run, a stopped run, a run that hit a usage limit and a merged base that is red never re-run.
 
+At `2`, `3` and `drain`, a ticket queued while the run was live (and not held behind an open blocker) joins it as
+a **follow-on turn**: where the run would end because no ticket is left to run again, or because `2` or `3` reached its own
+turn cap, it runs those tickets as one more turn, under the same stops and the 20-turn cap. At `2` and `3` that is at most one
+follow-on turn per run, even past the level's own cap; at `drain` the follow-on turns may repeat, so a ticket queued during
+one can earn the next. A ticket queued after the follow-on turn at `2` or `3` waits for the next `sandcastle run`, and the closing lines
+name it. Levels `0` and `1` take no follow-on turn.
+
 `autonomy: "drain"` (or `AUTONOMY_LEVEL=drain`) keeps taking turns until no ticket is left to run
 again, for a queue that needs more turns than `3` gives - a ticket that conflicts across turns, and
 the tickets waiting on it. A `Blocked by` chain whose links are all queued needs no extra turn: each
@@ -906,9 +913,11 @@ merged base**, and **a usage limit or a stopped run**. A hard cap of 20 turns is
 the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`.
 
 A drain takes only what its own turns lead to: every turn after the first takes exactly the previous
-turn's re-runnable tickets, never the whole queue. So a ticket queued after the run started waits for
+turn's re-runnable tickets, never the whole queue. A ticket queued after the run started is taken as a
+follow-on turn when the drain would otherwise end (also after the no-progress stop, which is about re-running the same
+tickets, and a late ticket is new work; never after another stop). One a stop or the 20-turn cap leaves unrun waits for
 the next `sandcastle run`, and the closing lines name each one
-(`#151 was queued after this run started: \`sandcastle run\` takes it`).
+(`#151 was queued after this run started: \`sandcastle run\` takes it`); at `2` and `3` they print too.
 
 A run that names its tickets (`sandcastle run 12 15`) keeps to them in every turn: the start lines, the run
 record and the summary hold no queued ticket you left out, and a named ticket that waits on an
