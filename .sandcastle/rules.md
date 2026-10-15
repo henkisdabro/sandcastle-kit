@@ -20,6 +20,9 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   the suite otherwise), limits each test to two minutes and exits when the file is done, so a red
   test that leaves a poll or a pool wait alive cannot hang the pass. A test that takes pool slots
   goes through `test/pool-sim.ts`, whose probe it needs.
+- **Final check: `pnpm exec tsc --noEmit` and `pnpm test:related <the files you changed>`.** It
+  runs every test that names a changed path or anything it exports, including the tests that pin
+  source text or wording, which a red ticket gate would otherwise find after you finish.
 - **`burndown()` needs Docker, so no test drives it.** Put logic you add there in an exported helper
   a test calls, and hold the call site with a source-match test (as `test/ticket-first-start.test.ts`
   does). Before you edit a line of `burndown()` or `timed`, `grep -rn` `test/` for a phrase of it:
