@@ -37,7 +37,7 @@ import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, che
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
+import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
@@ -3198,6 +3198,7 @@ export const burndown = async (
     let gateTimes: Record<string, number> | undefined;
     let peakMib: number | undefined;
     let pressure: ReturnType<typeof pressureOf>;
+    let cpu: ReturnType<typeof cpuOf>;
     let red: string[] | undefined;
     let times: ReturnType<typeof stepTimes> | undefined;
     let ended: unknown;
@@ -3212,6 +3213,7 @@ export const burndown = async (
       gateTimes = gateMs(result);
       peakMib = peakOf(result);
       pressure = pressureOf(result);
+      cpu = cpuOf(result);
       red = gateRed(result);
       // `ok` is pass/fail: a gate run with a red gate is not ok, though it ran.
       ok = !red?.length;
@@ -3243,6 +3245,7 @@ export const burndown = async (
         ...(peakContext ? { peakContext } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
         ...(peakMib ? { peakMib } : {}),
+        ...cpuFields(cpu),
         ...pressureFields(pressure),
         ...(red?.length ? { red } : {}),
       };

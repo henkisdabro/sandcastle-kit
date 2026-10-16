@@ -1823,6 +1823,31 @@ decision on #382: per sandbox, warn only).
 An `avg10` reaches back 10 s, so a phase's first read can carry the end of the one before.
 `test/memory-pressure.test.ts` holds it.
 
+**CPU pressure** is read in the same `sampling` loop (the first read as a pass starts, then every
+10 s, with the same `ended` and `late` rules), as two figures. The judged one is machine-wide and read
+by the host process, never through a sandbox: `readMachineCpu(host?)` returns `{ avg10, avg60,
+estimate? }` from Linux's (and WSL2's) own `/proc/pressure/cpu` `some` line (`parsePressure`, the pure
+PSI parser `readPressure`'s sibling `readCpuPressure` shares), from the 1-minute load average on macOS
+(`max(0, (load1 - cores) / load1) x 100`, `estimate: true`, and it is labelled as an estimate wherever it is
+shown), and nothing elsewhere or on an unreadable file. `host` (`platform`, `readFile`, `loadavg`, `cpus`)
+is injectable, and `sampling`'s `readMachine` and `GateProgress.machineCpu` carry an injected reader down from
+a test or from the load pause that reads between passes. Called with no `host`, it gives no reading when
+`SANDCASTLE_TEST_MACHINE_CPU=none`, which `test/hermetic-env.ts` sets for every test file: no test's pass,
+judgement or hold depends on the machine's real load, and the seam never applies to an injected reader.
+The other figure is the sandbox cgroup's own `cpu.pressure` (`readCpuPressure`), recorded and never judged:
+the kit's `--cpus` limit (`sandboxCpus`) raises it, so it cannot tell outside load from the kit's own.
+For a gate pass `sampling` keeps the highest and the mean (one decimal, failed reads not counted) of each
+beside the memory pressure: `GateRun`'s `cpuSome`, `cpuSomeMean`, `cpuMachine`, `cpuMachineMean` and
+`cpuEstimate`, each absent where unread or 0. `cpuOf` and `cpuFields` read them off a result and spread them
+onto a line, as `pressureOf` and `pressureFields` do, in every place that copies memory pressure
+(`timedGate`, `timingLines`, `requireGreenBase`, `timed()`); `recordPeak` writes the highest `cpuSome`,
+`cpuMachine` and `cpuEstimate` on the `peaks.jsonl` line (`readPeaks` accepts them; `size` shows none yet).
+`cpuHigh(result)` is the judgement, the recorded (rounded) `cpuMachineMean` at or above `CPU_PRESSURE_HIGH`
+(60%), and `cpuFromTimings` (`src/report.ts`) takes the run's busiest pass for the closing summary's
+`CPU pressure: high` line. Three limits: the macOS estimate reaches 60 only at `load1` of 2.5 times the
+core count or more; WSL2's PSI sees the Linux VM, not load on the Windows side; and the machine figure
+includes the kit's own gates and agents, not only other work. `test/cpu-pressure.test.ts` holds it.
+
 **The cap** (`sandcastle cap`, `parseCapArgs`, `setCap` and `standing` in `src/pool.ts`; the command
 in `src/cli.ts`, which handles it before the repository check so `--project <name>` works from any
 directory): a person's limit on one live run's share, the optional `cap` field of that run's
