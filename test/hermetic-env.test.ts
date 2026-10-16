@@ -52,6 +52,10 @@ test("a test that runs `docker` gets one that lists nothing, never the machine's
   assert.equal(process.env.PATH!.split(delimiter)[1], dockerDirs[0]);
 });
 
+test("a test sees the machine's CPU pressure switched off, whatever the shell had", () => {
+  assert.equal(process.env.SANDCASTLE_TEST_MACHINE_CPU, "none");
+});
+
 test("a docker a test puts ahead of the no-op one is the one that runs", () => {
   const own = mkdtempSync(join(dir, "own-docker-"));
   writeFileSync(join(own, "docker"), "#!/bin/sh\necho own\n", { mode: 0o755 });
@@ -85,7 +89,7 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
     TMPDIR: link,
     PATH: [hostBin, "/shim", process.env.PATH].join(delimiter),
     HERDR_ENV: "1", HERDR_PANE_ID: "p", TMUX: "x", TMUX_PANE: "%1", AUTONOMY_LEVEL: "3", CONCURRENCY: "9", USAGE_CHECK: "1",
-    SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", GH_TOKEN: "t", NO_COLOR: "1", XDG_CONFIG_HOME: "/xdg",
+    SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", SANDCASTLE_TEST_MACHINE_CPU: "real", GH_TOKEN: "t", NO_COLOR: "1", XDG_CONFIG_HOME: "/xdg",
     GIT_COMMITTER_NAME: "n", GIT_COMMITTER_EMAIL: "n@example.com", GIT_AUTHOR_NAME: "n", GIT_AUTHOR_EMAIL: "n@example.com", EMAIL: "n@example.com",
     GIT_CONFIG_GLOBAL: join(dir, "host-gitconfig"), GIT_CONFIG_NOSYSTEM: "0",
     GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "commit.gpgsign", GIT_CONFIG_VALUE_0: "false",
@@ -103,6 +107,7 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   assert.ok(seen.path.split(delimiter)[1]!.startsWith(realpathSync(real)), "the no-op docker is in the test's own TMPDIR");
   for (const gone of ["HERDR_ENV", "HERDR_PANE_ID", "TMUX", "TMUX_PANE", "AUTONOMY_LEVEL", "CONCURRENCY", "USAGE_CHECK", "SANDCASTLE_DETACHED", "GH_TOKEN", "NO_COLOR"]) assert.equal(seen.env[gone], undefined, gone);
   assert.equal(seen.env.SANDCASTLE_TEST_TEMP, "kept");
+  assert.equal(seen.env.SANDCASTLE_TEST_MACHINE_CPU, "none", "the machine's CPU pressure is off whatever the shell set");
   assert.equal(seen.env.XDG_CONFIG_HOME, "/xdg");
   for (const gone of ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "EMAIL"]) assert.equal(seen.env[gone], undefined, gone);
   // The committer's stay (full-check's agent leg sets them); alone they let no commit through.

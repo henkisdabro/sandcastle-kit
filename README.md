@@ -1815,6 +1815,20 @@ of them at once). The highest goes onto each gate pass's `timings.jsonl` line (`
 records nothing. `size` shows the highest of the runs it rests on and, at 5% `full` or more, says the VM
 was short of memory at that pool size; a run's closing summary has a `Memory pressure` line under the same
 condition. It is a warning only: `size` does not yet lower its recommendation for it.
+CPU pressure is read in the same loop, as two figures. The one a run judges is the **machine-wide** CPU
+pressure (PSI `some` `avg10`), read by the kit itself, not through a sandbox: on Linux and WSL2 the host's own
+`/proc/pressure/cpu` (on WSL2 Docker's engine shares the VM's kernel, so it is the file a container sees),
+and on macOS, which has no PSI, an estimate from the 1-minute load average,
+`max(0, (load1 - cores) / load1) x 100`, marked as an estimate wherever it is shown; anywhere else, or
+where the file is unreadable, nothing is read. Each gate pass's `timings.jsonl` line carries its highest and
+its mean (`cpuMachine`, `cpuMachineMean`, and `cpuEstimate` for the macOS figure), and the pass's mean at
+60% or more counts as a busy machine. A run's closing summary has a `CPU pressure: high` line when its
+busiest pass reached that: it gives the mean, names the pass, and says to run `sandcastle gates` when the
+machine is quiet or to lower `maxSandboxes`. The sandbox cgroup's own `cpu.pressure` is recorded too
+(`cpuSome`, `cpuSomeMean`, and on the `peaks.jsonl` line) and never judged: the kit's own `--cpus` limit
+raises it, so it cannot tell other work on the machine from the kit's own. Three things to know: the macOS
+estimate reaches 60% only at a load of 2.5 times the core count or more; WSL2's PSI sees the Linux VM, not
+load on the Windows side; and the machine figure includes the kit's own gates and agents, not only other work.
 `size` takes the project whose peak figure (priced as below) is highest over its last 5 measured runs,
 of the projects measured in the last 30 days, and prices each figure at the 90th percentile of that project's samples
 over those runs (every sandbox's line is one sample; with fewer than 5 samples the highest is used),
