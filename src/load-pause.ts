@@ -102,7 +102,7 @@ export const createLoadPause = (ports: LoadPausePorts): LoadPause => {
   const giveUp = () => {
     if (gave) return;
     gave = true;
-    say(`Load pause: held gate passes ${minutes(giveUpMs)} in all - giving up; later gate passes run under load`);
+    say(`Load pause: held gate passes ${Math.round(giveUpMs / 60_000)} min in all - giving up; later gate passes run under load`);
     emit();
     endGiveUp();
   };

@@ -182,7 +182,7 @@ test("at 30 minutes held in all, every hold releases at once and the run holds n
   assert.equal(w.now() - start, 30 * MIN, "released at the 30 minutes exactly");
   assert.equal(pause.gaveUp(), true);
   assert.equal(pause.heldMs(), 30 * MIN);
-  assert.deepEqual(said.filter((l) => /giving up/.test(l)), ["Load pause: held gate passes 30 minutes in all - giving up; later gate passes run under load"]);
+  assert.deepEqual(said.filter((l) => /giving up/.test(l)), ["Load pause: held gate passes 30 min in all - giving up; later gate passes run under load"]);
   assert.deepEqual(changes.at(-1), { heldMs: 30 * MIN, gaveUp: true });
   // Later holds return at once, at 90% too.
   const at = w.now();
