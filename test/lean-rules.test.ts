@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,7 +14,7 @@ import { quietly } from "./quiet.ts";
 
 // The kit's config dir is read at import; a test must not touch the real one.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { alwaysLoadedRules, plan, report } = await import("../src/lean.ts");
+const { alwaysLoadedRules, alwaysLoadedSegment, plan, report } = await import("../src/lean.ts");
 
 const repo = (rules: Record<string, string>, untracked: Record<string, string> = {}) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-lean-rules-"));
@@ -54,6 +54,8 @@ test("lean lists each always-loaded rule file with its tokens under a total line
 
 test("lean does not list a rule scoped with paths:, an untracked rule or a file that is not markdown", async () => {
   const out = await printed(repo(fixtureRules, { ".claude/rules/local.md": "untracked" }));
+  // The listing is there, so the absences below are the filter's and not an empty report's.
+  assert.match(out, /^ {4}\.claude\/rules\/always\.md +~100$/m);
   assert.doesNotMatch(out, /scoped\.md/);
   assert.doesNotMatch(out, /local\.md/);
   assert.doesNotMatch(out, /notes\.txt/);
@@ -70,6 +72,16 @@ test("a rule's tokens are its characters over four, rounded up", () => {
   const project = repo({ ".claude/rules/a.md": "a".repeat(401), ".claude/rules/b.md": `---\npaths: [x]\n---\nb`, ".claude/rules/c.md": "---\nnever closed\n" + "c".repeat(10) });
   assert.deepEqual(alwaysLoadedRules(project.root), [
     { path: ".claude/rules/a.md", tokens: 101 },
-    { path: ".claude/rules/c.md", tokens: Math.ceil(("---\nnever closed\n".length + 10) / 4) },
+    // A frontmatter never closed counts as none: 17 + 10 = 27 characters, 7 tokens.
+    { path: ".claude/rules/c.md", tokens: 7 },
   ]);
+});
+
+test("the run's Lean: line gives the always-loaded rules' count and total tokens, and nothing when there are none", () => {
+  const project = repo(fixtureRules);
+  assert.equal(alwaysLoadedSegment(alwaysLoadedRules(project.root)), "; 2 always-loaded rule file(s), ~201 tokens");
+  assert.equal(alwaysLoadedSegment([]), "");
+  // burndown() needs Docker, so its Lean: line is held by its source.
+  const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
+  assert.match(source, /"; Claude Code's bundled skills off" \+\n\s*alwaysLoadedSegment\(alwaysLoadedRules\(project\.root\)\) \+\n\s*`; \$\{lean\.hooks\.length\} hook\(s\) kept/);
 });

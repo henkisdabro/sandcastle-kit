@@ -257,6 +257,10 @@ export const alwaysLoadedRules = (root: string): { path: string; tokens: number 
       return [{ path, tokens: Math.ceil(text.length / 4) }];
     });
 
+// The run's `Lean:` line's segment for the always-loaded rules; empty when there are none.
+export const alwaysLoadedSegment = (rules: { tokens: number }[]) =>
+  rules.length ? `; ${rules.length} always-loaded rule file(s), ~${rules.reduce((n, r) => n + r.tokens, 0)} tokens` : "";
+
 // Tracked files, outside what lean hides, that name a hidden path. Hiding a
 // skill a test reads (a guard over agent docs, say) turns the test gate red
 // on every branch - and on the base branch - for a reason no agent can fix.

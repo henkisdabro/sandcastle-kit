@@ -34,7 +34,7 @@ import { localConfigLine, type Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
-import { alwaysLoadedRules, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
+import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
@@ -3416,13 +3416,12 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const { plan: lean, file: planFile } = writePlan(project);
   const kept = lean.items.filter((i) => i.kept && i.kind !== "hook").map((i) => `${i.kind}:${i.id}`);
   const dropped = lean.items.filter((i) => i.kind === "hook" && !i.kept).length;
-  const alwaysRules = alwaysLoadedRules(project.root);
   console.log(
     `Lean: hiding ${lean.items.filter((i) => !i.kept && i.kind !== "hook").length} item(s) the repo would load` +
       (kept.length ? `; keeping ${kept.join(", ")}` : "") +
       // The count and the list are the repo's items; Claude Code's own bundled skills are off in every sandbox (container/managed-settings.json).
       "; Claude Code's bundled skills off" +
-      (alwaysRules.length ? `; ${alwaysRules.length} always-loaded rule file(s), ~${alwaysRules.reduce((n, r) => n + r.tokens, 0)} tokens` : "") +
+      alwaysLoadedSegment(alwaysLoadedRules(project.root)) +
       `; ${lean.hooks.length} hook(s) kept${dropped ? `, ${dropped} dropped by lean.dropHooks` : ""} (\`sandcastle lean\` for detail).`,
   );
   for (const line of unmatchedLines(unmatched(project, lean))) console.log(`Lean: ${line}.`);
