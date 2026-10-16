@@ -70,6 +70,22 @@ An id that names only a file (`FAIL path`, a node:test file that failed to load)
 which test failed, so with one the red is the base's only when the gate's `failureKey` is the same
 on the branch and the base
 
+What a Claude pass said of its work is read once, in `pass`, by `saidOf(text, facts?)`: the pass's
+`unmet`, `ungated`, changelog read and follow-ups, which `pass` hands back as the result's `said` and every
+reader (the review loop, the narrow reviews, the implementer, `noteChangelog`, `gapOf`'s guard) takes from
+there. With no report (`REPORT_SCHEMA` off, or none came valid) it reads the whole text for the own-line tags
+as it always did. With the report (`REPORT_SCHEMA=1`, `src/agents.ts`) the report stands for the pass's
+last iteration - `unmet` and `ungated` are its alone - and the iterations before it, the text with the
+last iteration's output taken off its end, are still read for their `<changelog>` and `<followup>` tags, so
+a follow-up an earlier iteration named is still filed. The tag readers and the report's items share their
+rules (`oneLine`, `judgeChangelog`, `readFollowUps`, `unmetNote`). A missing report is a value, never a
+throw (a throw would start a second editing review through `reviewWithFallback`). `reportTiming` turns the
+capture's facts into the `report` field of the step's `timings.jsonl` line (`came`, `missing`, `tries`,
+`turns`, and `gapMs`, `silenceMs` and `cutOff` once the completion signal was seen); `pass` leaves it in
+`PipelineContext.reportTimings` and `timed` takes it, the last pass of a step winning
+(`test/report-said.test.ts`, `test/report-schema.test.ts`). The `<report>`/`<blocked>` hand-back, the
+resolver's `<stray>` lines and the repair pass's `<verdict>` stay tags.
+
 The pipeline takes everything outside itself through one `PipelineContext`, as a landing takes its
 `LandContext`: its sandbox (`open`, whose `run` is every agent pass and `exec` every git command in
 it), its gate runs (`gate`, and `regate`: the gates from a named one on), the step timer (`timed`),
@@ -2456,6 +2472,13 @@ and a record with only the boolean reads as `share` (`test/status-landing-wait.t
 An older kit's record has neither, and the view then draws the cell as before.
 The status view's settings lane reads only these fields (its record type is `RunRecord`, which `tsc`
 checks), draws nothing from a record without the group, and never fills a field the record lacks.
+`local` (the dotted keys `.sandcastle/config.local.json` set, as `loadProject` keeps them in
+`localKeys`) is the group's one list: `resolveSettings` drops a key whose value the environment set
+instead (`AUTONOMY_LEVEL`, `CONCURRENCY`, `USAGE_PAUSE`, and for the model keys `IMPL_MODEL`,
+`IMPL_EFFORT`, `REVIEW_MODEL`, `REVIEW_EFFORT`), `settingsGroup` writes it only when it is not empty,
+and the lane follows `autonomy`, `concurrency` (after any `(asked N)`) and `usage-pause` with a grey
+`local` when their key is in it; a `local` that is not a list of strings marks nothing
+(`test/status-settings-local.test.ts`).
 Idle, `sandcastle status` resolves the next run's settings with the same resolver and passes the
 group as `SANDCASTLE_SETTINGS` (`{}` when they cannot be resolved), with the whole lane prefixed
 `next run:` (an ended run's report holds the settings it recorded, which this lane is not); a bare
@@ -2558,6 +2581,16 @@ the agent has just written) or `sh -c` gets past a command-string match, and it 
 them - that would be a second parser for any shell, and the host's check of `.git` is what protects
 the repo.
 Needs bash and `jq` in the image.
+
+`report.schema.json` is the shape of the report a Claude pass returns with `REPORT_SCHEMA=1`
+(`--json-schema`, `claude()` in `src/agents.ts`, which reads the file on the host and puts it, compact, on
+the command; the mount keeps a copy where a pass can read it, and no image rebuild follows an edit). Codex
+strict mode is the dialect: every object has `additionalProperties: false` and `required` naming every
+property, with the keywords `type`, `properties`, `required`, `additionalProperties`, `items`, `enum` and
+`description` only (`test/report-schema.test.ts` checks it). It covers the tags the kit reads from prose today -
+the signal, `unmet`, `changelog`, `followups`, `ungated` - and nothing else. Claude Code returns the
+validated object as `structured_output` on the stream's `result` line, which the library's parser drops, so
+`reportCapture` keeps it with the timing of the signal and the result line.
 
 The same file carries `permissions.deny` for `Monitor`, `ScheduleWakeup`, `CronCreate`,
 `CronDelete`, `CronList` and `RemoteTrigger` (`test/managed-settings-deny.test.ts`), and for the

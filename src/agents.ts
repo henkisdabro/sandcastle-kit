@@ -23,9 +23,11 @@
 // A model newer than the image's Claude Code is refused at the first call -
 // the image follows Claude Code's `latest` release unless the project pins `claudeCode` (src/versions.ts).
 
+import { readFileSync } from "node:fs";
 import { claudeCode, codex } from "@ai-hero/sandcastle";
 import type { ProjectConfig } from "./config.ts";
 import { cutAtWord, OperatorError, promptExpansionLine } from "./errors.ts";
+import { shq } from "./generated.ts";
 import { CODEX_RATE_LIMITS_READOUT } from "./usage.ts";
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -55,6 +57,12 @@ const CROSS = crossReviewSetting(process.env);
 export const CROSS_REVIEW = CROSS.on;
 export const CROSS_REVIEW_MODEL = process.env.CROSS_REVIEW_MODEL ?? "gpt-6-astra";
 const CROSS_REVIEW_EFFORT = CROSS.on ? CROSS.effort : "high";
+
+/**
+ * REPORT_SCHEMA=1: Claude passes also return a schema-validated report (`container/report.schema.json`), which a pass's
+ * readers prefer to the own-line tags. Off, a run is what it was before: the same command, the same readers, no timings field.
+ */
+export const REPORT_SCHEMA = process.env.REPORT_SCHEMA === "1";
 
 export let IMPL_MODEL: string;
 export let REVIEW_MODEL: string;
@@ -122,6 +130,184 @@ export const withTools = (command: string, tools: readonly string[]): string => 
   return `${command.slice(0, -tail.length)} --tools '${tools.join(",")}'${tail}`;
 };
 
+// The schema as the command carries it: compact, read on the host when the first command is built (the file is also
+// mounted at /etc/claude-code, but the flag takes the schema itself).
+let REPORT_SCHEMA_JSON: string | undefined;
+const reportSchemaJson = () =>
+  (REPORT_SCHEMA_JSON ??= JSON.stringify(JSON.parse(readFileSync(new URL("../container/report.schema.json", import.meta.url), "utf8"))));
+
+/**
+ * Sandcastle's claude command with `--json-schema '<schema>'` before its closing ` -p -`, as `withTools` adds
+ * `--tools`, and with the same refusal of a command of another shape: a flag put in the wrong place would run
+ * every pass without the report and record "no result" for it.
+ */
+export const withSchema = (command: string, schema: string): string => {
+  const tail = " -p -";
+  if (!command.startsWith("claude ") || !command.endsWith(tail)) {
+    throw new Error(
+      `Sandcastle's claude command no longer has the shape the --json-schema flag needs (starts with "claude ", ends with "${tail}"): update withSchema in src/agents.ts. Command: ${command}`,
+    );
+  }
+  return `${command.slice(0, -tail.length)} --json-schema ${shq(schema)}${tail}`;
+};
+
+/** The completion signal the library looks for by default, and the schema's only value for `signal`. */
+export const COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
+
+/** The report as the schema shapes it. */
+export type Report = {
+  signal: typeof COMPLETION_SIGNAL;
+  unmet: { assessed: boolean; items: { who: "agent" | "person"; text: string }[] };
+  changelog: string[];
+  followups: string[];
+  ungated: string[];
+};
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const exactKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).length === keys.length && keys.every((k) => k in v);
+const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
+/**
+ * A `structured_output` as a report, or why it is none. Claude Code validates against the schema it was given, but
+ * strict mode cannot say two things the kit needs (`signal` only the completion signal is in the schema; "assessed: false
+ * means no items" is not), and a Claude Code that skipped validation must not be trusted for the shape.
+ */
+export const reportFrom = (value: unknown): { report: Report } | { missing: string } => {
+  const invalid = (what: string) => ({ missing: `invalid: ${what}` });
+  if (!isRecord(value) || !exactKeys(value, ["signal", "unmet", "changelog", "followups", "ungated"])) return invalid("not an object with the report's five fields");
+  if (value.signal !== COMPLETION_SIGNAL) return invalid("signal is not the completion signal");
+  const { unmet } = value;
+  if (!isRecord(unmet) || !exactKeys(unmet, ["assessed", "items"]) || typeof unmet.assessed !== "boolean" || !Array.isArray(unmet.items)) return invalid("unmet is not {assessed, items}");
+  const items = unmet.items.every((i) => isRecord(i) && exactKeys(i, ["who", "text"]) && (i.who === "agent" || i.who === "person") && typeof i.text === "string");
+  if (!items) return invalid("an unmet item is not {who, text}");
+  if (!unmet.assessed && unmet.items.length) return invalid("unmet is not assessed but has items");
+  if (!strings(value.changelog) || !strings(value.followups) || !strings(value.ungated)) return invalid("changelog, followups and ungated are not lists of strings");
+  return { report: value as Report };
+};
+
+/** What the capture knows of a pass's last iteration (`ReportCapture.read`). */
+export type ReportFacts = {
+  /** The report, when a valid one came. */
+  report?: Report;
+  /** Why none did: `no result line`, `no structured_output`, `retries exhausted` or `invalid: <what>`. */
+  missing?: string;
+  /** The iteration's output by the library's rule: the `result` text, else the `text` events. */
+  output: string;
+  /** The `StructuredOutput` tool calls seen. */
+  tries: number;
+  /** The `result` line's `num_turns`. */
+  turns?: number;
+  /** From the moment the completion signal armed the library's grace window to the `result` line (or, cut off, the pass's end). Absent when the signal never came. */
+  gapMs?: number;
+  /** The longest stretch with no line from that moment on, to the `result` line or the pass's end: what a completion timeout must exceed. */
+  silenceMs?: number;
+  /** No `result` line followed the signal. */
+  cutOff?: true;
+};
+
+/** The events of one stream line as the library's parser gives them; the capture reads only these two. */
+type StreamEvent = { type: string; text?: string; result?: string };
+
+/**
+ * Keeps, from one pass's stream, the report and the timing the schema's rollout needs measured (#820). `reset()` at each
+ * command (a pass that runs again starts clean), `line()` for each stream line with the events the library parsed from
+ * it, `finish()` when the pass returns or throws, `read()` for the facts. The clock is a parameter for a test.
+ */
+export const reportCapture = (now: () => number = Date.now) => {
+  type State = {
+    texts: string;
+    resultText?: string;
+    accumulated: string;
+    structured?: { value: unknown };
+    subtype?: string;
+    sawResult: boolean;
+    tries: number;
+    turns?: number;
+    signalAt?: number;
+    resultAt?: number;
+    lastLineAt?: number;
+    silenceMs: number;
+    endedAt?: number;
+  };
+  const fresh = (): State => ({ texts: "", accumulated: "", sawResult: false, tries: 0, silenceMs: 0 });
+  let s = fresh();
+  return {
+    reset() {
+      s = fresh();
+    },
+    line(raw: string, events: readonly StreamEvent[]) {
+      const at = now();
+      for (const e of events) {
+        if (e.type === "text" && typeof e.text === "string") {
+          s.texts += e.text;
+          s.accumulated += e.text;
+        } else if (e.type === "result" && typeof e.result === "string") {
+          s.resultText = e.result;
+          s.accumulated += e.result;
+        }
+      }
+      let isResult = false;
+      if (raw.includes('"type":"result"') || raw.includes("StructuredOutput")) {
+        try {
+          const parsed = JSON.parse(raw) as { type?: string; subtype?: string; structured_output?: unknown; num_turns?: unknown; message?: { content?: unknown } };
+          if (parsed.type === "result") {
+            isResult = true;
+            s.sawResult = true;
+            s.subtype = parsed.subtype;
+            s.structured = parsed.structured_output === undefined || parsed.structured_output === null ? undefined : { value: parsed.structured_output };
+            if (typeof parsed.num_turns === "number") s.turns = parsed.num_turns;
+          } else if (parsed.type === "assistant" && Array.isArray(parsed.message?.content)) {
+            for (const block of parsed.message.content as { type?: string; name?: string }[]) if (block?.type === "tool_use" && block.name === "StructuredOutput") s.tries++;
+          }
+        } catch {
+          // A line that is not JSON is no result.
+        }
+      }
+      // The library arms its grace window on the first line after which the text and result events, accumulated, hold the signal.
+      if (s.signalAt === undefined) {
+        if (s.accumulated.includes(COMPLETION_SIGNAL)) {
+          s.signalAt = at;
+          s.lastLineAt = at;
+        }
+      } else if (s.resultAt === undefined) {
+        s.silenceMs = Math.max(s.silenceMs, at - (s.lastLineAt ?? at));
+        s.lastLineAt = at;
+      }
+      if (isResult && s.resultAt === undefined && s.signalAt !== undefined) s.resultAt = at;
+    },
+    finish(at: number = now()) {
+      s.endedAt ??= at;
+    },
+    read(): ReportFacts {
+      const output = s.resultText ? s.resultText : s.texts;
+      let found: { report: Report } | { missing: string };
+      if (!s.sawResult) found = { missing: "no result line" };
+      else if (s.subtype === "error_max_structured_output_retries") found = { missing: "retries exhausted" };
+      else if (!s.structured) found = { missing: "no structured_output" };
+      else found = reportFrom(s.structured.value);
+      const facts: ReportFacts = { ...found, output, tries: s.tries, ...(s.turns !== undefined ? { turns: s.turns } : {}) };
+      if (s.signalAt !== undefined) {
+        if (s.resultAt !== undefined) {
+          facts.gapMs = s.resultAt - s.signalAt;
+          facts.silenceMs = s.silenceMs;
+        } else {
+          const end = s.endedAt ?? now();
+          facts.gapMs = end - s.signalAt;
+          facts.silenceMs = Math.max(s.silenceMs, end - (s.lastLineAt ?? s.signalAt));
+          facts.cutOff = true;
+        }
+      }
+      return facts;
+    },
+  };
+};
+export type ReportCapture = ReturnType<typeof reportCapture>;
+
+// One capture per Claude agent made with REPORT_SCHEMA=1, found from the agent object a pass was given.
+const captures = new WeakMap<object, ReportCapture>();
+/** The capture of the agent a pass was given: none for a Codex agent, or with REPORT_SCHEMA off. */
+export const passReport = (agent: object): ReportCapture | undefined => captures.get(agent);
+
 // Session capture is off: Sandcastle would otherwise copy every sandbox
 // transcript into the host's ~/.claude/projects/, where it shows up in
 // `claude --resume`. The .sandcastle/logs stream is the record.
@@ -140,18 +326,25 @@ const claude = (model: string, effort: Effort) => {
       ...(AUTO_COMPACT_WINDOW === undefined ? {} : { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(AUTO_COMPACT_WINDOW) }),
     },
   });
-  return {
+  const capture = REPORT_SCHEMA ? reportCapture() : undefined;
+  const agent = {
     ...provider,
     buildPrintCommand(options: Parameters<typeof provider.buildPrintCommand>[0]) {
       const printed = provider.buildPrintCommand(options);
-      return { ...printed, command: withTools(printed.command, TOOLS) };
+      // Each command is one iteration: the capture describes the last one only.
+      capture?.reset();
+      const command = withTools(printed.command, TOOLS);
+      return { ...printed, command: capture ? withSchema(command, reportSchemaJson()) : command };
     },
     parseStreamLine(line: string) {
       const events = provider.parseStreamLine(line);
+      capture?.line(line, events);
       const usage = line.includes('"type":"result"') ? resultUsage(line) : undefined;
       return usage ? [...events, { type: "usage" as const, usage }] : events;
     },
   };
+  if (capture) captures.set(agent, capture);
+  return agent;
 };
 
 type Usage = { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; output_tokens?: number };

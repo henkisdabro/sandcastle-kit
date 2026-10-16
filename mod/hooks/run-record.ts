@@ -248,6 +248,8 @@ export type RunSettings = {
   keepWarm?: boolean;
   /** True when the sandboxes spend `ANTHROPIC_API_KEY`, billing API credits; absent otherwise. */
   apiKey?: boolean;
+  /** The dotted keys (`autonomy`, `implement.model`) whose value came from `.sandcastle/config.local.json`, not the environment or the committed config; the view marks the ones it draws. Absent when there are none. */
+  local?: string[];
 };
 
 /** One of a plan's usage windows: how much of it is spent (0 to 100) and when it resets (seconds since the epoch). */

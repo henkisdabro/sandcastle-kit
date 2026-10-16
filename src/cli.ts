@@ -128,7 +128,7 @@
 //                    and keys to Herdr's config (shows them and asks first); --remove
 //                    takes all of it out. Works from anywhere
 //
-// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, LOAD_PAUSE, SANDCASTLE_API_KEY:
+// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, LOAD_PAUSE, SANDCASTLE_API_KEY:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
