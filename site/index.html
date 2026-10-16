@@ -46,7 +46,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://henkisdabro.github.io/sandcastle-kit/#app",
         "name": "sandcastle-kit",
-        "softwareVersion": "0.17.0",
+        "softwareVersion": "0.18.0",
         "description": "An opinionated issue-burndown kit built on Sandcastle: unattended Claude Code agents implement, review, gate and merge GitHub issues or Markdown tickets in Docker sandboxes, locally, with nothing pushed.",
         "url": "https://henkisdabro.github.io/sandcastle-kit/",
         "applicationCategory": "DeveloperApplication",
@@ -78,7 +78,7 @@
           { "@type": "Question", "name": "What if a branch is green but wrong?", "acceptedAnswer": { "@type": "Answer", "text": "Then it is in your local branch and nowhere else. A second agent reads every branch against its ticket before your gates run, and the report lists what merged, so you read before you push. Behaviour that no test covers has only that review between it and your branch." } },
           { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "If a branch conflicts with the base, it gets one more try in the same run. A conflict found during ticket work skips review and gates; one found at landing is caught on the host, before a sandbox starts. A second conflict is left for you, and so is a resolution that edits a file git had merged cleanly without naming the file and its reason." } },
           { "@type": "Question", "name": "Can the text of a ticket make an agent do something else?", "acceptedAnswer": { "@type": "Answer", "text": "It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said." } },
-          { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake while work is in flight (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and autonomy: \"drain\" keeps taking turns until the queue is drained or something stops it. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice." } },
+          { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake while work is in flight (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and autonomy: \"drain\" keeps taking turns until the queue is drained or something stops it. At autonomy 2, 3 and \"drain\", a ticket you queue while the run is live is taken as a follow-on turn, not left for the next run. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice." } },
           { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
           { "@type": "Question", "name": "Linear, Jira, Windows?", "acceptedAnswer": { "@type": "Answer", "text": "Linear issues can block a ticket today, but the queues are GitHub Issues and Markdown ticket files. The kit runs on macOS and Linux." } }
         ]
@@ -302,7 +302,7 @@
         <li><time>07:30</time><b>you read the report</b><span>Push once you have read it. <code>sandcastle requeue 44</code> sends a ticket back.</span></li>
       </ol>
       <p class="sky-key" aria-hidden="true"><span class="k-w">outlined: in a sandbox</span><span class="k-m">filled: merged</span><span class="k-r">red: needs you</span><span class="k-b">dashed: waiting on another ticket</span><span class="sky-hint">Move across the sky to wind the night.</span></p>
-      <p class="after">With <code>autonomy: "drain"</code>, the run keeps taking turns by itself until the queue is drained, and says why it stopped.</p>
+      <p class="after">With <code>autonomy: "drain"</code>, the run keeps taking turns by itself until the queue is drained, picks up tickets you queue while it runs, and says why it stopped.</p>
     </section>
 
     <section class="how" id="how" aria-labelledby="how-title">
@@ -480,7 +480,7 @@
           <div class="bound">
             <h3>Shares the machine</h3>
             <ul>
-              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other. The pool keeps one slot for any run's landing, so a green branch does not wait behind a ticket, and no slot sits idle. <code>sandcastle cap 2</code> limits a live run's share.</li>
+              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other. The pool keeps one slot for a landing while one is near, so a green branch does not wait behind a ticket, and lets a ticket take it otherwise, so no slot sits idle. A ticket waiting only for a gates slot lends its sandbox slot to another ticket's agent pass. <code>sandcastle cap 2</code> limits a live run's share.</li>
               <li><b>CPU and memory counted.</b> Each sandbox has a CPU limit. Landing, base and verify gates take the run's next free gate slot before ticket gates; <code>sandcastle size</code> recommends pool limits from measured memory, and doctor warns when they exceed the VM.</li>
               <li><b>A pause keeps the work.</b> Passes in flight finish and green branches still land. Parked sandboxes close, slots go back to other runs and the machine can sleep until you resume.</li>
               <li><b>Detached.</b> A run started by your agent outlives the session that started it; <code>sandcastle wait</code> and <code>sandcastle stop</code> find it again.</li>
@@ -540,7 +540,7 @@
           <div class="bound">
             <h3>Between runs</h3>
             <ul>
-              <li><b>Ready tickets.</b> Between runs, a quiet row of sand above the prompt shows the kit's version and how many tickets a run would start now: <code>♜ sandcastle 0.17.0 · 4 ready - /sandcastle run</code>. It adds <code>update needed</code> when the project has upgrading notes to act on, and names a newer kit release once one is out. The count is read in the background, at most once every ten minutes per project.</li>
+              <li><b>Ready tickets.</b> Between runs, a quiet row of sand above the prompt shows the kit's version and how many tickets a run would start now: <code>♜ sandcastle 0.18.0 · 4 ready - /sandcastle run</code>. It adds <code>update needed</code> when the project has upgrading notes to act on, and names a newer kit release once one is out. The count is read in the background, at most once every ten minutes per project.</li>
               <li><b>Hide the reminder.</b> <code>/sandcastle-mark dismiss</code> hides the count until another ticket becomes ready, and a newer release until the next one; <code>hide</code> turns the mark off for the project.</li>
             </ul>
           </div>
@@ -701,7 +701,7 @@
       </details>
       <details>
         <summary>Can a run go all night?</summary>
-        <p>Yes. A run keeps the machine awake while work is in flight (<code>caffeinate</code> on macOS, <code>systemd-inhibit</code> on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and <code>autonomy: "drain"</code> keeps taking turns until the queue is drained or something stops it. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice.</p>
+        <p>Yes. A run keeps the machine awake while work is in flight (<code>caffeinate</code> on macOS, <code>systemd-inhibit</code> on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and <code>autonomy: "drain"</code> keeps taking turns until the queue is drained or something stops it. At autonomy 2, 3 and <code>"drain"</code>, a ticket you queue while the run is live is taken as a follow-on turn, not left for the next run. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice.</p>
       </details>
       <details>
         <summary>Do I need Matt Pocock's skills?</summary>
@@ -722,7 +722,7 @@
   <footer class="foot">
     <p class="foot-credit">Built by <a href="https://www.henriksoderlund.com/?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=footer-author-link" rel="author">Henrik Söderlund</a></p>
     <p><a href="https://www.henriksoderlund.com/expertise?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=more-work-link#showcase-projects">More AI and automation work →</a></p>
-    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.17.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
+    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.18.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
   </footer>
 
   <script src="js/status-render.js" defer></script>
