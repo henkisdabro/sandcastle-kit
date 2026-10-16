@@ -18,8 +18,9 @@ export const SANDCASTLE_IGNORES = [".env", "logs/", "worktrees/", ".run/", "tria
 
 type Stack = { label: string; block: string; dockerfile?: string };
 
+// The commented `rerun` example is for a runner that takes test ids or files: a red gate's one re-run then runs only those.
 const gatesBlock = (gates: [string, string][]) =>
-  `  gates: [\n${gates.map(([name, command]) => `    { name: ${JSON.stringify(name)}, command: ${JSON.stringify(command)} },`).join("\n")}\n  ],`;
+  `  gates: [\n${gates.map(([name, command]) => `    { name: ${JSON.stringify(name)}, command: ${JSON.stringify(command)} },`).join("\n")}\n    // Optional \`rerun\`: what a red gate's re-run runs instead of \`command\`, with {tests} (the failing test ids) or {files} (their files):\n    // { name: "test", command: "pytest", rerun: "pytest {tests}" },\n  ],`;
 
 // The project layer for a toolchain the base image lacks. COPY --from an
 // official image needs no build context, which the kit's builds do not have.
