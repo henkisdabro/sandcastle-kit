@@ -66,7 +66,9 @@ export const resolveSettings = ({ env, project, machine, apiKey = false }: Setti
 
 /**
  * The settings group of one turn's run record: the run's settings, this turn's number and the
- * level's cap. `noReading` is the guard's reading as a fact beside its setting, not part of it.
+ * level's cap. A follow-on turn for tickets queued while the run was live goes past the cap, and
+ * "turn 3/2" read as a fault, so such a turn records no cap. `noReading` is the guard's reading as
+ * a fact beside its setting, not part of it.
  */
 export const settingsGroup = (settings: ResolvedSettings, turn: number, noReading = false): RunSettings => {
   const cap = turnCap(settings.autonomy);
@@ -74,7 +76,7 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number, noReadin
   return {
     autonomy: settings.autonomy,
     turn,
-    ...(cap === undefined ? {} : { cap }),
+    ...(cap === undefined || turn > cap ? {} : { cap }),
     repair: settings.repair,
     concurrency: settings.concurrency.effective,
     asked: settings.concurrency.asked,

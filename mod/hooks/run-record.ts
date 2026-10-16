@@ -209,7 +209,7 @@ export type RunEstimate = {
  * level, the turn this record is, the level's cap, the repair attempts, the concurrency (asked
  * and effective), whether cross-review runs, and the usage guard. Each field is optional and a
  * reader shows only what is there - an older kit's record has no group at all, level 1 has no cap
- * (it asks after every turn), and a record without the guard's fields shows nothing about it.
+ * (it asks after every turn), nor has a follow-on turn past the level's cap, and a record without the guard's fields shows nothing about it.
  */
 export type RunSettings = {
   /** The level, resolved once per run. */

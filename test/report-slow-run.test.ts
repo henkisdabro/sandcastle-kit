@@ -28,6 +28,8 @@ const facts = (over: Partial<Facts> = {}): Facts => ({
   ...over,
 });
 
+const noLoss = { gateWaitMs: 0, landingGateWaitMs: 0, landingWaitMs: 0, redReruns: 0, redRerunMs: 0, afterRepair: 0, afterRepairMs: 0, afterRequeue: 0, afterRequeueMs: 0, repairs: 0, repairMs: 0 };
+
 // 5 hours against an hour; 90M tokens in against 20M, 1.2M out against 400k.
 const estimate = { ms: { mid: 60 * MIN, high: 90 * MIN }, tokensIn: { mid: 20_000_000, high: 30_000_000 }, tokensOut: { mid: 400_000, high: 600_000 }, slots: 2, tickets: 4 };
 const tokenTotal = { input: 1_000_000, cacheWrite: 4_000_000, cacheRead: 85_000_000, output: 1_200_000 };
@@ -46,13 +48,13 @@ test("the largest causes the record measured are named, largest first, and anyth
       tokenTotal,
       sharedMs: 180 * MIN,
       sandboxWaitMs: 20 * MIN,
-      timeLost: { gateWaitMs: 55 * MIN, landingWaitMs: 4 * MIN, reruns: 3, rerunMs: 12 * MIN, repairs: 1, repairMs: 8 * MIN },
+      timeLost: { ...noLoss, gateWaitMs: 55 * MIN, landingWaitMs: 4 * MIN, redReruns: 3, redRerunMs: 12 * MIN, repairs: 1, repairMs: 8 * MIN },
     }),
   );
   assert.deepEqual(headline(out).slice(1), [
-    "Largest causes measured: 3h 00m at a share below what it asked for, beside another run; 55m waiting for gates slots, summed over tickets; 20m with a worker waiting for a sandbox slot; 3 gate re-runs and 1 repair pass (20m of pass time); 4m with landings waiting for a sandbox slot.",
+    "Largest causes measured: 3h 00m at a share below what it asked for, beside another run; 55m waiting for gates slots, summed over tickets; 20m with a worker waiting for a sandbox slot; 3 red gates run again and 1 repair pass (20m of pass time); 4m with landings waiting for a sandbox slot.",
   ]);
-  const small = render(facts({ estimate, sharedMs: 30_000, timeLost: { gateWaitMs: 0, landingWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 } }));
+  const small = render(facts({ estimate, sharedMs: 30_000, timeLost: noLoss }));
   assert.match(headline(small)[1], /^No cause measured/);
 });
 
@@ -65,7 +67,7 @@ test("a run within twice its estimate says nothing of it, unless one cause took 
 
 test("a run bound by its gates slot names the check that says whether the machine has room for more", () => {
   const within = { estimate: { ...estimate, ms: { mid: 180 * MIN, high: 240 * MIN } }, tokenTotal: { input: 1, cacheWrite: 0, cacheRead: 30_000_000, output: 600_000 } };
-  const timeLost = { gateWaitMs: 4 * 60 * MIN, landingWaitMs: 0, reruns: 0, rerunMs: 0, repairs: 0, repairMs: 0 };
+  const timeLost = { ...noLoss, gateWaitMs: 4 * 60 * MIN };
   assert.deepEqual(headline(render(facts({ ...within, timeLost }))), [
     "Largest causes measured: 4h 00m waiting for gates slots, summed over tickets. `sandcastle size` says whether the machine has room for more gates slots.",
   ]);
@@ -91,8 +93,11 @@ test("tokens far under the estimate give their ratio, as a run far over it does"
   assert.match(headline(out)[0], /against an estimate of 20\.0M in \/ 400k out \(0\.4x\)\.$/);
 });
 
-test("a run with no estimate, a live run and a dry run give no line", () => {
+test("a run with no estimate gives only a large cause, and a live run and a dry run give no line", () => {
   assert.deepEqual(headline(render(facts({ tokenTotal }))), []);
+  // A project's first run has no estimate, but a cause that took a fifth of its time is still named.
+  assert.deepEqual(headline(render(facts({ tokenTotal, sharedMs: 59 * MIN }))), []);
+  assert.deepEqual(headline(render(facts({ tokenTotal, sharedMs: 3 * 60 * MIN }))), ["Largest causes measured: 3h 00m at a share below what it asked for, beside another run."]);
   assert.deepEqual(headline(render(facts({ estimate, live: true, finished: undefined }))), []);
   assert.deepEqual(headline(render(facts({ estimate, dryRun: true }))), []);
 });
@@ -132,7 +137,7 @@ test("no ticket with a flaky test, no line", () => {
 
 const line = (over: Record<string, unknown>) => JSON.stringify({ run: "r1", ms: 1000, ok: true, ...over });
 
-test("the timings lines give the gates slot waits, the landings' sandbox slot waits apart, the gate re-runs and the repair passes of the run", () => {
+test("the timings lines give the gates slot waits, the landings' sandbox slot waits apart, the gate runs after a repair or a requeue and the repair passes of the run", () => {
   const text = [
     line({ issue: "", phase: "base gates", ms: 5000, waitMs: 2 * MIN }),
     line({ issue: "1", phase: "setup", ms: 4000, waitMs: 9 * MIN }),
@@ -145,11 +150,11 @@ test("the timings lines give the gates slot waits, the landings' sandbox slot wa
     line({ run: "r0", issue: "1", phase: "gates", ms: 99 * MIN, waitMs: 99 * MIN }),
     "not json",
   ].join("\n");
-  assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 27 * MIN, landingWaitMs: 3 * MIN, reruns: 2, rerunMs: 6 * MIN, repairs: 1, repairMs: 6 * MIN });
+  assert.deepEqual(timeLostFromTimings(text, "r1"), { ...noLoss, gateWaitMs: 27 * MIN, landingWaitMs: 3 * MIN, afterRepair: 1, afterRepairMs: 2 * MIN, afterRequeue: 1, afterRequeueMs: 4 * MIN, repairs: 1, repairMs: 6 * MIN });
   assert.equal(timeLostFromTimings(text, "none"), undefined);
 });
 
-test("a landing gate's marked re-run line counts as one gate re-run, and a ticket's in-slot gates re-run line once", () => {
+test("a marked re-run line counts as one red gate run again, landing or ticket's, and an unmarked second landing is none", () => {
   const text = [
     line({ issue: "1", phase: "gates", ms: 3 * MIN }),
     line({ issue: "1", phase: "gates", ms: 4 * MIN, rerun: true }),
@@ -158,7 +163,7 @@ test("a landing gate's marked re-run line counts as one gate re-run, and a ticke
     // A requeued ticket's second landing has no mark and is no re-run.
     line({ issue: "1", phase: "landing gates", ms: 5 * MIN }),
   ].join("\n");
-  assert.deepEqual(timeLostFromTimings(text, "r1"), { gateWaitMs: 0, landingWaitMs: 0, reruns: 2, rerunMs: 5 * MIN, repairs: 0, repairMs: 0 });
+  assert.deepEqual(timeLostFromTimings(text, "r1"), { ...noLoss, redReruns: 2, redRerunMs: 5 * MIN });
 });
 
 test("a ticket whose landing gate flaked is listed under Likely flaky", () => {

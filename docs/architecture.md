@@ -116,7 +116,7 @@ A landing gate that goes red and then green on its in-slot re-run keeps the red 
 ticket's `flaked` (`landingFlaked`, written by burndown's landing `gate` port, so the closing
 summary's "Likely flaky" list has it), and `timedGate` writes the re-run as a `LANDING_GATES` line
 of its own after the red run's through `timingLines`, which marks every line after the first
-`rerun: true`: `timeLostFromTimings` counts a marked landing line as a re-run, and `typicalTimes`
+`rerun: true`: `timeLostFromTimings` counts a marked line as a red gate run again, and `typicalTimes`
 leaves it out of the landing-gates sum (a requeued ticket's second landing has no mark and is
 summed).
 Green on the third run goes on as after any green gate; red on it, on any tests, goes to repair as
@@ -164,7 +164,8 @@ the summary says a test is likely flaky or order-dependent (`test/verify-same-tr
 A red verify is run again once and the second result kept (`rerunRedVerify`, `src/gates.ts`; a
 ticket's first red gate and a landing's are re-run the same way), and one still red is judged for
 load (`likelyLoad`): each failing test a red gate's output names has a test-timeout line
-(`Test timed out in`, `Exceeded timeout of`, node:test's `test timed out after`) among its own
+(`Test timed out in`, `Exceeded timeout of`, node:test's `test timed out after`, and
+`claude plugin test`'s `timed out after N ms` on a line of its own) among its own
 lines, up to the next failing test (`onlyTimeouts`: node:test and vitest print each error twice, so
 a count of timeout lines would read one timeout beside an assertion as all timeouts), or a red gate
 ran at least three times (`LOAD_FACTOR`) its recorded time - the gate times of the landing sandbox
@@ -470,7 +471,8 @@ blocker checks (`openOnQueue` at the start, then the start's `commentOnlyBlocks`
 with the same `limitMs`, and `blockerWhyAsync` for a blocker's reason; `openBlockersNow` as tickets land,
 each dependant read side by side), whose `declaredBlockersAsync` and state reads go through
 `blockerResolver`'s `limitMs`. A ticket whose native blocker links cannot be read is held by a `links`
-blocker that is never closed, and starts once a later read gets them. The repository's own name
+blocker that is never closed, and starts once a later read gets them: the run's next landing reads it
+again, or the next run does for a ticket held from the start. The repository's own name
 (`thisRepoAsync`) is one read shared by the callers that ask meanwhile; one that fails or times out is
 asked again later, so a same-repo native blocker is never read as another repository's for the run.
 What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it
@@ -649,7 +651,12 @@ state.
   and closes, the blockers of the ones that waited for it are read again through the plan's
   `blockers.open` port, and each with none open starts through the file hold. Any other ending, a
   run that starts nothing or a dry run releases none, and each held ticket is told what it waits
-  for now.
+  for now. A held ticket with a blocker whose read failed (the plan's `blockers.unread`: burndown
+  wires `unreadable`, which a `links` blocker always is) is read again at every later landing of the
+  run, in the same `open` call as the landed ticket's dependants, so a read that timed out once does
+  not hold it for the rest of the run; a read that throws leaves it unread for the next landing, and
+  while any ticket is in flight it keeps `last()` false. A ticket held from the start behind such a
+  blocker (not a candidate) is read again by the next run only.
 - **Start order.** The pipeline queue ranks what waits for a sandbox slot: a requeued ticket first,
   then a released dependant, then every ticket not yet started, each group in the order it arrived.
   Both have waited already, and every landing before they start moves the base under them; behind the
@@ -677,6 +684,21 @@ state.
   A worker still asking then ends its wait once nothing is queued (`wanted()` again), or a run with
   no
   demand left beside a hungry run would wait for ever (`test/schedule-slot-stale-ask.test.ts`).
+  **A gates wait frees the worker.** An attempt that only waits for a gates slot says so (`at.gateWait()`) and
+  moves its sandbox lease to the pool's uncounted lock (`createGateSeat`, `src/burndown.ts`; `uncountSlot`,
+  `src/pool.ts`): the worker goes back to the queue (`occupy`: it awaits the attempt only until the attempt ends or goes
+  off) while the attempt goes on, as a resolve's wait does. The ticket stays open until its ending and in `gating`
+  (a resolve that shares its files still waits for it) until its gates end. `Work.gateWaiters`, the gates limit, caps the
+  attempts off their worker; one that reaches its gates wait at the cap is told no, keeps its slot and its worker and
+  waits as before. Every wait for a gates slot of a ticket gate asks, not only the first (a gate run after a repair does).
+  A red ticket takes a counted slot again just before its repair pass (and the review after it), not at the result: through
+  a fix-board wait it stays on the uncounted lock (a waiter that holds a worker stops waiting on it meanwhile: the fix board
+  below). `at.retake()` queues it in the pipeline queue at the top rank, so it is served as a
+  worker's ask - the pool's order, a landing first (`landingWaits`), the run's share - ahead of tickets that have not started;
+  the worker that gets the slot hands it over and stays with the attempt until it goes off again or ends, so the run never has
+  more agent passes than workers, and the uncounted lock goes once the slot is held. A pause answers a queued retake with nothing:
+  the attempt parks at a juncture and asks again after the resume. A green ticket asks for none. A stopped run grants no slot,
+  and the pass runs on the uncounted lock. `test/schedule-gate-wait-worker.test.ts`.
   A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
   `src/burndown.ts`: the run record's `waitsForShare` and `waitsFor`, which the status view's next-to-start rows say,
   and the heartbeat's `waiting for a sandbox slot`). The demand is counted as before, from the push.
@@ -720,6 +742,13 @@ state.
   waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
   ticket that repaired before it waited keeps those commits under the review after repair.
   `test/fix-wait.test.ts`.
+  The same holds for a worker: a fixer off its worker on an uncounted lock asks for one again
+  before its repair pass (`at.retake`), and with one worker a waiter that holds it would wait on a
+  fixer that waits for it.
+  So while the ticket waited on, or one it waits on in turn, asks for a worker (`stuck`:
+  `fixWaitStuck` over each ticket's `createGateSeat` in `src/burndown.ts`), a waiter that holds its
+  worker stops waiting and repairs; a waiter off its worker holds none and keeps waiting
+  (`test/fix-wait-retake.test.ts`).
 - **The pause** (`Work.pause`, a `PauseSource`: `read()` answers the pause in force, `{ since }` in
   seconds, or none).
   The scheduler reads it at each juncture and every `pollMs` (1 s; the timer is not unref'd - with
@@ -1117,11 +1146,12 @@ per commit), and `isTestPath` (conventional test names; a test file a branch add
 `Touches:` overrun, and `overrunPaths` (`src/report.ts`) folds the modified ones into a count, "+7
 test files"), `isDocPath` (any `*.md`, and `docs/` and `skill/`: the docs a repo's rules have every
 change edit, folded by `overrunPaths` into "+2 docs files", so the listed paths are the source files
-a ticket missed; the close comment says "changed beyond its Touches line: ...", the report "<title> -
-beyond Touches: ..."), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one
-is not an overrun when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out
-a file only a repair pass or a merge commit (a conflict resolution) changed: the repair commits are
-recorded as `repaired` in the ticket's head record (`heads.json`), across attempts.
+a ticket missed; the close comment says "changed beyond its Touches line: ...", the report lists
+"<title>: ..." lines under "Changed files beyond their Touches line:", directly before the push
+note), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun
+when the branch adds a file). `touchesOverrun` (`src/landing.ts`) also leaves out a file only
+a repair pass or a merge commit (a conflict resolution) changed: the repair commits are recorded as
+`repaired` in the ticket's head record (`heads.json`), across attempts.
 An overrun of only test and docs files stays in the run record, and `overrunNoted` (`src/report.ts`)
 keeps it out of the close comment and the report.
 A scheduling hint and warning source, never a guard
@@ -1549,19 +1579,34 @@ left behind another run that began waiting after its own run did, and any other 
 yields while one of the run's priority waits is waiting (`priorityAhead`).
 A run with no priority wait is served as it always was, and a run that has waited less than another
 is still behind it, priority or not.
-A landing that will gate **claims** the gates pool before its gates ask (`claimSlot`, `src/pool.ts`):
-it opens its sandbox and merges for seconds first, and a ticket gate asked in that window took the
-slot and held it for a whole gate run.
-`landOne` takes the claim once it holds its landing sandbox slot (not while it waits for one; a
-fast-forward or a conflict found on the host never takes it) and releases it when `landInSandbox`
-ends, gated or not.
-The claim is handed down with the gate (`ctx.gate` -> `runGates` -> `withSlot`) and the landing's own
-priority wait spends that claim and no other: a priority wait made without one (the base check's, the
-verify's) spends none, and another landing's claim keeps holding ticket gates back.
-A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than
-the run's claims, so with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
-The claim is kept in this process (`claims`), not in the pool's files; `test/pool-landing-claim.test.ts`, and
-`test/pool-landing-claim-spare.test.ts` for the slot to spare.
+The run holds **one claim** on the gates pool (`createRunClaim`, `src/pool.ts`; `claimSlot` is its unit) from the
+moment a green branch is queued to land: a landing opens its sandbox and merges for seconds first, and a ticket
+gate asked in that window took the slot and held it for a whole gate run, so nearly every landing's gates waited out
+one ticket-gate run.
+`createLanding` (`src/schedule.ts`) tells the claim of each push, of each landing that starts and of each that ends
+(`LandPorts.claim`, which `landingWork` makes and hands to `landOne`), and of a stop (`StopWriter.watch`, and the
+scheduler's `noticeStop` for the host's live failure), so `src/schedule.ts` still imports nothing from the pool.
+It is taken at the push when no landing gate is running (a branch queued while one runs is claimed when that gate
+run ends, so with `maxGates` above 1 a spare slot stays free for ticket gates), and never more than one stands.
+`landOne` hands it to `ctx.gate` when its gates begin (`take`) and takes none of its own; the gate's priority wait
+spends it and no other: a priority wait made without one (the base check's, the verify's) spends none.
+The moment that gate run ends, green, red or thrown, and before anyone else sees the slot free, the run claims again
+if another green is queued (`gateEnded`), so the freed slot goes to that landing.
+The claim is released when the queue empties after the last landing, on a stop (the worker hands the queued greens to
+`stopped`, and nothing claims again when the in-flight landing's gates end) and on a crash of the land port, and by every
+landing that ends without gating (an in-place fast-forward, a conflict found on the host, `not-landed`, the no-merge
+endings): the claim then stays for the next queued green, or goes.
+A `landOne` given no run claim (`sandcastle land`, a direct caller) keeps the earlier bound: it claims once it holds its
+landing sandbox slot and releases when `landInSandbox` ends.
+A ticket gate yields to a claim (`priorityAhead`) only while the pool's free slots are no more than the run's claims, so
+with `maxGates` above 1 and a slot to spare ticket gates go on through a merge.
+Nor while a landing of the run waits for a sandbox slot (a priority wait of the sandboxes pool): a ticket's gate runs
+in the sandbox slot its pipeline holds, so with that slot the last one free (a pool of one) the landing waited for it
+while the ticket's gate waited behind the claim, and neither moved (`test/landing-claim-sandbox-wait.test.ts`).
+The claim is kept in this process (`claims`), not in the pool's files, so a crash leaves nothing behind;
+`test/pool-landing-claim-queued.test.ts` (gates limit 1) and `test/pool-landing-claim-queued-spare.test.ts` (2) for
+the run's claim, `test/pool-landing-claim.test.ts`, `test/pool-landing-claim-spare.test.ts` and
+`test/landing-claim-gates.test.ts` for the single claim.
 The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is
 this process's, and another run needs only a wait's start - and, for the pool's last free slot,
 whether it is a landing's, which the entry's file name says (a `-priority` before `.wait`; the
@@ -1599,6 +1644,20 @@ and `members()` counts it in its run's `held`, so that run's other tickets may w
 the share arithmetic is left as it is, since hiding the slot there would hide it from the other
 runs too.
 
+An **uncounted lock** (`uncountSlot`) is where a ticket's sandbox lease goes while its container only waits
+for a gates slot: `<pool>-waiting-<run>-<n>.lock`, a slot's content, written before the numbered
+slot is freed (the sandbox is never unseen) and released with the lease it returns and at exit.
+Like an extra slot it sits outside the numbered locks `tryAcquire` takes, and one left by a killed
+holder counts for nothing (`holderRunning`) and is removed by the next extra slot or uncounted lock
+taken.
+Unlike one, it is not counted against `maxSandboxes`: `liveSlots` leaves it out, so it is not in
+`members()`' `held` (the shares) nor in `lastFreeSlot`'s count, and a waiting ticket's agent pass can
+take its numbered slot.
+`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - its name starts
+with `sandboxes-` and ends in `.lock`, which is all that count asks - so other runs and the views see
+every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run.
+`test/gate-wait-frees-sandbox.test.ts`.
+
 **A wait that holds a slot.**
 Code that waits while holding a pool slot must not wait on anything that needs another slot - a
 ticket keeping its sandbox slot while it waits for a fix, a landing or another ticket's attempt that
@@ -1608,6 +1667,9 @@ or two slots shows it.
 Release the slot before such a wait, or wait before taking it.
 Waiting for a gates slot while holding a sandbox slot is the one sanctioned case, as no gates slot
 holder waits for a sandbox slot.
+A ticket gate's wait moves the lease to an uncounted lock instead, while the run has fewer than
+`maxGates` such waiters (`createGateSeat` in `src/burndown.ts`, the scheduler's `gateWait`); one kept at
+that cap is still a wait that holds a slot.
 
 The base image's build is one more lock of the same kind, `withLock` on
 `<cache>/locks/base-image.lock`: `ensureImage` holds it across every image a project's sandbox
@@ -1865,6 +1927,22 @@ pipeline time are swapped for that `gateMs` (the four bounds combine as before).
 Otherwise - too few such runs, or older lines with no `load`, which count as unknown - all the
 window's runs price them and the line ends `No history at N at a time ..., so it may be low.`
 (`test/estimate-load.test.ts`).
+A run recorded at concurrency 1 counts as similar only to a run at 1 slot: at concurrency 1 the base
+never moves under a branch, so every landing was a gate-free fast-forward, and at 2 or more almost
+every landing after the first runs the full gates.
+For a run at 2 slots or more `landMs` never comes from a ticket of such a run, in the `byLoad` path
+and in the fallback alike, and (for a run with a recorded `load`) only a ticket with a merged
+`landing` line gives a landing figure; a run with no recorded `load` stays as before.
+When that leaves a pool (a model's own tickets, the blended pool, a size or carried class: each is
+priced alone) with no figure, its landings are priced as the pool's own `gateMs`, at the median and at
+the high end, for every ticket of the run but the first in run order, which lands free as a
+fast-forward (`firstFree` in `figures()`, taken off the first ticket's `landMs`); `minutes()` sees
+them in `sum(land)`, so the gated, landed and serial bounds and the slot note follow.
+`typicalTimes(project, extra, slots)` applies the same filter with `slots` of 2 or more (`burndown()`
+passes it where it writes the run record's `typical`): landings of runs recorded at concurrency 1 are
+left out of the `landing gates` median, and with none left it is the window's `gates` figure, so the
+status view's projected end, which reads `typical`, prices them alike. Both read each run's
+concurrency through `runLoads` (`test/estimate-landing-load.test.ts`).
 A ticket re-run for what an earlier "part of" merge left (`isRemainder`: `mergedPartly` and no
 branch ahead of the base, read once at the start into `remainderAtStart`, handed to `estimate` as
 `detail.remainder` and written on its timings lines as `remainder`) is a third class beside carried
@@ -1917,8 +1995,19 @@ and `splitAtStart` split the limit less one slot (`shareable`; a pool of one slo
 run's ticket pipelines use their whole share, and the slot left over is any run's landing's.
 A ticket pipeline's lease (`leaseSlot`'s `keep`, which `burndown()` sets unless it is a dry run)
 never takes the pool's last free sandbox slot while another run is live (`lastFreeSlot`: exactly one
-slot free); it waits with the reason `landing`, and its wait entry is out of the waits directory
-meanwhile, as a wait that cannot take the slot would make a landing of another run yield it.
+slot free) and some live run, this one included, has a landing near; it waits with the reason
+`landing`, and its wait entry is out of the waits directory meanwhile, as a wait that cannot take
+the slot would make a landing of another run yield it. A landing is near when a run's registration
+says so (`Registration.landingNear`, written whole and renamed in like the demand, only when it
+changes, and kept beside a cap): `createSchedule` tells `{ kind: "landing near" }` when the run has
+a ticket in its gates (`gating`: from `at.gates()` until a repair or review juncture or the
+attempt's end, so a ticket parked for a gates slot on an uncounted lock is in it) or a green branch
+queued to land or landing (`greens`), and `burndown()` hands it to `setLandingNear`. With no run
+saying so the slot is any free slot's: a ticket takes it, shares, `overShare` and `olderWait`
+applying as to any free slot, and nothing is taken back if a landing comes near after (it waits for
+a slot like any priority wait, at most one agent pass). A registration without the field (an older
+kit's) and slots held with no registration count as near, so beside one the slot is kept as before
+(`test/kept-slot-near-landing.test.ts`, `test/schedule-landing-near.test.ts`).
 A landing's lease (priority) may take that slot whatever its run holds against its share, and any
 other free slot while its run holds no more than its share (`overShare`'s `landingOnLast`; a
 person's cap still applies): the run's tickets fill the whole share, so a landing held to it waited
@@ -1927,7 +2016,8 @@ with slots free, and when two runs' landings want it at once the longest wait go
 `-priority` for a landing's, so another run can tell it from a ticket's).
 While a landing runs, the slot it holds is not free, and a ticket that ends then frees the pool's
 last free slot again, so the tickets wait until the landing is done: the pool holds one slot for
-landing, and tickets use only the rest.
+landing, and tickets use only the rest while a landing is near; with none near a ticket takes
+it too.
 Nothing is taken back from a running ticket (ADR 0001): a run over its share after the split keeps
 what it holds and shrinks as its tickets end.
 A run alone is unchanged: the whole pool as its share, nothing held back from its tickets, one slot
@@ -2189,7 +2279,12 @@ beside the estimate when either is more than twice off, and for a run that took 
 estimate names the causes of a minute or more, largest first: `pausedMs`, `sharedMs`, the gates-slot
 waits summed from the timings lines' `waitMs` (`timeLostFromTimings`), `sandboxWaitMs`, the
 landings' waits for a sandbox slot (the `landing` lines' `waitMs`, which `sandboxWaitMs` does not
-hold), and the gate re-runs and repair passes counted from the timings lines.
+hold), and the gate runs after a ticket's first and the repair passes counted from the timings lines. A
+gate run after the first is one of three: a red gate run again (a `rerun: true` line), a gate run
+after repair (a repair line came since the ticket's previous gates line) and a gate run after a
+requeue (any other); their time and the repair passes' make one "of pass time". The gates-slot wait
+carries the landing gates' share apart ("of which 1h 16m landings", from a minute), because a
+landing's wait also sits inside its `landing Nm` in the ticket lines.
 It lists each likely flaky test once with the tickets it hit, from both fields that name one: a
 ticket's `flaked` (red on one run of a gate, green on a later one) and its `flaky` (a repair pass's
 verdict).

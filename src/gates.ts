@@ -652,8 +652,9 @@ export const verifyFailing = (failures: GateRun["failures"]) => {
 };
 
 // A test runner's own timeout wording: vitest's "Test timed out in 30000ms", jest's "Exceeded timeout of 5000 ms for a
-// test", node:test's "test timed out after 30000ms". Nothing else counts: a gate's own timeout (exit 124) is a hang.
-const TEST_TIMEOUT = /Test timed out in \d|Exceeded timeout of \d|test timed out after \d/i;
+// test", node:test's "test timed out after 30000ms", and `claude plugin test`'s "Error: timed out after 20000 ms" on a line
+// of its own. Nothing else counts: a gate's own timeout (exit 124, "timed out after N min") is a hang.
+const TEST_TIMEOUT = /Test timed out in \d|Exceeded timeout of \d|test timed out after \d|^\s*(?:Error: )?timed out after \d+ ?ms\b/i;
 /** A gate that ran this many times its recorded time was slowed by load, not changed by the merge (`likelyLoad`). */
 export const LOAD_FACTOR = 3;
 
@@ -1056,12 +1057,13 @@ export const verifyPlan = (project: Project, image: string, planFile: string, me
  * commit they ran on is the base's record, as the base check's own result is: green is the next
  * turn's skip, red removes a record that would skip a base known to be red.
  */
-export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string, check?: (when: string) => unknown, exclusive?: Exclusive) => {
+export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string, check?: (when: string) => unknown, exclusive?: Exclusive, fresh = true) => {
   // Streamed as a ticket's gates log is, unclipped: the test summary sits at the end of a runner's stdout, where a
   // clipped excerpt cuts, and the per-gate times and the slot wait are what tell a load-made red. This run's log
-  // replaces an earlier one, which would read as this run's result.
+  // replaces an earlier one, which would read as this run's result; a re-run (`fresh` false) appends, so the first
+  // red it was run for stays to compare with.
   const log = join(project.root, VERIFY_LOG);
-  rmSync(log, { force: true });
+  if (fresh) rmSync(log, { force: true });
   mkdirSync(dirname(log), { recursive: true });
   // The section header `markLog` (src/run.ts) writes, which this file cannot import: run.ts imports it.
   appendFileSync(log, `\n# gates on the merged ${project.baseBranch} at ${sh("git", ["rev-parse", "--short", project.baseBranch], project.root)} - run ${runId ?? "none"}, ${localStamp()}\n`);
@@ -1079,11 +1081,11 @@ export const verifyBase = async (project: Project, image: string, planFile: stri
  * landing's are: a test that timed out beside other runs' suites would otherwise stop the drain and tell the operator
  * not to push. The second run takes its own gates slot, so the first has freed its own before it starts.
  */
-export const rerunRedVerify = async <R extends { gates: Gate[]; failures: GateRun["failures"] }>(run: () => Promise<R>, say: (line: string) => void): Promise<R> => {
-  const first = await run();
+export const rerunRedVerify = async <R extends { gates: Gate[]; failures: GateRun["failures"] }>(run: (fresh: boolean) => Promise<R>, say: (line: string) => void): Promise<R> => {
+  const first = await run(true);
   if (!first.failures.length && first.gates.every((g) => g.pass)) return first;
   say(`verify red (${gateLine(first.gates)}) - re-running it once`);
-  const second = await run();
+  const second = await run(false);
   say(!second.failures.length && second.gates.every((g) => g.pass) ? "verify red, then green on a re-run - a flake" : "verify red again on the re-run");
   return second;
 };

@@ -76,8 +76,9 @@ This continues SKILL.md: run its "Before every action" first.
      blocker lands with its work done (a close the tracker refuses holds nothing back). With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
-     before left conflicted, released, partly done (still queued) or green but not landed; a red ticket is not run again, and a ticket queued after
-     the run started waits for the next `sandcastle run`. A drain stops when no ticket is left to
+     before left conflicted, released, partly done (still queued) or green but not landed; a red ticket is not run again. A ticket queued after
+     the run started (unblocked) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
+     (`drain` may repeat it; `2` and `3` take one per run); one a stop leaves unrun waits for the next `sandcastle run`. A drain stops when no ticket is left to
      run again or a stop holds: no progress, the same ticket conflicting, left partly done or failing to land in two
      turns running, a red merged base, a usage limit or a stopped run, 20 turns at most.
    - **How long.** Once the project has run before, the run prints a rough estimate at its start
@@ -190,8 +191,9 @@ This continues SKILL.md: run its "Before every action" first.
    only its latest ending). A turn the loop goes on from says so in one line instead of its steps.
    The earlier turns' other lines (what they merged, the `Autonomy level` lines) are in the run's
    output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
-   `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line for each ticket
-   queued after the run started: quote the cause and name those tickets in the hand-back.
+   `Drain: <N> turns, <landed> landed, stopped because <cause>`; at `2`, `3` and `drain`, a line for each ticket
+   queued after the run started that no turn took (a follow-on turn takes the unblocked ones when the run would
+   end, once at `2` and `3`): quote the cause and name those tickets in the hand-back.
 
    **A shorter hand-back, when the user asked for one.** If the user has asked for a short or plain
    hand-back - in this conversation, or as a standing preference in their own memory or
@@ -210,7 +212,7 @@ This continues SKILL.md: run its "Before every action" first.
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, blocked (left out at 0), tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
       ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent; if it says `RED twice, likely load`, the failures were only test timeouts or a gate far slower than recorded, so `sandcastle gates` on a quiet machine is the check: say which, and still do not push.
-      If an `Against the estimate:` line follows, the run's time or tokens were more than twice the start estimate's (or under half): relay it, and for a slow run the `Largest causes measured:` line under it (time paused, time beside another run, slot waits, re-runs and repairs). That line also comes alone, for a run inside its estimate where one cause took a fifth of its time or more: relay it too, and when it names `sandcastle size`, offer to run it. A `Likely flaky` line lists tests that went red and then green on a re-run, or that a repair pass judged flaky, with the tickets they hit: mention them, as a flaky test is worth a ticket of its own.
+      If an `Against the estimate:` line follows, the run's time or tokens were more than twice the start estimate's (or under half): relay it, and for a slow run the `Largest causes measured:` line under it (time paused, time beside another run, slot waits, re-runs and repairs). That line also comes alone, for a run inside its estimate (or with none, a project's first) where one cause took a fifth of its time or more: relay it too, and when it names `sandcastle size`, offer to run it. A `Likely flaky` line lists tests that went red and then green on a re-run, or that a repair pass judged flaky, with the tickets they hit: mention them, as a flaky test is worth a ticket of its own.
       If it reads `NOT re-gated: the verify could not open its sandbox`, the merged base is ungated (a worktree or container start timed out): run `sandcastle gates`, and do not push until it is green.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.

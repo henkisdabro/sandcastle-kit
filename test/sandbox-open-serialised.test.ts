@@ -143,7 +143,7 @@ test("every sandbox open of the kit passes the host-git mutex it has, and the ba
   assert.match(source("burndown.ts"), /openOrAbandon\(project, branch, \(\) => createSandbox\([^\n]*\), host\.exclusive\)/);
   assert.match(source("burndown.ts"), /sandboxOpener\(gateProject, image, planFile, host\.exclusive\)/);
   assert.match(source("burndown.ts"), /baseGate: \(id\) =>[^]*?gateBase\([^\n]*host\.exclusive\)/);
-  assert.match(source("burndown.ts"), /verifyBase\([^\n]*host\.exclusive\)/);
+  assert.match(source("burndown.ts"), /verifyBase\([^\n]*host\.exclusive, fresh\)/);
   assert.match(source("gates.ts"), /openOrAbandon\(project, branch, \(\) => createSandbox\([^\n]*\), exclusive\)/);
   assert.match(source("land.ts"), /openOrAbandon\(project, branch, \(\) => createSandbox\([^\n]*\), exclusive\)/);
 });

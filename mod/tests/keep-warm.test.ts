@@ -76,9 +76,10 @@ const rowNow = async ($: Parameters<TestBody>[0]) => {
 /**
  * Each test moves the clock an hour or more, and every wait due on the way resolves in turn: a live run's look every
  * 3 s, the refresh's tick every minute. So each moves only as far as its claim needs - just past the next point a
- * refresh would be due - and has more than the kit's 5 s, which a loaded machine took from the longest.
+ * refresh would be due - and has more than the kit's 5 s, which a loaded machine took from the longest. The longest
+ * takes about 17 s on a quiet machine, so 20 s failed a run's every gate once the host was busy: a minute leaves room.
  */
-const HOURS = { timeoutMs: 20_000 };
+const HOURS = { timeoutMs: 60_000 };
 
 /** The session starts, uses the skill (so it closes the run) and lets the first look and tick pass. */
 const begin = async ($: Parameters<TestBody>[0], w: ReturnType<typeof world>) => {

@@ -39,7 +39,7 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
+import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
@@ -1574,6 +1574,66 @@ const worktreeIsClean = (project: Project, path: string) => {
   }
 };
 
+/**
+ * A ticket's sandbox while it only waits for a gates slot. The first wait for one (`gateWait`: the scheduler's answer to the
+ * attempt) moves the counted sandbox lease to an uncounted lock (`uncount`: the container lives on, the limit and the run's
+ * shares do not count it) and frees the ticket's worker; `retake` leases a counted slot again - through the scheduler, which
+ * serves it as a worker's ask, ahead of tickets that have not started - and only then lets the uncounted lock go. `gateWait`
+ * says no when the run already has its gates limit of such waiters: the ticket keeps its slot and its worker.
+ */
+export const createGateSeat = (ports: { gateWait(): boolean; retake(): Promise<{ slot?: SlotLease } | undefined>; uncount(lease: SlotLease): SlotLease }) => {
+  let waiting: SlotLease | undefined;
+  let off = false;
+  let asking = false;
+  return {
+    /** The ticket's sandbox is on the uncounted lock and its worker is not its own. */
+    get off() {
+      return off;
+    },
+    /** It waits for a worker to take a counted slot again (`retake`): a fix-board waiter holding one must not wait for it (`fixWaitStuck`). */
+    get asking() {
+      return asking;
+    },
+    /** Whether `lease` was moved to the uncounted lock; the lease is spent then. False: the ticket keeps it. */
+    move(lease: SlotLease): boolean {
+      if (!ports.gateWait()) return false;
+      try {
+        waiting = ports.uncount(lease);
+      } catch (error) {
+        // The scheduler has the worker free already: the ticket goes on with the counted slot it holds, one more than its share.
+        console.log(`  could not move a sandbox slot off the count (${String(error).slice(0, 120)}); the ticket keeps it`);
+        return false;
+      }
+      off = true;
+      return true;
+    },
+    /** A counted slot again; undefined when the run is paused (the caller parks and asks again). None to hold without the port or on a stopped run: the uncounted lock stays. */
+    async retake(): Promise<{ slot?: SlotLease } | undefined> {
+      asking = true;
+      const taken = await ports.retake().finally(() => (asking = false));
+      if (!taken) return undefined;
+      off = false;
+      if (taken.slot) {
+        waiting?.release();
+        waiting = undefined;
+      }
+      return taken;
+    },
+    /** The container closes (a pause, the attempt's end): the uncounted lock goes. */
+    release() {
+      waiting?.release();
+      waiting = undefined;
+    },
+  };
+};
+
+/**
+ * The fix board's `stuck` (`createFixBoard`): a waiter that holds its worker stops waiting on a ticket that waits for a worker
+ * to take back a counted slot (`createGateSeat`'s `asking`) - with one worker, each would wait for the other for good. A
+ * waiter off its worker holds none, and keeps waiting.
+ */
+export const fixWaitStuck = (seats: { get(id: string): { off: boolean; asking: boolean } | undefined }) => (waiter: string, on: string) => !seats.get(waiter)?.off && !!seats.get(on)?.asking;
+
 /** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
 export const createPipeline = (ctx: PipelineContext) => {
   const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseRecordedGreen, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
@@ -1788,10 +1848,12 @@ export const createPipeline = (ctx: PipelineContext) => {
 
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
   // `at.gates`: told as the ticket is past its review and goes to its gates, which a conflicted ticket's resolve waits for.
+  // `at.agent`: awaited right before a pass that needs a counted sandbox slot after the first gates (the repair, the review after it): a ticket
+  // whose sandbox waited for a gates slot on an uncounted lock (`createGateSeat`) leases one again first.
   // `at.resolveWaitMs`: a sent-back ticket's wait, from its requeue to the attempt (for the tickets ahead of its resolve,
   // and for a free slot after), which came before the attempt: the first `setup` step records it as its `waitMs`. No wait for a sandbox slot is a ticket's: its worker held the
   // slot before it took the ticket (slot first).
-  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; gates?(): void; resolveWaitMs?: number }): Promise<Outcome> => {
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; agent?(): Promise<void>; paused?(): boolean; gates?(): void; resolveWaitMs?: number }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -2589,6 +2651,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         forced = false;
         const beforePass = sh("git", ["rev-parse", branch], project.root);
         let verdict: ReturnType<typeof repairVerdict>;
+        // A slot of the limit again, after the fix board's wait: no agent pass runs outside `maxSandboxes`.
+        await at?.agent?.();
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
@@ -2655,6 +2719,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         // A review that dies leaves the branch held, not the ticket crashed:
         // like a failed repair, only a spent allowance stops the queue.
         await juncture("review");
+        await at?.agent?.();
         let afterModel: string | undefined;
         const beforeAfter = ownNow();
         const listAfter = ownList();
@@ -2859,7 +2924,7 @@ export const burndown = async (
     files: DRY_RUN ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
     // A held ticket that also waits on something outside this run is the next run's. A dry run
     // lands nothing, so it releases nothing.
-    blockers: { held: [...held.values()], ticketOf: blockerTicket, ...(DRY_RUN ? {} : { open: openBlockersNow(project, tracker, queued.map((i) => i.id)) }) },
+    blockers: { held: [...held.values()], ticketOf: blockerTicket, unread: (b) => b.state === "unreadable", ...(DRY_RUN ? {} : { open: openBlockersNow(project, tracker, queued.map((i) => i.id)) }) },
     // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket
     // that starts now costs nothing. A waiting ticket's label is checked when it is released (it
     // holds that ticket, never the run), but its model is still read now, for the preflight.
@@ -3021,7 +3086,7 @@ export const burndown = async (
     // The line printed above, as figures: history.jsonl then holds the estimate beside what the turn took.
     ...(rough ? { estimate: rough.figures } : {}),
     ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
-    typical: typicalTimes(project),
+    typical: typicalTimes(project, [], slots),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
   // The machine-wide list of live runs (the Herdr tab bar, the Claude Code mod), Herdr or not.
@@ -3303,6 +3368,8 @@ export const burndown = async (
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
   // `from`: a red gate's re-run, which starts at that gate (`gatesIn`'s own).
   // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
+  // A ticket's move of its sandbox slot to an uncounted lock (`createGateSeat`), by ticket: told by a ticket gate's wait for a gates slot.
+  const gateWaits = new Map<string, () => void>();
   const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim) => {
     const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
@@ -3315,6 +3382,8 @@ export const burndown = async (
         const step = active.get(id) ?? landing.get(id);
         if (step) step.phase = "gates: waiting for a gates slot";
         run.ticket(id, { note: "waiting for a gates slot" });
+        // A ticket's gates only: a landing's, the base's and the verify's sandbox is a slot the run's end waits on.
+        if (!priority) gateWaits.get(id)?.();
       },
       gate: (i, name) => {
         // The step's `since` is set before the wait for a gates slot: the gate time starts at the first gate.
@@ -3526,7 +3595,9 @@ export const burndown = async (
   // Who is repairing which failure: the scheduler's endings (`tell`) tell a waiting ticket whether the fix landed.
   // A landing left waiting for a sandbox slot may be waiting for the very slots the waiters hold (the run's
   // share shrank, a cap): they stop waiting and repair, so no wait outlasts the landing it waits for.
-  const fixes = createFixBoard(() => slotWanted.n > 0, undefined, (id) => ctx.landed.get(id)?.commit);
+  // Each ticket's seat while its attempt runs (`createGateSeat`), for the fix board's `stuck`.
+  const seats = new Map<string, ReturnType<typeof createGateSeat>>();
+  const fixes = createFixBoard(() => slotWanted.n > 0, undefined, (id) => ctx.landed.get(id)?.commit, fixWaitStuck(seats));
   const pipeline = createPipeline({
     project,
     tracker,
@@ -3587,7 +3658,7 @@ export const burndown = async (
 
   // A sandbox slot of the machine pool, for a worker's next ticket (the schedule's `slot`) or a ticket's own after a
   // pause. A landing that waits for a slot goes first (`slotTurn`). `giveUp` ends a wait that is no longer wanted.
-  // `keep`: beside another run the tickets never take the pool's last free slot, which is any run's landing's, as
+  // `keep`: beside another run, while a landing is near, the tickets never take the pool's last free slot, which is any run's landing's, as
   // `pipelineWorkers` leaves one of the machine's for a run alone. A dry run lands nothing, but keeps off that slot too:
   // it is the pool's, so a dry run's ticket taking it held a real run's landing back.
   const sandboxSlot = async (label: string, giveUp: () => boolean): Promise<SlotLease | undefined> => {
@@ -3601,18 +3672,37 @@ export const burndown = async (
   };
   // One attempt of a ticket (schedule.ts runs it), in the sandbox slot its worker leased (`slot`): the usage check and
   // the tracker's word before it, then its pipeline.
-  const attempt = async (issue: Issue, { last, juncture, paused, gates, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
+  const attempt = async (issue: Issue, { last, juncture, paused, gates, gateWait, retake, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; retake(): Promise<{ slot?: SlotLease } | undefined>; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
     // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
     // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
     let lease: SlotLease | undefined = slot;
+    // While it only waits for a gates slot the ticket's sandbox sits on an uncounted lock and its worker is free (`createGateSeat`);
+    // a slot it takes again then goes through the scheduler's `retake`, as a worker's does.
+    const seat = createGateSeat({ gateWait, retake, uncount: (l) => uncountSlot(l, `${project.name} ${ref(issue.id)} gates`) });
+    seats.set(issue.id, seat);
     const take = async () => {
+      if (seat.off) {
+        const retaken = await seat.retake();
+        if (!retaken) return false;
+        lease = retaken.slot;
+        return true;
+      }
       lease = await sandboxSlot(ref(issue.id), paused);
       return lease !== undefined;
     };
     const give = () => {
       lease?.release();
       lease = undefined;
+      seat.release();
     };
+    // Right before an agent pass after the gates: a counted slot, asked again after a pause if the run is paused meanwhile.
+    const counted = async () => {
+      while (seat.off && !(await take())) await juncture("start", { suspend: async () => {}, resume: async () => {} });
+    };
+    // The first wait for a gates slot of a ticket gate (the heartbeat's wait callback): move the slot off the count.
+    gateWaits.set(issue.id, () => {
+      if (lease && seat.move(lease)) lease = undefined;
+    });
     // At its start the ticket gives the slot back for a pause and takes one only once it goes on (below).
     const start: Park = { suspend: async () => give(), resume: async () => {} };
     await pausing.waitOutPause(usagePause !== undefined, paused, (phase) => juncture(phase, start));
@@ -3644,9 +3734,11 @@ export const burndown = async (
         // A pause gives the slot back and waits; the ticket then leases its own, in the time parked. Its worker's slot
         // was gone too when the run was paused as the attempt began.
         for (await juncture("start", start); !lease; await juncture("start", start)) await take();
-        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, gates, resolveWaitMs });
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), agent: counted, paused, gates, resolveWaitMs });
       } finally {
         give();
+        gateWaits.delete(issue.id);
+        seats.delete(issue.id);
       }
     })().then(
       (value) => ({ status: "fulfilled", value }) as const,
@@ -3685,7 +3777,7 @@ export const burndown = async (
           ...(value.changelogDroppedWhy?.length ? { changelogDroppedWhy: value.changelogDroppedWhy } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
         });
-        run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0))) });
+        run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)), slots) });
         // With nothing left to start, the pane closes: five panes each
         // frozen on a finished agent's summary read as five stuck sandboxes.
         // A stopped run starts nothing, whatever is still queued or parked.
@@ -3781,6 +3873,9 @@ export const burndown = async (
         // Before the pipelines ask for their slots, so the share they are held to is worked out from it.
         setDemand(c.n);
         return poolValues();
+      case "landing near":
+        // The pool keeps its last free slot idle for a landing only while a live run says one is near.
+        return setLandingNear(c.near);
       case "paused":
       case "resumed":
       case "pause stopped":
@@ -3839,7 +3934,7 @@ export const burndown = async (
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), landingWaits: () => slotWanted.n > 0, attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
+    .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), landingWaits: () => slotWanted.n > 0, gateWaiters: limit("gates"), attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
     .catch(async (error: unknown) => {
       clearInterval(heartbeat);
       console.log = consoleLog;
@@ -3918,7 +4013,7 @@ export const burndown = async (
       setDemand(1);
       // Red once is run again, the second result kept: a load flake beside other runs' suites is not a red base.
       try {
-        gated = await timed("", "verify", () => rerunRedVerify(() => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive), (line) => console.log(line))).finally(() => setDemand(0));
+        gated = await timed("", "verify", () => rerunRedVerify((fresh) => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive, fresh), (line) => console.log(line))).finally(() => setDemand(0));
       } catch (error) {
         // A guard's refusal still stops the run. A sandbox that would not open (Sandcastle's worktree timeout behind a
         // hung fetch, a slow container start) left the merged base ungated: the summary must still print and say so,

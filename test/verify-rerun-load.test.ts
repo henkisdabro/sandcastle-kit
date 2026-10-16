@@ -16,7 +16,7 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { likelyLoad, rerunRedVerify } = await import("../src/gates.ts");
 const { render } = await import("../src/report.ts");
 type Facts = Parameters<typeof render>[0];
-type Run = Parameters<typeof rerunRedVerify>[0] extends () => Promise<infer R> ? R : never;
+type Run = Parameters<typeof rerunRedVerify>[0] extends (fresh: boolean) => Promise<infer R> ? R : never;
 
 const red = (output: string, name = "test") => ({ name, command: "pnpm test", exitCode: 1, output });
 const timeout30 = (n: number) =>
@@ -29,8 +29,11 @@ test("a red verify is run again once and the second result is kept", async () =>
   ];
   const said: string[] = [];
   let calls = 0;
-  const kept = await rerunRedVerify(async () => results[calls++], (l) => said.push(l));
+  const fresh: boolean[] = [];
+  const kept = await rerunRedVerify(async (f) => (fresh.push(f), results[calls++]), (l) => said.push(l));
   assert.equal(calls, 2);
+  // The re-run appends to the verify log: the first red stays beside the second.
+  assert.deepEqual(fresh, [true, false]);
   assert.equal(kept, results[1]);
   assert.match(said.join("\n"), /re-running it once/);
   assert.match(said.join("\n"), /then green on a re-run - a flake/);
@@ -83,6 +86,16 @@ test("one timeout beside a real failure is not load, though each runner prints t
   assert.equal(likelyLoad([red(jest('thrown: "Exceeded timeout of 5000 ms for a test.'))], gates), true);
 });
 
+test("a node:test that runs `claude plugin test` and fails only by its harness's timeout reads as load", () => {
+  const gates = [{ name: "test", pass: false }];
+  const mod = (fail: string) =>
+    `✖ the mod's own tests pass (162016ms)\n✖ failing tests:\n\ntest at test/mod.test.ts:292:1\n✖ the mod's own tests pass (162016ms)\n  AssertionError [ERR_ASSERTION]: \n  tests/keep-warm.test.ts:\n  (pass) a turn restarts the 55 minutes [9780.85ms]\n  (fail) a refresh is not repeated [20019.06ms]\n    ${fail}\n`;
+  assert.equal(likelyLoad([red(mod("Error: timed out after 20000 ms"))], gates), true);
+  assert.equal(likelyLoad([red(mod("Error: expect(received).toBe(expected)"))], gates), false);
+  // A gate's own limit is a hang, not a test's timeout.
+  assert.equal(likelyLoad([red("✖ failing tests:\n\ntest at test/a.test.ts:1:1\n✖ a (1ms)\n  gate timed out after 30 min")], gates), false);
+});
+
 test("a red gate that ran three times its recorded time reads as load; twice does not", () => {
   const failures = [red("FAIL  a.test.ts > b\nAssertionError: expected 1 to be 2")];
   assert.equal(likelyLoad(failures, [{ name: "test", pass: false, ms: 81_000 }], { test: 18_000 }), true);
@@ -132,7 +145,7 @@ test("a red verify with no load flag keeps the sandbox wording", () => {
 
 test("burndown() re-runs the verify and records the load flag from the landing's and the base gates' times", () => {
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(source, /timed\("", "verify", \(\) => rerunRedVerify\(\(\) => verifyBase\(gateProject, image, planFile, runId, \(when\) => host\.check\(when\), host\.exclusive\)/);
+  assert.match(source, /timed\("", "verify", \(\) => rerunRedVerify\(\(fresh\) => verifyBase\(gateProject, image, planFile, runId, \(when\) => host\.check\(when\), host\.exclusive, fresh\)/);
   assert.match(source, /likelyLoad\(gated\.failures, gated\.gates, \{ \.\.\.baseGateMs, \.\.\.\(same && landed\.get\(same\)\?\.clean \? landingGateMs\.get\(same\) : undefined\) \}\)/);
   assert.match(source, /baseGateMs = gateMs\(await timed\("", "base gates"/);
   assert.match(source, /\.\.\.\(verifyLoad \? \{ likelyLoad: true \} : \{\}\)/);
