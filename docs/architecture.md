@@ -142,11 +142,20 @@ left the tip where it was is in `idleRepairs`, which a requeue carries as it doe
 (`firstAttemptIdleRepairs`), and the per-ticket line words (`repairWords`, `src/ledger.ts`) as
 `repaired=N` and `repair made no change` (`test/pipeline-repair-no-change.test.ts`).
 A repair pass that committed nothing and ends with `<verdict>outside-branch</verdict>`
-(`repairVerdict`; `prompts/repair.md` asks for it, with a `Flaky:` line of the tests it judges
-flaky) is followed by one gate run and no further pass, whatever `repair.attempts` leaves: green
-goes on as after any green gate, red ends the ticket red with the verdict's line in its note, and
-the tests are kept on the ticket's run record as `flaky`; the tag on a pass that committed is
-ignored (`test/pipeline-repair-verdict.test.ts`).
+(`repairVerdict`; `prompts/repair.md` asks for it, with a `Flaky:` line of the failing tests it
+judges flaky) is followed by one gate run and no further pass, whatever `repair.attempts` leaves:
+green goes on as after any green gate, red ends the ticket red with the verdict's line in its
+note, and the tests are kept on the ticket's run record as `flaky`; the tag on a pass that
+committed is ignored (`test/pipeline-repair-verdict.test.ts`).
+The `flaky` ids come from the gate run, not from the agent's text: `repairVerdict` takes the
+`wholeTests` of the red run the repair was given and keeps the ids whose test name (the text after
+the last `::`, else the whole id) occurs in the `Flaky:` line, or every id when the line names
+something that matches none. No usable line (none, or `Flaky: none`) or no readable ids (a lint or
+type gate, a clipped output) records no `flaky`; the line stays the verdict's text only
+(`test/repair-flaky-ids.test.ts`). The closing summary prints one `Likely flaky:` line per id
+across the turn's tickets' `flaked` and `flaky`, naming the tickets, and a red verify whose
+`failing` ids (uncut: `verifyFailing` reads `wholeTests`) are all among them, with `failingMore`
+not true, adds `- a test this run already saw flake` to its re-gated line.
 The verify records the image it ran on - the run's own, built before any ticket landed - and the
 Dockerfiles the run's merges changed since (`changedDockerfiles`, `src/gates.ts`: the kit's
 `docker/base.Dockerfile` and `docker/agents.Dockerfile`, and the config's `dockerfile`) in the run

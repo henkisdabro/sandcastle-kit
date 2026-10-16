@@ -161,7 +161,7 @@ export type TicketRecord = {
   failing?: string[];
   /** Test ids that went red on one run of a gate and green on a later one (the ticket gate's re-runs), whatever became of the ticket. */
   flaked?: string[];
-  /** The tests a repair pass judged flaky (its `<verdict>outside-branch</verdict>` line) when it committed nothing: the closing summary's likely-flaky list reads them. */
+  /** The tests a repair pass judged flaky (its `<verdict>outside-branch</verdict>` line) when it committed nothing: ids of the gate run the repair was given, kept when the line names them, never the agent's own wording. The closing summary's likely-flaky lines read them. */
   flaky?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];

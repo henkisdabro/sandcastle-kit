@@ -874,8 +874,8 @@ it ended: `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still go
 with a Codex reading adds `Codex plan usage at the end:` in the same shape. A run more than twice off its start
 estimate (or under half) gets an `Against the estimate:` line, and a slow one `Largest causes measured:` under it (time
 paused, time beside another run, slot waits, re-runs and repairs), which any run also gets when one cause took a fifth of
-its time or more, a project's first run with no estimate too (led by the gates wait, it names `sandcastle size`); `Likely flaky` lists tests that went red and then green, or that a
-repair judged flaky, with the tickets they hit. `sandcastle report` prints it again at any time, with git and the blockers as they
+its time or more, a project's first run with no estimate too (led by the gates wait, it names `sandcastle size`); a `Likely flaky:` line per test that went red and then green, or that a
+repair judged flaky, names the tickets that hit it (a red verify whose failing tests all flaked earlier in the run says so). `sandcastle report` prints it again at any time, with git and the blockers as they
 are now. Then:
 
 - **Push** the base branch yourself when you are happy with it. The kit never pushes.

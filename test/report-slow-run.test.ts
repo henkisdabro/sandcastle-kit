@@ -103,7 +103,6 @@ test("a run with no estimate gives only a large cause, and a live run and a dry 
 });
 
 const flakyLine = (out: string) => out.split("\n").filter((l) => l.startsWith("Likely flaky"));
-const FLAKY = "Likely flaky - red, then green on a re-run, or judged flaky by a repair pass: ";
 
 test("a test red then green on a re-run is listed once with every ticket it hit", () => {
   const out = render(
@@ -115,7 +114,7 @@ test("a test red then green on a re-run is listed once with every ticket it hit"
       },
     }),
   );
-  assert.deepEqual(flakyLine(out), [`${FLAKY}test/pool.test.ts (#11, #12, #13); test/a.test.ts (#11).`]);
+  assert.deepEqual(flakyLine(out), ["Likely flaky: test/pool.test.ts (#11, #12, #13)", "Likely flaky: test/a.test.ts (#11)"]);
 });
 
 test("the in-slot re-run's flakes and a repair verdict's flaky tests are one list, each test once", () => {
@@ -128,7 +127,7 @@ test("the in-slot re-run's flakes and a repair verdict's flaky tests are one lis
       },
     }),
   );
-  assert.deepEqual(flakyLine(out), [`${FLAKY}test/clock.test.ts::ticks (#22, #23); test/pool.test.ts::takes a slot (#21).`]);
+  assert.deepEqual(flakyLine(out), ["Likely flaky: test/clock.test.ts::ticks (#22, #23)", "Likely flaky: test/pool.test.ts::takes a slot (#21)"]);
 });
 
 test("no ticket with a flaky test, no line", () => {
@@ -168,5 +167,5 @@ test("a marked re-run line counts as one red gate run again, landing or ticket's
 
 test("a ticket whose landing gate flaked is listed under Likely flaky", () => {
   const out = render(facts({ tickets: { "31": { state: "merged", title: "a", flaked: ["test/clock.test.ts::ticks"] } } }));
-  assert.deepEqual(flakyLine(out), [`${FLAKY}test/clock.test.ts::ticks (#31).`]);
+  assert.deepEqual(flakyLine(out), ["Likely flaky: test/clock.test.ts::ticks (#31)"]);
 });

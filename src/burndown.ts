@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, wholeTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -231,15 +231,26 @@ const tags = (text: string) => {
 
 /**
  * A repair pass that judged the red outside its branch (`<verdict>outside-branch</verdict>`, as `prompts/repair.md` asks) and
- * the line it gave: `Flaky: a; b`, the tests it judged flaky separated by semicolons (a test title may hold a comma). The last
- * verdict tag counts; a line is the verdict's own without the tests too.
+ * the line it gave: `Flaky: <the failing tests as the gate output names them>`. The last verdict tag counts; a line is the
+ * verdict's own without the tests too.
+ *
+ * The `tests` are ids of the red run the repair was given (`failing`: `wholeTests` of its failure), never the agent's prose,
+ * which a `;` inside a title or another wording of the same test would split or multiply. An id is kept when its test name
+ * (the text after its last `::`, else the whole id: a vitest or jest id is the file path) occurs in the line; a line that
+ * names something matching no id keeps every id. No line, `Flaky: none` or no readable ids (a lint or type gate, a clipped
+ * output) give no tests.
  */
-export const repairVerdict = (text: string): { line: string; tests: string[] } | undefined => {
+export const repairVerdict = (text: string, failing: string[] = []): { line: string; tests: string[] } | undefined => {
   const at = [...text.matchAll(/<verdict>\s*outside-branch\s*<\/verdict>/g)].at(-1);
   if (!at) return undefined;
   const line = [...text.matchAll(/^[ \t]*Flaky:[ \t]*(.+)$/gm)].map((m) => m[1].trim()).filter((l) => l && l !== "...").at(-1);
-  const tests = (line ?? "").split(";").map((t) => t.trim()).filter(Boolean);
-  return { line: line ?? "", tests };
+  if (!line || !failing.length || /^none\b[\s.]*$/i.test(line)) return { line: line ?? "", tests: [] };
+  const named = failing.filter((id) => {
+    const cut = id.lastIndexOf("::");
+    const name = cut >= 0 ? id.slice(cut + 2) : id;
+    return name !== "" && line.includes(name);
+  });
+  return { line, tests: named.length ? named : [...failing] };
 };
 
 // A spent plan allowance fails every issue after it the same way, each one
@@ -2680,7 +2691,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           (fixedRun) => {
             const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
             if (said) addReport(issue.id, "Repair", said);
-            verdict = repairVerdict(fixedRun.stdout);
+            verdict = repairVerdict(fixedRun.stdout, wholeTests(failure));
             return true;
           },
           (error) => {

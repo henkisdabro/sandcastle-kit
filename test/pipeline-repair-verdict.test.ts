@@ -28,7 +28,8 @@ test("a verdict with no commit is followed by one gate run and no second pass; g
   const o = await h.attempt("1");
   assert.deepEqual(h.repairs, ["1"], "one model pass");
   assert.equal(o.status, "green");
-  assert.deepEqual(o.outside, { line: "src/ticket-1.test.ts > works; src/other.test.ts > slow", tests: ["src/ticket-1.test.ts > works", "src/other.test.ts > slow"] });
+  // The red run's ids (a vitest id is the file path), not the agent's own wording of the two tests.
+  assert.deepEqual(o.outside, { line: "src/ticket-1.test.ts > works; src/other.test.ts > slow", tests: ["src/ticket-1.test.ts"] });
 });
 
 test("a verdict with no commit and a red gate ends the ticket red, the line in its note, with no second pass", async () => {
