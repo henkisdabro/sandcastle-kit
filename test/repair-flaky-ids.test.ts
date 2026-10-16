@@ -44,6 +44,7 @@ test("no failing ids gives no tests, with the line kept", () => {
 test("no Flaky line, and Flaky: none, give no tests", () => {
   assert.deepEqual(repairVerdict(said(), ["test/a.test.ts::one"]), { line: "", tests: [] });
   assert.deepEqual(repairVerdict(said("none"), ["test/a.test.ts::one"]), { line: "none", tests: [] });
+  assert.deepEqual(repairVerdict(said("None - the base is red too"), ["test/a.test.ts::one"]), { line: "None - the base is red too", tests: [] });
   assert.equal(repairVerdict("<verdict>fixed</verdict>", ["test/a.test.ts::one"]), undefined);
 });
 
