@@ -164,7 +164,8 @@ the summary says a test is likely flaky or order-dependent (`test/verify-same-tr
 A red verify is run again once and the second result kept (`rerunRedVerify`, `src/gates.ts`; a
 ticket's first red gate and a landing's are re-run the same way), and one still red is judged for
 load (`likelyLoad`): each failing test a red gate's output names has a test-timeout line
-(`Test timed out in`, `Exceeded timeout of`, node:test's `test timed out after`) among its own
+(`Test timed out in`, `Exceeded timeout of`, node:test's `test timed out after`, and
+`claude plugin test`'s `timed out after N ms` on a line of its own) among its own
 lines, up to the next failing test (`onlyTimeouts`: node:test and vitest print each error twice, so
 a count of timeout lines would read one timeout beside an assertion as all timeouts), or a red gate
 ran at least three times (`LOAD_FACTOR`) its recorded time - the gate times of the landing sandbox

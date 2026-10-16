@@ -4013,7 +4013,7 @@ export const burndown = async (
       setDemand(1);
       // Red once is run again, the second result kept: a load flake beside other runs' suites is not a red base.
       try {
-        gated = await timed("", "verify", () => rerunRedVerify(() => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive), (line) => console.log(line))).finally(() => setDemand(0));
+        gated = await timed("", "verify", () => rerunRedVerify((fresh) => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive, fresh), (line) => console.log(line))).finally(() => setDemand(0));
       } catch (error) {
         // A guard's refusal still stops the run. A sandbox that would not open (Sandcastle's worktree timeout behind a
         // hung fetch, a slow container start) left the merged base ungated: the summary must still print and say so,

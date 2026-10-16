@@ -889,6 +889,8 @@ export const typicalTimes = (project: Project, extra: number[] = [], slots?: num
   const byPhase = new Map<string, number[]>();
   const byIssue = new Map<string, number>();
   const landing = new Map<string, number>();
+  const landed = new Set<string>();
+  const notLanded = new Set<string>();
   const loads = slots === undefined ? new Map<string, number>() : runLoads(project);
   for (const l of steps) {
     const key = `${l.run}|${l.issue}`;
@@ -901,8 +903,11 @@ export const typicalTimes = (project: Project, extra: number[] = [], slots?: num
       continue;
     }
     // A landing's own line holds its landing gates' time already: left out, or it counts them twice. A merged one
-    // does say the ticket landed: a fast-forward's, with no gates, is a landing of 0. A conflict's is none.
+    // does say the ticket landed: a fast-forward's, with no gates, is a landing of 0. A conflict's is none, and so is
+    // a red one's, though its landing gates ran: a ticket whose landings all failed is dropped below.
     if (l.phase === LANDING) {
+      if (l.ok === true) landed.add(key);
+      else notLanded.add(key);
       if (l.ok === true && !free) landing.set(key, landing.get(key) ?? 0);
       continue;
     }
@@ -915,6 +920,7 @@ export const typicalTimes = (project: Project, extra: number[] = [], slots?: num
   for (const [phase, ms] of byPhase) out[phase] = Math.round(percentile(ms, USUAL)! / 1000);
   const issue = median([...byIssue.values(), ...extra]);
   if (issue !== undefined) out.issue = Math.round(issue / 1000);
+  for (const key of notLanded) if (!landed.has(key)) landing.delete(key);
   if (landing.size) {
     // Over the tickets that landed: one held, red or from before landings were timed has no landing to count, and
     // counting it as 0 made the median 0 when most of a window had none.

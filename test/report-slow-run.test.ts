@@ -93,8 +93,11 @@ test("tokens far under the estimate give their ratio, as a run far over it does"
   assert.match(headline(out)[0], /against an estimate of 20\.0M in \/ 400k out \(0\.4x\)\.$/);
 });
 
-test("a run with no estimate, a live run and a dry run give no line", () => {
+test("a run with no estimate gives only a large cause, and a live run and a dry run give no line", () => {
   assert.deepEqual(headline(render(facts({ tokenTotal }))), []);
+  // A project's first run has no estimate, but a cause that took a fifth of its time is still named.
+  assert.deepEqual(headline(render(facts({ tokenTotal, sharedMs: 59 * MIN }))), []);
+  assert.deepEqual(headline(render(facts({ tokenTotal, sharedMs: 3 * 60 * MIN }))), ["Largest causes measured: 3h 00m at a share below what it asked for, beside another run."]);
   assert.deepEqual(headline(render(facts({ estimate, live: true, finished: undefined }))), []);
   assert.deepEqual(headline(render(facts({ estimate, dryRun: true }))), []);
 });

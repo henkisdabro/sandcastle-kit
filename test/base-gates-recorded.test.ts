@@ -85,6 +85,18 @@ test("a green verify is the base the next turn's check does not gate again, thou
   });
 });
 
+test("a verify run again appends to the verify log, and the next run's verify starts it afresh", async () => {
+  const root = makeProject("check-red");
+  await inProject(root, async (project, plan) => {
+    const headers = () => readFileSync(join(root, ".sandcastle/logs/verify-gates.log"), "utf8").split("\n").filter((l) => l.startsWith("# gates on the merged")).length;
+    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
+    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1", undefined, undefined, false));
+    assert.equal(headers(), 2);
+    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-2"));
+    assert.equal(headers(), 1);
+  });
+});
+
 test("the base check's own record skips the gates and the hook checks both", async () => {
   const root = makeProject("check-red");
   await inProject(root, async (project, plan) => {

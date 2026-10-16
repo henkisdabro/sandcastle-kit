@@ -71,6 +71,8 @@ test("the settings group carries the level, the turn and the cap; level 1 has no
   assert.deepEqual(settingsGroup({ ...rest, autonomy: 3 }, 2), { autonomy: 3, turn: 2, cap: 3, ...also });
   assert.deepEqual(settingsGroup({ ...rest, autonomy: "drain" }, 7), { autonomy: "drain", turn: 7, cap: 20, ...also });
   assert.deepEqual(settingsGroup({ ...rest, autonomy: 1 }, 2), { autonomy: 1, turn: 2, ...also });
+  // A follow-on turn past level 2's cap reads "turn 3", never "turn 3/2".
+  assert.deepEqual(settingsGroup({ ...rest, autonomy: 2 }, 3), { autonomy: 2, turn: 3, ...also });
 });
 
 test("a written record carries its settings, and a later turn's record its own turn number", () => {

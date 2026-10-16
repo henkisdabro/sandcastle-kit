@@ -47,6 +47,21 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A ticket held because a blocker read timed out is read again after each later landing** of
   the run (also when its native blocker links could not be read), so it can start in the same run
   instead of waiting for the next one.
+- **A red verify whose only failures are `claude plugin test`'s own timeouts reads as likely
+  load**, not as a sandbox that differs: the check knew vitest's, jest's and node:test's wording,
+  not `Error: timed out after 20000 ms`, so the closing summary sent the operator to the sandbox's
+  git identity.
+- **The verify log keeps the first red beside the re-run's**: a red verify's re-run replaced the
+  log, so the failure it was re-run for could not be compared with the second.
+- **A project's first run names its largest measured cause** when one took a fifth of its time or
+  more (a gates-slot wait, say), as a run with an estimate does; with no estimate the line was
+  never printed.
+- **A red landing's gates are no longer counted as a landing** in the typical landing time the
+  estimate and the status view read.
+- **A follow-on turn past level 2 or 3's turn cap reads `turn 3`**, not `turn 3/2` in the status
+  view and `autonomy 2 (turn 3 of 2)` in the closing summary.
+- **The Claude Code mod's keep-warm tests have a minute each**: the longest takes about 17 s on a
+  quiet machine, so their 20 s failed every gate of a run on a busy host.
 - **The run's `Lean warning` and `sandcastle lean` no longer count CODEOWNERS or the project's own
   `.sandcastle/` files** as readers of a hidden path: a hidden `.mcp.json` that only CODEOWNERS
   named printed the warning at every run's start. The run's warning now names the files that

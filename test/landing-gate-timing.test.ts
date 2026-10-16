@@ -110,6 +110,17 @@ test("typicalTimes: a ticket that never landed, or from before landings were tim
   assert.equal(typicalTimes({ root, name: "fixture" } as Project)[LANDING_GATES], 5 * 60);
 });
 
+test("typicalTimes: a red landing's gates are no landing, and a second attempt that landed is", () => {
+  const root = mkdtempSync(join(TMP, "estimate-"));
+  mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
+  const red = [line({ issue: "1", phase: LANDING_GATES, ms: 2 * MIN }), line({ issue: "1", phase: LANDING, ms: 2 * MIN, ok: false, result: "red" })];
+  writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), red.join("\n") + "\n");
+  assert.equal(typicalTimes({ root, name: "fixture" } as Project)[LANDING_GATES], undefined);
+  const again = [...red, line({ issue: "1", phase: LANDING_GATES, ms: 3 * MIN }), line({ issue: "1", phase: LANDING, ms: 3 * MIN, ok: true, result: "merged" })];
+  writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), again.join("\n") + "\n");
+  assert.equal(typicalTimes({ root, name: "fixture" } as Project)[LANDING_GATES], 5 * 60);
+});
+
 test("18 tickets, 9 sandboxes: the landings in a row set the time, whatever the gate slots", () => {
   const p = project();
   // Sandbox-bound: 2 rounds of 10m. Landings: 18 x 5m on one worker.

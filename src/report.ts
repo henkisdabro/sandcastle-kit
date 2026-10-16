@@ -1087,17 +1087,21 @@ const LARGE_CAUSE = 0.2;
  * The run's time and tokens beside the estimate it was given, when either is more than twice off, and for a run that took
  * more than twice its estimate the largest causes the record can measure (a minute or more each, largest first): the time
  * paused, held below its ask beside another run, the waits for gates and sandbox slots, and the re-runs and repairs. A run
- * inside its estimate still gets the causes when the largest is a fifth of its time or more (`LARGE_CAUSE`). The estimate
- * comes from the record (a file in a repository): only finite positive figures count. None for a run still going, which
- * has neither its time nor its tokens yet.
+ * inside its estimate still gets the causes when the largest is a fifth of its time or more (`LARGE_CAUSE`), and so does a
+ * run with no estimate (a project's first): its slot waits are as real. The estimate comes from the record (a file in a
+ * repository): only finite positive figures count. None for a run still going, which has neither its time nor its tokens yet.
  */
 const estimateLines = (f: Facts, end: string | undefined): string[] => {
   const est = f.estimate;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
   const estMs = num(est?.ms?.mid);
-  if (!est || f.live || f.dryRun || !end || estMs === undefined) return [];
+  if (f.live || f.dryRun || !end) return [];
   const took = Date.parse(end) - Date.parse(f.started);
   if (!(took > 0)) return [];
+  if (!est || estMs === undefined) {
+    const causes = causesOf(f);
+    return causes.length > 0 && causes[0]!.ms >= LARGE_CAUSE * took ? [causesLine(causes)] : [];
+  }
   const off = (actual: number, estimated: number | undefined) => estimated !== undefined && (actual / estimated > SLOW || actual / estimated < 1 / SLOW);
   const t = f.tokenTotal;
   const inTokens = t ? t.input + t.cacheWrite + t.cacheRead : 0;
