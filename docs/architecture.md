@@ -1284,8 +1284,10 @@ check (the same one `HostGit.write` makes before its write) is the last thing be
 `git merge --ff-only`; `sandcastle land`, which has no `HostGit`, gets it too
 (`test/landing-filter-before-ff.test.ts`).
 
-**Before every sandbox opens**: Sandcastle's open runs host git in the project -
-`git worktree prune` and `list`, then `git worktree add`, whose checkout writes every file out
+**Before every sandbox opens**: the kit's `git worktree prune` runs inside the host-git mutex
+(`pruneWorktrees`, `openOrAbandon`, below), and Sandcastle's open then runs host git in the project -
+`git worktree list`, then `git worktree add` (the kit's own add has usually made the worktree by
+then), whose checkout writes every file out
 through the filters `.git/config` and `info/attributes` name, or, in a kit worktree it reuses,
 `git status` (and, unpatched, `git fetch` and `git merge --ff-only`, below) - so a filter another
 sandbox planted in the shared `.git` since the last check would run there, past the pins, which hold
@@ -1319,6 +1321,19 @@ wanted. `test/sandcastle-no-origin-refresh.test.ts` reads the installed `dist` a
 is back, so an upgrade that loses the patch is loud; make the patch again with `pnpm patch` and
 `pnpm patch-commit` on an upgrade, and remove it once Sandcastle has an option to skip the origin
 refresh.
+A third change drops the `pruneStale` call in `createSandbox`: it ran a host prune of worktree
+records outside the mutex, beside a landing's ref write, then re-added a worktree whose directory a
+person had removed (its record still listed, so the kit's add took it for taken) with Sandcastle's
+own add, also outside the mutex, and deleted every directory under `.sandcastle/worktrees/` that git
+did not list - which the kit's rule, that an add git refuses leaves what was in the way, never
+wanted.
+The kit prunes itself instead: `pruneWorktrees` (`src/guard.ts`) runs `git worktree prune` and
+nothing else, inside `openOrAbandon`'s `exclusive`, before the read of the worktrees there are and
+the add, so a removed worktree's record is cleared and the add re-creates it (git never prunes a
+locked worktree, so every live sandbox's record stays, `src/worktree-lock.ts`), and an unlisted
+directory is left for a person.
+`test/sandcastle-open-no-prune.test.ts` reads the installed `dist` for the call, as the test above
+does for the origin refresh; `test/sandbox-open-serialised.test.ts` drives the kit's prune.
 The patch also raises `PROMPT_EXPANSION_TIMEOUT_MS` from 30 s to 120 s, so `gh-retry.sh`'s waits can
 ride out a GitHub 5xx that lasts a minute; `test/gh-retry.test.ts` holds the constant above the
 script's waits.
@@ -1410,7 +1425,7 @@ pipeline's cut of a stale branch in a kept worktree (`cutFromBase`'s `git status
 `git merge --ff-only`), and before Sandcastle's open reuses a kit worktree that holds the ticket's
 branch or sits at its path (its host `git status`; the `git fetch` and `git merge --ff-only` that
 follow it unpatched are patched out, above), at the setup and at a resume; a listed worktree whose
-directory is gone is no tampering, since no git runs there and Sandcastle's open prunes its record.
+directory is gone is no tampering, since no git runs there and the kit's prune before the add (`openOrAbandon`) clears its record.
 The same check refuses a repository nested in the worktree (`nestedGit`): a host `git status`
 recurses into a gitlink - a nested `.git` directory, or a `.git` file naming a git directory under
 `.git/modules/` - and reads that repository's own config and attributes, past the pins, and a flag
@@ -1562,7 +1577,7 @@ opened, since a blocking read would hang the whole run.
   The kit's own `worktreeIsClean` also passes `--ignore-submodules=all`.
 
 What remains after the checks is the moment between the last one and the host git call -
-Sandcastle's close's `git status`, its open's `git worktree prune`, `list` and `add`, its reuse's
+Sandcastle's close's `git status`, its open's `git worktree list` and `add`, its reuse's
 status, fetch and fast-forward, the cut's status and fast-forward - in which another sandbox still
 running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the
 time Sandcastle takes to remove the stopped container before its `git status`; elsewhere

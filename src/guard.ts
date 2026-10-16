@@ -1356,6 +1356,20 @@ export const addWorktree = async (project: Project, branch: string, limitMs = wo
 };
 
 /**
+ * `git worktree prune` in the project: drops the record of a worktree whose directory is gone, so the add that follows
+ * does not take it for a worktree that exists. Git never prunes a locked worktree, so every live sandbox's record
+ * stays (`src/worktree-lock.ts`). It writes `.git/worktrees/`, so it runs inside the host-git mutex. A failure is
+ * ignored: the add that follows says what is wrong with the repository.
+ */
+export const pruneWorktrees = (project: Project): void => {
+  try {
+    sh("git", ["worktree", "prune"], project.root);
+  } catch {
+    /* the add says what is wrong */
+  }
+};
+
+/**
  * Opens a sandbox (Sandcastle's `createSandbox`, passed as `open`) and, when the open fails, removes what it left. A
  * start that runs out of time (a loaded machine) throws with no handle to close: the container keeps running, the
  * worktree stays locked by the worktree hook (so Sandcastle's own clean-up of it fails) and the branch stays. Nothing
@@ -1368,18 +1382,26 @@ export const addWorktree = async (project: Project, branch: string, limitMs = wo
  * another sandbox planted since would run there. Never throws from the clean-up: the open's own error is the one the caller sees, a container-start timeout as an `OperatorError` that names the cause and the fix.
  *
  * `exclusive` is the run's host git mutex (`HostGit.exclusive`; a caller with no other host git at the same moment
- * passes none). The worktree add and the clean-up's `git worktree remove` and `git branch -D` run inside it, so no
- * landing's ref write meets them; the container start does not, or a landing would wait behind a start of up to 120 s.
+ * passes none). The prune of worktree records (`pruneWorktrees`, which Sandcastle's `createSandbox` ran outside the
+ * mutex until the pnpm patch of #711 dropped it), the read of the worktrees there already are and the worktree add run
+ * inside it in that order, as do the clean-up's `git worktree remove` and `git branch -D`, so no landing's ref write
+ * meets them; the container start does not, or a landing would wait behind a start of up to 120 s. The read comes
+ * after the prune, so a record the prune cleared (a worktree whose directory a person removed) and the add then
+ * re-creates is the open's own, and a failed open removes it. A directory under `.sandcastle/worktrees/` that git
+ * does not list is left where it is: the orphan sweep Sandcastle ran beside its prune is gone.
  */
 export const openOrAbandon = async <T>(project: Project, branch: string, open: () => Promise<T>, exclusive: Exclusive = (fn) => Promise.resolve().then(fn)): Promise<T> => {
   let before: string[] = [];
   try {
-    before = worktreesOf(project, branch);
-  } catch {
-    /* the open will say what is wrong with the repository */
-  }
-  try {
-    await exclusive(() => addWorktree(project, branch));
+    await exclusive(async () => {
+      pruneWorktrees(project);
+      try {
+        before = worktreesOf(project, branch);
+      } catch {
+        /* the add will say what is wrong with the repository */
+      }
+      await addWorktree(project, branch);
+    });
     return await open();
   } catch (error) {
     try {

@@ -1598,8 +1598,8 @@ const keptWorktreeOf = (project: Project, branch: string): string | undefined =>
 
 /**
  * Every worktree git lists under the project's `.sandcastle/worktrees/`, with the branch it has checked out ("" for none).
- * Not one whose directory is gone (a person removed it): no git runs there, Sandcastle's open prunes its record, and
- * its record check would read the missing `.git` file as tampering.
+ * Not one whose directory is gone (a person removed it): no git runs there, the kit's prune before the add
+ * (`openOrAbandon`) clears its record, and its record check would read the missing `.git` file as tampering.
  */
 const kitWorktrees = (project: Project): { path: string; branch: string }[] => {
   const under = [...new Set([project.root, realpathSync(project.root)])].map((r) => join(r, ".sandcastle", "worktrees") + sep);

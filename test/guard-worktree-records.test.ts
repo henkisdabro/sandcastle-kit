@@ -281,7 +281,7 @@ const harness = (o: { act?: (root: string, wt: string) => void; earlier?: (root:
   const closed: string[] = [];
   const open = async (branch: string): Promise<Box> => {
     const path = join(root, ".sandcastle", "worktrees", branch.replace(/\//g, "-"));
-    // Sandcastle's open prunes the records of worktrees whose directory is gone (a scratch repo: never the project's).
+    // The kit's prune before the add (`openOrAbandon`) clears the records of worktrees whose directory is gone (a scratch repo: never the project's).
     git(root, "worktree", "prune");
     if (existsSync(path)) spawnSync("git", ["status", "--porcelain"], { cwd: path });
     else if (spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: root }).status === 0) git(root, "worktree", "add", "-q", path, branch);
@@ -459,7 +459,7 @@ test("a kept worktree whose record an earlier run changed is not reused: the run
   assert.ok(h.tampered.has(ID));
 });
 
-test("a kept worktree whose directory a person removed is no tampering: the run opens a fresh one, as Sandcastle's prune lets it", async () => {
+test("a kept worktree whose directory a person removed is no tampering: the run opens a fresh one, as the kit's prune lets it", async () => {
   // git still lists the record, as prunable; no git can run in a directory that is gone.
   for (const behind of [false, true]) {
     const h = harness({ earlier: earlierRun({ behind, tamper: (_root, wt) => rmSync(wt, { recursive: true, force: true }) }) });
