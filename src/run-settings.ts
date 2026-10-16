@@ -2,7 +2,8 @@
 // spends. One pure resolver reads the environment, the project config and the personal machine
 // settings, so `sandcastle run` and `sandcastle status` cannot disagree about the next run; each
 // later setting is one more field here. The precedence never changes: the environment beats the
-// project config, which beats the default.
+// project's `.sandcastle/config.local.json` (a clone's own, untracked), which beats `.sandcastle/config.ts`,
+// which beats the default; `loadProject` merges the two files, so `project` below is the merged one.
 import type { RunSettings } from "../mod/hooks/run-record.ts";
 import { type CrossReviewSetting, crossReviewSetting } from "./agents.ts";
 import { autonomyLevel, type Level, turnCap } from "./autonomy.ts";
@@ -13,7 +14,7 @@ import { parseUsagePause, parseUsageStop } from "./usage.ts";
 
 export type SettingsSources = {
   env: Record<string, string | undefined>;
-  /** The project's `.sandcastle/config.ts`, as far as settings are concerned. */
+  /** The project's `.sandcastle/config.ts` with `.sandcastle/config.local.json` merged over it, as far as settings are concerned. */
   project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown }; usagePause?: unknown; keepWarm?: unknown };
   /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency. */
   machine: Record<string, unknown>;

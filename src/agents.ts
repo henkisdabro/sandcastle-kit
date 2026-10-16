@@ -28,7 +28,7 @@ import type { ProjectConfig } from "./config.ts";
 import { cutAtWord, OperatorError, promptExpansionLine } from "./errors.ts";
 import { CODEX_RATE_LIMITS_READOUT } from "./usage.ts";
 
-const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type Effort = (typeof EFFORTS)[number];
 
 const effort = (name: string, configured?: string, allowed: readonly string[] = EFFORTS, env: Record<string, string | undefined> = process.env): Effort => {
