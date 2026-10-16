@@ -27,7 +27,7 @@ import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { format } from "node:util";
-import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
@@ -326,21 +326,26 @@ const ownLineMatches = (text: string, tag: string, withAttrs = false): { attrs: 
   return [...masked.matchAll(new RegExp(`^[ \\t]*${open}((?:(?!<${tag}[ \\t>])[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => ({ attrs: unmask(m[1] ?? ""), text: unmask(m[2]) }));
 };
 const ownLineTags = (text: string, tag: string): string[] => ownLineMatches(text, tag).map((m) => m.text);
+// A tag's text, or a report's item, as one line: whitespace folded; empty and the echoed placeholder "..." are no line.
+const oneLine = (raw: string | undefined): string | undefined => {
+  const said = raw?.replace(/\s+/g, " ").trim();
+  return said && said !== "..." ? said : undefined;
+};
 const lineOf = (tag: string) => (text: string): string | undefined => {
-  const said = ownLineTags(text, tag).at(-1)?.replace(/\s+/g, " ").trim();
-  return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
+  const said = oneLine(ownLineTags(text, tag).at(-1));
+  return said ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 export const ungatedOf = lineOf("ungated");
 // An agent's `<unmet>...</unmet>` line: the acceptance criterion it knowingly left undone. Read the same way.
 // `<unmet who="person">...</unmet>` says the remainder needs a person (access, a deploy, a human-only file, a
 // decision): the note keeps that as `PERSON_MARK` in front, so the run record's `unmet` carries it to the
 // report and the status view, and no other run is spent on it (`needsDecision`).
+const unmetNote = (said: string, byPerson: boolean) => cutAtWord(byPerson && !said.startsWith(PERSON_MARK) ? PERSON_MARK + said : said, UNGATED_MAX);
 export const unmetOf = (text: string): string | undefined => {
   const last = ownLineMatches(text, "unmet", true).at(-1);
-  const said = last?.text.replace(/\s+/g, " ").trim();
-  if (!last || !said || said === "...") return undefined;
-  const byPerson = /(^|\s)who\s*=\s*(["']?)person\2(\s|$)/i.test(last.attrs);
-  return cutAtWord(byPerson && !said.startsWith(PERSON_MARK) ? PERSON_MARK + said : said, UNGATED_MAX);
+  const said = oneLine(last?.text);
+  if (!last || !said) return undefined;
+  return unmetNote(said, /(^|\s)who\s*=\s*(["']?)person\2(\s|$)/i.test(last.attrs));
 };
 // The resolver's `<stray path="...">reason</stray>` lines: each cleanly merged file it had to change, and why. Read like
 // every own-line tag, so a tag named in prose or code is no claim; a line with no path or no reason names nothing.
@@ -401,13 +406,15 @@ const saysNone = /^(?:none|n\/a)\.?$/i;
 const listItem = /^[ \t]*(?:[-*+•]|\d+[.)])[ \t]/m;
 const commitSha = /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/;
 // `why` has one entry per dropped tag, in order: what the closing summary says of it (`droppedWords`).
-export const changelogScan = (text: string): { lines: string[]; why: string[]; none?: true } => {
+export type ChangelogScan = { lines: string[]; why: string[]; none?: true };
+// The rules for each text an agent gave as a changelog line, whether it came in a tag or as an item of a report.
+const judgeChangelog = (raws: readonly string[]): ChangelogScan => {
   const lines: string[] = [];
   const why: string[] = [];
   let none = false;
-  for (const raw of ownLineTags(text, "changelog")) {
-    const said = raw.replace(/\s+/g, " ").trim();
-    if (!said || said === "...") continue;
+  for (const raw of raws) {
+    const said = oneLine(raw);
+    if (!said) continue;
     if (saysNone.test(said)) none = true;
     else if (said.length > CHANGELOG_MAX) why.push(`too long (${said.length} characters)`);
     else if (listItem.test(raw)) why.push("spans list items");
@@ -416,6 +423,7 @@ export const changelogScan = (text: string): { lines: string[]; why: string[]; n
   }
   return { lines, why, ...(none ? { none: true as const } : {}) };
 };
+export const changelogScan = (text: string): ChangelogScan => judgeChangelog(ownLineTags(text, "changelog"));
 export const changelogRead = (text: string): { lines: string[]; dropped: number; none?: true } => {
   const { lines, why, none } = changelogScan(text);
   return { lines, dropped: why.length, ...(none ? { none } : {}) };
@@ -435,8 +443,8 @@ export type ChangelogDrops = { count: number; why: string[] };
 // implementer gave - and its drops are added. A pass that gives none (no tag, or only `none`) leaves the
 // earlier set standing and adds its drops. Two lines of one pass are two changes, however alike their words ("`size --json`
 // prints ..." and "`status --json` prints ...").
-export const addChangelog = (have: string[], text: string, narrow = false, drops?: ChangelogDrops): number => {
-  const read = changelogScan(text);
+export const addChangelog = (have: string[], text: string | ChangelogScan, narrow = false, drops?: ChangelogDrops): number => {
+  const read = typeof text === "string" ? changelogScan(text) : text;
   const replaces = !!read.lines.length && !narrow;
   if (drops) {
     if (replaces) {
@@ -480,14 +488,66 @@ const titleSplit = (said: string): number => {
   }
   return said.indexOf(" - ");
 };
-export const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
-  ownLineTags(text, "followup").flatMap((raw) => {
-    const said = raw.replace(/\s+/g, " ").trim();
-    if (!said || said === "..." || said === "title - one line of evidence") return [];
+const readFollowUps = (raws: readonly string[]): Omit<FollowUp, "from" | "phase">[] =>
+  raws.flatMap((raw) => {
+    const said = oneLine(raw);
+    if (!said || said === "title - one line of evidence") return [];
     const at = titleSplit(said);
     const title = (at > 0 ? said.slice(0, at) : said).trim();
     return [{ title: cutAtWord(title, FOLLOWUP_TITLE_MAX), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
   });
+export const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] => readFollowUps(ownLineTags(text, "followup"));
+
+/** What a Claude pass said of its work, whether it said it in tags or in a report (`saidOf`). */
+export type Said = { unmet?: string; ungated?: string; changelog: ChangelogScan; followups: Omit<FollowUp, "from" | "phase">[] };
+
+/**
+ * What a pass's final message said: its `unmet`, `ungated`, changelog read and follow-ups. With no report (REPORT_SCHEMA
+ * off, or no valid report came) it reads the whole `text` as the tag readers always did. With one, the report stands for
+ * the pass's last iteration, and the iterations before it - `text` with the last one's `output` taken off its end - are
+ * still read for the tags they left: a follow-up or a changelog line an earlier iteration named is still filed. `unmet`
+ * and `ungated` are the report's alone (an earlier iteration's unmet criterion may be finished by the last). A text that
+ * does not end with the output is read whole, as a line read twice costs less than one lost.
+ */
+export const saidOf = (text: string, facts?: Pick<ReportFacts, "report" | "output">): Said => {
+  const report = facts?.report;
+  if (!facts || !report) return { unmet: unmetOf(text), ungated: ungatedOf(text), changelog: changelogScan(text), followups: followUpsOf(text) };
+  const earlier = text.endsWith(facts.output) ? text.slice(0, text.length - facts.output.length) : text;
+  const items = report.unmet.assessed ? report.unmet.items.flatMap((i) => { const t = oneLine(i.text); return t ? [{ who: i.who, text: t }] : []; }) : [];
+  const unmet = items.length ? unmetNote(items.map((i) => i.text).join("; "), items.some((i) => i.who === "person")) : undefined;
+  const ungatedItems = report.ungated.flatMap((u) => oneLine(u) ?? []);
+  const changelog = judgeChangelog([...ownLineTags(earlier, "changelog"), ...report.changelog]);
+  return {
+    unmet,
+    ungated: ungatedItems.length ? cutAtWord(ungatedItems.join("; "), UNGATED_MAX) : undefined,
+    // An empty list is the report's answer `none`, as `<changelog>none</changelog>` is.
+    changelog: report.changelog.length ? changelog : { ...changelog, none: true },
+    followups: readFollowUps([...ownLineTags(earlier, "followup"), ...report.followups]),
+  };
+};
+
+/** One pass's report as the step's timings line records it (`reportTiming`). */
+export type ReportTiming = { came: "report" | "tags" | "missing"; missing?: string; tries: number; turns?: number; gapMs?: number; silenceMs?: number; cutOff?: true };
+
+/**
+ * Whether the report came, for the step's timings line. `failed` is `agentFailure`'s text for a pass that threw: it came
+ * to nothing (`missing: failed: ...`) unless the capture saw the retries run out, which is the better reason. With no
+ * report, `came` is `tags` when the last iteration's output held an own-line tag of the kinds the report replaces, and
+ * `missing` keeps the reason either way.
+ */
+export const reportTiming = (facts: ReportFacts, failed?: string): ReportTiming => {
+  const common = {
+    tries: facts.tries,
+    ...(facts.turns !== undefined ? { turns: facts.turns } : {}),
+    ...(facts.gapMs !== undefined ? { gapMs: facts.gapMs } : {}),
+    ...(facts.silenceMs !== undefined ? { silenceMs: facts.silenceMs } : {}),
+    ...(facts.cutOff ? { cutOff: true as const } : {}),
+  };
+  if (failed !== undefined) return { came: "missing", missing: facts.missing === "retries exhausted" ? facts.missing : `failed: ${failed}`, ...common };
+  if (facts.report) return { came: "report", ...common };
+  const tagged = ["unmet", "changelog", "followup", "ungated"].some((tag) => ownLineMatches(facts.output, tag, tag === "unmet").length > 0);
+  return { came: tagged ? "tags" : "missing", missing: facts.missing ?? "no report", ...common };
+};
 // A reviewer that names a known gap in prose and files it as neither a `<followup>` nor an `<unmet>` line
 // loses it: nobody reads the message. The words that name one, as a person writes them ("left alone",
 // "remains", "a gap", "not fixed"); the wording of the prompts alone did not hold.
@@ -597,8 +657,8 @@ const isLeadIn = (sentence: string): boolean => {
 // brings the sentences after it in its unit instead, in order, within the same size.
 // A gap still open, said anywhere in the message: it outweighs an opening that says the gap was fixed.
 const STILL_OPEN = /\b(?:remains?|not\s+(?:yet\s+)?(?:fixed|addressed|handled)|left\s+(?:alone|unfixed|undone)|unfixed|still\s+(?:fails?|broken|wrong|open))\b/i;
-const gapOf = (text: string): string | undefined => {
-  if (followUpsOf(text).length || unmetOf(text)) return undefined;
+export const gapOf = (text: string, filed: Said = saidOf(text)): string | undefined => {
+  if (filed.followups.length || filed.unmet) return undefined;
   const all = sentencesOf(text);
   // A review that opens by saying it found a gap and fixed it ("I found one gap in the implementer's work and fixed it.")
   // then describes that gap under a bold lead-in: a fixed gap, not one left, unless a sentence says one is still open.
@@ -1509,6 +1569,8 @@ export type PipelineContext = {
   followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[]; namedByOthers?(from: string): NamedFollowUp[] };
   /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`runTicketsView`). None, and it is shown none. */
   tickets?: readonly { id: string; title: string }[];
+  /** With REPORT_SCHEMA=1: where a Claude pass leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
+  reportTimings?: Map<string, ReportTiming>;
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
   /** Each ticket's waits inside `took` that are not its work - a gates slot, another ticket's fix - left out of its usual time. */
@@ -1922,14 +1984,21 @@ export const createPipeline = (ctx: PipelineContext) => {
         const logFrom = logSize(opts.logging);
         if (opts.logging?.type === "file" && typeof opts.logging.path === "string") passStarts.set(basename(opts.logging.path), logFrom);
         try {
-          const r = await sampling(sandbox, "agent", () => sandbox.run(opts))
+          // REPORT_SCHEMA=1: the agent's capture of the report, ended as the pass returns or throws.
+          const capture = passReport(opts.agent);
+          const r = await sampling(sandbox, "agent", () => sandbox.run(opts).finally(() => capture?.finish()))
             .then((r) => {
-              for (const f of followUpsOf(r.stdout ?? "")) ctx.followUps?.push({ ...f, from: issue.id, phase });
-              return r;
+              const facts = capture?.read();
+              if (facts) ctx.reportTimings?.set(issue.id, reportTiming(facts));
+              const said = saidOf(r.stdout ?? "", facts);
+              for (const f of said.followups) ctx.followUps?.push({ ...f, from: issue.id, phase });
+              return Object.assign(r, { said });
             })
             .finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
           return parkedInStep > parkedBefore ? Object.assign(r, { waitMs: parkedInStep - parkedBefore }) : r;
         } catch (error) {
+          const facts = passReport(opts.agent)?.read();
+          if (facts) ctx.reportTimings?.set(issue.id, reportTiming(facts, agentFailure(error)));
           logExpansionFailure(opts.logging, error);
           // The cross-review is a second opinion that never stopped a run, so its limit is not waited out either.
           // Without a juncture there is nothing to park at, and a pass run again at once would only fail again.
@@ -2274,10 +2343,10 @@ export const createPipeline = (ctx: PipelineContext) => {
       // The implementer's lines come first; a later full review that gives lines restates the branch's whole
       // set and replaces them - and the tags dropped from the set it replaced - a narrow pass adds its own
       // (see addChangelog).
-      const noteChangelog = (text: string | undefined, narrow = false) => {
-        if (!project.changelog || !text) return;
-        if (changelogScan(text).none) changelogSaidNone = true;
-        addChangelog(changelog, text, narrow, drops);
+      const noteChangelog = (said: Said | undefined, narrow = false) => {
+        if (!project.changelog || !said) return;
+        if (said.changelog.none) changelogSaidNone = true;
+        addChangelog(changelog, said.changelog, narrow, drops);
       };
       // What the agents knowingly left undone. The implementer's word stands only until a full
       // review has read the branch after it: the reviewer may have finished the criterion.
@@ -2340,12 +2409,12 @@ export const createPipeline = (ctx: PipelineContext) => {
         await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenComments ? { comments: commentCount(seenComments) } : {}) });
         reviewed = true;
         for (const r of [review, cross]) {
-          const u = r && ungatedOf(r.stdout);
+          const u = r?.said.ungated;
           if (u) ungated.push(u);
-          const g = r && gapOf(r.stdout);
+          const g = r && gapOf(r.stdout, r.said);
           if (g) gaps.push(g);
-          noteChangelog(r?.stdout);
-          const m = r && unmetOf(r.stdout);
+          noteChangelog(r?.said);
+          const m = r?.said.unmet;
           if (m) unmet.push(m);
         }
         await noteHead(issue.id, branch, agentsSaid());
@@ -2377,10 +2446,10 @@ export const createPipeline = (ctx: PipelineContext) => {
         await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
         reviewCommits += ownNow() - beforeResolved;
         noteReviewed(listResolved);
-        noteChangelog(resolved.stdout, true);
+        noteChangelog(resolved.said, true);
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
-        const u = unmetOf(resolved.stdout);
+        const u = resolved.said.unmet;
         if (u) unmet.push(u);
         await noteHead(issue.id, branch, agentsSaid());
       }
@@ -2410,8 +2479,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           }
           if (report) addReport(issue.id, "Implementer", report);
         }
-        noteChangelog(impl.stdout);
-        implUnmet = unmetOf(impl.stdout);
+        noteChangelog(impl.said);
+        implUnmet = impl.said.unmet;
         implSaid = implementerSaidOf(impl.stdout);
 
         // `impl.commits` counts what THIS run added, which is zero in two very
@@ -2442,10 +2511,10 @@ export const createPipeline = (ctx: PipelineContext) => {
           await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits = ownNow() - beforeMerged;
           noteReviewed(listMerged);
-          noteChangelog(merged.stdout, true);
+          noteChangelog(merged.said, true);
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
-          const u = unmetOf(merged.stdout);
+          const u = merged.said.unmet;
           if (u) unmet.push(u);
           await noteHead(issue.id, branch, agentsSaid());
         } else {
@@ -2744,12 +2813,12 @@ export const createPipeline = (ctx: PipelineContext) => {
           await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits += ownNow() - beforeAfter;
           noteReviewed(listAfter);
-          const u = ungatedOf(after.stdout);
+          const u = after.said.ungated;
           if (u) ungated.push(u);
-          const g = gapOf(after.stdout);
+          const g = gapOf(after.stdout, after.said);
           if (g) gaps.push(g);
-          noteChangelog(after.stdout, true);
-          const m = unmetOf(after.stdout);
+          noteChangelog(after.said, true);
+          const m = after.said.unmet;
           if (m) unmet.push(m);
           await noteHead(issue.id, branch, agentsSaid());
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
@@ -3171,6 +3240,8 @@ export const burndown = async (
   // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
   const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
+  // With REPORT_SCHEMA=1: whether the last Claude pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
+  const reportTimings = new Map<string, ReportTiming>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
   // The run's own count of tokens (`createTokenCount`), settled against the usage watch, which is made below.
@@ -3231,6 +3302,8 @@ export const burndown = async (
       const { peakContext, kept, note: tokensNote } = count.settled(issue, counted);
       if (issue && peakContext) run.ticket(issue, { peakContext: peakContexts(run.tickets()[issue]?.peakContext, phase, peakContext) });
       active.delete(issue);
+      const reported = reportTimings.get(issue);
+      reportTimings.delete(issue);
       const m = model?.();
       const line = {
         ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ...(times ?? withQueued({ ms: Date.now() - since }, queuedMs)), ok,
@@ -3240,6 +3313,7 @@ export const burndown = async (
         ...(touchPaths.has(issue) ? { touches: touchPaths.get(issue) } : {}),
         ...(bodyChars.has(issue) ? { bodyChars: bodyChars.get(issue) } : {}),
         ...(m ? { model: m } : {}),
+        ...(reported ? { report: reported } : {}),
         ...(tokens || kept ? { tokens: addTokens(tokens ?? NO_TOKENS, kept ?? NO_TOKENS) } : {}),
         ...(tokensNote ? { tokensNote } : {}),
         ...(peakContext ? { peakContext } : {}),
@@ -3642,6 +3716,7 @@ export const burndown = async (
     notes,
     followUps,
     tickets: candidates,
+    reportTimings,
     took,
     waited,
     ...(usagePause
