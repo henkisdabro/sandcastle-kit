@@ -31,6 +31,8 @@ export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolea
 export type Failure = { name: string; command: string; exitCode: number; output: string; tests?: string[] };
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
+// `loadHeldMs`: how long the run held this pass for the machine's CPU pressure (`LOAD_PAUSE`, src/load-pause.ts) before it asked for
+// a gates slot; never part of `waitMs`, which is the slot wait alone. Absent at 0.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
 // `pressureSome`, `pressureFull`: the highest memory pressure (`avg10`, percent) read in the sandbox while this pass ran; absent at 0 or where the kernel gives none.
 // `cpuSome`, `cpuSomeMean`: the sandbox cgroup's CPU pressure (`some` `avg10`), highest and mean of this pass, recorded and never judged;
@@ -44,6 +46,7 @@ export type GateRun = {
   failure?: Failure;
   failures: Failure[];
   waitMs?: number;
+  loadHeldMs?: number;
   peakMib?: number;
   pressureSome?: number;
   pressureFull?: number;
@@ -78,6 +81,8 @@ export const clip = (text: string, head = 8_000, tail = 24_000) =>
 export type GateProgress = {
   /** No gates slot was free; the run waits for one. */
   wait?: () => void;
+  /** The run holds this pass for the machine's CPU pressure (`LOAD_PAUSE`) before it asks for a gates slot; called once, when the hold begins. */
+  loadWait?: () => void;
   /** Gate `index` (0-based) starts. */
   gate?: (index: number, name: string) => void;
   /** Each gate's output is appended here as it arrives. */
@@ -159,6 +164,15 @@ const restoreGateChanges = async (sandbox: Parameters<typeof execGate>[0], befor
   return [...tracked, ...added];
 };
 
+// The run's hold for the machine's CPU pressure (`createLoadPause(...).hold`), set by `burndown()` for a turn and cleared when it ends:
+// module state, as every gate pass of a run - a ticket's, a landing's, the base's and the verify's - goes through `runGates`.
+// `sandcastle gates` and `sandcastle land` set none and are never held.
+type LoadHold = (label: string, onHold?: () => void) => Promise<void>;
+let loadHold: LoadHold | undefined;
+export const setLoadHold = (hold: LoadHold | undefined) => {
+  loadHold = hold;
+};
+
 // In order. A branch stops at the first red gate - its repair pass is fed
 // that one's output, and the rest would only cost time. `all` runs every
 // gate, for a report that says which of them are red, not just the first.
@@ -168,7 +182,16 @@ const restoreGateChanges = async (sandbox: Parameters<typeof execGate>[0], befor
 // `from` names the gate to start at, the first by default: a red gate's re-run (`PipelineContext.regate`) goes on
 // from the red one, in config order, since the gates before it already passed on this tree. The log and the
 // progress keep the configured numbering (`gate 2/3`), and a name that is no gate starts at the first.
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim) => {
+export const runGates = async (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim): Promise<GateRun> => {
+  // Held for the machine's CPU pressure before the pass asks for its gates slot, so the hold is no part of the slot wait.
+  let held = false;
+  const heldSince = Date.now();
+  await loadHold?.(label, () => {
+    held = true;
+    progress.loadWait?.();
+  });
+  const loadHeldMs = held ? Math.max(1, Date.now() - heldSince) : 0;
+  const loaded = loadHeldMs ? { loadHeldMs } : {};
   const asked = Date.now();
   const startAt = (name?: string) => Math.max(0, project.gates.findIndex((g) => g.name === name));
   const log = progress.log;
@@ -225,10 +248,11 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const rewrote = await restoreGateChanges(sandbox, before);
     return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...cpuFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   };
-  return withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
+  return await withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
+    if (log && loadHeldMs >= 1000) appendFileSync(log, `# held ${Math.round(loadHeldMs / 1000)}s for machine load\n`);
     if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
     const began = Date.now();
     const first = await pass(startAt(from));
@@ -238,7 +262,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     // The red gate's one re-run (`PipelineContext.regate`) is inside this slot: a second `withSlot` would queue behind
     // every other run's gates again, minutes for a re-run meant to find out whether the machine was only busy. The
     // wait is the first run's, so the re-run records none. Not after a timeout, which is never re-run or repaired.
-    if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return { ...first, waitMs };
+    if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return { ...first, waitMs, ...loaded };
     progress.again?.(red.name);
     const rerunBegan = Date.now();
     const rerun = await pass(startAt(red.name));
@@ -252,13 +276,13 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
       const third = await pass(startAt(second.name));
       const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? []), ...(third.rewrote ?? [])])];
       // The chain: the third run's result, then the re-run (with its `ms`), then the first red run (with the wait).
-      return { ...third, gates: [...first.gates.slice(0, redAt), ...third.gates], waitMs, rerunOf: { ...rerun, ms: rerunMs, rerunOf: { ...first, waitMs, ms: firstMs } }, ...(rewrote.length ? { rewrote } : {}) };
+      return { ...third, gates: [...first.gates.slice(0, redAt), ...third.gates], waitMs, ...loaded, rerunOf: { ...rerun, ms: rerunMs, rerunOf: { ...first, waitMs, ms: firstMs } }, ...(rewrote.length ? { rewrote } : {}) };
     }
     // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
     // A file the first run's gates rewrote is reported too: the re-run starts at the red gate, so the gate that
     // rewrote it may not run again, and the run's `gateRewrites` line would lose it.
     const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? [])])];
-    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) };
+    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, ...loaded, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) };
   }), progress.wait, undefined, priority, false, undefined, claim);
 };
 
@@ -728,14 +752,14 @@ export const gateRed = (result: unknown): string[] | undefined => {
  * only its own gates; the lines' `ms` sum to the step's. Every line after the first carries `rerun: true`, so a reader can
  * tell a re-run from a requeued ticket's second pass, which is no re-run.
  */
-export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, result: unknown): Record<string, unknown>[] => {
+export const timingLines = <L extends { ms: number; waitMs?: number; loadHeldMs?: number }>(line: L, result: unknown): Record<string, unknown>[] => {
   const r = result as GateRun | undefined;
   if (!r?.rerunOf || !Array.isArray(r.gates)) return [line];
   // The earlier runs, oldest first, then the result itself.
   const runs: (GateRun & { ms?: number })[] = [];
   for (let run: (GateRun & { ms?: number }) | undefined = r.rerunOf; run; run = run.rerunOf) runs.unshift(run);
   if (runs.some((run) => typeof run.ms !== "number")) return [line];
-  const { waitMs, ...rest } = line;
+  const { waitMs, loadHeldMs, ...rest } = line;
   // The later runs' figures, which an earlier run's line must not carry: absent there unless that run has its own.
   const { gates: _gates, peakMib: _peak, pressureSome: _some, pressureFull: _full, cpuSome: _cs, cpuSomeMean: _csm, cpuMachine: _cm, cpuMachineMean: _cmm, cpuEstimate: _ce, red: _red, ...common } = rest as Record<string, unknown>;
   let left = line.ms;
@@ -744,7 +768,7 @@ export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, 
     const ms = Math.min(Math.max(0, Math.round(run.ms!)), left);
     left -= ms;
     const redGates = gateRed(run);
-    return { ...common, ms, ...(i === 0 && waitMs ? { waitMs } : {}), ...(i > 0 ? { rerun: true } : {}), ok: false, gates: gateMs(run), peakMib: peakOf(run), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)), red: redGates?.length ? redGates : undefined };
+    return { ...common, ms, ...(i === 0 && waitMs ? { waitMs } : {}), ...(i === 0 && loadHeldMs ? { loadHeldMs } : {}), ...(i > 0 ? { rerun: true } : {}), ok: false, gates: gateMs(run), peakMib: peakOf(run), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)), red: redGates?.length ? redGates : undefined };
   });
   // The result's own gates: from the red gate on, the passes before it are the first run's.
   const first = runs[0];
@@ -753,14 +777,16 @@ export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, 
 };
 
 /**
- * The `ms` and `waitMs` of a step's timings line, given its elapsed time. A gate run's slot wait is
+ * The `ms`, `waitMs` and `loadHeldMs` of a step's timings line, given its elapsed time. A gate run's slot wait is
  * `waitMs`, not part of `ms`: a ticket that queued behind others for a slot once recorded the queue
- * as gate time, which `typicalTimes`, the status view's "twice the usual" age and the estimate read.
+ * as gate time, which `typicalTimes`, the status view's "twice the usual" age and the estimate read. Its hold for the
+ * machine's CPU pressure (`LOAD_PAUSE`) is `loadHeldMs`, out of `ms` the same way and never part of `waitMs`.
  */
-export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitMs?: number } => {
-  const w = (result as { waitMs?: unknown } | undefined)?.waitMs;
-  const waitMs = typeof w === "number" && w > 0 ? Math.min(Math.round(w), elapsed) : 0;
-  return { ms: elapsed - waitMs, ...(waitMs ? { waitMs } : {}) };
+export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitMs?: number; loadHeldMs?: number } => {
+  const r = result as { waitMs?: unknown; loadHeldMs?: unknown } | undefined;
+  const waitMs = typeof r?.waitMs === "number" && r.waitMs > 0 ? Math.min(Math.round(r.waitMs), elapsed) : 0;
+  const loadHeldMs = typeof r?.loadHeldMs === "number" && r.loadHeldMs > 0 ? Math.min(Math.round(r.loadHeldMs), elapsed - waitMs) : 0;
+  return { ms: elapsed - waitMs - loadHeldMs, ...(waitMs ? { waitMs } : {}), ...(loadHeldMs ? { loadHeldMs } : {}) };
 };
 
 /**
@@ -768,9 +794,9 @@ export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitM
  * tickets ahead of its resolve before its `setup` step starts, so `elapsed` never held that wait, and a wait
  * left off the setup line showed nowhere at all.
  */
-export const withQueued = (times: { ms: number; waitMs?: number }, queued: number | undefined): { ms: number; waitMs?: number } => {
+export const withQueued = <T extends { ms: number; waitMs?: number }>(times: T, queued: number | undefined): T => {
   const q = typeof queued === "number" && queued > 0 ? Math.round(queued) : 0;
-  return q ? { ms: times.ms, waitMs: (times.waitMs ?? 0) + q } : times;
+  return q ? { ...times, waitMs: (times.waitMs ?? 0) + q } : times;
 };
 /**
  * The phase of a landing gate's timings line (a tree merged in the landing worker's sandbox). Apart from
@@ -1194,7 +1220,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   );
   // For the run's "base gates" timings line, as verify's carries them: per-gate times, the slot wait
   // (out of `ms`) and the sandbox's peak and memory pressure.
-  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)) };
+  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.loadHeldMs ? { loadHeldMs: run.loadHeldMs } : {}), ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)) };
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
