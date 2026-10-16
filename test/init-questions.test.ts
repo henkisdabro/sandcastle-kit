@@ -1,5 +1,5 @@
-// The three questions `sandcastle init` leaves for rules.md (generated files, paths never to
-// touch, the drift gate): the scaffolding that names them, the commented `generated` example,
+// The four questions `sandcastle init` leaves for rules.md (generated files, paths never to
+// touch, the drift gate, the related tests): the scaffolding that names them, the commented `generated` example,
 // the closing message, and the skill's init step that asks them without gaining a numbered step
 // (update.md refers to steps 4 and 6 by number). Temp dirs only: no Docker, no model, no network.
 //
@@ -34,10 +34,10 @@ const project = (t: import("node:test").TestContext) => {
   return { root, logs: logs.join("\n") };
 };
 
-test("rules.md names the three questions and stays one HTML comment", (t) => {
+test("rules.md names the four questions and stays one HTML comment", (t) => {
   const { root } = project(t);
   const rules = read(join(root, ".sandcastle/rules.md")).trim();
-  for (const word of ["Generated files", "Do not touch", "Drift"]) assert.ok(rules.includes(word), word);
+  for (const word of ["Generated files", "Do not touch", "Drift", "Related tests"]) assert.ok(rules.includes(word), word);
   assert.ok(rules.startsWith("<!--"));
   assert.ok(rules.endsWith("-->"));
   assert.equal(rules.indexOf("-->"), rules.length - 3, "no other -->");
@@ -51,9 +51,10 @@ test("config.ts holds the commented generated example and no generated key", asy
   assert.ok(!("generated" in config));
 });
 
-test("init prints the pointer to the three questions", (t) => {
+test("init prints the pointer to the four questions", (t) => {
   const { logs } = project(t);
-  assert.ok(logs.includes("answer the three questions in .sandcastle/rules.md"));
+  assert.ok(logs.includes("answer the four questions in .sandcastle/rules.md"));
+  assert.ok(logs.includes("related tests"));
 });
 
 const initSection = read(join(kit, "skill/init.md"));
@@ -61,7 +62,7 @@ const initSection = read(join(kit, "skill/init.md"));
 test("init.md asks the questions and keeps its eight numbered steps", () => {
   assert.ok(initSection.length > 0, "init section not found");
   const flat = initSection.replace(/\s+/g, " ");
-  for (const word of ["generated", "protectedPaths", "A gate for generated files", "question tool"]) {
+  for (const word of ["generated", "protectedPaths", "A gate for generated files", "Related tests", "question tool"]) {
     assert.ok(flat.includes(word), word);
   }
   assert.equal(initSection.match(/^\d+\. /gm)?.length, 8);

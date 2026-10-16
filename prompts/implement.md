@@ -115,8 +115,14 @@ For a change in behaviour:
 5. **Name each test after what a caller sees,** not after the function it calls.
 
 While working, run single test files and the typecheck. Before you finish, run the typecheck gate
-and the tests your change touches or that cover it, each once. Do not run the full suite yourself:
-the orchestrator runs every gate right after you exit. A loop that runs most of the test files one
+and the tests your change touches or that cover it, each once. To find the tests that cover a
+change, `git grep -l` the names of the changed modules and functions over the test directories, and
+run every file it lists: a test file you did not know of often imports the module. A test that
+scans the whole repo (a ratchet, a count baseline, a lint-like check over every file) covers a new
+file too. Where the project rules name a command for this, use it. Do not run the full suite
+yourself: the orchestrator runs every gate right after you exit. A project instruction to run the
+full suite or every gate before committing is met here by the orchestrator's gates: run only the
+tests that cover your change. A loop that runs most of the test files one
 at a time is the full suite run serially - slower, and it slows the gates beside it: when a change
 reaches nearly every test (a preload, a shared helper, a doc many tests read), leave that to the
 gates.
@@ -168,7 +174,9 @@ to omit it.
 
 If what is left needs a person and no agent can do it (access you do not have, a deploy, a file agents may
 not edit, a decision), open the line as `<unmet who="person">...</unmet>` instead: a plain `<unmet>` line is
-picked up again by the next run, which would spend an agent on work only a person can do.
+picked up again by the next run, which would spend an agent on work only a person can do. A step
+only a person can do is an `<unmet who="person">` line even when the ticket already says so: prose
+in your message or the code does not carry it.
 
 **A problem, limitation, risk or trade-off you judge outside the ticket** does not stay in the prose of
 your final message: the tracker does not read it, and the reviewer is shown the message, cut at about 4,000 characters, but files nothing from it. Put each one on a line of its own:
