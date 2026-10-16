@@ -140,7 +140,7 @@ import { confirmApiKey } from "./api-key.ts";
 import { startClock } from "./start-clock.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
@@ -400,8 +400,11 @@ try {
         return true;
       };
       for (let turn = 1; ; turn++) {
+        // The last turn's verify was red, likely load: this turn, a re-run or a follow-on, gates the base before any agent starts.
+        const gateBase = mustGateBase(lastFacts);
+        if (gateBase) console.log(`The merged ${project.baseBranch} was red, likely load - this turn gates it again before any agent starts.`);
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }

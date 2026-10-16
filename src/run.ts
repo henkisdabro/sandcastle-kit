@@ -950,6 +950,32 @@ export const typicalTimes = (project: Project, extra: number[] = [], slots?: num
 };
 
 /**
+ * Each gate's typical time in ms, for a red verify's slowness check (`likelyLoad`) when this turn's base gates did not run
+ * and no landing gated the tree: per gate name, the 75th percentile (`USUAL`) of its `ms` over the project's green
+ * `base gates` and `verify` lines (`ok: true`, with a `gates` object) of `timings.jsonl` (`timingsText`), through the window
+ * `typicalTimes` uses (`recentWindow`: the lines of a run with no ticket count a run each, so the newest three runs, widened to
+ * five). Empty with no such line: only the timeouts rule then judges.
+ */
+export const typicalGateMs = (timingsText: string, project: Pick<Project, "name">): Record<string, number> => {
+  const lines: { project?: string; run?: string; issue?: unknown; phase?: string; ok?: boolean; gates?: unknown }[] = [];
+  for (const raw of timingsText.split("\n").filter(Boolean)) {
+    try {
+      lines.push(JSON.parse(raw));
+    } catch {
+      /* a line that does not parse is skipped */
+    }
+  }
+  const proof = lines.filter((l) => l?.project === project.name && (l.phase === "base gates" || l.phase === "verify") && l.ok === true && typeof l.gates === "object" && l.gates !== null);
+  const byGate = new Map<string, number[]>();
+  for (const l of recentWindow(proof)) {
+    for (const [name, ms] of Object.entries(l.gates as Record<string, unknown>)) {
+      if (typeof ms === "number" && Number.isFinite(ms) && ms > 0) byGate.set(name, [...(byGate.get(name) ?? []), ms]);
+    }
+  }
+  return Object.fromEntries([...byGate].map(([name, ms]) => [name, Math.round(percentile(ms, USUAL)!)]));
+};
+
+/**
  * Seconds until the first ticket of another live run is likely to end, for the start line of a run
  * that has to wait for a slot: this project's usual time for one issue (`typicalTimes`, the history
  * the estimate reads) less each working ticket's age, a minute at least, as the status view counts

@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
-import { type MachineCpu, type PassReadings, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
+import { type MachineCpu, type PassReadings, cpuFields, cpuHigh, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
 import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -739,7 +739,7 @@ const JEST_TEST = /^\s*● (?!Console$)/;
  * is there: its body also names the parents of a failed test, whose error is no timeout. jest's tests are its "●"
  * lines, not the file's FAIL line above them. Output that names no test counts on any timeout line.
  */
-const onlyTimeouts = (output: string) => {
+export const onlyTimeouts = (output: string) => {
   const lines = stripVTControlCharacters(output).split("\n").map((line) => line.replace(/\r$/, ""));
   const summary = lines.findIndex((line) => SPEC_SUMMARY.test(line));
   const read = summary >= 0 ? lines.slice(summary + 1) : lines;
@@ -760,6 +760,14 @@ export const likelyLoad = (failures: GateRun["failures"], gates: Gate[], recorde
   const slow = gates.some((g) => red.has(g.name) && typeof g.ms === "number" && typeof recorded[g.name] === "number" && recorded[g.name] > 0 && g.ms >= LOAD_FACTOR * recorded[g.name]);
   return timeouts || slow;
 };
+
+/**
+ * Whether a ticket gate's red is the machine's load: at least one failure, every failure a test timeout (`onlyTimeouts`),
+ * none of them a gate's own time bound (exit 124: a hang, which never gets a re-gate as it never gets a repair), and the
+ * pass read high machine-wide CPU pressure (`cpuHigh`). Judged on the run itself: in a `rerunOf` chain, the last run's.
+ */
+export const loadMade = (run: GateRun): boolean =>
+  run.failures.length > 0 && run.failures.every((f) => f.exitCode !== 124 && onlyTimeouts(f.output)) && cpuHigh(run);
 
 /**
  * The failing tests of a landing's red failure, at most `limit`: the targeted re-run's own when the failure carries one
