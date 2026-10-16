@@ -2408,7 +2408,8 @@ project's value, else true; always in `settingsGroup`, true or false, so the mod
 one value from the run record and a record without it, from an older kit, reads as true; the status
 view's row does not draw it), with the precedence of environment over the clone's
 `.sandcastle/config.local.json` over project config over default (`loadProject` merges the two
-files, so `project` is the merged one: see `mergeLocalConfig` in `src/config.ts` below) - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and
+files, so `project` is the merged one: see `mergeLocalConfig` in `src/config.ts` below) -
+and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and
 `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a
 field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and
 `test/run-settings-cross-review.test.ts` hold it
