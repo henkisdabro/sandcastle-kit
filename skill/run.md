@@ -112,7 +112,10 @@ This continues SKILL.md: run its "Before every action" first.
    **Confirm that line.** Outside Herdr it says ``Status view: run `sandcastle status` ``. If the
    command refuses, prints `The run ended at once`, or names no status view where Herdr is in use,
    tell the user plainly that there is no run to watch. Otherwise tell them the pid, and the tab
-   and status pane ids. `.sandcastle/logs/run-output.log` is the run's own output; the status
+   and status pane ids. When the start was slow (`Status view: not reported within 60 s`, or the
+   user says so), read `.sandcastle/logs/run-output.log` once for its `Start took` line and report
+   its heaviest steps. If the line is not there yet (the run is still starting), say so and read
+   the log once more in step 4, when closing the run. `.sandcastle/logs/run-output.log` is the run's own output; the status
    view's bottom shows its last lines while the run is live.
 
    Watching the run from a Claude Code session in the same checkout is safe: its own writes to
@@ -179,6 +182,8 @@ This continues SKILL.md: run its "Before every action" first.
    summary" below before writing it.
 
    Start by stopping the keep-warm loop of step 3, if you scheduled one.
+
+   A slow start whose `Start took` line step 2 did not find is named now, from `.sandcastle/logs/run-output.log`.
 
    The run ends with a closing summary (`## 🏁 Run finished` down to `## 👉 Next step`);
    `sandcastle report` prints it again at any time, with the blockers re-read and the local git
