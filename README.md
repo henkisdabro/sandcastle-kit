@@ -652,6 +652,10 @@ from its record; between runs `sandcastle status` shows what the next run would 
 (so it is not read as the ended run's recorded settings), and with nothing passed falls back to the last
 run's record, marked `(last run)`. The view shows only what the record holds: a record from an older kit
 has no settings, and draws none.
+A value that came from the clone's untracked `.sandcastle/config.local.json` is followed by a grey `local`
+(`autonomy [2] local`, `concurrency 3 (asked 8) local`, `● usage-pause 90% local`), so a run that behaves
+differently from CI or from another clone is explained where it is watched. Only a value the file set and
+the environment did not override is marked, and the model keys, which the lane does not draw, are not.
 
 SETTINGS also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (its stop
 threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off.

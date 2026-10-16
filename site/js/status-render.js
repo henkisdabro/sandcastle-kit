@@ -604,13 +604,16 @@ const renderFrame = (snapshot          , table       , { cols, rows, showAll, co
   // SETTINGS: autonomy, concurrency, cross-review and the usage guard - the turn is in RUN, repair in MODELS.
   const SET = ["", "", ""];
   if (s) {
+    // The keys the clone's untracked local file set; a record whose `local` is not a list of strings marks nothing.
+    const localKeys           = Array.isArray(s.local) && s.local.every((k         ) => typeof k === "string") ? s.local : [];
+    const localMark = (key        ) => (localKeys.includes(key) ? ` ${c.gry}local${c.off}` : "");
     const lvl = text(s.autonomy);
-    if (["0", "1", "2", "3", "drain"].includes(lvl)) SET[0] = `${c.mute}autonomy${c.off} ${c.bold}${c.accent}[${lvl}]${c.off}`;
+    if (["0", "1", "2", "3", "drain"].includes(lvl)) SET[0] = `${c.mute}autonomy${c.off} ${c.bold}${c.accent}[${lvl}]${c.off}${localMark("autonomy")}`;
     // Concurrency as the run takes it after the machine-wide cap; what it asked for only when that differs.
     const conc = text(s.concurrency);
     if (digits(conc)) {
       const asked = text(s.asked);
-      SET[1] = `${c.mute}concurrency${c.off} ${c.head}${conc}${c.off}${digits(asked) && Number(asked) !== Number(conc) ? ` ${c.gry}(asked ${asked})${c.off}` : ""}`;
+      SET[1] = `${c.mute}concurrency${c.off} ${c.head}${conc}${c.off}${digits(asked) && Number(asked) !== Number(conc) ? ` ${c.gry}(asked ${asked})${c.off}` : ""}${localMark("concurrency")}`;
     }
     const guards           = [];
     // The record is a file in a repository: a model or effort that is not plain text is left out of the terminal.
@@ -626,7 +629,7 @@ const renderFrame = (snapshot          , table       , { cols, rows, showAll, co
       if (text(s.usageReading) === "unavailable") guards.push(`${c.ylw}● usage-guard${stop ? ` ${stop}%` : ""} (no reading - not guarding)${c.off}`);
       else guards.push(`${c.grn}●${c.off} ${c.mute}usage-guard${c.off}${stop ? ` ${c.head}${stop}%${c.off}` : ""}`);
     } else if (guard === "false") guards.push(`${c.gry}○ usage-guard${c.off}`);
-    if (digits(text(s.usagePause))) guards.push(`${c.grn}●${c.off} ${c.mute}usage-pause${c.off} ${c.head}${text(s.usagePause)}%${c.off}`);
+    if (digits(text(s.usagePause))) guards.push(`${c.grn}●${c.off} ${c.mute}usage-pause${c.off} ${c.head}${text(s.usagePause)}%${c.off}${localMark("usagePause")}`);
     SET[2] = guards.join(dot);
     // The next run's settings are not the ended run's: "next run:" leads the lane, "(last run)" ends it.
     const firstRow = SET.findIndex(Boolean);

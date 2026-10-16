@@ -2385,6 +2385,13 @@ and a record with only the boolean reads as `share` (`test/status-landing-wait.t
 An older kit's record has neither, and the view then draws the cell as before.
 The status view's settings lane reads only these fields (its record type is `RunRecord`, which `tsc`
 checks), draws nothing from a record without the group, and never fills a field the record lacks.
+`local` (the dotted keys `.sandcastle/config.local.json` set, as `loadProject` keeps them in
+`localKeys`) is the group's one list: `resolveSettings` drops a key whose value the environment set
+instead (`AUTONOMY_LEVEL`, `CONCURRENCY`, `USAGE_PAUSE`, and for the model keys `IMPL_MODEL`,
+`IMPL_EFFORT`, `REVIEW_MODEL`, `REVIEW_EFFORT`), `settingsGroup` writes it only when it is not empty,
+and the lane follows `autonomy`, `concurrency` (after any `(asked N)`) and `usage-pause` with a grey
+`local` when their key is in it; a `local` that is not a list of strings marks nothing
+(`test/status-settings-local.test.ts`).
 Idle, `sandcastle status` resolves the next run's settings with the same resolver and passes the
 group as `SANDCASTLE_SETTINGS` (`{}` when they cannot be resolved), with the whole lane prefixed
 `next run:` (an ended run's report holds the settings it recorded, which this lane is not); a bare
