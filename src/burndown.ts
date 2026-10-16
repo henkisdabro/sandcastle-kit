@@ -56,7 +56,7 @@ import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
-import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
+import { execGate, lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
@@ -2094,6 +2094,44 @@ export const createPipeline = (ctx: PipelineContext) => {
         console.log(`${ref(issue.id)}: ${branch} no longer merges onto ${base} (${conflictLine(conflict)}) - its ${before === "review" ? "review and gates are" : "gates are"} skipped.`);
         return { issue: issue.id, branch, status: "conflict", conflict: { ...conflict, found: before }, commits: ownCommits(base, branch, project.root), gates: [], head: sh("git", ["rev-parse", branch], project.root), ...o };
       };
+      // The base tip merged into the branch in this sandbox just before its gates (#790 option b): the gates then run on a
+      // tree that holds the tip, and a landing with no landing in between fast-forwards it in place on those results
+      // (`landOne`'s "branch holds the base's tip" rule) with no landing gate. Only when the branch is behind. Never an
+      // agent pass or a requeue: a merge that conflicts (the base moved since `conflictBefore` read it), a refused one, a
+      // failed regen or a failed setup leaves the branch as it was and it is gated as it stands - the landing's own
+      // precheck finds a real conflict, as it did. A failed setup is undone rather than reported as a red `setup` gate:
+      // the base's dependency the install could not take is no fault of the ticket's, and the gates run on the
+      // branch the ticket's own review read.
+      const mergeBaseBeforeGates = async (): Promise<void> => {
+        const behindNow = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`], project.root));
+        if (!(behindNow > 0)) return;
+        const identity = hostIdentity(project.root);
+        const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+        const pull = await sandbox.exec(`git ${identity} merge --no-edit ${shq(base)}`);
+        const stand = async (why: string) => {
+          // `--abort` refuses when no merge is in progress (a refusal before it began); the reset covers a merge that committed.
+          await sandbox.exec("git merge --abort");
+          await sandbox.exec(`git reset -q --hard ${shq(before)}`);
+          console.log(`${ref(issue.id)}: could not merge ${base} into its branch before its gates (${why}) - undone, gated as it stands.`);
+        };
+        if (pull.exitCode !== 0) {
+          const files = (await sandbox.exec("git diff --name-only --diff-filter=U")).stdout.split("\n").filter(Boolean);
+          if (!files.length || !regensFor(files, project.generated)) return stand(files.length ? `conflicts in ${files.join(", ")}` : (pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160) || "refused");
+          const r = await resolveGenerated(sandbox, { files, generated: project.generated, setup: project.setup, message: `Merge ${base} into ${branch} (generated files regenerated)`, identity });
+          if (!r.ok) return stand(`regenerating ${files.join(", ")} failed: ${r.reason}`);
+          console.log(`${ref(issue.id)}: merged ${base} into its branch before its gates (${behindNow} behind; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}).`);
+          return;
+        }
+        const brought = (await sandbox.exec(`git diff --name-only ${shq(before)} HEAD`)).stdout.trim();
+        if (brought) {
+          // A dependency the base added must be installed before the gates, as `landInSandbox` does after its merge.
+          for (const command of project.setup) {
+            const r = await execGate(sandbox, command);
+            if (r.exitCode !== 0) return stand(`setup "${command}" exited ${r.exitCode}`);
+          }
+        }
+        console.log(`${ref(issue.id)}: merged ${base} into its branch before its gates (${behindNow} behind)`);
+      };
       // A branch that merged a base since rewritten (a `pull --rebase` that flattened the landing merges into copies,
       // a reset that dropped a landing) holds commits the base no longer has under their old hashes: landed as it
       // stands it brings them back, duplicated or removed on purpose, with no review, and its recorded heads vouch
@@ -2551,7 +2589,10 @@ export const createPipeline = (ctx: PipelineContext) => {
               : ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
         );
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
-      } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
+      } else {
+        await mergeBaseBeforeGates();
+        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
+      }
       // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
       // the tip looking reviewed with no gate result, and a re-run would only gate it again.
       if (gated.failure) await noteHead(issue.id, branch, { red: sh("git", ["rev-parse", branch], project.root) });
