@@ -47,6 +47,7 @@ import {
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
+import { startClock, type StartClock } from "./start-clock.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
@@ -2911,9 +2912,11 @@ export const burndown = async (project: Project, turn?: TurnOptions): Promise<bo
 };
 
 /** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
-type TurnOptions = { settings: ResolvedSettings; turn: number; loadPause?: LoadPause; docker?: () => string | undefined; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> } };
+type TurnOptions = { settings: ResolvedSettings; turn: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> } };
 
 const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
+  // The first turn takes the clock `sandcastle run` started; a later turn counts only its own steps.
+  const clock = turn?.clock ?? startClock();
   const DRY_RUN = process.env.DRY_RUN === "1";
   // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
   resetMergeCheckGap();
@@ -2937,7 +2940,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   disableHostGitGc();
   // The lock, and what a killed run's sandboxes left working stopped, before anything reads or pins the shared `.git`:
   // a container still alive could write it between the baseline check and the reap, past both the refusal and the pins.
+  clock.step("lock and reap");
   holdAndReap(project);
+  clock.step("git baseline");
   // Then, before the pins take the config as it is: a key an earlier, killed run's sandbox planted is refused, not pinned.
   const gitConfig = assertGitConfigBaseline(project, "sandcastle run", turn?.acceptGitConfig);
   pinHostGitConfig(project.root);
@@ -2955,6 +2960,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // in an agent's context. Named tickets are checked on the host, so a typo or
   // a closed ticket fails here and not inside a sandbox that has already
   // installed its dependencies.
+  clock.step("queue read");
   const tracker = makeTracker(project);
   const ref = tracker.ref;
   const named = namedTicketsFromEnv();
@@ -2976,6 +2982,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // those: a queued ticket they left out is not listed, recorded or reported, and a later turn's list is no wider.
   const scope = turn?.scope ? (turn.scope.ids ??= scopeIds(tracker, turn.scope.list, queued)) : undefined;
   const whole = named.list ? wholeQueue(tracker, queued, scope) : queued;
+  clock.step("blocker reads");
   const wholeOpen = await openOnQueue(project, tracker, whole);
   const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i) => (wholeOpen.has(i.id) ? [[i.id, { ticket: i, on: wholeOpen.get(i.id)! }] as const] : [])));
   const waiting = [...wholeOpen].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
@@ -2988,6 +2995,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // holds. The two blockers of seven waiting tickets once ran last of thirty,
   // so a run stopped early would have left all seven stuck for another run.
   // (Their dependants start in this run, as the blocker lands.)
+  clock.step();
   const unblocks = (i: Issue) => waiting.filter((w) => w.on.includes(ref(i.id))).length;
   const ready = queued.filter((i) => !waiting.some((w) => w.issue === i.id)).sort((a, b) => unblocks(b) - unblocks(a));
   // A file git cannot merge (a lockfile, a generated file, a minified blob) conflicts at landing
@@ -2999,6 +3007,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // Every attempt and every landing goes through the scheduler: a bounded fan-out (a sliding pool,
   // not a batch barrier, inside the machine-wide sandbox limit), one landing worker beside it, a
   // first conflict or red sent back once, the file hold, and the release of what waits, as each ticket ends.
+  clock.step("schedule");
   const schedule = createSchedule<Issue, Outcome, Outcome, Blocker>({
     tickets: ready,
     files: DRY_RUN ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
@@ -3017,6 +3026,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       }
     },
   });
+  clock.step();
   const sharesLog = join(project.root, ".sandcastle/logs/file-shares.log");
   let sharesHeaded = false;
   // Filled by the ticket list below, which already says a file hold; `holds.start` then does not say it again.
@@ -3052,13 +3062,16 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   }
   const overrides = new Map([...issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])] as const), ...laterOverrides]);
   // Resolved once here: the image, the start lines and run.json all name the same versions.
+  clock.step("versions");
   const versions = await resolveVersions(project);
+  clock.step();
   kitAtStart ??= kitVersion();
 
   // A dry run lands nothing, so it needs no sandbox slot for it.
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
   // Another live run shares the pool: read before the header, whose note on the kept slot says only what applies to this run.
+  clock.step("other runs");
   const others = otherRuns();
   const split = others.length ? splitAtStart(workers, others) : undefined;
   // "up to": another project's live run can cut this run's share below it, which the split line under the
@@ -3092,7 +3105,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
   // gates, which run one at a time and set the run's end (`gateProject` below opens those).
   // One `docker info` for both this and the pool warning below; on Linux docker not answering stops the run here, before anything is recorded or started.
+  clock.step("docker info");
   const info = turnDockerInfo(turn?.docker ?? readDockerInfo);
+  clock.step();
   const pool = { concurrency: settings.concurrency.effective, maxGates: limit("gates") };
   const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
   const gateCpus = sandboxCpus(project, "gate", pool, () => info);
@@ -3103,12 +3118,14 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
+  clock.step("other runs");
   const neighbours = others.map((m) => {
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
   });
   for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, neighbours, !DRY_RUN, project.name, project.root)) console.log(line);
+  clock.step("carried branches");
   // Carried branches, read before any agent touches them: a land-only or narrowly reviewed one is dearer than a fresh ticket's landing,
   // so the estimate and the timings say so; one that gets a full review is priced as a fresh ticket (`carriedKindAtStart`).
   const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i)] as const));
@@ -3117,12 +3134,15 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
   const remainderAtStart = new Set(candidates.filter((i) => isRemainder(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. Beside another run the share is the tickets' whole: the pool's one landing slot is outside it.
+  clock.step();
   const slots = estimateSlots(workers, split);
   // The path count of each ticket's `Touches:` line (0 with none): the estimate prices a ticket by its size, and each timings line records it for later runs.
   const touchPaths = new Map(candidates.map((i) => [i.id, parseTouches(i.body ?? "").length]));
   // The length of each ticket's body: with the path count it sizes the ticket (`sizeOf`, src/run.ts), and each timings line records it.
   const bodyChars = new Map(candidates.map((i) => [i.id, (i.body ?? "").length]));
+  clock.step("blocker chain");
   const chainIds = blockerChain(project, tracker, candidates);
+  clock.step("estimate");
   const rough = priceRun(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
@@ -3130,7 +3150,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   );
   if (rough) console.log(rough.text);
   console.log(`Machine-wide: ${usage()}`);
+  clock.step("keep awake");
   console.log(`Keep awake: ${await keepAwake()}`);
+  clock.step();
   console.log(baseIsTheRunsLine(project.baseBranch));
   if (TEST_RED_GATE) {
     console.log(
@@ -3158,6 +3180,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       .filter(([id]) => !candidates.some((c) => c.id === id))
       .map(([id, on]): [string, TicketRecord] => [id, { state: "blocked", note: blockedNote(on, inRun), title: whole.find((q) => q.id === id)?.title }]),
   ];
+  clock.step("run record");
   const run = recordRun(project, {
     issues: candidates.map((i) => i.id),
     dryRun: DRY_RUN,
@@ -3234,12 +3257,16 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
+  clock.step("status view");
   const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage, run.paused);
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
   }
   if (statusPane) console.log(`Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
+  // A statement of its own, not part of the line above: a start with no pane still says where its time went. `startTook`, as `took` below is the tickets' times.
+  const startTook = clock.line();
+  if (startTook) console.log(startTook);
 
   // Every step is timed into logs/timings.jsonl, so how long a project's
   // issues take - and where the time goes - is on record rather than guessed.

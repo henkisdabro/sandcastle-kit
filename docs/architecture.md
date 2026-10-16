@@ -463,6 +463,20 @@ a guess at prose, so it is under neither Needs you nor the headline's `need you`
 step (approving prose keeps finding phrasings the detector reads as a gap;
 `test/gap-in-prose-false.test.ts`).
 
+A start that took 10 s or more says where its time went: `Start took 64.2 s: blocker reads 31.0 s,
+queue read 12.3 s, versions 9.8 s, docker info 4.1 s, others 7.0 s`, printed as a statement of its
+own right after the `Status view:` line, before the image step (`src/start-clock.ts`). `sandcastle run`
+starts the clock and hands it to turn 1's `burndown()`, which times its steps (`lock and reap`,
+`git baseline`, `queue read`, `blocker reads`, `schedule`, `versions`, `other runs`, `docker info`,
+`carried branches`, `blocker chain`, `estimate`, `keep awake`, `run record`, `status view`); a later
+turn starts its own clock, so its line counts only its own steps. Steps of 1 s or more are named,
+heaviest first; the rest, and the code between steps, is `others`. The wait at the API-key question
+is an `aside`: left out of the total and said at the end (`(not counting 40 s at the API-key
+question)`). The clock writes nothing, and is not a `timings.jsonl` phase, whose lines feed the
+estimate. A detached run prints the line in its child's `.sandcastle/logs/run-output.log`, not in
+the parent's terminal. A start that returns before the view (empty queue, everything waiting)
+prints none.
+
 ## `src/landing.ts`
 
 `landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a

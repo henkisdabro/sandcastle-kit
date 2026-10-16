@@ -137,6 +137,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
+import { startClock } from "./start-clock.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
@@ -269,6 +270,8 @@ try {
       // Parsed before anything that needs config or Docker, so a bad argument is refused for free.
       // An argument overrides the variable of the same name; burndown() reads them all at call time.
       const given = parseRunArgs(args);
+      // The start's own clock: the attached path times its steps and turn 1's burndown() prints the line.
+      const clock = startClock();
       // Doctor's own refusal, before the config, the billing question or an image: a run as root or on
       // Podman or rootless Docker on Linux would only fail inside the first sandbox.
       // `docker info` is read once for the whole start, when first asked: the check below (Linux only),
@@ -278,7 +281,9 @@ try {
       let reading: { text: string | undefined } | undefined = child && process.env[DOCKER_INFO_ENV] ? { text: process.env[DOCKER_INFO_ENV] } : undefined;
       delete process.env[DOCKER_INFO_ENV];
       const docker = () => (reading ??= { text: readDockerInfo() }).text;
+      clock.step("docker info");
       const runtime = child ? undefined : runtimeProblemNow(docker);
+      clock.step();
       if (runtime) throw new OperatorError(`${runtime.label}: ${runtime.fix}`);
       if (given.issues) {
         // An argument overrides both names, so the older one is dropped rather than reported as a clash.
@@ -327,7 +332,9 @@ try {
       exitOnSignal();
       rewordLibraryLines();
       // Read before burndown, so a bad level is refused before Docker or any spend.
+      clock.step("config");
       const project = await loadProject(root);
+      clock.step();
       // The run's settings, resolved once: every turn's record carries them.
       const settings = resolveSettings({ env: process.env, project, machine: machineSettings(), apiKey: !!projectApiKeySpend(project) });
       const level = settings.autonomy;
@@ -339,11 +346,14 @@ try {
       sandboxPanes(project);
       checkUsageSettings();
       // A token that cannot see the repo would crash every ticket on its first `gh issue view`: refused before the billing question, an image or a sandbox.
+      clock.step("repo access");
       await requireRepoAccess(project);
+      clock.step();
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
       for (const line of upgradeLines(root, KIT, false)) console.log(line);
       // Once for the whole run, every turn included, and before any image, sandbox or model call.
-      await confirmApiKey(projectApiKeySpend(project), "This run", { ask: (q) => askingInPane("asks whether to bill API credits", () => confirm(q)) });
+      // An aside: the operator's time at the question is not the start's.
+      await clock.aside("API-key question", () => confirmApiKey(projectApiKeySpend(project), "This run", { ask: (q) => askingInPane("asks whether to bill API credits", () => confirm(q)) }));
       // `drain` keeps its own tally: each turn still prints its closing report, and the last line
       // says how many turns ran, what they landed and why the loop stopped.
       const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, inRun: new Set<string>(), unblocked: [] as string[], cause: undefined as string | undefined };
@@ -352,9 +362,11 @@ try {
       // Unreadable: no closing lines rather than wrong ones.
       let queuedAtStart: Set<string> | undefined;
       if (level === 2 || level === 3 || level === "drain") {
+        clock.step("queue at start");
         try {
           queuedAtStart = new Set(makeTracker(project).queued(false).map((t) => t.id));
         } catch {}
+        clock.step();
       }
       // What the operator named, kept for every turn: a later turn sets TICKETS to its own re-runnable tickets,
       // which says nothing of a queued ticket the operator left out. Nothing named: the whole queue, as always.
@@ -389,7 +401,7 @@ try {
       };
       for (let turn = 1; ; turn++) {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
