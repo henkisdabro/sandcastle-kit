@@ -9,8 +9,24 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Runs at autonomy 2, 3 and `drain` now spend a turn on tickets queued while they were live**;
+  levels 0 and 1 keep the old behaviour.
+
 ### Changed
 
+- **A ticket whose sandbox only waits for a free gates slot no longer counts against
+  `maxSandboxes`**, so another ticket's implement or review pass can run meanwhile. The waiting
+  container stays visible in the pool count, up to `maxGates` per run, and the ticket takes a
+  counted slot again before a repair pass.
+- **A ticket takes the pool's last free sandbox slot when no live run has a landing near** (a
+  ticket in its gates, or a branch queued or landing), instead of leaving it idle for a landing that
+  may be far off. Each run publishes that in its pool registration; a run from an older kit counts
+  as having a landing near.
+- **Runs at autonomy 2, 3 and `drain` spend one more turn on unblocked tickets queued while they
+  were live**, instead of leaving them for a second `sandcastle run`. At 2 and 3 that is one
+  follow-on turn per run; at `drain` they may repeat within the 20-turn cap.
 - **`sandcastle init` lists every project config key** in the `.sandcastle/config.ts` it writes,
   commented out at its default or with an example: `cpus`, `usagePause`, `herdr`,
   `autoCompactWindow`, `mounts`, `protectedPaths`, `changelog` and `implement` were missing, so a
@@ -19,6 +35,18 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **A landing's gates no longer wait behind a ticket gate of the same run**: the run holds one
+  gates claim from the moment a green branch is queued to land, not only once the landing holds its
+  sandbox slot.
+- **A run at 2 or more sandboxes no longer prices its landing gates at 0** from runs recorded at
+  concurrency 1, in the start-of-run estimate and the status view's projected end; with no other
+  history each landing after the first is priced as one ticket's gate time.
+- **The closing summary tells a red gate run again from one after a repair pass or a requeue**,
+  names the landings' share of the gates-slot wait, and lists files changed beyond their Touches
+  line under their own lead-in before the push note.
+- **A ticket held because a blocker read timed out is read again after each later landing** of
+  the run (also when its native blocker links could not be read), so it can start in the same run
+  instead of waiting for the next one.
 - **The run's `Lean warning` and `sandcastle lean` no longer count CODEOWNERS or the project's own
   `.sandcastle/` files** as readers of a hidden path: a hidden `.mcp.json` that only CODEOWNERS
   named printed the warning at every run's start. The run's warning now names the files that
