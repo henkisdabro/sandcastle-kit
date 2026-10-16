@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
-import type { Project } from "./config.ts";
+import { LOCAL_CONFIG_PATH, type Project } from "./config.ts";
 import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
@@ -235,6 +235,22 @@ export const gitLeftovers = (root: string): { file: string; what: string }[] => 
 export const leftoverSteps = (left: { file: string; what: string }[]) =>
   `Once no git process is running, ${left.map((l) => (l.file.endsWith("index.lock") ? `remove ${l.file}` : "run `git merge --abort`")).join(", then ")}, then run again.`;
 
+// An untracked .sandcastle/config.local.json (a clone's own run settings) is the one dirty file a person
+// means to keep: the fix is to ignore it, not to commit it. `.sandcastle/.gitignore` when that file is the
+// user's to change, else the exclude file - by the path git resolves, as `.git` is a file in a linked worktree.
+const localConfigHint = (root: string, dirty: string[]): string => {
+  if (!dirty.some((l) => l.startsWith("?? ") && l.endsWith(LOCAL_CONFIG_PATH))) return "";
+  let exclude: string;
+  try {
+    exclude = resolve(root, sh("git", ["rev-parse", "--git-path", "info/exclude"], root));
+  } catch {
+    exclude = join(root, ".git/info/exclude");
+  }
+  // Quoted only when it has to be, so a path with a space still runs.
+  const path = /^[\w@%+=:,./-]+$/.test(exclude) ? exclude : `'${exclude.replaceAll("'", "'\\''")}'`;
+  return `\n${LOCAL_CONFIG_PATH} is a clone's own run settings, not meant to be committed. Ignore it with a \`config.local.json\` line in .sandcastle/.gitignore, or, for a clone whose ignore file is not yours to change: echo ${LOCAL_CONFIG_PATH} >> ${path}`;
+};
+
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
 // An OperatorError, so the CLI prints a message: a stack trace read as a kit bug, and
 // without the file list the operator had to run git status to find a stray lockfile.
@@ -251,7 +267,7 @@ export const assertCleanBase = (project: Project) => {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
     if (dirty.length > 10) shown.push(`  ... and ${dirty.length - 10} more`);
     throw new OperatorError(
-      `NOT STARTED: the working tree is dirty. The run merges into it - commit or stash first.\n${shown.join("\n")}`,
+      `NOT STARTED: the working tree is dirty. The run merges into it - commit or stash first.\n${shown.join("\n")}${localConfigHint(project.root, dirty)}`,
     );
   }
   const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], project.root);

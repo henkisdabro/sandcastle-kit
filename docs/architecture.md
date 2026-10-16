@@ -70,6 +70,22 @@ An id that names only a file (`FAIL path`, a node:test file that failed to load)
 which test failed, so with one the red is the base's only when the gate's `failureKey` is the same
 on the branch and the base
 
+What a Claude pass said of its work is read once, in `pass`, by `saidOf(text, facts?)`: the pass's
+`unmet`, `ungated`, changelog read and follow-ups, which `pass` hands back as the result's `said` and every
+reader (the review loop, the narrow reviews, the implementer, `noteChangelog`, `gapOf`'s guard) takes from
+there. With no report (`REPORT_SCHEMA` off, or none came valid) it reads the whole text for the own-line tags
+as it always did. With the report (`REPORT_SCHEMA=1`, `src/agents.ts`) the report stands for the pass's
+last iteration - `unmet` and `ungated` are its alone - and the iterations before it, the text with the
+last iteration's output taken off its end, are still read for their `<changelog>` and `<followup>` tags, so
+a follow-up an earlier iteration named is still filed. The tag readers and the report's items share their
+rules (`oneLine`, `judgeChangelog`, `readFollowUps`, `unmetNote`). A missing report is a value, never a
+throw (a throw would start a second editing review through `reviewWithFallback`). `reportTiming` turns the
+capture's facts into the `report` field of the step's `timings.jsonl` line (`came`, `missing`, `tries`,
+`turns`, and `gapMs`, `silenceMs` and `cutOff` once the completion signal was seen); `pass` leaves it in
+`PipelineContext.reportTimings` and `timed` takes it, the last pass of a step winning
+(`test/report-said.test.ts`, `test/report-schema.test.ts`). The `<report>`/`<blocked>` hand-back, the
+resolver's `<stray>` lines and the repair pass's `<verdict>` stay tags.
+
 The pipeline takes everything outside itself through one `PipelineContext`, as a landing takes its
 `LandContext`: its sandbox (`open`, whose `run` is every agent pass and `exec` every git command in
 it), its gate runs (`gate`, and `regate`: the gates from a named one on), the step timer (`timed`),
@@ -1832,6 +1848,31 @@ decision on #382: per sandbox, warn only).
 An `avg10` reaches back 10 s, so a phase's first read can carry the end of the one before.
 `test/memory-pressure.test.ts` holds it.
 
+**CPU pressure** is read in the same `sampling` loop (the first read as a pass starts, then every
+10 s, with the same `ended` and `late` rules), as two figures. The judged one is machine-wide and read
+by the host process, never through a sandbox: `readMachineCpu(host?)` returns `{ avg10, avg60,
+estimate? }` from Linux's (and WSL2's) own `/proc/pressure/cpu` `some` line (`parsePressure`, the pure
+PSI parser `readPressure`'s sibling `readCpuPressure` shares), from the 1-minute load average on macOS
+(`max(0, (load1 - cores) / load1) x 100`, `estimate: true`, and it is labelled as an estimate wherever it is
+shown), and nothing elsewhere or on an unreadable file. `host` (`platform`, `readFile`, `loadavg`, `cpus`)
+is injectable, and `sampling`'s `readMachine` and `GateProgress.machineCpu` carry an injected reader down from
+a test or from the load pause that reads between passes. Called with no `host`, it gives no reading when
+`SANDCASTLE_TEST_MACHINE_CPU=none`, which `test/hermetic-env.ts` sets for every test file: no test's pass,
+judgement or hold depends on the machine's real load, and the seam never applies to an injected reader.
+The other figure is the sandbox cgroup's own `cpu.pressure` (`readCpuPressure`), recorded and never judged:
+the kit's `--cpus` limit (`sandboxCpus`) raises it, so it cannot tell outside load from the kit's own.
+For a gate pass `sampling` keeps the highest and the mean (one decimal, failed reads not counted) of each
+beside the memory pressure: `GateRun`'s `cpuSome`, `cpuSomeMean`, `cpuMachine`, `cpuMachineMean` and
+`cpuEstimate`, each absent where unread or 0. `cpuOf` and `cpuFields` read them off a result and spread them
+onto a line, as `pressureOf` and `pressureFields` do, in every place that copies memory pressure
+(`timedGate`, `timingLines`, `requireGreenBase`, `timed()`); `recordPeak` writes the highest `cpuSome`,
+`cpuMachine` and `cpuEstimate` on the `peaks.jsonl` line (`readPeaks` accepts them; `size` shows none yet).
+`cpuHigh(result)` is the judgement, the recorded (rounded) `cpuMachineMean` at or above `CPU_PRESSURE_HIGH`
+(60%), and `cpuFromTimings` (`src/report.ts`) takes the run's busiest pass for the closing summary's
+`CPU pressure: high` line. Three limits: the macOS estimate reaches 60 only at `load1` of 2.5 times the
+core count or more; WSL2's PSI sees the Linux VM, not load on the Windows side; and the machine figure
+includes the kit's own gates and agents, not only other work. `test/cpu-pressure.test.ts` holds it.
+
 **The cap** (`sandcastle cap`, `parseCapArgs`, `setCap` and `standing` in `src/pool.ts`; the command
 in `src/cli.ts`, which handles it before the repository check so `--project <name>` works from any
 directory): a person's limit on one live run's share, the optional `cap` field of that run's
@@ -2394,6 +2435,13 @@ and a record with only the boolean reads as `share` (`test/status-landing-wait.t
 An older kit's record has neither, and the view then draws the cell as before.
 The status view's settings lane reads only these fields (its record type is `RunRecord`, which `tsc`
 checks), draws nothing from a record without the group, and never fills a field the record lacks.
+`local` (the dotted keys `.sandcastle/config.local.json` set, as `loadProject` keeps them in
+`localKeys`) is the group's one list: `resolveSettings` drops a key whose value the environment set
+instead (`AUTONOMY_LEVEL`, `CONCURRENCY`, `USAGE_PAUSE`, and for the model keys `IMPL_MODEL`,
+`IMPL_EFFORT`, `REVIEW_MODEL`, `REVIEW_EFFORT`), `settingsGroup` writes it only when it is not empty,
+and the lane follows `autonomy`, `concurrency` (after any `(asked N)`) and `usage-pause` with a grey
+`local` when their key is in it; a `local` that is not a list of strings marks nothing
+(`test/status-settings-local.test.ts`).
 Idle, `sandcastle status` resolves the next run's settings with the same resolver and passes the
 group as `SANDCASTLE_SETTINGS` (`{}` when they cannot be resolved), with the whole lane prefixed
 `next run:` (an ended run's report holds the settings it recorded, which this lane is not); a bare
@@ -2415,11 +2463,33 @@ not part of `settingsGroup`) and `keepWarm` (whether the session that started th
 prompt cache warm: false when the personal `config.json` says `"keepWarm": false`, else the
 project's value, else true; always in `settingsGroup`, true or false, so the mod and the skill read
 one value from the run record and a record without it, from an older kit, reads as true; the status
-view's row does not draw it), with the unchanged precedence of environment over project config over
-default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and
+view's row does not draw it), with the precedence of environment over the clone's
+`.sandcastle/config.local.json` over project config over default (`loadProject` merges the two
+files, so `project` is the merged one: see `mergeLocalConfig` in `src/config.ts` below) -
+and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and
 `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a
 field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and
 `test/run-settings-cross-review.test.ts` hold it
+
+### `config.local.json`
+
+`mergeLocalConfig(root, config)` in `src/config.ts`, called by `loadProject` after `checkShape` has
+passed `config.ts` on its own, merges an optional, untracked `.sandcastle/config.local.json` over it.
+Plain JSON, never code, so the ESM loader hook stays as it is. Its keys go through `KEYS` and
+`NESTED` (an unknown one is refused with the nearest-name hint), then the `LOCAL_KEYS` allowlist of
+run settings (`gates`, `setup`, `mounts`, `generated` and the rest are refused: two clones of one
+repo would land against different gates), then the same type checks `config.ts` gets for its top-level
+keys (`checkSettingTypes`, shared with `checkShape`) and, for the file alone, `implement`, `review`
+and `repair`'s `model`, `effort`, `maxIterations` and `idleTimeoutSeconds` (`checkLocalNested`;
+`config.ts`'s own validation is not stricter). Every refusal is an `OperatorError` naming the file and
+the dotted key. A nested object merges key by key, a JSON `null` deletes the key so the default
+applies, and the project keeps the keys the file set (`Project.localKeys`, dotted) for doctor and the
+run's `Local config (...)` start line (`localConfigLine`). Because the merge happens in
+`loadProject`, `resolveSettings` and `configureModels` see the merged values and keep their
+env-first rule. The file is in `SANDCASTLE_IGNORES` (`src/init.ts`), so init and doctor's
+`gitignoreFix` ignore it; `assertCleanBase` (`src/run.ts`) names both fixes, the ignore file and the
+exclude file git resolves with `rev-parse --git-path info/exclude`, when it is among the dirty files.
+`test/config-local.test.ts` holds it.
 
 ## `src/versions.ts`
 
@@ -2472,6 +2542,16 @@ the agent has just written) or `sh -c` gets past a command-string match, and it 
 them - that would be a second parser for any shell, and the host's check of `.git` is what protects
 the repo.
 Needs bash and `jq` in the image.
+
+`report.schema.json` is the shape of the report a Claude pass returns with `REPORT_SCHEMA=1`
+(`--json-schema`, `claude()` in `src/agents.ts`, which reads the file on the host and puts it, compact, on
+the command; the mount keeps a copy where a pass can read it, and no image rebuild follows an edit). Codex
+strict mode is the dialect: every object has `additionalProperties: false` and `required` naming every
+property, with the keywords `type`, `properties`, `required`, `additionalProperties`, `items`, `enum` and
+`description` only (`test/report-schema.test.ts` checks it). It covers the tags the kit reads from prose today -
+the signal, `unmet`, `changelog`, `followups`, `ungated` - and nothing else. Claude Code returns the
+validated object as `structured_output` on the stream's `result` line, which the library's parser drops, so
+`reportCapture` keeps it with the timing of the signal and the result line.
 
 The same file carries `permissions.deny` for `Monitor`, `ScheduleWakeup`, `CronCreate`,
 `CronDelete`, `CronList` and `RemoteTrigger` (`test/managed-settings-deny.test.ts`), and for the

@@ -107,9 +107,11 @@ Declining is not skipping: every step still runs its check, and only the asking 
    5. **Unproven guards** (**`hook-tests`**). If `sandcastle lean` warns that `PreToolUse` guards are kept with no
       `hookTests`, propose tests as in init.md step 4, then `sandcastle gates`.
    6. **Ignored paths.** If `.sandcastle/.gitignore` lacks any of `.env`, `logs/`, `worktrees/`,
-      `.run/`, `triage/`, append the missing ones (commit it with the other project changes in
-      step 4). Without them, files the kit writes show as untracked and a run's clean-tree check
-      refuses to start.
+      `.run/`, `triage/`, `config.local.json`, append the missing ones (commit it with the other
+      project changes in step 4). Without them, files the kit writes show as untracked and a run's
+      clean-tree check refuses to start. For a clone whose `.sandcastle/.gitignore` is not the
+      user's to change, `config.local.json` goes in the exclude file instead: `echo
+      .sandcastle/config.local.json >> "$(git rev-parse --git-path info/exclude)"`.
    7. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
       entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
       yes).

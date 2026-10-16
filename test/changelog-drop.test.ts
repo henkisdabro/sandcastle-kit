@@ -114,6 +114,6 @@ test("`report --changelog` words a length drop the same way", () => {
 test("the pipeline hands each pass's tags to the ticket's drops and records the reasons", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.ok(source.includes("addChangelog(changelog, text, narrow, drops);"));
+  assert.ok(source.includes("addChangelog(changelog, said.changelog, narrow, drops);"));
   assert.ok(source.includes("changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined,"));
 });

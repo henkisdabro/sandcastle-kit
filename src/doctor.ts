@@ -4,11 +4,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
-import { CONFIG_PATH, loadProject, MountRefused, type Project } from "./config.ts";
+import { CONFIG_PATH, loadProject, LOCAL_CONFIG_PATH, MountRefused, type Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
@@ -683,6 +683,19 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     if (cache) console.log(`info ${cache}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));
+    // The clone's own run settings: said where they come from, and a FIX when git would show the file as untracked (a run's clean-tree check refuses to start on it).
+    if (hasConfig && existsSync(join(repoRoot, LOCAL_CONFIG_PATH))) {
+      const keys = project?.localKeys ?? [];
+      console.log(`info ${LOCAL_CONFIG_PATH} sets ${keys.length ? keys.join(", ") : "no keys"} over .sandcastle/config.ts`);
+      const localIgnored = run("git", ["-C", repoRoot, "check-ignore", "-q", LOCAL_CONFIG_PATH]) !== undefined;
+      const exclude = run("git", ["-C", repoRoot, "rev-parse", "--git-path", "info/exclude"]);
+      const excludeFix = `\`echo ${LOCAL_CONFIG_PATH} >> ${shellQuote(resolve(repoRoot, exclude?.trim() || ".git/info/exclude"))}\``;
+      const ignoreFile = join(repoRoot, ".sandcastle/.gitignore");
+      const listed = existsSync(ignoreFile) && readFileSync(ignoreFile, "utf8").split("\n").includes("config.local.json");
+      // A listed entry that ignores nothing is another rule's doing: `git check-ignore -v` names it.
+      const fix = listed ? `\`git check-ignore -v ${LOCAL_CONFIG_PATH}\` names the rule that un-ignores it; or ignore it in the exclude file: ${excludeFix}` : `${gitignoreFix(repoRoot)}, or for a clone whose .sandcastle/.gitignore is not yours to change: ${excludeFix}`;
+      check(localIgnored, `${LOCAL_CONFIG_PATH} is gitignored`, fix);
+    }
     // Ignoring a file does not untrack it: a .env added before the ignore line (or with -f) is in
     // every clone and, once pushed, on the remote.
     const tracked = run("git", ["-C", repoRoot, "ls-files", "--error-unmatch", ".sandcastle/.env"]) !== undefined;

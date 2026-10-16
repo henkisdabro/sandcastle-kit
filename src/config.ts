@@ -3,12 +3,12 @@
 // view - lives in this kit and is shared.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { AUTO_COMPACT_MAX, AUTO_COMPACT_MIN, configureAutoCompact, configureModels, configureTools, type Effort } from "./agents.ts";
+import { AUTO_COMPACT_MAX, AUTO_COMPACT_MIN, configureAutoCompact, configureModels, configureTools, type Effort, EFFORTS } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
 import { CLAUDE_CODE_TOOLS, managedDenied, nearestTool } from "./claude-tools.ts";
 import { nearest, OperatorError } from "./errors.ts";
@@ -216,9 +216,17 @@ export type ProjectConfig = {
 };
 
 export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause" | "keepWarm" | "autoCompactWindow">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "keepWarm" | "autoCompactWindow"> & { root: string; tracker: Resolved };
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "keepWarm" | "autoCompactWindow"> & {
+    root: string;
+    tracker: Resolved;
+    /** The keys (dotted, such as `implement.model`) that `.sandcastle/config.local.json` set; empty without the file. */
+    localKeys?: string[];
+  };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
+
+/** The untracked override of a clone: run settings only (`LOCAL_KEYS`), merged over `config.ts` by `loadProject`. */
+export const LOCAL_CONFIG_PATH = ".sandcastle/config.local.json";
 
 export const PNPM_STORE_SANDBOX = "/home/agent/.pnpm-store";
 export const PNPM_STORE_SETUP = `pnpm config set store-dir ${PNPM_STORE_SANDBOX}`;
@@ -268,18 +276,45 @@ export const kitOwnName = (name: string): boolean => KIT_REPOS.includes(projectR
 const isStrings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const isCount = (v: unknown, min: number) => typeof v === "number" && Number.isInteger(v) && v >= min;
 
+/** A refusal that names the file it is about. */
+const refuserFor = (path: string) => (what: string): never => {
+  throw new OperatorError(`${path}: ${what}`);
+};
+
+/** An unknown key, refused with the nearest known one. */
+const refuseUnknown = (refuse: (what: string) => never, keys: string[], known: string[], at: string) => {
+  for (const k of keys) {
+    if (known.includes(k)) continue;
+    const near = nearest(k, known);
+    refuse(`unknown key \`${at}${k}\`${near ? ` - did you mean \`${at}${near}\`?` : ` (README -> Configuration lists the keys)`}`);
+  }
+};
+
+/** The types of the run settings that both `config.ts` and `config.local.json` take. */
+const checkSettingTypes = (config: ProjectConfig, refuse: (what: string) => never) => {
+  if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
+  if (config.cpus !== undefined && config.cpus !== false && !(typeof config.cpus === "number" && Number.isFinite(config.cpus) && config.cpus >= 0.01)) {
+    // docker's own range is 0.01 up to the VM's CPUs: below it `docker run --cpus` is refused, and no sandbox starts.
+    refuse(`\`cpus\` must be a number of 0.01 or more (CPUs per sandbox) or false (no limit), not ${JSON.stringify(config.cpus)}.`);
+  }
+  if (config.keepWarm !== undefined && typeof config.keepWarm !== "boolean") refuse(`\`keepWarm\` must be true or false, not ${JSON.stringify(config.keepWarm)}.`);
+  if (config.autoCompactWindow !== undefined && !(isCount(config.autoCompactWindow, AUTO_COMPACT_MIN) && config.autoCompactWindow <= AUTO_COMPACT_MAX)) {
+    refuse(`\`autoCompactWindow\` must be a whole number of tokens from ${AUTO_COMPACT_MIN.toLocaleString("en-US")} to ${AUTO_COMPACT_MAX.toLocaleString("en-US")} (Claude Code's own range), not ${JSON.stringify(config.autoCompactWindow)}.`);
+  }
+  if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
+  if (config.usagePause !== undefined && !(typeof config.usagePause === "number" && config.usagePause >= 1 && config.usagePause <= 100)) {
+    refuse(`\`usagePause\` must be a number from 1 to 100 (the percent of a plan window at which a run pauses), not ${JSON.stringify(config.usagePause)}.`);
+  }
+  if (config.herdr?.panes !== undefined && config.herdr.panes !== "none" && config.herdr.panes !== "all") {
+    refuse(`\`herdr.panes\` must be "none" or "all", not ${JSON.stringify(config.herdr.panes)}.`);
+  }
+  if (config.repair?.attempts !== undefined && !isCount(config.repair.attempts, 0)) refuse(`\`repair.attempts\` must be a whole number of 0 or more (0 turns repair off), not ${JSON.stringify(config.repair.attempts)}.`);
+};
+
 /** Unknown keys and wrong types, refused with the key and what it takes, before anything runs. */
 const checkShape = (config: ProjectConfig) => {
-  const refuse = (what: string) => {
-    throw new OperatorError(`${CONFIG_PATH}: ${what}`);
-  };
-  const unknown = (keys: string[], known: string[], at: string) => {
-    for (const k of keys) {
-      if (known.includes(k)) continue;
-      const near = nearest(k, known);
-      refuse(`unknown key \`${at}${k}\`${near ? ` - did you mean \`${at}${near}\`?` : ` (README -> Configuration lists the keys)`}`);
-    }
-  };
+  const refuse = refuserFor(CONFIG_PATH);
+  const unknown = (keys: string[], known: string[], at: string) => refuseUnknown(refuse, keys, known, at);
   unknown(Object.keys(config), KEYS, "");
   const c = config as Record<string, unknown>;
   for (const [key, known] of Object.entries(NESTED)) {
@@ -303,24 +338,8 @@ const checkShape = (config: ProjectConfig) => {
     if (managedDenied().includes(name)) refuse(`\`lean.keep\` entry \`${entry}\`: the managed settings deny ${name} in every sandbox, so it could never be used.`);
     if (!CLAUDE_CODE_TOOLS.includes(name)) refuse(`\`lean.keep\` entry \`${entry}\` names no built-in Claude Code tool, and Claude Code would ignore it silently - did you mean \`tool:${nearestTool(name)}\`?`);
   }
-  if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
-  if (config.cpus !== undefined && config.cpus !== false && !(typeof config.cpus === "number" && Number.isFinite(config.cpus) && config.cpus >= 0.01)) {
-    // docker's own range is 0.01 up to the VM's CPUs: below it `docker run --cpus` is refused, and no sandbox starts.
-    refuse(`\`cpus\` must be a number of 0.01 or more (CPUs per sandbox) or false (no limit), not ${JSON.stringify(config.cpus)}.`);
-  }
   if (config.changelog !== undefined && typeof config.changelog !== "boolean") refuse(`\`changelog\` must be true or false, not ${JSON.stringify(config.changelog)}.`);
-  if (config.keepWarm !== undefined && typeof config.keepWarm !== "boolean") refuse(`\`keepWarm\` must be true or false, not ${JSON.stringify(config.keepWarm)}.`);
-  if (config.autoCompactWindow !== undefined && !(isCount(config.autoCompactWindow, AUTO_COMPACT_MIN) && config.autoCompactWindow <= AUTO_COMPACT_MAX)) {
-    refuse(`\`autoCompactWindow\` must be a whole number of tokens from ${AUTO_COMPACT_MIN.toLocaleString("en-US")} to ${AUTO_COMPACT_MAX.toLocaleString("en-US")} (Claude Code's own range), not ${JSON.stringify(config.autoCompactWindow)}.`);
-  }
-  if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
-  if (config.usagePause !== undefined && !(typeof config.usagePause === "number" && config.usagePause >= 1 && config.usagePause <= 100)) {
-    refuse(`\`usagePause\` must be a number from 1 to 100 (the percent of a plan window at which a run pauses), not ${JSON.stringify(config.usagePause)}.`);
-  }
-  if (config.herdr?.panes !== undefined && config.herdr.panes !== "none" && config.herdr.panes !== "all") {
-    refuse(`\`herdr.panes\` must be "none" or "all", not ${JSON.stringify(config.herdr.panes)}.`);
-  }
-  if (config.repair?.attempts !== undefined && !isCount(config.repair.attempts, 0)) refuse(`\`repair.attempts\` must be a whole number of 0 or more (0 turns repair off), not ${JSON.stringify(config.repair.attempts)}.`);
+  checkSettingTypes(config, refuse);
   if (!Array.isArray(config.gates) || config.gates.some((g) => typeof g?.name !== "string" || !g.name || typeof g.command !== "string" || !g.command)) {
     refuse("each gate needs a `name` and a `command`, both strings: { name: \"test\", command: \"pnpm test\" }.");
   }
@@ -328,6 +347,88 @@ const checkShape = (config: ProjectConfig) => {
   if (config.mounts !== undefined && (!Array.isArray(config.mounts) || config.mounts.some((m) => typeof m?.hostPath !== "string" || typeof m.sandboxPath !== "string"))) {
     refuse("each mount needs a `hostPath` and a `sandboxPath`, both strings.");
   }
+};
+
+// The run settings a clone may override without touching the committed config. Not `gates`, `setup`,
+// `mounts`, `generated` and the rest: they change what a landed branch is checked against, and two
+// clones of one repo would land against different gates.
+const LOCAL_KEYS = ["autonomy", "concurrency", "cpus", "herdr", "usagePause", "keepWarm", "autoCompactWindow", "implement", "review", "repair"];
+
+/** The nested types `checkShape` does not check in `config.ts` (its own validation is not made stricter), checked for the local file. */
+const checkLocalNested = (local: Record<string, unknown>, refuse: (what: string) => never) => {
+  const positive = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v > 0;
+  for (const key of ["implement", "review", "repair"]) {
+    const o = local[key];
+    if (o === undefined || o === null) continue;
+    const at = (sub: string) => `${key}.${sub}`;
+    const sets = (sub: string) => (o as Record<string, unknown>)[sub] !== undefined && (o as Record<string, unknown>)[sub] !== null;
+    const value = (sub: string) => JSON.stringify((o as Record<string, unknown>)[sub]);
+    const v = o as Record<string, unknown>;
+    if (key !== "repair") {
+      if (sets("model") && (typeof v.model !== "string" || !v.model)) refuse(`\`${at("model")}\` must be a non-empty string, not ${value("model")}.`);
+      if (sets("effort") && !EFFORTS.includes(v.effort as Effort)) refuse(`\`${at("effort")}\` must be one of ${EFFORTS.join(", ")}, not ${value("effort")}.`);
+    }
+    if (sets("maxIterations") && !isCount(v.maxIterations, 1)) refuse(`\`${at("maxIterations")}\` must be a whole number of 1 or more, not ${value("maxIterations")}.`);
+    if (sets("idleTimeoutSeconds") && !positive(v.idleTimeoutSeconds)) refuse(`\`${at("idleTimeoutSeconds")}\` must be a number of seconds above 0, not ${value("idleTimeoutSeconds")}.`);
+  }
+};
+
+/** The run's start line naming the local file and the keys taken from it; undefined without the file (or with no key in it), so a run without one prints nothing. */
+export const localConfigLine = (project: { localKeys?: string[] }): string | undefined =>
+  project.localKeys?.length ? `Local config (${LOCAL_CONFIG_PATH}): ${project.localKeys.join(", ")}` : undefined;
+
+/**
+ * `.sandcastle/config.local.json` merged over a loaded `config.ts`: `{ config, keys }`, the file's keys
+ * (dotted, such as `implement.model`) beside the merged config. Without the file, the config as it is
+ * and no keys. Plain JSON, so no code runs from an untracked file. A nested object is merged key by
+ * key; a JSON `null` drops that key, so the kit default applies, and still counts as one the file set.
+ */
+export const mergeLocalConfig = (root: string, config: ProjectConfig): { config: ProjectConfig; keys: string[] } => {
+  const file = join(root, LOCAL_CONFIG_PATH);
+  if (!existsSync(file)) return { config, keys: [] };
+  const refuse = refuserFor(LOCAL_CONFIG_PATH);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    return refuse(`is not valid JSON: ${String((error as Error).message ?? error)}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) refuse("must hold a JSON object of run settings, such as { \"autonomy\": 2 }.");
+  const local = parsed as Record<string, unknown>;
+  refuseUnknown(refuse, Object.keys(local), KEYS, "");
+  for (const key of Object.keys(local)) {
+    if (!LOCAL_KEYS.includes(key)) refuse(`\`${key}\` cannot be set here: only run settings can (${LOCAL_KEYS.join(", ")}), as the rest changes what a landed branch is checked against.`);
+  }
+  for (const [key, known] of Object.entries(NESTED)) {
+    if (local[key] === undefined || local[key] === null) continue;
+    if (typeof local[key] !== "object" || Array.isArray(local[key])) refuse(`\`${key}\` must be an object ({ ${known.join(", ")} }).`);
+    refuseUnknown(refuse, Object.keys(local[key] as object), known, `${key}.`);
+  }
+  // Null is an unset, not a value: the types below are those of the keys that carry one.
+  const set = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null));
+  const typed = Object.fromEntries(Object.entries(local).filter(([, v]) => v !== null).map(([k, v]) => [k, k in NESTED ? set(v as Record<string, unknown>) : v]));
+  checkSettingTypes(typed as ProjectConfig, refuse);
+  checkLocalNested(typed, refuse);
+  const merged: Record<string, unknown> = { ...config };
+  const keys: string[] = [];
+  for (const [key, value] of Object.entries(local)) {
+    if (value === null) {
+      delete merged[key];
+      keys.push(key);
+    } else if (key in NESTED) {
+      const next = { ...(merged[key] as Record<string, unknown> | undefined) };
+      for (const [sub, v] of Object.entries(value as Record<string, unknown>)) {
+        if (v === null) delete next[sub];
+        else next[sub] = v;
+        keys.push(`${key}.${sub}`);
+      }
+      merged[key] = next;
+    } else {
+      merged[key] = value;
+      keys.push(key);
+    }
+  }
+  return { config: merged as ProjectConfig, keys };
 };
 
 // Node gives a syntax error's place only in the head of its stack - the file and line, the source
@@ -376,6 +477,8 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and at least one gate in \`gates\`.`);
   }
   checkShape(config);
+  const merged = mergeLocalConfig(root, config);
+  config = merged.config;
   for (const m of config.mounts ?? []) {
     const problem = mountProblem(root, m);
     if (problem) throw new MountRefused(`${CONFIG_PATH}: ${problem}`);
@@ -443,6 +546,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     generated: generated.map((g) => ({ ...g, paths: g.paths.map((p) => p.replace(/^\.\//, "")) })),
     label: config.label ?? detectFromDocs(root).labels?.["ready-for-agent"] ??"ready-for-agent",
     tracker: resolveTracker(root, config.tracker),
+    localKeys: merged.keys,
     lean: { keep: config.lean?.keep ?? [], dropHooks: config.lean?.dropHooks ?? [] },
   };
 };

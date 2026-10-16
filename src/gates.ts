@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
-import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
+import { type MachineCpu, type PassReadings, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
 import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -33,6 +33,9 @@ export type Failure = { name: string; command: string; exitCode: number; output:
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
 // `pressureSome`, `pressureFull`: the highest memory pressure (`avg10`, percent) read in the sandbox while this pass ran; absent at 0 or where the kernel gives none.
+// `cpuSome`, `cpuSomeMean`: the sandbox cgroup's CPU pressure (`some` `avg10`), highest and mean of this pass, recorded and never judged;
+// `cpuMachine`, `cpuMachineMean`: the machine-wide one the host read (`readMachineCpu`), highest and mean - the mean is the judged figure
+// (`cpuHigh`); `cpuEstimate` when those are the macOS load-average estimate. Each is absent at 0 or where no reading was taken.
 // `head`: the commit the run gated, read in its sandbox: a base run's (`gateBase`), as the base's name can move between asking and
 // gating; a ticket run's (`runGates`), the head `rememberFailed` keeps each failed test by.
 // `rewrote`: the tracked files the gates changed in the worktree, which were put back.
@@ -44,6 +47,11 @@ export type GateRun = {
   peakMib?: number;
   pressureSome?: number;
   pressureFull?: number;
+  cpuSome?: number;
+  cpuSomeMean?: number;
+  cpuMachine?: number;
+  cpuMachineMean?: number;
+  cpuEstimate?: true;
   head?: string;
   rewrote?: string[];
   /**
@@ -82,6 +90,8 @@ export type GateProgress = {
    * is released (`withContainerCpus`). Unset for a gate-only sandbox, which has the gate share from its start.
    */
   cpus?: { gate: number; ticket: number };
+  /** The machine-wide CPU pressure reader a pass samples with (`sampling`'s `readMachine`); `readMachineCpu` by default, a test injects its own. */
+  machineCpu?: () => MachineCpu | undefined | Promise<MachineCpu | undefined>;
 };
 
 // One decimal under 10 s: gates average a few seconds, and "green in 0s" says
@@ -169,7 +179,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const before = await dirtyPaths(sandbox);
     const head = await headOf(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
-    const pressure: Pressure = {};
+    const pressure: PassReadings = {};
     await sampling(sandbox, "gate", async () => {
       for (const [i, g] of project.gates.entries()) {
         if (i < start) continue;
@@ -210,10 +220,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // its own timeout too.
         if (!all || r.exitCode === 124) break;
       }
-    }, pressure);
+    }, pressure, progress.machineCpu);
     const peakMib = await samplePeak(sandbox);
     const rewrote = await restoreGateChanges(sandbox, before);
-    return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
+    return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...cpuFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   };
   return withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
@@ -728,14 +738,14 @@ export const timingLines = <L extends { ms: number; waitMs?: number }>(line: L, 
   if (runs.some((run) => typeof run.ms !== "number")) return [line];
   const { waitMs, ...rest } = line;
   // The later runs' figures, which an earlier run's line must not carry: absent there unless that run has its own.
-  const { gates: _gates, peakMib: _peak, pressureSome: _some, pressureFull: _full, red: _red, ...common } = rest as Record<string, unknown>;
+  const { gates: _gates, peakMib: _peak, pressureSome: _some, pressureFull: _full, cpuSome: _cs, cpuSomeMean: _csm, cpuMachine: _cm, cpuMachineMean: _cmm, cpuEstimate: _ce, red: _red, ...common } = rest as Record<string, unknown>;
   let left = line.ms;
   // Undefined values are left out of the line by `JSON.stringify`.
   const lines: Record<string, unknown>[] = runs.map((run, i) => {
     const ms = Math.min(Math.max(0, Math.round(run.ms!)), left);
     left -= ms;
     const redGates = gateRed(run);
-    return { ...common, ms, ...(i === 0 && waitMs ? { waitMs } : {}), ...(i > 0 ? { rerun: true } : {}), ok: false, gates: gateMs(run), peakMib: peakOf(run), ...pressureFields(pressureOf(run)), red: redGates?.length ? redGates : undefined };
+    return { ...common, ms, ...(i === 0 && waitMs ? { waitMs } : {}), ...(i > 0 ? { rerun: true } : {}), ok: false, gates: gateMs(run), peakMib: peakOf(run), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)), red: redGates?.length ? redGates : undefined };
   });
   // The result's own gates: from the red gate on, the passes before it are the first run's.
   const first = runs[0];
@@ -829,12 +839,14 @@ export const timedGate = async <T>(
     const gateTimes = done ? gateMs(result) : undefined;
     const peakMib = done ? peakOf(result) : undefined;
     const pressure = done ? pressureFields(pressureOf(result)) : {};
+    const cpu = done ? cpuFields(cpuOf(result)) : {};
     const line = {
       ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
       ...(who.carried ? { carried: true } : {}),
       ...(who.unreviewed ? { unreviewed: true } : {}),
       ...(gateTimes ? { gates: gateTimes } : {}),
       ...(peakMib ? { peakMib } : {}),
+      ...cpu,
       ...pressure,
       ...(red?.length ? { red } : {}),
     };
@@ -1183,7 +1195,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   );
   // For the run's "base gates" timings line, as verify's carries them: per-gate times, the slot wait
   // (out of `ms`) and the sandbox's peak and memory pressure.
-  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)) };
+  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)) };
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }

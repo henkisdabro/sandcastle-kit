@@ -1,6 +1,6 @@
 // Preloaded into every test file's process, beside test/no-stray.ts (`--import ./test/hermetic-env.ts` in
 // package.json's `test`, `test:shard` and `test:weights`, and test/run-shards.sh): every test starts from the
-// same environment, whatever shell the developer runs it in. Eight things in a developer's shell change what
+// same environment, whatever shell the developer runs it in. Nine things in a developer's shell change what
 // the code under test does, and a Linux sandbox with a clean environment passes them all:
 //
 //  - `TMPDIR` is the realpath of `os.tmpdir()`: on macOS it is a `/var/...` path that git and `process.cwd()`
@@ -34,6 +34,9 @@
 //    `origin`, and a test's `doctor` or `--version --json`, its read refused above, wrote a failure there that
 //    hid a newer release from the developer's own idle mark and doctor for an hour. A test that needs a cache of
 //    its own still sets it; a child the test starts inherits this one.
+//  - `SANDCASTLE_TEST_MACHINE_CPU` is `none`: `readMachineCpu` (src/peaks.ts), called with no injected host, then gives no
+//    reading, so no test's gate pass, judgement or hold depends on the machine's real CPU load (a loaded developer
+//    machine, full-check and the macOS CI leg would flake otherwise). A test that wants readings injects them.
 //  - Names the code reads as a setting or a credential are removed: HERDR_*, TMUX*, SANDCASTLE_* (but not
 //    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests and which are the tests' own switches, such as
 //    SANDCASTLE_TEST_NOW, the fixture clock: test/status-clock.ts) and the names in `SCRUBBED` below. A test that
@@ -50,7 +53,7 @@ import { delimiter, dirname, join } from "node:path";
 /** The settings and credential names `src/` reads from the environment that no prefix below covers. */
 export const SCRUBBED = [
   "AUTONOMY_LEVEL", "CONCURRENCY", "DRY_RUN", "TICKETS", "ISSUES", "KEEP_AWAKE", "SKIP_PREFLIGHT", "SKIP_BASE_GATES", "SANDBOX_PANES",
-  "IMPL_MODEL", "IMPL_EFFORT", "REVIEW_MODEL", "REVIEW_EFFORT", "CROSS_REVIEW", "CROSS_REVIEW_MODEL", "CROSS_REVIEW_EFFORT",
+  "IMPL_MODEL", "IMPL_EFFORT", "REVIEW_MODEL", "REVIEW_EFFORT", "CROSS_REVIEW", "CROSS_REVIEW_MODEL", "CROSS_REVIEW_EFFORT", "REPORT_SCHEMA",
   "USAGE_CHECK", "USAGE_PAUSE", "USAGE_STOP", "CLAUDE_CODE_VERSION", "CODEX_VERSION",
   "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY", "LINEAR_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID",
   // The terminal the click hint senses (src/click-hint.ts), and the colour switch.
@@ -119,4 +122,5 @@ if (process.env.NODE_TEST_CONTEXT) {
   addGitConfig("user.useConfigOnly", "true");
   addGitConfig("maintenance.auto", "false");
   process.env.GIT_ALLOW_PROTOCOL ??= "file";
+  process.env.SANDCASTLE_TEST_MACHINE_CPU = "none";
 }

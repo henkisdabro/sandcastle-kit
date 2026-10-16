@@ -19,7 +19,7 @@ import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
-import { PRESSURE_WARN_FULL } from "./peaks.ts";
+import { CPU_PRESSURE_HIGH, PRESSURE_WARN_FULL } from "./peaks.ts";
 import { PEAK_CONTEXT_WARN, readPlanUsages } from "./usage.ts";
 import { LANDING, LANDING_GATES, rewroteLine } from "./gates.ts";
 import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
@@ -99,6 +99,8 @@ export type Facts = {
   timeLost?: TimeLost;
   /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
   pressure?: { some: number; full: number; where: string };
+  /** The gate pass of this run with the highest machine-wide CPU pressure (its `cpuMachineMean`, percent), where it was read and whether it is the macOS estimate; undefined when none was above 0 or recorded. */
+  cpu?: { mean: number; where: string; estimate?: true };
   verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string }; notRun?: string } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
@@ -360,6 +362,30 @@ export const pressureFromTimings = (text: string, runId: string): { some: number
 };
 
 /**
+ * One run's busiest gate pass by machine-wide CPU pressure from timings.jsonl text: the line with the highest
+ * `cpuMachineMean` (the first of equals), where it was read (as `pressureFromTimings` words it) and `estimate` when that
+ * line's figure is the macOS load-average estimate.
+ */
+export const cpuFromTimings = (text: string, runId: string): { mean: number; where: string; estimate?: true } | undefined => {
+  let found: { mean: number; where: string; estimate?: true } | undefined;
+  for (const raw of text.split("\n")) {
+    let line: { run?: unknown; issue?: unknown; phase?: unknown; cpuMachineMean?: unknown; cpuEstimate?: unknown };
+    try {
+      line = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!line || line.run !== runId) continue;
+    const mean = typeof line.cpuMachineMean === "number" && line.cpuMachineMean > 0 ? line.cpuMachineMean : 0;
+    if (!mean || (found && mean <= found.mean)) continue;
+    const phase = typeof line.phase === "string" ? line.phase : "a pass";
+    const where = typeof line.issue === "string" || typeof line.issue === "number" ? (line.issue === "" ? phase : `ticket ${line.issue}'s ${phase}`) : phase;
+    found = { mean, where, ...(line.cpuEstimate === true ? { estimate: true as const } : {}) };
+  }
+  return found;
+};
+
+/**
  * Where a run's time went beyond the work itself, from its timings lines: `gateWaitMs` is the waits for a gates slot (the
  * `waitMs` of the gate, landing gate, base and verify lines) and `landingGateWaitMs` the landing gates' share of it,
  * `landingWaitMs` the landings' waits for a sandbox slot (the `waitMs` of a `landing` line, which is no gates slot's, and
@@ -605,6 +631,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   const timingsText = !earlier && existsSync(timingsFile) ? readFileSync(timingsFile, "utf8") : undefined;
   const timed = timingsText ? tokensFromTimings(timingsText, run.startedAt) : undefined;
   const pressure = timingsText ? pressureFromTimings(timingsText, run.startedAt) : undefined;
+  const cpu = timingsText ? cpuFromTimings(timingsText, run.startedAt) : undefined;
   const timeLost = timingsText ? timeLostFromTimings(timingsText, run.startedAt) : undefined;
   const ms = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
 
@@ -622,6 +649,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     tokenTotal: timed?.total,
     byModel: timed?.byModel,
     ...(pressure ? { pressure } : {}),
+    ...(cpu ? { cpu } : {}),
     ...(timeLost ? { timeLost } : {}),
     ...(run.estimate && typeof run.estimate === "object" ? { estimate: run.estimate } : {}),
     ...(ms(run.sharedMs) ? { sharedMs: ms(run.sharedMs) } : {}),
@@ -1281,6 +1309,9 @@ export const render = (f: Facts, plain = false): string => {
   );
   if (f.pressure && f.pressure.full >= PRESSURE_WARN_FULL) {
     out.push(`Memory pressure: high - full ${f.pressure.full}% (some ${f.pressure.some}%) in a sandbox during ${f.pressure.where}, so the sandboxes stalled on memory at once and gates ran slower for it. \`sandcastle size\` shows the VM's memory against the pool; lower maxSandboxes or maxGates, or give the VM more memory.`);
+  }
+  if (f.cpu && f.cpu.mean >= CPU_PRESSURE_HIGH) {
+    out.push(`CPU pressure: high - the machine's CPU pressure averaged ${f.cpu.mean}%${f.cpu.estimate ? " (an estimate from the load average)" : ""} over ${f.cpu.where}, so other work on the machine competed with the gates and they ran slower. Run \`sandcastle gates\` when the machine is quiet, or lower maxSandboxes.`);
   }
   out.push(...estimateLines(f, end));
   out.push(...flakyLines(f));

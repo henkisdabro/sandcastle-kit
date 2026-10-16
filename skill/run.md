@@ -218,6 +218,10 @@ This continues SKILL.md: run its "Before every action" first.
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       A `Memory pressure: high` line (a sandbox's `full` memory pressure reached 5% during a gate pass)
       says the VM ran short of memory at that pool size: relay it with the pass it names and its fix.
+      A `CPU pressure: high` line (the machine's CPU pressure, a gate pass's mean, reached 60%; on macOS an
+      estimate from the load average, which the line says) says other work on the machine slowed the gates:
+      relay it with the pass it names and its fix (`sandcastle gates` when the machine is quiet, or a lower
+      `maxSandboxes`). A red gate in such a run may be the load, not the change.
       A `Large context:` line names a ticket with an agent pass whose largest turn held over 150,000
       tokens of context: relay it with the pass and the peak it names.
       A `Tokens:` line (and `(incomplete)` or `tokens unknown` in the headline) names tickets with an

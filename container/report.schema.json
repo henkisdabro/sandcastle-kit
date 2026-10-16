@@ -1,0 +1,57 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["signal", "unmet", "changelog", "followups", "ungated"],
+  "properties": {
+    "signal": {
+      "description": "Always the completion signal, exactly as the prompt asks you to output it when you are done.",
+      "enum": ["<promise>COMPLETE</promise>"]
+    },
+    "unmet": {
+      "description": "The acceptance criteria you knowingly left undone, as the <unmet> line asks for. Set assessed to true once you have checked every criterion, with no items when all are met; false when you did not assess them, with no items.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assessed", "items"],
+      "properties": {
+        "assessed": {
+          "description": "True when you checked every acceptance criterion against the branch; false when you did not.",
+          "type": "boolean"
+        },
+        "items": {
+          "description": "One item per criterion left undone; empty when every criterion is met.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["who", "text"],
+            "properties": {
+              "who": {
+                "description": "person when only a person can finish it (access, a deploy, a file agents may not edit, a decision), as <unmet who=\"person\">; agent otherwise.",
+                "enum": ["agent", "person"]
+              },
+              "text": {
+                "description": "One sentence naming the criterion left undone.",
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "changelog": {
+      "description": "The changelog lines the <changelog> tag asks for, one per item: one or two sentences each, starting Added:, Changed: or Fixed:. Empty when the change needs no changelog line.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "followups": {
+      "description": "The problems outside this ticket that the <followup> tag asks for, one per item, as 'title - one line of evidence'. Empty when there are none.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ungated": {
+      "description": "What a person should check because no gate exercises the change, as the <ungated> tag asks for, one per item. Empty when every change is exercised by a gate.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
