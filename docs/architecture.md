@@ -95,6 +95,31 @@ collides with), and the fix board it shares with the run's other pipelines (`fix
 `src/schedule.ts`). `test/pipeline.test.ts` drives it over a temp repo with a worktree for the
 sandbox, scripted agents and scripted gate runs: a change to the pipeline is tested there, by what
 it does, not by matching the source of `src/burndown.ts`.
+
+**The base merged before the gates** (`mergeBaseBeforeGates` in `createPipeline`, #790 option b):
+on the path that calls `gate(...)`, after `conflicted("gates")` found no conflict and `redAtLanding`
+was read, and before the gates slot is asked for, a branch that is behind the base (`rev-list
+--count <branch>..<base>`) gets `git merge --no-edit <base>` in the ticket's sandbox, never on the
+host, with the line `merged <base> into its branch before its gates (N behind)`. The gates then run
+on a head that holds the base's tip, and `landOne`'s rule (a branch that holds the tip lands as a
+fast-forward on its own gate results) lands it with no landing gate when nothing landed in between;
+a landing in between still gates. A branch that holds the tip gets no merge commit. After a clean
+merge that brought files, `project.setup` runs again, as `landInSandbox` does; a failed setup
+command undoes the merge (`git reset --hard` to the pre-merge head) and gates the branch as it
+stands, not a red `setup` gate, because the dependency the base added is no fault of the ticket's.
+An undo after setup ran on the merged tree (here or in `resolveGenerated`) runs setup again, so the
+gates never run the branch's own tree on the base's install.
+A conflict only in `generated` paths goes through `resolveGenerated`. A failed regen, a conflict
+elsewhere (the base moved after `conflictBefore` read it) or a refused merge is aborted, with a
+line saying so, and the branch is gated as it stands: no agent pass or requeue starts here, and the
+landing's own precheck finds a real conflict. No merge on the `redAtLanding` path (no gate runs),
+nor before the gate run after a repair pass or a fix-board merge. `preRepair` is read after it, so
+a re-review after a repair covers repair commits only; `touchesOverrun` (three-dot, `--no-merges`)
+and `branchFiles` count the branch's own files, not what the merge brought; the green head record
+is the merged tip. With `land: "merge"` a landed ticket gains an in-branch `Merge <base> into
+agent/issue-N` commit beside the landing's `--no-ff` merge, and `squashBody` (`--no-merges`) leaves
+it out of a squash (`test/pipeline-base-merge-before-gates.test.ts`).
+
 An attempt's first red gate is run again once before any repair pass - and before the base check and
 the fix board are asked - from that gate on, in config order and stopping at the first red, in the
 same sandbox with no model (`regate`, built on `runGates`' `from`; a ticket's first gate run asks
@@ -112,27 +137,6 @@ are unchanged - `test/gates-rerun-keeps-slot.test.ts`; the gates before it passe
 a branch that holds the base's tip lands as a fast-forward on its own gate results, so a re-run of
 the red gate alone would leave the later gates never run).
 
-**The base merged before the gates** (`mergeBaseBeforeGates` in `createPipeline`, #790 option b):
-on the path that calls `gate(...)`, after `conflicted("gates")` found no conflict and `redAtLanding`
-was read, and before the gates slot is asked for, a branch that is behind the base (`rev-list
---count <branch>..<base>`) gets `git merge --no-edit <base>` in the ticket's sandbox, never on the
-host, with the line `merged <base> into its branch before its gates (N behind)`. The gates then run
-on a head that holds the base's tip, and `landOne`'s rule (a branch that holds the tip lands as a
-fast-forward on its own gate results) lands it with no landing gate when nothing landed in between;
-a landing in between still gates. A branch that holds the tip gets no merge commit. After a clean
-merge that brought files, `project.setup` runs again, as `landInSandbox` does; a failed setup
-command undoes the merge (`git reset --hard` to the pre-merge head) and gates the branch as it
-stands, not a red `setup` gate, because the dependency the base added is no fault of the ticket's.
-A conflict only in `generated` paths goes through `resolveGenerated`. A failed regen, a conflict
-elsewhere (the base moved after `conflictBefore` read it) or a refused merge is aborted, with a
-line saying so, and the branch is gated as it stands: no agent pass or requeue starts here, and the
-landing's own precheck finds a real conflict. No merge on the `redAtLanding` path (no gate runs),
-nor before the gate run after a repair pass or a fix-board merge. `preRepair` is read after it, so
-a re-review after a repair covers repair commits only; `touchesOverrun` (three-dot, `--no-merges`)
-and `branchFiles` count the branch's own files, not what the merge brought; the green head record
-is the merged tip. With `land: "merge"` a landed ticket gains an in-branch `Merge <base> into
-agent/issue-N` commit beside the landing's `--no-ff` merge, and `squashBody` (`--no-merges`) leaves
-it out of a squash (`test/pipeline-base-merge-before-gates.test.ts`).
 Green means the red was a flake: no repair pass, and the result's `gates` are the passes before the
 red gate followed by the re-run's, still a prefix of the configured gates (`gateResultLines`).
 Red again goes on to the repair loop from the re-run's failure - unless the re-run's failing tests

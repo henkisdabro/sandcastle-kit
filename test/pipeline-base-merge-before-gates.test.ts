@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -66,7 +66,7 @@ const harness = (o: { setup?: string[]; beforeMerge?: (worktree: string) => void
       return [kind, file];
     }),
   ) as PCtx["prompts"];
-  const gated: { head: string; mergeHead: boolean; files: string[] }[] = [];
+  const gated: { head: string; mergeHead: boolean; files: string[]; installed?: string }[] = [];
   const agents: Record<string, (worktree: string) => void> = {};
 
   const open = async (branch: string): Promise<Box> => {
@@ -124,6 +124,7 @@ const harness = (o: { setup?: string[]; beforeMerge?: (worktree: string) => void
         head: git(wt, "rev-parse", "HEAD"),
         mergeHead: existsSync(join(git(wt, "rev-parse", "--absolute-git-dir"), "MERGE_HEAD")),
         files: git(wt, "ls-files").split("\n"),
+        installed: existsSync(join(wt, ".installed")) ? readFileSync(join(wt, ".installed"), "utf8").trim() : undefined,
       });
       return GREEN;
     },
@@ -290,4 +291,17 @@ test("the Touches overrun of a merged branch lists none of the files the merge b
   assert.deepEqual(touchesOverrun(h.root, "main", head, "Touches: seven.txt"), []);
   // The branch's own undeclared file still counts, so the empty list above is the merge's doing.
   assert.deepEqual(touchesOverrun(h.root, "main", head, "Touches: nothing-here.txt"), ["seven.txt"]);
+});
+
+test("an undone merge whose setup ran on the merged tree runs setup again, so the gates run on the branch's own install", async () => {
+  // The first command stands for an install: it records the tree it ran on. The second fails on the merged tree.
+  const h = harness({ setup: ["if [ -e other.txt ]; then echo merged > .installed; else echo own > .installed; fi", "test ! -e other.txt"] });
+  h.agents.impl = (wt) => {
+    commit(wt, "seven.txt", "seven\n");
+    commit(h.root, "other.txt", "one\n", "another ticket landed");
+  };
+  const { result: o, lines } = await h.attempt();
+  assert.equal(o.status, "green");
+  assert.ok(!h.gated[0].files.includes("other.txt"));
+  assert.equal(h.gated[0].installed, "own", lines.join("\n"));
 });

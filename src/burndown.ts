@@ -2108,15 +2108,24 @@ export const createPipeline = (ctx: PipelineContext) => {
         const identity = hostIdentity(project.root);
         const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
         const pull = await sandbox.exec(`git ${identity} merge --no-edit ${shq(base)}`);
+        // Setup ran on the merged tree (here, or inside `resolveGenerated`): an undo then runs it again, or the gates
+        // run the branch's own tree on the base's install and a dependency the base changed reads as the ticket's red.
+        let installed = false;
         const stand = async (why: string) => {
           // `--abort` refuses when no merge is in progress (a refusal before it began); the reset covers a merge that committed.
           await sandbox.exec("git merge --abort");
           await sandbox.exec(`git reset -q --hard ${shq(before)}`);
           console.log(`${ref(issue.id)}: could not merge ${base} into its branch before its gates (${why}) - undone, gated as it stands.`);
+          if (!installed) return;
+          for (const command of project.setup) {
+            const r = await execGate(sandbox, command);
+            if (r.exitCode !== 0) return console.log(`${ref(issue.id)}: setup "${command}" exited ${r.exitCode} on its own branch after the undo - the gates say what that breaks.`);
+          }
         };
         if (pull.exitCode !== 0) {
           const files = (await sandbox.exec("git diff --name-only --diff-filter=U")).stdout.split("\n").filter(Boolean);
           if (!files.length || !regensFor(files, project.generated)) return stand(files.length ? `conflicts in ${files.join(", ")}` : (pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160) || "refused");
+          installed = project.setup.length > 0;
           const r = await resolveGenerated(sandbox, { files, generated: project.generated, setup: project.setup, message: `Merge ${base} into ${branch} (generated files regenerated)`, identity });
           if (!r.ok) return stand(`regenerating ${files.join(", ")} failed: ${r.reason}`);
           console.log(`${ref(issue.id)}: merged ${base} into its branch before its gates (${behindNow} behind; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}).`);
@@ -2125,6 +2134,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const brought = (await sandbox.exec(`git diff --name-only ${shq(before)} HEAD`)).stdout.trim();
         if (brought) {
           // A dependency the base added must be installed before the gates, as `landInSandbox` does after its merge.
+          installed = project.setup.length > 0;
           for (const command of project.setup) {
             const r = await execGate(sandbox, command);
             if (r.exitCode !== 0) return stand(`setup "${command}" exited ${r.exitCode}`);
