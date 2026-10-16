@@ -75,15 +75,15 @@ test("gitignoreFix names what is missing, and the command it prints completes th
   const file = join(root, ".sandcastle/.gitignore");
   writeFileSync(file, ".env\nlogs/\n");
   const fix = gitignoreFix(root);
-  assert.ok(fix.includes("printf '%s\\n' worktrees/ .run/ triage/ >> "));
+  assert.ok(fix.includes("printf '%s\\n' worktrees/ .run/ triage/ config.local.json >> "));
   sh(inBackticks(fix), root);
   const lines = readFileSync(file, "utf8").split("\n");
-  for (const entry of [".env", "logs/", "worktrees/", ".run/", "triage/"]) assert.equal(lines.filter((l) => l === entry).length, 1, entry);
+  for (const entry of [".env", "logs/", "worktrees/", ".run/", "triage/", "config.local.json"]) assert.equal(lines.filter((l) => l === entry).length, 1, entry);
   assert.match(gitignoreFix(root), /git check-ignore -v \.sandcastle\/logs\/x/);
 });
 
-test("gitignoreFix with no file at all names all five entries", () => {
-  assert.ok(gitignoreFix(project("none")).includes("'%s\\n' .env logs/ worktrees/ .run/ triage/ >>"));
+test("gitignoreFix with no file at all names all six entries", () => {
+  assert.ok(gitignoreFix(project("none")).includes("'%s\\n' .env logs/ worktrees/ .run/ triage/ config.local.json >>"));
 });
 
 test("gitignoreFix on a file with no final newline keeps its last line intact", () => {
@@ -92,5 +92,5 @@ test("gitignoreFix on a file with no final newline keeps its last line intact", 
   writeFileSync(file, ".env");
   sh(inBackticks(gitignoreFix(root)), root);
   const lines = readFileSync(file, "utf8").split("\n");
-  for (const entry of [".env", "logs/", "worktrees/", ".run/", "triage/"]) assert.equal(lines.filter((l) => l === entry).length, 1, entry);
+  for (const entry of [".env", "logs/", "worktrees/", ".run/", "triage/", "config.local.json"]) assert.equal(lines.filter((l) => l === entry).length, 1, entry);
 });

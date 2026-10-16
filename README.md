@@ -1380,6 +1380,37 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 
 Examples: [`examples/`](examples/).
 
+**A setting for your clone alone: `.sandcastle/config.local.json`.** For a clone of a repo whose
+committed config is not yours to change (a public repo you dogfood on, a team's shared one), an
+optional, untracked `.sandcastle/config.local.json` holds your own run settings, merged over
+`config.ts`:
+
+```json
+{ "autonomy": "drain", "implement": { "model": "claude-opus-5-5" } }
+```
+
+- **Plain JSON, run settings only.** The keys are `autonomy`, `concurrency`, `cpus`, `herdr`,
+  `usagePause`, `keepWarm`, `autoCompactWindow`, `implement` and `review` (`model`, `effort`,
+  `maxIterations`, `idleTimeoutSeconds`) and `repair` (`attempts`, `maxIterations`,
+  `idleTimeoutSeconds`). Any other key - `gates`, `setup`, `mounts`, `generated` - is refused with
+  the key named, as it changes what a landed branch is checked against, and two clones of one repo
+  would land against different gates. A typo is refused with the nearest key, a wrong type with the
+  dotted key (`implement.maxIterations`), a file that is not a JSON object by name.
+- **Precedence.** The environment (`AUTONOMY_LEVEL`, `CONCURRENCY`, `IMPL_MODEL`) beats the file,
+  the file beats `config.ts`, `config.ts` beats the default. Your [personal
+  settings](#personal-settings) still clamp last (`maxSandboxes`, `"keepWarm": false`).
+- **Merging.** A nested object merges key by key: `{ "implement": { "model": "x" } }` keeps
+  `implement.effort` from `config.ts`. A JSON `null` unsets a key: `config.ts`'s value is dropped and
+  the kit default applies (`{ "autonomy": null }` runs at the default level).
+- **Keep it out of the clean-tree check.** A run refuses to start on a dirty tree, untracked files
+  included. `sandcastle init` writes `config.local.json` to `.sandcastle/.gitignore`, and `sandcastle
+  doctor` adds it to an older project's. For a clone that cannot commit that file, ignore it in
+  `.git/info/exclude`, by the path git resolves so it works in a linked worktree too (there `.git` is
+  a file): `echo .sandcastle/config.local.json >> "$(git rev-parse --git-path info/exclude)"`.
+- **Where a value came from.** `sandcastle doctor` names the file and its keys (and flags it when
+  git would show it as untracked), and a run's start lines print
+  `Local config (.sandcastle/config.local.json): autonomy, implement.model`.
+
 <details>
 <summary><b>Environment variables</b></summary>
 
@@ -1895,7 +1926,7 @@ model; `sandcastle help` lists every command.
 |---|---|---|
 | **The kit** - this repository, cloned once per machine | Orchestrator, prompts, base image, status view, the `/sandcastle` skill. Shared by every project and possibly public, so it stays generic: no credentials, names or project details. | Nobody, in normal use |
 | **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` ([personal settings](#personal-settings): machine-wide limits, keep-awake, notify) and `denylist` | The user, once. Not committed anywhere |
-| **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/`, `triage/` (gitignored; [what is in them](#-what-a-run-leaves-behind)) | You and the user, when setting the project up |
+| **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`, optional `config.local.json` ([your clone's own run settings](#-configuration), gitignored); generated `logs/`, `worktrees/`, `.run/`, `triage/` (gitignored; [what is in them](#-what-a-run-leaves-behind)) | You and the user, when setting the project up |
 
 Run `sandcastle` from inside a project. `sandcastle doctor` also works anywhere.
 

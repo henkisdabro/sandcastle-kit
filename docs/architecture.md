@@ -2406,11 +2406,32 @@ not part of `settingsGroup`) and `keepWarm` (whether the session that started th
 prompt cache warm: false when the personal `config.json` says `"keepWarm": false`, else the
 project's value, else true; always in `settingsGroup`, true or false, so the mod and the skill read
 one value from the run record and a record without it, from an older kit, reads as true; the status
-view's row does not draw it), with the unchanged precedence of environment over project config over
-default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and
+view's row does not draw it), with the precedence of environment over the clone's
+`.sandcastle/config.local.json` over project config over default (`loadProject` merges the two
+files, so `project` is the merged one: see `mergeLocalConfig` in `src/config.ts` below) - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and
 `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a
 field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and
 `test/run-settings-cross-review.test.ts` hold it
+
+### `config.local.json`
+
+`mergeLocalConfig(root, config)` in `src/config.ts`, called by `loadProject` after `checkShape` has
+passed `config.ts` on its own, merges an optional, untracked `.sandcastle/config.local.json` over it.
+Plain JSON, never code, so the ESM loader hook stays as it is. Its keys go through `KEYS` and
+`NESTED` (an unknown one is refused with the nearest-name hint), then the `LOCAL_KEYS` allowlist of
+run settings (`gates`, `setup`, `mounts`, `generated` and the rest are refused: two clones of one
+repo would land against different gates), then the same type checks `config.ts` gets for its top-level
+keys (`checkSettingTypes`, shared with `checkShape`) and, for the file alone, `implement`, `review`
+and `repair`'s `model`, `effort`, `maxIterations` and `idleTimeoutSeconds` (`checkLocalNested`;
+`config.ts`'s own validation is not stricter). Every refusal is an `OperatorError` naming the file and
+the dotted key. A nested object merges key by key, a JSON `null` deletes the key so the default
+applies, and the project keeps the keys the file set (`Project.localKeys`, dotted) for doctor and the
+run's `Local config (...)` start line (`localConfigLine`). Because the merge happens in
+`loadProject`, `resolveSettings` and `configureModels` see the merged values and keep their
+env-first rule. The file is in `SANDCASTLE_IGNORES` (`src/init.ts`), so init and doctor's
+`gitignoreFix` ignore it; `assertCleanBase` (`src/run.ts`) names both fixes, the ignore file and the
+exclude file git resolves with `rev-parse --git-path info/exclude`, when it is among the dirty files.
+`test/config-local.test.ts` holds it.
 
 ## `src/versions.ts`
 

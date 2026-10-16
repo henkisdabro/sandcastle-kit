@@ -14,7 +14,7 @@ import { KIT } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 
 /** What init writes to .sandcastle/.gitignore; doctor names the missing ones in its fix. */
-export const SANDCASTLE_IGNORES = [".env", "logs/", "worktrees/", ".run/", "triage/"];
+export const SANDCASTLE_IGNORES = [".env", "logs/", "worktrees/", ".run/", "triage/", "config.local.json"];
 
 type Stack = { label: string; block: string; dockerfile?: string };
 
