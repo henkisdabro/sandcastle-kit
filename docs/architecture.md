@@ -2485,8 +2485,8 @@ Needs bash and `jq` in the image.
 the command; the mount keeps a copy where a pass can read it, and no image rebuild follows an edit). Codex
 strict mode is the dialect: every object has `additionalProperties: false` and `required` naming every
 property, with the keywords `type`, `properties`, `required`, `additionalProperties`, `items`, `enum` and
-`description` only (`test/report-schema.test.ts` checks it). It covers the tags the kit reads from prose today
-- the signal, `unmet`, `changelog`, `followups`, `ungated` - and nothing else. Claude Code returns the
+`description` only (`test/report-schema.test.ts` checks it). It covers the tags the kit reads from prose today -
+the signal, `unmet`, `changelog`, `followups`, `ungated` - and nothing else. Claude Code returns the
 validated object as `structured_output` on the stream's `result` line, which the library's parser drops, so
 `reportCapture` keeps it with the timing of the signal and the result line.
 
