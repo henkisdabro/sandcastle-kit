@@ -173,3 +173,22 @@ test("the skill reads the Start took line once after a slow start and names it a
   assert.ok(from >= 0 && next > 0);
   assert.ok(rest.slice(0, next).includes("Start took"));
 });
+
+test("the clock starts with the run command, before its arguments are parsed", () => {
+  const cli = read("src/cli.ts");
+  const body = cli.slice(cli.indexOf('case "run": {') + 'case "run": {'.length);
+  const first = body.split("\n").find((l) => l.trim() && !l.trim().startsWith("//"));
+  assert.equal(first?.trim(), "const clock = startClock();");
+});
+
+test("the other runs and run record steps end with their own reads, so the code after them is others", () => {
+  const src = read("src/burndown.ts");
+  const after = (anchor: string) => {
+    const at = src.indexOf(anchor);
+    assert.ok(at > 0, anchor);
+    const next = src.slice(at + anchor.length).split("\n").find((l) => l.trim() && !l.trim().startsWith("//"));
+    return next?.trim();
+  };
+  assert.equal(after("const split = others.length ? splitAtStart(workers, others) : undefined;\n"), "clock.step();");
+  assert.equal(after("joinPool(project.name, CONCURRENCY, 1);\n"), "clock.step();");
+});

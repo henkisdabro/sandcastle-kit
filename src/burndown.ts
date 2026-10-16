@@ -3074,6 +3074,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   clock.step("other runs");
   const others = otherRuns();
   const split = others.length ? splitAtStart(workers, others) : undefined;
+  // The ticket list and the plan lines below are not the other runs' reads: they count toward `others`.
+  clock.step();
   // "up to": another project's live run can cut this run's share below it, which the split line under the
   // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
@@ -3202,6 +3204,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
   // until the scheduler tells its own demand, for the base gates that come first.
   joinPool(project.name, CONCURRENCY, 1);
+  clock.step();
   // The time held below the slots it asked for by another live run, and the time a worker waited for a sandbox slot
   // (set once `slotWaits` exists): the closing summary names both when the run took far longer than its estimate.
   const shared = createSharedMeter();

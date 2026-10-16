@@ -267,11 +267,11 @@ try {
       break;
     }
     case "run": {
+      // The start's own clock: the attached path times its steps and turn 1's burndown() prints the line.
+      const clock = startClock();
       // Parsed before anything that needs config or Docker, so a bad argument is refused for free.
       // An argument overrides the variable of the same name; burndown() reads them all at call time.
       const given = parseRunArgs(args);
-      // The start's own clock: the attached path times its steps and turn 1's burndown() prints the line.
-      const clock = startClock();
       // Doctor's own refusal, before the config, the billing question or an image: a run as root or on
       // Podman or rootless Docker on Linux would only fail inside the first sandbox.
       // `docker info` is read once for the whole start, when first asked: the check below (Linux only),
