@@ -31,7 +31,7 @@ import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -42,7 +42,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -99,6 +99,8 @@ type Outcome = {
   idleRepairs?: number;
   /** The last repair pass committed nothing and ended with `<verdict>outside-branch</verdict>` (`repairVerdict`): its line and the tests it judged flaky. */
   outside?: { line: string; tests: string[] };
+  /** Red twice on test timeouts while the machine's CPU pressure was high (`loadMade`): no repair pass; the ticket says to run it again when the machine is quiet. */
+  loadRed?: true;
   gates: Gate[];
   /** Test ids the last red gate named. */
   failing?: string[];
@@ -2630,8 +2632,26 @@ export const createPipeline = (ctx: PipelineContext) => {
         // The note says the gate ran three times: only true when the third run went red on that same gate.
         else if (gated.failure.name === second.name) threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
       }
+      // A red that only the machine's load made (every failure a test timeout, high machine-wide CPU pressure over the
+      // pass) has nothing for a repair pass to fix: the gate runs once more instead. Once per attempt, never inside the
+      // repair loop, where a red is the repair's. With no high reading (or no reading) the flow above stands.
+      let loadRed = false;
+      // The tests the load-made red named: timeouts of a busy machine, never recorded as flaked.
+      const loadTests = new Set<string>();
+      if (gated.failure && !forced && attempts > 0 && loadMade(gated)) {
+        const loaded = gated;
+        for (const f of loaded.failures) for (const t of wholeTests(f)) loadTests.add(t);
+        console.log(`${ref(issue.id)}: ${gated.failure.name} red on test timeouts under machine load (CPU pressure ${gated.cpuMachineMean}%${gated.cpuEstimate ? ", an estimate from the load average" : ""}) - no repair pass, gating once more`);
+        at?.gates?.();
+        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        if (!gated.failure) console.log(`${ref(issue.id)}: ${loaded.failure?.name ?? "a gate"} red under machine load, then green on a re-gate - no repair pass`);
+        else if (loadMade(gated)) {
+          loadRed = true;
+          console.log(`${ref(issue.id)}: ${gated.failure.name} red on test timeouts under machine load again - no repair pass, left red; run it again when the machine is quiet`);
+        }
+      }
       // Kept on the ticket's record whatever follows (a repair may still fail): these went red and then green.
-      const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure) : [];
+      const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure).filter((t) => !loadTests.has(t)) : [];
       let preRepair = sh("git", ["rev-parse", branch], project.root);
       const seen = new Set<string>();
       // The failures this ticket has already waited a fix for: a second wait on one would never end the loop's own repair.
@@ -2645,7 +2665,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       let outside: { line: string; tests: string[] } | undefined;
       for (
         let red = gated.failure;
-        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
+        red && !loadRed && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
         red = gated.failure
       ) {
         const failure = red;
@@ -2848,6 +2868,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         repairs: earlierRepairs + repairs - idle,
         idleRepairs: earlierIdle + idle,
         ...(outside && { outside }),
+        ...(loadRed && { loadRed: true as const }),
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
         ...(flaked.length ? { flaked } : {}),
@@ -2901,7 +2922,7 @@ let kitAtStart: string | undefined;
  */
 export const burndown = async (
   project: Project,
-  turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> } },
+  turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean },
 ): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
@@ -3416,11 +3437,13 @@ export const burndown = async (
   if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
   // The base gates' times when they ran, the verify's fallback record for a gate far slower than it was (`likelyLoad`).
   let baseGateMs: Record<string, number> | undefined;
-  if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
+  // `turn.forceBaseGates`: the last turn's verify was red, likely load (`mustGateBase`), so the merged base is gated again here
+  // whatever SKIP_BASE_GATES says, and a base that is really red stops the drain at this check.
+  if (process.env.SKIP_BASE_GATES === "1" && !turn?.forceBaseGates) console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
       // Checked against the start's reading before its sandbox opens; closed behind a reading of its own (`gateBase`).
-      baseGateMs = gateMs(await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))));
+      baseGateMs = gateMs(await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, !turn?.forceBaseGates, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -4116,7 +4139,15 @@ export const burndown = async (
       else if (same) verifyTreeOf = ref(same);
       // Timeouts alone, or a gate far slower than it was: the run was loaded, whatever tree it gated. Judged against the
       // gates of the landing that gated this tree, else the run's base gates.
-      verifyLoad = likelyLoad(gated.failures, gated.gates, { ...baseGateMs, ...(same && landed.get(same)?.clean ? landingGateMs.get(same) : undefined) });
+      const timingsText = () => {
+        try {
+          return readFileSync(timings, "utf8");
+        } catch {
+          return "";
+        }
+      };
+      // With no base gates this turn, each gate's typical time from earlier runs' green base gates and verifies stands in.
+      verifyLoad = likelyLoad(gated.failures, gated.gates, { ...(baseGateMs ?? typicalGateMs(timingsText(), project)), ...(same && landed.get(same)?.clean ? landingGateMs.get(same) : undefined) });
     }
     // A red merged base said "do not push" with nothing to read: its full output is in the verify log (`verifyBase`
     // streamed it as the gates ran). A skipped verify ran nothing: a log an earlier run left would read as this one's.

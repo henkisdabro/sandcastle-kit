@@ -128,6 +128,16 @@ that one's `rerunOf` the first red, which holds the `waitMs`; `rewrote` is the u
 pipeline then makes no `regate` call (`earlier.length === 1` no longer holds).
 A port that ignores the in-slot runs, and the landing gate (a re-run only: `rerunOnRed` alone),
 still reach `regate` or stop at two runs.
+After those runs, a ticket gate red that is **load-made** (`loadMade`, `src/gates.ts`: at least one failure,
+every one a test timeout by `onlyTimeouts`, none with exit 124, and the pass's own machine-wide
+`cpuMachineMean` at or above `CPU_PRESSURE_HIGH`, `cpuHigh`; the last run of a `rerunOf` chain is the one
+judged, and the sandbox cgroup's figure never is) gets no repair pass and one full `gate` call instead,
+once per attempt and never inside the repair loop, when repair is on and the red is not the forced one.
+Green goes on as green with no re-review; red and load-made again ends the ticket `gate-failed` with
+`loadRed: true` (the ledger's note says to run it again when the machine is quiet); red and not
+load-made goes to the repair loop as ever. A load red's tests never enter `earlier` or `flaked`. With
+no reading, a reading under the threshold or a red brought from a landing, the flow is unchanged
+(`test/pipeline-load-red.test.ts`).
 A landing gate that goes red and then green on its in-slot re-run keeps the red run's tests as the
 ticket's `flaked` (`landingFlaked`, written by burndown's landing `gate` port, so the closing
 summary's "Likely flaky" list has it), and `timedGate` writes the re-run as a `LANDING_GATES` line
@@ -185,10 +195,16 @@ load (`likelyLoad`): each failing test a red gate's output names has a test-time
 lines, up to the next failing test (`onlyTimeouts`: node:test and vitest print each error twice, so
 a count of timeout lines would read one timeout beside an assertion as all timeouts), or a red gate
 ran at least three times (`LOAD_FACTOR`) its recorded time - the gate times of the landing sandbox
-that gated this tree, else the run's base gates when they ran.
+that gated this tree, else the run's base gates when they ran, else each gate's typical time
+(`typicalGateMs`, `src/run.ts`: the 75th percentile of its `ms` over the project's green `base gates`
+and `verify` lines of `timings.jsonl`, through `recentWindow`; none: the timeouts rule alone).
 The run record's `verify.likelyLoad` is then set and the summary says "RED twice, likely load" and
 sends the operator to `sandcastle gates` on a quiet machine, instead of to the sandbox's git
-identity (`test/verify-rerun-load.test.ts`).
+identity (`test/verify-rerun-load.test.ts`). A likely-load verify does not stop a drain:
+`noRerunCause` (`src/autonomy.ts`) leaves it out, and `mustGateBase` makes the loop pass
+`turn.forceBaseGates` to the next turn, re-run or follow-on, whose `burndown()` then runs its base
+gates uncached even under `SKIP_BASE_GATES=1`, so a base that is really red stops the drain there;
+`redBaseExit` still reads the last turn's facts (`test/verify-load-drain.test.ts`).
 The verify is **proof that the merged base is green in a clean gate-only sandbox**, not a clean
 re-gate on purpose: the green-base record (`.sandcastle/.run/base-gates.json`) holds the commit, the
 key (commit, image, plan and config), `by`, whose gates proved it (`#427` for a landing,

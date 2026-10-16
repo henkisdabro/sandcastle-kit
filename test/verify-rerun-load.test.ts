@@ -146,7 +146,7 @@ test("a red verify with no load flag keeps the sandbox wording", () => {
 test("burndown() re-runs the verify and records the load flag from the landing's and the base gates' times", () => {
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   assert.match(source, /timed\("", "verify", \(\) => rerunRedVerify\(\(fresh\) => verifyBase\(gateProject, image, planFile, runId, \(when\) => host\.check\(when\), host\.exclusive, fresh\)/);
-  assert.match(source, /likelyLoad\(gated\.failures, gated\.gates, \{ \.\.\.baseGateMs, \.\.\.\(same && landed\.get\(same\)\?\.clean \? landingGateMs\.get\(same\) : undefined\) \}\)/);
+  assert.match(source, /likelyLoad\(gated\.failures, gated\.gates, \{ \.\.\.\(baseGateMs \?\? typicalGateMs\(timingsText\(\), project\)\), \.\.\.\(same && landed\.get\(same\)\?\.clean \? landingGateMs\.get\(same\) : undefined\) \}\)/);
   assert.match(source, /baseGateMs = gateMs\(await timed\("", "base gates"/);
   assert.match(source, /\.\.\.\(verifyLoad \? \{ likelyLoad: true \} : \{\}\)/);
 });
