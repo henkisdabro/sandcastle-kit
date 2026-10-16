@@ -65,7 +65,7 @@ type Agent = (worktree: string) => Promise<string | void> | string | void;
  * run of the attempt in order. `land(id, file, text)` is another ticket landing on main, recorded in the
  * run's landings as burndown's landing worker records it.
  */
-const harness = (o: { generated?: { paths: string[]; regen: string[] }[] } = {}) => {
+const harness = (o: { generated?: { paths: string[]; regen: string }[] } = {}) => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
@@ -263,7 +263,7 @@ test("a branch that conflicts only before its gates is reviewed, then skips the 
 });
 
 test("a landing on other lines, or one only in generated files, changes nothing: review and gates run, and the branch is green", async () => {
-  const h = harness({ generated: [{ paths: ["out.css"], regen: ["make css"] }] });
+  const h = harness({ generated: [{ paths: ["out.css"], regen: "make css" }] });
   h.agents.impl = (wt) => {
     commit(wt, "shared.txt", "seven\n");
     commit(wt, "out.css", "seven\n");
