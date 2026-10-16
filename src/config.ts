@@ -164,8 +164,12 @@ export type ProjectConfig = {
    * conveniences, never guards. `sandcastle lean` shows both.
    */
   lean?: { keep?: string[]; dropHooks?: string[] };
-  /** Run by the orchestrator after both agents, in order, stopping at the first red. */
-  gates: { name: string; command: string }[];
+  /**
+   * Run by the orchestrator after both agents, in order, stopping at the first red. `rerun`, opt-in: what the red gate's
+   * in-slot re-run runs instead of `command`, with `{tests}` (the failing test ids as the kit read them) and/or `{files}`
+   * (their files, each once), shell-quoted. The full `command` runs whenever the failing tests cannot be read.
+   */
+  gates: { name: string; command: string; rerun?: string }[];
   /**
    * Proof that the kept PreToolUse guards fire. Each test hands every kept
    * PreToolUse hook whose matcher takes `tool` a made-up call, in the base-gate
@@ -351,6 +355,11 @@ const checkShape = (config: ProjectConfig) => {
   checkSettingTypes(config, refuse);
   if (!Array.isArray(config.gates) || config.gates.some((g) => typeof g?.name !== "string" || !g.name || typeof g.command !== "string" || !g.command)) {
     refuse("each gate needs a `name` and a `command`, both strings: { name: \"test\", command: \"pnpm test\" }.");
+  }
+  for (const g of config.gates) {
+    if (g.rerun === undefined) continue;
+    if (typeof g.rerun !== "string" || !g.rerun.trim()) refuse(`gate \`${g.name}\`: \`rerun\` must be a non-empty string that names {tests} or {files}: { name: "test", command: "pytest", rerun: "pytest {tests}" }.`);
+    else if (!g.rerun.includes("{tests}") && !g.rerun.includes("{files}")) refuse(`gate \`${g.name}\`: \`rerun\` must name {tests} (the failing test ids) or {files} (their files), such as "pytest {tests}"; a command without either would re-run the same thing every time.`);
   }
   if (config.pnpmStore !== undefined && typeof config.pnpmStore !== "boolean") refuse(`\`pnpmStore\` must be true or false, not ${JSON.stringify(config.pnpmStore)}.`);
   if (config.mounts !== undefined && (!Array.isArray(config.mounts) || config.mounts.some((m) => typeof m?.hostPath !== "string" || typeof m.sandboxPath !== "string"))) {

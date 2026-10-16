@@ -23,6 +23,10 @@ This continues SKILL.md: run its "Before every action" first.
      generated files" recipe and add it to `gates` once the user agrees, or record in the rules
      why there is none.
 
+   Also offer a `rerun` for the test gate when its runner takes test ids or files (pytest, vitest, jest): `{ name: "test", command: "pytest", rerun: "pytest {tests}" }`, with `{tests}`
+   (the failing ids) or `{files}` (their files). A red gate's re-run then runs only those, not the
+   whole suite; the full command still runs when the failing tests cannot be read.
+
    "None" is a fine answer to each; write it down so the next reader knows it was asked. Extend
    the Dockerfile (from the kit's `templates/Dockerfile` if init wrote none) only when the base
    image lacks something the gates or hooks need (browsers, a pinned package manager). A Dockerfile
