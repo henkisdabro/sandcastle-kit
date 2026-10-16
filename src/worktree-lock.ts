@@ -3,10 +3,10 @@
 // Every sandbox shares the host repo's `.git`. Inside a container no other
 // sandbox's worktree path exists, so an agent that runs `git worktree prune`
 // (tidying a scratch worktree it made) deletes every other live sandbox's
-// record - and the host's own prune, which Sandcastle runs before each new
-// sandbox, then deletes the worktree directory an agent "repaired" with a
-// container path. Two sandboxes of one run crashed that way
-// (`safe.directory ... not a git repository`). Git never prunes a LOCKED
+// record - and the kit's own host prune, which runs inside the host-git mutex
+// before each sandbox open, would drop the record of a sandbox whose
+// directory an agent "repaired" with a container path. Two sandboxes of one
+// run crashed that way (`safe.directory ... not a git repository`). Git never prunes a LOCKED
 // worktree, from either side, so each sandbox's worktree is locked for its
 // whole life and unlocked just before Sandcastle removes it.
 

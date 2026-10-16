@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -146,4 +146,53 @@ test("every sandbox open of the kit passes the host-git mutex it has, and the ba
   assert.match(source("burndown.ts"), /verifyBase\([^\n]*host\.exclusive, fresh\)/);
   assert.match(source("gates.ts"), /openOrAbandon\(project, branch, \(\) => createSandbox\([^\n]*\), exclusive\)/);
   assert.match(source("land.ts"), /openOrAbandon\(project, branch, \(\) => createSandbox\([^\n]*\), exclusive\)/);
+});
+
+/** A worktree the kit added for `branch`, whose directory a person then deleted by hand: git still lists it, as prunable. */
+const goneWorktree = (root: string, git: (...args: string[]) => string, branch: string) => {
+  const path = join(root, ".sandcastle/worktrees", branch.replace(/\//g, "-"));
+  git("worktree", "add", "-q", "-b", branch, path, "main");
+  rmSync(path, { recursive: true, force: true });
+  assert.match(git("worktree", "list", "--porcelain"), /prunable/);
+  return path;
+};
+
+test("a worktree whose directory was deleted keeps its record while a host git write holds the mutex, then is added again with nothing left to prune", async () => {
+  const { root, git, project } = repo();
+  const { exclusive, hold } = mutex();
+  const path = goneWorktree(root, git, "agent/issue-5");
+  const landing = hold();
+  let started = false;
+  const open = openOrAbandon(project, "agent/issue-5", async () => ((started = true), "started"), exclusive);
+  await tick();
+  assert.ok(git("worktree", "list", "--porcelain").includes(`worktree ${path}`), "the record is still listed while the landing's write holds the mutex");
+  assert.ok(!started && !existsSync(path));
+  landing.release();
+  assert.equal(await open, "started");
+  assert.ok(existsSync(join(path, "tracked.txt")), "the worktree is back at the same path");
+  const listed = git("worktree", "list", "--porcelain");
+  assert.ok(listed.includes(`worktree ${path}`));
+  assert.doesNotMatch(listed, /prunable/);
+});
+
+test("when the open of a worktree that was added again fails, its clean-up removes it as the open's own", async () => {
+  const { root, git, project } = repo();
+  const path = goneWorktree(root, git, "sandcastle/scratch-7");
+  await assert.rejects(
+    openOrAbandon(project, "sandcastle/scratch-7", async () => {
+      throw new Error("container start timed out after 120 s");
+    }, mutex().exclusive),
+    /timed out/,
+  );
+  assert.ok(!existsSync(path));
+  assert.ok(!git("worktree", "list", "--porcelain").includes(path));
+});
+
+test("a directory under .sandcastle/worktrees/ that git does not list survives another branch's open", async () => {
+  const { root, project } = repo();
+  const stray = join(root, ".sandcastle/worktrees/agent-issue-9");
+  mkdirSync(stray, { recursive: true });
+  writeFileSync(join(stray, "mine.txt"), "mine\n");
+  assert.equal(await openOrAbandon(project, "agent/issue-8", async () => "started", mutex().exclusive), "started");
+  assert.ok(existsSync(join(stray, "mine.txt")), "the directory is left for a person");
 });
