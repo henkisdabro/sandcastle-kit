@@ -714,10 +714,11 @@ export const threeRunsNote = (name: string, reds: Failure[]) => {
 /**
  * The failing tests across a red run's gates, for the end-of-run verify's excerpt and summary: at most
  * `FAILING_TESTS_SHOWN` names, and `more` when the output named others. Each gate is read whole first: a list
- * cut at the limit inside `failingTests` could not say there were more.
+ * cut at the limit inside `failingTests` could not say there were more. The ids are the uncut ones (`wholeTests`): a
+ * clipped output no longer shows a test its `tests` hold.
  */
 export const verifyFailing = (failures: GateRun["failures"]) => {
-  const all = [...new Set(failures.flatMap((f) => failingTests(f.output, Infinity)))];
+  const all = [...new Set(failures.flatMap(wholeTests))];
   return { tests: all.slice(0, FAILING_TESTS_SHOWN), more: all.length > FAILING_TESTS_SHOWN };
 };
 

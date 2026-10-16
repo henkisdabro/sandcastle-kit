@@ -1194,20 +1194,24 @@ const causesLine = (causes: { text: string; gates?: true }[]) =>
   `Largest causes measured: ${causes.map((c) => c.text).join("; ")}.` + (causes[0]?.gates ? " `sandcastle size` says whether the machine has room for more gates slots." : "");
 
 /**
- * Likely flaky tests, on any ticket: each once, with the tickets it hit. Two fields name them - `flaked` (red on one run of a
- * gate, green on a later one) and `flaky` (a repair pass's verdict) - and a test either names is one test. The record is a
- * file in a repository: only strings count.
+ * The likely flaky tests of this turn's tickets, each with the tickets it hit, the most-hit first. Two fields name them -
+ * `flaked` (red on one run of a gate, green on a later one) and `flaky` (a repair pass's verdict, the ids of the red run it
+ * was given) - and a test either names is one test. The record is a file in a repository: only strings count.
  */
-const flakyLines = (f: Facts): string[] => {
+const flakyTests = (f: Facts) => {
   const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x) : []);
   const hit = new Map<string, string[]>();
   for (const [id, t] of Object.entries(f.tickets)) {
     for (const test of new Set([...strings(t.flaked), ...strings(t.flaky)])) hit.set(test, [...(hit.get(test) ?? []), id]);
   }
-  if (!hit.size) return [];
-  const all = [...hit].sort(([, a], [, b]) => b.length - a.length);
-  const shown = all.slice(0, 8).map(([test, ids]) => `${test} (${ids.map(refOf).join(", ")})`);
-  return [`Likely flaky - red, then green on a re-run, or judged flaky by a repair pass: ${shown.join("; ")}${all.length > 8 ? `; and ${all.length - 8} more` : ""}.`];
+  return [...hit].sort(([, a], [, b]) => b.length - a.length);
+};
+
+/** One `Likely flaky:` line per test, naming the tickets that saw it; at most eight tests, then a line for the rest. */
+const flakyLines = (f: Facts): string[] => {
+  const all = flakyTests(f);
+  const lines = all.slice(0, 8).map(([test, ids]) => `Likely flaky: ${test} (${ids.map(refOf).join(", ")})`);
+  return all.length > 8 ? [...lines, `Likely flaky: and ${all.length - 8} more`] : lines;
 };
 
 /** The closing summary as Markdown-ish text, every section present. */
@@ -1262,6 +1266,10 @@ export const render = (f: Facts, plain = false): string => {
   const verifyImage = typeof f.verify?.image === "string" && f.verify.image ? ` on image ${f.verify.image}` : "";
   // The tests the red verify named (a file in a repository: only strings count).
   const verifyTests = Array.isArray(f.verify?.failing) ? f.verify!.failing.filter((t): t is string => typeof t === "string" && !!t) : [];
+  // Every id the red verify names flaked on a ticket of this turn (`flakyTests`): a cut list may hide a test that never did,
+  // and a red that names no test (lint, types) says nothing about flakiness.
+  const flakedBefore = new Set(flakyTests(f).map(([test]) => test));
+  const seenFlake = verifyTests.length > 0 && f.verify?.failingMore !== true && verifyTests.every((t) => flakedBefore.has(t)) ? " - a test this run already saw flake" : "";
   const verifyFailing = verifyTests.length ? ` - failing: ${verifyTests.join(", ")}${f.verify?.failingMore === true ? ", and more" : ""}` : "";
   // The ticket whose gates passed the verified tree (a file in a repository: only a string counts).
   const sameTree = typeof f.verify?.gatedTree === "string" && f.verify.gatedTree ? f.verify.gatedTree : "";
@@ -1302,7 +1310,7 @@ export const render = (f: Facts, plain = false): string => {
         ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
-        : `Merged ${f.base} re-gated: ${loaded ? "RED twice, likely load - every failure is a test timeout, or a gate ran several times its recorded time" : sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : cleanTree ? `RED on the tree ${cleanTree}'s landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
+        : `Merged ${f.base} re-gated: ${loaded ? "RED twice, likely load - every failure is a test timeout, or a gate ran several times its recorded time" : sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : cleanTree ? `RED on the tree ${cleanTree}'s landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${seenFlake}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
   if (f.pressure && f.pressure.full >= PRESSURE_WARN_FULL) {
     out.push(`Memory pressure: high - full ${f.pressure.full}% (some ${f.pressure.some}%) in a sandbox during ${f.pressure.where}, so the sandboxes stalled on memory at once and gates ran slower for it. \`sandcastle size\` shows the VM's memory against the pool; lower maxSandboxes or maxGates, or give the VM more memory.`);
