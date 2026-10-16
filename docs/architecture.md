@@ -111,13 +111,31 @@ re-run's failure, with the line that the gate went red twice there; base, verify
 are unchanged - `test/gates-rerun-keeps-slot.test.ts`; the gates before it passed on this tree, and
 a branch that holds the base's tip lands as a fast-forward on its own gate results, so a re-run of
 the red gate alone would leave the later gates never run).
+A gate may carry an opt-in `rerun` command (`src/config.ts`, refused at load unless it names
+`{tests}` or `{files}`): the in-slot re-run, and the third run, of that gate run it in place of
+`command`, filled by `runGates` with the failing ids of the runs it follows (`Failure.tests`, read
+whole; both reds' ids, deduplicated, for the third run), shell-quoted with `shq`, or their files
+(`failingTestFile`, each once). The full `command` runs instead when the gate has no `rerun`, a run's
+tests are unset (output that may be cut) or empty (a lint or type gate), or `{files}` meets an id
+with no file. The failure a red targeted run returns **is the first full run's** (`name`, `command`,
+`exitCode`, `output`, `tests`), with `Failure.rerun` (`command`, and the targeted run's own `tests`)
+alongside: so `failureKey`, the fix board and the red-on-base check keep comparing a full run with a
+full run, and the repair is fed the first full run's output and command. `wholeTests` returns
+`rerun.tests` for such a failure (none when unset), so `disjointReds`, `flakedTests` and
+`threeRunsNote` see each run's own reds (the note says the output below is the first run's), and the
+landing's readers (`redTests`, `redEvidence`: the red ending's `failing` and `seen`, the files
+`redSubject` blames, `rememberFailed`) do the same. A targeted run that times out returns its own
+124 failure, so no repair or third run follows. The re-runs outside the slot (`regate`, `landInSandbox`'s
+second gate run) run the full command (`test/gates-rerun-command.test.ts`,
+`test/landing-rerun-tests.test.ts`).
 Green means the red was a flake: no repair pass, and the result's `gates` are the passes before the
 red gate followed by the re-run's, still a prefix of the configured gates (`gateResultLines`).
-Red again goes on to the repair loop from the re-run's failure - unless the re-run's failing tests
-(`failingTests`) share none with the first red's (`disjointReds`, `src/gates.ts`; both lists must be
-readable, so a lint or type gate never qualifies): that is a flake each time - only on the same
-gate: a re-run that passed the red gate and went red on a later one, which never ran before, goes to
-repair - and the gate runs once more from the re-run's red gate (a third run), with no repair pass.
+Red again goes on to the repair loop from the re-run's failure (a targeted run's is the first full
+run's, as above) - unless the re-run's failing tests (`wholeTests`) share none with the first
+red's (`disjointReds`, `src/gates.ts`; both lists must be readable, so a lint or type gate never
+qualifies): that is a flake each time - only on the same gate: a re-run that passed the red gate
+and went red on a later one, which never ran before, goes to repair - and the gate runs once more
+from the re-run's red gate (a third run), with no repair pass.
 A ticket's own gates run that third run **inside the same gates slot** too (`runGates`'
 `thirdOnDisjoint`, asked together with `rerunOnRed`): a `regate` would queue behind every other
 run's gates again, the wait the in-slot re-run removed, and it would hit exactly the load flakes
@@ -478,6 +496,20 @@ the ticket record's `gap`, and for a merged ticket (`gapLines` in `src/report.ts
 a guess at prose, so it is under neither Needs you nor the headline's `need you`, and adds no Next
 step (approving prose keeps finding phrasings the detector reads as a gap;
 `test/gap-in-prose-false.test.ts`).
+
+A start that took 10 s or more says where its time went: `Start took 64.2 s: blocker reads 31.0 s,
+queue read 12.3 s, versions 9.8 s, docker info 4.1 s, others 7.0 s`, printed as a statement of its
+own right after the `Status view:` line, before the image step (`src/start-clock.ts`). `sandcastle run`
+starts the clock and hands it to turn 1's `burndown()`, which times its steps (`lock and reap`,
+`git baseline`, `queue read`, `blocker reads`, `schedule`, `versions`, `other runs`, `docker info`,
+`carried branches`, `blocker chain`, `estimate`, `keep awake`, `run record`, `status view`); a later
+turn starts its own clock, so its line counts only its own steps. Steps of 1 s or more are named,
+heaviest first; the rest, and the code between steps, is `others`. The wait at the API-key question
+is an `aside`: left out of the total and said at the end (`(not counting 40 s at the API-key
+question)`). The clock writes nothing, and is not a `timings.jsonl` phase, whose lines feed the
+estimate. A detached run prints the line in its child's `.sandcastle/logs/run-output.log`, not in
+the parent's terminal. A start that returns before the view (empty queue, everything waiting)
+prints none.
 
 ## `src/landing.ts`
 
@@ -1282,8 +1314,10 @@ check (the same one `HostGit.write` makes before its write) is the last thing be
 `git merge --ff-only`; `sandcastle land`, which has no `HostGit`, gets it too
 (`test/landing-filter-before-ff.test.ts`).
 
-**Before every sandbox opens**: Sandcastle's open runs host git in the project -
-`git worktree prune` and `list`, then `git worktree add`, whose checkout writes every file out
+**Before every sandbox opens**: the kit's `git worktree prune` runs inside the host-git mutex
+(`pruneWorktrees`, `openOrAbandon`, below), and Sandcastle's open then runs host git in the project -
+`git worktree list`, then `git worktree add` (the kit's own add has usually made the worktree by
+then), whose checkout writes every file out
 through the filters `.git/config` and `info/attributes` name, or, in a kit worktree it reuses,
 `git status` (and, unpatched, `git fetch` and `git merge --ff-only`, below) - so a filter another
 sandbox planted in the shared `.git` since the last check would run there, past the pins, which hold
@@ -1317,6 +1351,19 @@ wanted. `test/sandcastle-no-origin-refresh.test.ts` reads the installed `dist` a
 is back, so an upgrade that loses the patch is loud; make the patch again with `pnpm patch` and
 `pnpm patch-commit` on an upgrade, and remove it once Sandcastle has an option to skip the origin
 refresh.
+A third change drops the `pruneStale` call in `createSandbox`: it ran a host prune of worktree
+records outside the mutex, beside a landing's ref write, then re-added a worktree whose directory a
+person had removed (its record still listed, so the kit's add took it for taken) with Sandcastle's
+own add, also outside the mutex, and deleted every directory under `.sandcastle/worktrees/` that git
+did not list - which the kit's rule, that an add git refuses leaves what was in the way, never
+wanted.
+The kit prunes itself instead: `pruneWorktrees` (`src/guard.ts`) runs `git worktree prune` and
+nothing else, inside `openOrAbandon`'s `exclusive`, before the read of the worktrees there are and
+the add, so a removed worktree's record is cleared and the add re-creates it (git never prunes a
+locked worktree, so every live sandbox's record stays, `src/worktree-lock.ts`), and an unlisted
+directory is left for a person.
+`test/sandcastle-open-no-prune.test.ts` reads the installed `dist` for the call, as the test above
+does for the origin refresh; `test/sandbox-open-serialised.test.ts` drives the kit's prune.
 The patch also raises `PROMPT_EXPANSION_TIMEOUT_MS` from 30 s to 120 s, so `gh-retry.sh`'s waits can
 ride out a GitHub 5xx that lasts a minute; `test/gh-retry.test.ts` holds the constant above the
 script's waits.
@@ -1408,7 +1455,7 @@ pipeline's cut of a stale branch in a kept worktree (`cutFromBase`'s `git status
 `git merge --ff-only`), and before Sandcastle's open reuses a kit worktree that holds the ticket's
 branch or sits at its path (its host `git status`; the `git fetch` and `git merge --ff-only` that
 follow it unpatched are patched out, above), at the setup and at a resume; a listed worktree whose
-directory is gone is no tampering, since no git runs there and Sandcastle's open prunes its record.
+directory is gone is no tampering, since no git runs there and the kit's prune before the add (`openOrAbandon`) clears its record.
 The same check refuses a repository nested in the worktree (`nestedGit`): a host `git status`
 recurses into a gitlink - a nested `.git` directory, or a `.git` file naming a git directory under
 `.git/modules/` - and reads that repository's own config and attributes, past the pins, and a flag
@@ -1560,7 +1607,7 @@ opened, since a blocking read would hang the whole run.
   The kit's own `worktreeIsClean` also passes `--ignore-submodules=all`.
 
 What remains after the checks is the moment between the last one and the host git call -
-Sandcastle's close's `git status`, its open's `git worktree prune`, `list` and `add`, its reuse's
+Sandcastle's close's `git status`, its open's `git worktree list` and `add`, its reuse's
 status, fetch and fast-forward, the cut's status and fast-forward - in which another sandbox still
 running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the
 time Sandcastle takes to remove the stopped container before its `git status`; elsewhere
@@ -2090,6 +2137,52 @@ line can name another run as live before its record's `startedAt` (`recordRun` r
 `joinPool` in the first turn, so the first turn's record never starts later than its registration).
 `test/landing-slot-share.test.ts`, `test/kept-slot-idle.test.ts`.
 
+## `src/load-pause.ts`
+
+`LOAD_PAUSE` holds gate passes while the machine's CPU pressure is high. It exists because a gate pass
+starts whatever else the machine is doing: on a host held at a high load, test gates ran 1.5 to 2.6 times
+their quiet time and went red on their timeouts, and repair passes and full gate runs went on load.
+
+- **The setting.** `parseLoadPause(env.LOAD_PAUSE, project.loadPause)`: a non-empty `LOAD_PAUSE` wins (`0`
+  off, 1 to 100 the threshold, else an `OperatorError` naming `LOAD_PAUSE`), else the config (absent 60,
+  `false` off, 1 to 100, else an `OperatorError` naming `loadPause`; `checkShape` in `src/config.ts` refuses
+  a bad one at load, as it does `usagePause`). Unlike `USAGE_PAUSE` it is on by default, so
+  `ResolvedSettings.loadPause` is absent only when it was turned off.
+- **The hold.** `createLoadPause({ threshold, read, now, sleep, say, onChange, pollMs, releaseMs, giveUpMs })`,
+  every port injectable (`read` is `readMachineCpu` in a run, `src/peaks.ts`). `hold(label, onHold)` returns
+  at once when the run has given up, when `read()` gives no reading, or when `avg60` is under the threshold.
+  Otherwise it calls `onHold` once, says one line and polls every `pollMs` (10 s); it releases when the
+  readings have stayed under the threshold for `releaseMs` (2 minutes, restarted by a reading at or over), when
+  a read gives none, or at the give-up. The held time is the run's wall time with at least one hold in
+  progress, so two passes held at once count once. At `giveUpMs` (30 minutes) every hold releases at once
+  (a shared signal, not each hold's next poll), `gaveUp()` stays true and later holds return at once: a machine
+  that never quietens must not stop a drain. `onChange({ heldMs, gaveUp })` is called as the total changes (once
+  per poll at most, at each release and at the give-up); `listen` swaps who hears it, which is how each turn's
+  run record follows the one pause.
+- **Not the usage pause.** It is no `PauseSource` (`src/schedule.ts`): no ticket parks and no sandbox closes.
+  Only gate passes wait; agent passes go on.
+- **Where it holds.** `src/gates.ts` keeps the run's hold in module state (`setLoadHold`). `runGates` awaits it
+  at its entry, before it takes `asked` and before `withSlot("gates", ...)`, so every gate pass - a ticket's,
+  a landing's, `gateBase`'s (the base gates, the verify, a base-red check) - is held before it takes its gates
+  slot, and the hold is no part of `waitMs`. A red gate's re-run inside the same slot is not held again.
+  `sandcastle gates` and `sandcastle land` set no hold. The hold has its own figure, `GateRun.loadHeldMs`
+  (absent at 0): the gates log gets `# held Ns for machine load` before the `# waited` line, `stepTimes` takes it
+  out of the line's `ms` as it takes out `waitMs`, `timingLines` puts it on the first run's line, and
+  `burndown()` adds it to a ticket's waited time, so its usual time leaves it out. `GateProgress.loadWait` is
+  called when a hold begins: `burndown()`'s gate wrapper sets the step's phase and the ticket's note to
+  `waiting: machine load` and, for a ticket's own gates, frees its sandbox slot and worker as a wait for a
+  gates slot does (`createGateSeat`).
+- **One per `sandcastle run`.** `src/cli.ts` makes it where the settings are resolved and hands it to every
+  turn, so the 30 minutes are a total across the turns. The exported `burndown()` is a wrapper that clears
+  the hold (`setLoadHold(undefined)`) and the turn's listener when the turn ends, a throw included; the turn
+  itself sets them after its run record exists, before the base gates, and prints `loadPauseLine`.
+- **The record and the summary.** `RunRecord.loadPause` (`{ heldMs, gaveUp? }`) is the run's running total
+  across all its turns, written at each turn's start and as it changes. The closing summary prints
+  `Load pause: gate passes waited <span> in all ...` beside the memory pressure line, with the give-up words
+  when it gave up, and the `Settings:` line names `load pause at N%`.
+
+`test/load-pause.test.ts` holds it on a fake clock and reader, and the gate side on a fake sandbox.
+
 ## `src/usage.ts`
 
 The opt-in plan usage guard (`USAGE_CHECK=1`). `usageToken(env, platform, readers, now)` is the one
@@ -2466,7 +2559,9 @@ of what a run is told at its start - the autonomy level, cross-review (`crossRev
 (`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts`
 and refused when bad only while the guard is on) and the usage pause (`usagePause`, from
 `USAGE_PAUSE` or the project's key through `parseUsagePause`, refused when bad, and absent when off;
-not part of `settingsGroup`) and `keepWarm` (whether the session that started the run keeps its
+not part of `settingsGroup`), the load pause (`loadPause`, from `LOAD_PAUSE` or the project's key through
+`parseLoadPause` in `src/load-pause.ts`: 60 by default, refused when bad, absent when off; in
+`settingsGroup` when on) and `keepWarm` (whether the session that started the run keeps its
 prompt cache warm: false when the personal `config.json` says `"keepWarm": false`, else the
 project's value, else true; always in `settingsGroup`, true or false, so the mod and the skill read
 one value from the run record and a record without it, from an older kit, reads as true; the status
@@ -2600,6 +2695,11 @@ Managed settings outrank a branch's own, so it holds there.
 The lean line printed at the start (`Lean: hiding N item(s) ...; keeping skill:<the repo's>`) counts
 the repo's items only and says `Claude Code's bundled skills off`, so the two lists are not read as
 one.
+When the repo has tracked `.claude/rules/**/*.md` files with no `paths:` frontmatter, which Claude Code
+loads into every session (`alwaysLoadedRules`, `src/lean.ts`), the line gains
+`; N always-loaded rule file(s), ~T tokens`, and `sandcastle lean` lists each file with its tokens.
+They are reported only: not plan items, so `hide`, `write` and the plan file never see them
+(`test/lean-rules.test.ts`).
 
 The managed settings do not choose the pass's tools.
 Each Claude pass gets its allow-list in `claude()` (`src/agents.ts`): `withTools` inserts
