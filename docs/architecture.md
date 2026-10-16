@@ -2632,6 +2632,11 @@ Managed settings outrank a branch's own, so it holds there.
 The lean line printed at the start (`Lean: hiding N item(s) ...; keeping skill:<the repo's>`) counts
 the repo's items only and says `Claude Code's bundled skills off`, so the two lists are not read as
 one.
+When the repo has tracked `.claude/rules/**/*.md` files with no `paths:` frontmatter, which Claude Code
+loads into every session (`alwaysLoadedRules`, `src/lean.ts`), the line gains
+`; N always-loaded rule file(s), ~T tokens`, and `sandcastle lean` lists each file with its tokens.
+They are reported only: not plan items, so `hide`, `write` and the plan file never see them
+(`test/lean-rules.test.ts`).
 
 The managed settings do not choose the pass's tools.
 Each Claude pass gets its allow-list in `claude()` (`src/agents.ts`): `withTools` inserts
