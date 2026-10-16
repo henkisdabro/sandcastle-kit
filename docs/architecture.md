@@ -130,11 +130,12 @@ second gate run) run the full command (`test/gates-rerun-command.test.ts`,
 `test/landing-rerun-tests.test.ts`).
 Green means the red was a flake: no repair pass, and the result's `gates` are the passes before the
 red gate followed by the re-run's, still a prefix of the configured gates (`gateResultLines`).
-Red again goes on to the repair loop from the re-run's failure - unless the re-run's failing tests
-(`failingTests`) share none with the first red's (`disjointReds`, `src/gates.ts`; both lists must be
-readable, so a lint or type gate never qualifies): that is a flake each time - only on the same
-gate: a re-run that passed the red gate and went red on a later one, which never ran before, goes to
-repair - and the gate runs once more from the re-run's red gate (a third run), with no repair pass.
+Red again goes on to the repair loop from the re-run's failure (a targeted run's is the first full
+run's, as above) - unless the re-run's failing tests (`wholeTests`) share none with the first
+red's (`disjointReds`, `src/gates.ts`; both lists must be readable, so a lint or type gate never
+qualifies): that is a flake each time - only on the same gate: a re-run that passed the red gate
+and went red on a later one, which never ran before, goes to repair - and the gate runs once more
+from the re-run's red gate (a third run), with no repair pass.
 A ticket's own gates run that third run **inside the same gates slot** too (`runGates`'
 `thirdOnDisjoint`, asked together with `rerunOnRed`): a `regate` would queue behind every other
 run's gates again, the wait the in-slot re-run removed, and it would hit exactly the load flakes
