@@ -43,6 +43,12 @@ This continues SKILL.md: run its "Before every action" first.
      would use and whose plan that is). Or `USAGE_PAUSE=90`, which has the run pause itself when a
      plan window reaches that percent and resume by itself after the window's reset (a pause a person can
      end with `sandcastle resume`); it reads the agents' own readings, so it needs no credential.
+   - **Load pause.** On by default: a run holds each gate pass, before it takes its gates slot, while the
+     machine's CPU pressure (`some` `avg60`; on macOS an estimate from the load average) is at or over 60%,
+     releases after 2 minutes under it, and holds at most 30 minutes in all per run. Agent passes go on, so a
+     busy machine can make a run wait before its gates. `LOAD_PAUSE=0` turns it off for one run,
+     `loadPause: false` in `.sandcastle/config.ts` for the project; `LOAD_PAUSE=<percent>` sets the threshold.
+     A ticket held shows `waiting: machine load`.
    - **API credits.** If `sandcastle doctor` prints a `warn API credits` line, an
      `ANTHROPIC_API_KEY` (in the personal or the project `.env`) reaches the sandboxes, and Claude
      Code spends it before any `CLAUDE_CODE_OAUTH_TOKEN`: the run bills API credits, not the plan.
@@ -222,6 +228,9 @@ This continues SKILL.md: run its "Before every action" first.
       estimate from the load average, which the line says) says other work on the machine slowed the gates:
       relay it with the pass it names and its fix (`sandcastle gates` when the machine is quiet, or a lower
       `maxSandboxes`). A red gate in such a run may be the load, not the change.
+      A `Load pause: gate passes waited ...` line says the run held its gate passes for the machine's CPU
+      pressure (`LOAD_PAUSE`, 60% by default): relay the time. If it ends `gave up after 30 min`, later gate
+      passes ran under load, and a red gate in that run may be the load, not the change.
       A `Large context:` line names a ticket with an agent pass whose largest turn held over 150,000
       tokens of context: relay it with the pass and the peak it names.
       A `Tokens:` line (and `(incomplete)` or `tokens unknown` in the headline) names tickets with an

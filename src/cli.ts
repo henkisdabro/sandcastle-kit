@@ -128,7 +128,7 @@
 //                    and keys to Herdr's config (shows them and asks first); --remove
 //                    takes all of it out. Works from anywhere
 //
-// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, SANDCASTLE_API_KEY:
+// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, LOAD_PAUSE, SANDCASTLE_API_KEY:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
@@ -157,6 +157,8 @@ import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, pro
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
 import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine, versionFacts } from "./upgrading.ts";
+import { createLoadPause } from "./load-pause.ts";
+import { readMachineCpu } from "./peaks.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, toolsFloorLine, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -329,6 +331,11 @@ try {
       // The run's settings, resolved once: every turn's record carries them.
       const settings = resolveSettings({ env: process.env, project, machine: machineSettings(), apiKey: !!projectApiKeySpend(project) });
       const level = settings.autonomy;
+      // One hold for the whole run, so its 30 minutes are a total across the turns; each turn's record listens to it (`burndown`).
+      const loadPause =
+        settings.loadPause === undefined
+          ? undefined
+          : createLoadPause({ threshold: settings.loadPause, read: () => readMachineCpu(), now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), say: (line) => console.log(line) });
       sandboxPanes(project);
       checkUsageSettings();
       // A token that cannot see the repo would crash every ticket on its first `gh issue view`: refused before the billing question, an image or a sandbox.
@@ -382,7 +389,7 @@ try {
       };
       for (let turn = 1; ; turn++) {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }

@@ -129,6 +129,12 @@ export type ProjectConfig = {
    * limit an agent hits stops the queue. `USAGE_PAUSE` overrides it for one run.
    */
   usagePause?: number;
+  /**
+   * Machine-wide CPU pressure, in percent (1 to 100, PSI `some` `avg60`), at or over which a run holds each gate pass
+   * before it takes its gates slot, releasing once the pressure has stayed under it for 2 minutes and holding at most
+   * 30 minutes in all per run. Unset: 60. `false` turns the hold off. `LOAD_PAUSE` overrides it for one run (`0` is off).
+   */
+  loadPause?: number | false;
   /** Automatic re-runs in one `sandcastle run`: 0 none (default), 1 ask first, 2 one re-run, 3 up to two, "drain" until the queue is drained or a stop condition holds; `AUTONOMY_LEVEL` overrides it for one run. */
   autonomy?: 0 | 1 | 2 | 3 | "drain";
   /**
@@ -215,8 +221,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause" | "keepWarm" | "autoCompactWindow">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "keepWarm" | "autoCompactWindow"> & {
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow"> & {
     root: string;
     tracker: Resolved;
     /** The keys (dotted, such as `implement.model`) that `.sandcastle/config.local.json` set; empty without the file. */
@@ -253,7 +259,7 @@ export const hostPnpmStore = (root: string): string | undefined => {
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "usagePause", "keepWarm", "autoCompactWindow", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "usagePause", "loadPause", "keepWarm", "autoCompactWindow", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "changelog", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -304,6 +310,9 @@ const checkSettingTypes = (config: ProjectConfig, refuse: (what: string) => neve
   if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
   if (config.usagePause !== undefined && !(typeof config.usagePause === "number" && config.usagePause >= 1 && config.usagePause <= 100)) {
     refuse(`\`usagePause\` must be a number from 1 to 100 (the percent of a plan window at which a run pauses), not ${JSON.stringify(config.usagePause)}.`);
+  }
+  if (config.loadPause !== undefined && config.loadPause !== false && !(typeof config.loadPause === "number" && config.loadPause >= 1 && config.loadPause <= 100)) {
+    refuse(`\`loadPause\` must be false (off) or a number from 1 to 100 (the percent of machine-wide CPU pressure at which a run holds its gate passes), not ${JSON.stringify(config.loadPause)}.`);
   }
   if (config.herdr?.panes !== undefined && config.herdr.panes !== "none" && config.herdr.panes !== "all") {
     refuse(`\`herdr.panes\` must be "none" or "all", not ${JSON.stringify(config.herdr.panes)}.`);

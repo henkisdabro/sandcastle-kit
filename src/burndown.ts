@@ -31,13 +31,13 @@ import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
+import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
@@ -54,6 +54,7 @@ import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
+import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
@@ -2899,10 +2900,20 @@ let kitAtStart: string | undefined;
  * `turn.docker` is the start's one `docker info` reading, which the first turn takes over from the
  * runtime check (cli.ts); a turn handed none reads its own.
  */
-export const burndown = async (
-  project: Project,
-  turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> } },
-): Promise<boolean> => {
+export const burndown = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
+  try {
+    return await burndownTurn(project, turn);
+  } finally {
+    // The run's one load pause outlives the turn; the turn's hold and its record's listener do not, a throw included.
+    setLoadHold(undefined);
+    turn?.loadPause?.listen(undefined);
+  }
+};
+
+/** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
+type TurnOptions = { settings: ResolvedSettings; turn: number; loadPause?: LoadPause; docker?: () => string | undefined; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> } };
+
+const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
   resetMergeCheckGap();
@@ -3158,6 +3169,8 @@ export const burndown = async (
     // The line printed above, as figures: history.jsonl then holds the estimate beside what the turn took.
     ...(rough ? { estimate: rough.figures } : {}),
     ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
+    // The run's running total across its turns, not this turn's: every turn's record carries it (`LOAD_PAUSE`).
+    ...(turn?.loadPause ? { loadPause: loadRecord({ heldMs: turn.loadPause.heldMs(), gaveUp: turn.loadPause.gaveUp() }) } : {}),
     typical: typicalTimes(project, [], slots),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
@@ -3279,6 +3292,8 @@ export const burndown = async (
       times = stepTimes(Date.now() - since, result);
       // Only the wait inside the step is in `took`; the slot wait before it never was (see `withQueued`).
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
+      // The hold for the machine's CPU pressure is out of the usual time as a slot wait is.
+      if (issue && times.loadHeldMs) waited.set(issue, (waited.get(issue) ?? 0) + times.loadHeldMs);
       times = withQueued(times, queuedMs);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
@@ -3370,6 +3385,13 @@ export const burndown = async (
           standing: (now) => readPause(project.root, process.pid, now),
           hold: (pause, now) => holdForUsage(project.root, process.pid, pause, now),
         });
+  // `LOAD_PAUSE`: every gate pass of this turn - the base gates, a ticket's, a landing's and the verify - is held while the machine's CPU pressure is high (src/load-pause.ts).
+  if (turn?.loadPause && settings.loadPause !== undefined) {
+    const pause = turn.loadPause;
+    pause.listen((change) => run.update({ loadPause: loadRecord(change) }));
+    setLoadHold(pause.hold);
+    console.log(loadPauseLine(settings.loadPause, readMachineCpu()));
+  }
   if (settings.usagePause !== undefined) console.log(usagePauseLine(settings.usagePause, planUsage.map((u) => u.provider)));
   if (planUsage.length) run.update({ usage: [...planUsage] });
   // Also without a plan to show: a ticket's tokens, as its running pass spends them, are the status view's TOKENS column.
@@ -3463,6 +3485,15 @@ export const burndown = async (
         if (step) step.phase = "gates: waiting for a gates slot";
         run.ticket(id, { note: "waiting for a gates slot" });
         // A ticket's gates only: a landing's, the base's and the verify's sandbox is a slot the run's end waits on.
+        if (!priority) gateWaits.get(id)?.();
+      },
+      // Held for the machine's CPU pressure before the pass asks for a slot (`LOAD_PAUSE`): the same words in the heartbeat and the
+      // ticket's note, and a ticket's own sandbox slot and worker are freed as a wait for a gates slot frees them. The base's and
+      // the verify's have no ticket; the hold's own line names them.
+      loadWait: () => {
+        const step = active.get(id) ?? landing.get(id);
+        if (step) step.phase = "gates: waiting: machine load";
+        run.ticket(id, { note: "waiting: machine load" });
         if (!priority) gateWaits.get(id)?.();
       },
       gate: (i, name) => {
@@ -3695,7 +3726,7 @@ export const burndown = async (
         gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when), undefined, host.exclusive),
       ).then((r) => {
         // The wait for the gates slot is inside the ticket's time but not its usual time, as a gates step's is.
-        if (r.waitMs) waited.set(id, (waited.get(id) ?? 0) + r.waitMs);
+        if (r.waitMs || r.loadHeldMs) waited.set(id, (waited.get(id) ?? 0) + (r.waitMs ?? 0) + (r.loadHeldMs ?? 0));
         return r;
       }),
     baseRecordedGreen: () => baseRecordedGreen(gateProject, image, planFile),

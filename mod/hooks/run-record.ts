@@ -242,6 +242,8 @@ export type RunSettings = {
   usageReading?: "unavailable";
   /** The plan usage in percent at which the run pauses itself (`USAGE_PAUSE`); only when it is on. */
   usagePause?: number;
+  /** The machine-wide CPU pressure in percent at which the run holds each gate pass (`LOAD_PAUSE`); only when it is on. */
+  loadPause?: number;
   /** The session that started the run keeps its prompt cache warm while the run is live; absent in records from older kits, read as true. */
   keepWarm?: boolean;
   /** True when the sandboxes spend `ANTHROPIC_API_KEY`, billing API credits; absent otherwise. */
@@ -300,6 +302,8 @@ export type RunRecord = {
    * count. An older kit's record has none, and the estimate counts that run as unknown.
    */
   load?: { concurrency: number; tickets: number };
+  /** Gate passes held for the machine's CPU pressure (`LOAD_PAUSE`): the run's running total across all its turns, and that it gave up holding; absent where the run is off or has held nothing yet. */
+  loadPause?: { heldMs: number; gaveUp?: true };
   /**
    * The estimate printed at the turn's start, kept so the history line can be set beside what the run took. Absent when
    * none was printed (no history to price from). The figures are the line's, unrounded: milliseconds and tokens.

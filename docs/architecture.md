@@ -2074,6 +2074,52 @@ line can name another run as live before its record's `startedAt` (`recordRun` r
 `joinPool` in the first turn, so the first turn's record never starts later than its registration).
 `test/landing-slot-share.test.ts`, `test/kept-slot-idle.test.ts`.
 
+## `src/load-pause.ts`
+
+`LOAD_PAUSE` holds gate passes while the machine's CPU pressure is high. It exists because a gate pass
+starts whatever else the machine is doing: on a host held at a high load, test gates ran 1.5 to 2.6 times
+their quiet time and went red on their timeouts, and repair passes and full gate runs went on load.
+
+- **The setting.** `parseLoadPause(env.LOAD_PAUSE, project.loadPause)`: a non-empty `LOAD_PAUSE` wins (`0`
+  off, 1 to 100 the threshold, else an `OperatorError` naming `LOAD_PAUSE`), else the config (absent 60,
+  `false` off, 1 to 100, else an `OperatorError` naming `loadPause`; `checkShape` in `src/config.ts` refuses
+  a bad one at load, as it does `usagePause`). Unlike `USAGE_PAUSE` it is on by default, so
+  `ResolvedSettings.loadPause` is absent only when it was turned off.
+- **The hold.** `createLoadPause({ threshold, read, now, sleep, say, onChange, pollMs, releaseMs, giveUpMs })`,
+  every port injectable (`read` is `readMachineCpu` in a run, `src/peaks.ts`). `hold(label, onHold)` returns
+  at once when the run has given up, when `read()` gives no reading, or when `avg60` is under the threshold.
+  Otherwise it calls `onHold` once, says one line and polls every `pollMs` (10 s); it releases when the
+  readings have stayed under the threshold for `releaseMs` (2 minutes, restarted by a reading at or over), when
+  a read gives none, or at the give-up. The held time is the run's wall time with at least one hold in
+  progress, so two passes held at once count once. At `giveUpMs` (30 minutes) every hold releases at once
+  (a shared signal, not each hold's next poll), `gaveUp()` stays true and later holds return at once: a machine
+  that never quietens must not stop a drain. `onChange({ heldMs, gaveUp })` is called as the total changes (once
+  per poll at most, at each release and at the give-up); `listen` swaps who hears it, which is how each turn's
+  run record follows the one pause.
+- **Not the usage pause.** It is no `PauseSource` (`src/schedule.ts`): no ticket parks and no sandbox closes.
+  Only gate passes wait; agent passes go on.
+- **Where it holds.** `src/gates.ts` keeps the run's hold in module state (`setLoadHold`). `runGates` awaits it
+  at its entry, before it takes `asked` and before `withSlot("gates", ...)`, so every gate pass - a ticket's,
+  a landing's, `gateBase`'s (the base gates, the verify, a base-red check) - is held before it takes its gates
+  slot, and the hold is no part of `waitMs`. A red gate's re-run inside the same slot is not held again.
+  `sandcastle gates` and `sandcastle land` set no hold. The hold has its own figure, `GateRun.loadHeldMs`
+  (absent at 0): the gates log gets `# held Ns for machine load` before the `# waited` line, `stepTimes` takes it
+  out of the line's `ms` as it takes out `waitMs`, `timingLines` puts it on the first run's line, and
+  `burndown()` adds it to a ticket's waited time, so its usual time leaves it out. `GateProgress.loadWait` is
+  called when a hold begins: `burndown()`'s gate wrapper sets the step's phase and the ticket's note to
+  `waiting: machine load` and, for a ticket's own gates, frees its sandbox slot and worker as a wait for a
+  gates slot does (`createGateSeat`).
+- **One per `sandcastle run`.** `src/cli.ts` makes it where the settings are resolved and hands it to every
+  turn, so the 30 minutes are a total across the turns. The exported `burndown()` is a wrapper that clears
+  the hold (`setLoadHold(undefined)`) and the turn's listener when the turn ends, a throw included; the turn
+  itself sets them after its run record exists, before the base gates, and prints `loadPauseLine`.
+- **The record and the summary.** `RunRecord.loadPause` (`{ heldMs, gaveUp? }`) is the run's running total
+  across all its turns, written at each turn's start and as it changes. The closing summary prints
+  `Load pause: gate passes waited <span> in all ...` beside the memory pressure line, with the give-up words
+  when it gave up, and the `Settings:` line names `load pause at N%`.
+
+`test/load-pause.test.ts` holds it on a fake clock and reader, and the gate side on a fake sandbox.
+
 ## `src/usage.ts`
 
 The opt-in plan usage guard (`USAGE_CHECK=1`). `usageToken(env, platform, readers, now)` is the one
@@ -2450,7 +2496,9 @@ of what a run is told at its start - the autonomy level, cross-review (`crossRev
 (`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts`
 and refused when bad only while the guard is on) and the usage pause (`usagePause`, from
 `USAGE_PAUSE` or the project's key through `parseUsagePause`, refused when bad, and absent when off;
-not part of `settingsGroup`) and `keepWarm` (whether the session that started the run keeps its
+not part of `settingsGroup`), the load pause (`loadPause`, from `LOAD_PAUSE` or the project's key through
+`parseLoadPause` in `src/load-pause.ts`: 60 by default, refused when bad, absent when off; in
+`settingsGroup` when on) and `keepWarm` (whether the session that started the run keeps its
 prompt cache warm: false when the personal `config.json` says `"keepWarm": false`, else the
 project's value, else true; always in `settingsGroup`, true or false, so the mod and the skill read
 one value from the run record and a record without it, from an older kit, reads as true; the status
