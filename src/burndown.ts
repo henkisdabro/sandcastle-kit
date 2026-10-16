@@ -31,22 +31,23 @@ import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, wholeTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
-import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
+import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
+import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
+import { startClock, type StartClock } from "./start-clock.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
@@ -54,8 +55,9 @@ import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
+import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
-import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
+import { execGate, lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
@@ -99,6 +101,8 @@ type Outcome = {
   idleRepairs?: number;
   /** The last repair pass committed nothing and ended with `<verdict>outside-branch</verdict>` (`repairVerdict`): its line and the tests it judged flaky. */
   outside?: { line: string; tests: string[] };
+  /** Red twice on test timeouts while the machine's CPU pressure was high (`loadMade`): no repair pass; the ticket says to run it again when the machine is quiet. */
+  loadRed?: true;
   gates: Gate[];
   /** Test ids the last red gate named. */
   failing?: string[];
@@ -1609,8 +1613,8 @@ const keptWorktreeOf = (project: Project, branch: string): string | undefined =>
 
 /**
  * Every worktree git lists under the project's `.sandcastle/worktrees/`, with the branch it has checked out ("" for none).
- * Not one whose directory is gone (a person removed it): no git runs there, Sandcastle's open prunes its record, and
- * its record check would read the missing `.git` file as tampering.
+ * Not one whose directory is gone (a person removed it): no git runs there, the kit's prune before the add
+ * (`openOrAbandon`) clears its record, and its record check would read the missing `.git` file as tampering.
  */
 const kitWorktrees = (project: Project): { path: string; branch: string }[] => {
   const under = [...new Set([project.root, realpathSync(project.root)])].map((r) => join(r, ".sandcastle", "worktrees") + sep);
@@ -2105,6 +2109,54 @@ export const createPipeline = (ctx: PipelineContext) => {
         console.log(`${ref(issue.id)}: ${branch} no longer merges onto ${base} (${conflictLine(conflict)}) - its ${before === "review" ? "review and gates are" : "gates are"} skipped.`);
         return { issue: issue.id, branch, status: "conflict", conflict: { ...conflict, found: before }, commits: ownCommits(base, branch, project.root), gates: [], head: sh("git", ["rev-parse", branch], project.root), ...o };
       };
+      // The base tip merged into the branch in this sandbox just before its gates (#790 option b): the gates then run on a
+      // tree that holds the tip, and a landing with no landing in between fast-forwards it in place on those results
+      // (`landOne`'s "branch holds the base's tip" rule) with no landing gate. Only when the branch is behind. Never an
+      // agent pass or a requeue: a merge that conflicts (the base moved since `conflictBefore` read it), a refused one, a
+      // failed regen or a failed setup leaves the branch as it was and it is gated as it stands - the landing's own
+      // precheck finds a real conflict, as it did. A failed setup is undone rather than reported as a red `setup` gate:
+      // the base's dependency the install could not take is no fault of the ticket's, and the gates run on the
+      // branch the ticket's own review read.
+      const mergeBaseBeforeGates = async (): Promise<void> => {
+        const behindNow = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`], project.root));
+        if (!(behindNow > 0)) return;
+        const identity = hostIdentity(project.root);
+        const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+        const pull = await sandbox.exec(`git ${identity} merge --no-edit ${shq(base)}`);
+        // Setup ran on the merged tree (here, or inside `resolveGenerated`): an undo then runs it again, or the gates
+        // run the branch's own tree on the base's install and a dependency the base changed reads as the ticket's red.
+        let installed = false;
+        const stand = async (why: string) => {
+          // `--abort` refuses when no merge is in progress (a refusal before it began); the reset covers a merge that committed.
+          await sandbox.exec("git merge --abort");
+          await sandbox.exec(`git reset -q --hard ${shq(before)}`);
+          console.log(`${ref(issue.id)}: could not merge ${base} into its branch before its gates (${why}) - undone, gated as it stands.`);
+          if (!installed) return;
+          for (const command of project.setup) {
+            const r = await execGate(sandbox, command);
+            if (r.exitCode !== 0) return console.log(`${ref(issue.id)}: setup "${command}" exited ${r.exitCode} on its own branch after the undo - the gates say what that breaks.`);
+          }
+        };
+        if (pull.exitCode !== 0) {
+          const files = (await sandbox.exec("git diff --name-only --diff-filter=U")).stdout.split("\n").filter(Boolean);
+          if (!files.length || !regensFor(files, project.generated)) return stand(files.length ? `conflicts in ${files.join(", ")}` : (pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160) || "refused");
+          installed = project.setup.length > 0;
+          const r = await resolveGenerated(sandbox, { files, generated: project.generated, setup: project.setup, message: `Merge ${base} into ${branch} (generated files regenerated)`, identity });
+          if (!r.ok) return stand(`regenerating ${files.join(", ")} failed: ${r.reason}`);
+          console.log(`${ref(issue.id)}: merged ${base} into its branch before its gates (${behindNow} behind; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}).`);
+          return;
+        }
+        const brought = (await sandbox.exec(`git diff --name-only ${shq(before)} HEAD`)).stdout.trim();
+        if (brought) {
+          // A dependency the base added must be installed before the gates, as `landInSandbox` does after its merge.
+          installed = project.setup.length > 0;
+          for (const command of project.setup) {
+            const r = await execGate(sandbox, command);
+            if (r.exitCode !== 0) return stand(`setup "${command}" exited ${r.exitCode}`);
+          }
+        }
+        console.log(`${ref(issue.id)}: merged ${base} into its branch before its gates (${behindNow} behind)`);
+      };
       // A branch that merged a base since rewritten (a `pull --rebase` that flattened the landing merges into copies,
       // a reset that dropped a landing) holds commits the base no longer has under their old hashes: landed as it
       // stands it brings them back, duplicated or removed on purpose, with no review, and its recorded heads vouch
@@ -2562,7 +2614,10 @@ export const createPipeline = (ctx: PipelineContext) => {
               : ctx.regate && repair > 0 ? `no full gate run; ${name} is re-run first, and a repair starts only if it is red again.` : "no gate run; the repair starts from that output."),
         );
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
-      } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
+      } else {
+        await mergeBaseBeforeGates();
+        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
+      }
       // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
       // the tip looking reviewed with no gate result, and a re-run would only gate it again.
       if (gated.failure) await noteHead(issue.id, branch, { red: sh("git", ["rev-parse", branch], project.root) });
@@ -2642,8 +2697,26 @@ export const createPipeline = (ctx: PipelineContext) => {
         // The note says the gate ran three times: only true when the third run went red on that same gate.
         else if (gated.failure.name === second.name) threeRuns = { red: gated.failure, note: threeRunsNote(gated.failure.name, [...earlier, gated.failure]) };
       }
+      // A red that only the machine's load made (every failure a test timeout, high machine-wide CPU pressure over the
+      // pass) has nothing for a repair pass to fix: the gate runs once more instead. Once per attempt, never inside the
+      // repair loop, where a red is the repair's. With no high reading (or no reading) the flow above stands.
+      let loadRed = false;
+      // The tests the load-made red named: timeouts of a busy machine, never recorded as flaked.
+      const loadTests = new Set<string>();
+      if (gated.failure && !forced && attempts > 0 && loadMade(gated)) {
+        const loaded = gated;
+        for (const f of loaded.failures) for (const t of wholeTests(f)) loadTests.add(t);
+        console.log(`${ref(issue.id)}: ${gated.failure.name} red on test timeouts under machine load (CPU pressure ${gated.cpuMachineMean}%${gated.cpuEstimate ? ", an estimate from the load average" : ""}) - no repair pass, gating once more`);
+        at?.gates?.();
+        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        if (!gated.failure) console.log(`${ref(issue.id)}: ${loaded.failure?.name ?? "a gate"} red under machine load, then green on a re-gate - no repair pass`);
+        else if (loadMade(gated)) {
+          loadRed = true;
+          console.log(`${ref(issue.id)}: ${gated.failure.name} red on test timeouts under machine load again - no repair pass, left red; run it again when the machine is quiet`);
+        }
+      }
       // Kept on the ticket's record whatever follows (a repair may still fail): these went red and then green.
-      const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure) : [];
+      const flaked = earlier.length ? flakedTests([...earlier, ...(gated.failure ? [gated.failure] : [])], !gated.failure).filter((t) => !loadTests.has(t)) : [];
       let preRepair = sh("git", ["rev-parse", branch], project.root);
       const seen = new Set<string>();
       // The failures this ticket has already waited a fix for: a second wait on one would never end the loop's own repair.
@@ -2657,7 +2730,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       let outside: { line: string; tests: string[] } | undefined;
       for (
         let red = gated.failure;
-        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
+        red && !loadRed && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
         red = gated.failure
       ) {
         const failure = red;
@@ -2860,6 +2933,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         repairs: earlierRepairs + repairs - idle,
         idleRepairs: earlierIdle + idle,
         ...(outside && { outside }),
+        ...(loadRed && { loadRed: true as const }),
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
         ...(flaked.length ? { flaked } : {}),
@@ -2911,10 +2985,22 @@ let kitAtStart: string | undefined;
  * `turn.docker` is the start's one `docker info` reading, which the first turn takes over from the
  * runtime check (cli.ts); a turn handed none reads its own.
  */
-export const burndown = async (
-  project: Project,
-  turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> } },
-): Promise<boolean> => {
+export const burndown = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
+  try {
+    return await burndownTurn(project, turn);
+  } finally {
+    // The run's one load pause outlives the turn; the turn's hold and its record's listener do not, a throw included.
+    setLoadHold(undefined);
+    turn?.loadPause?.listen(undefined);
+  }
+};
+
+/** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
+type TurnOptions = { settings: ResolvedSettings; turn: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
+
+const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
+  // The first turn takes the clock `sandcastle run` started; a later turn counts only its own steps.
+  const clock = turn?.clock ?? startClock();
   const DRY_RUN = process.env.DRY_RUN === "1";
   // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
   resetMergeCheckGap();
@@ -2938,7 +3024,9 @@ export const burndown = async (
   disableHostGitGc();
   // The lock, and what a killed run's sandboxes left working stopped, before anything reads or pins the shared `.git`:
   // a container still alive could write it between the baseline check and the reap, past both the refusal and the pins.
+  clock.step("lock and reap");
   holdAndReap(project);
+  clock.step("git baseline");
   // Then, before the pins take the config as it is: a key an earlier, killed run's sandbox planted is refused, not pinned.
   const gitConfig = assertGitConfigBaseline(project, "sandcastle run", turn?.acceptGitConfig);
   pinHostGitConfig(project.root);
@@ -2956,6 +3044,7 @@ export const burndown = async (
   // in an agent's context. Named tickets are checked on the host, so a typo or
   // a closed ticket fails here and not inside a sandbox that has already
   // installed its dependencies.
+  clock.step("queue read");
   const tracker = makeTracker(project);
   const ref = tracker.ref;
   const named = namedTicketsFromEnv();
@@ -2977,6 +3066,7 @@ export const burndown = async (
   // those: a queued ticket they left out is not listed, recorded or reported, and a later turn's list is no wider.
   const scope = turn?.scope ? (turn.scope.ids ??= scopeIds(tracker, turn.scope.list, queued)) : undefined;
   const whole = named.list ? wholeQueue(tracker, queued, scope) : queued;
+  clock.step("blocker reads");
   const wholeOpen = await openOnQueue(project, tracker, whole);
   const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i) => (wholeOpen.has(i.id) ? [[i.id, { ticket: i, on: wholeOpen.get(i.id)! }] as const] : [])));
   const waiting = [...wholeOpen].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
@@ -2989,6 +3079,7 @@ export const burndown = async (
   // holds. The two blockers of seven waiting tickets once ran last of thirty,
   // so a run stopped early would have left all seven stuck for another run.
   // (Their dependants start in this run, as the blocker lands.)
+  clock.step();
   const unblocks = (i: Issue) => waiting.filter((w) => w.on.includes(ref(i.id))).length;
   const ready = queued.filter((i) => !waiting.some((w) => w.issue === i.id)).sort((a, b) => unblocks(b) - unblocks(a));
   // A file git cannot merge (a lockfile, a generated file, a minified blob) conflicts at landing
@@ -3000,6 +3091,7 @@ export const burndown = async (
   // Every attempt and every landing goes through the scheduler: a bounded fan-out (a sliding pool,
   // not a batch barrier, inside the machine-wide sandbox limit), one landing worker beside it, a
   // first conflict or red sent back once, the file hold, and the release of what waits, as each ticket ends.
+  clock.step("schedule");
   const schedule = createSchedule<Issue, Outcome, Outcome, Blocker>({
     tickets: ready,
     files: DRY_RUN ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
@@ -3018,6 +3110,7 @@ export const burndown = async (
       }
     },
   });
+  clock.step();
   const sharesLog = join(project.root, ".sandcastle/logs/file-shares.log");
   let sharesHeaded = false;
   // Filled by the ticket list below, which already says a file hold; `holds.start` then does not say it again.
@@ -3053,15 +3146,20 @@ export const burndown = async (
   }
   const overrides = new Map([...issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])] as const), ...laterOverrides]);
   // Resolved once here: the image, the start lines and run.json all name the same versions.
+  clock.step("versions");
   const versions = await resolveVersions(project);
+  clock.step();
   kitAtStart ??= kitVersion();
 
   // A dry run lands nothing, so it needs no sandbox slot for it.
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
   // Another live run shares the pool: read before the header, whose note on the kept slot says only what applies to this run.
+  clock.step("other runs");
   const others = otherRuns();
   const split = others.length ? splitAtStart(workers, others) : undefined;
+  // The ticket list and the plan lines below are not the other runs' reads: they count toward `others`.
+  clock.step();
   // "up to": another project's live run can cut this run's share below it, which the split line under the
   // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
@@ -3093,7 +3191,9 @@ export const burndown = async (
   // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
   // gates, which run one at a time and set the run's end (`gateProject` below opens those).
   // One `docker info` for both this and the pool warning below; on Linux docker not answering stops the run here, before anything is recorded or started.
+  clock.step("docker info");
   const info = turnDockerInfo(turn?.docker ?? readDockerInfo);
+  clock.step();
   const pool = { concurrency: settings.concurrency.effective, maxGates: limit("gates") };
   const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
   const gateCpus = sandboxCpus(project, "gate", pool, () => info);
@@ -3104,12 +3204,14 @@ export const burndown = async (
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
+  clock.step("other runs");
   const neighbours = others.map((m) => {
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
   });
   for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, neighbours, !DRY_RUN, project.name, project.root)) console.log(line);
+  clock.step("carried branches");
   // Carried branches, read before any agent touches them: a land-only or narrowly reviewed one is dearer than a fresh ticket's landing,
   // so the estimate and the timings say so; one that gets a full review is priced as a fresh ticket (`carriedKindAtStart`).
   const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i)] as const));
@@ -3118,12 +3220,15 @@ export const burndown = async (
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
   const remainderAtStart = new Set(candidates.filter((i) => isRemainder(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. Beside another run the share is the tickets' whole: the pool's one landing slot is outside it.
+  clock.step();
   const slots = estimateSlots(workers, split);
   // The path count of each ticket's `Touches:` line (0 with none): the estimate prices a ticket by its size, and each timings line records it for later runs.
   const touchPaths = new Map(candidates.map((i) => [i.id, parseTouches(i.body ?? "").length]));
   // The length of each ticket's body: with the path count it sizes the ticket (`sizeOf`, src/run.ts), and each timings line records it.
   const bodyChars = new Map(candidates.map((i) => [i.id, (i.body ?? "").length]));
+  clock.step("blocker chain");
   const chainIds = blockerChain(project, tracker, candidates);
+  clock.step("estimate");
   const rough = priceRun(
     project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
@@ -3131,7 +3236,9 @@ export const burndown = async (
   );
   if (rough) console.log(rough.text);
   console.log(`Machine-wide: ${usage()}`);
+  clock.step("keep awake");
   console.log(`Keep awake: ${await keepAwake()}`);
+  clock.step();
   console.log(baseIsTheRunsLine(project.baseBranch));
   if (TEST_RED_GATE) {
     console.log(
@@ -3159,6 +3266,7 @@ export const burndown = async (
       .filter(([id]) => !candidates.some((c) => c.id === id))
       .map(([id, on]): [string, TicketRecord] => [id, { state: "blocked", note: blockedNote(on, inRun), title: whole.find((q) => q.id === id)?.title }]),
   ];
+  clock.step("run record");
   const run = recordRun(project, {
     issues: candidates.map((i) => i.id),
     dryRun: DRY_RUN,
@@ -3170,6 +3278,8 @@ export const burndown = async (
     // The line printed above, as figures: history.jsonl then holds the estimate beside what the turn took.
     ...(rough ? { estimate: rough.figures } : {}),
     ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
+    // The run's running total across its turns, not this turn's: every turn's record carries it (`LOAD_PAUSE`).
+    ...(turn?.loadPause ? { loadPause: loadRecord({ heldMs: turn.loadPause.heldMs(), gaveUp: turn.loadPause.gaveUp() }) } : {}),
     typical: typicalTimes(project, [], slots),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
@@ -3178,6 +3288,7 @@ export const burndown = async (
   // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
   // until the scheduler tells its own demand, for the base gates that come first.
   joinPool(project.name, CONCURRENCY, 1);
+  clock.step();
   // The time held below the slots it asked for by another live run, and the time a worker waited for a sandbox slot
   // (set once `slotWaits` exists): the closing summary names both when the run took far longer than its estimate.
   const shared = createSharedMeter();
@@ -3233,12 +3344,16 @@ export const burndown = async (
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
+  clock.step("status view");
   const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage, run.paused);
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
   }
   if (statusPane) console.log(`Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
+  // A statement of its own, not part of the line above: a start with no pane still says where its time went. `startTook`, as `took` below is the tickets' times.
+  const startTook = clock.line();
+  if (startTook) console.log(startTook);
 
   // Every step is timed into logs/timings.jsonl, so how long a project's
   // issues take - and where the time goes - is on record rather than guessed.
@@ -3291,6 +3406,8 @@ export const burndown = async (
       times = stepTimes(Date.now() - since, result);
       // Only the wait inside the step is in `took`; the slot wait before it never was (see `withQueued`).
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
+      // The hold for the machine's CPU pressure is out of the usual time as a slot wait is.
+      if (issue && times.loadHeldMs) waited.set(issue, (waited.get(issue) ?? 0) + times.loadHeldMs);
       times = withQueued(times, queuedMs);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
@@ -3382,6 +3499,13 @@ export const burndown = async (
           standing: (now) => readPause(project.root, process.pid, now),
           hold: (pause, now) => holdForUsage(project.root, process.pid, pause, now),
         });
+  // `LOAD_PAUSE`: every gate pass of this turn - the base gates, a ticket's, a landing's and the verify - is held while the machine's CPU pressure is high (src/load-pause.ts).
+  if (turn?.loadPause && settings.loadPause !== undefined) {
+    const pause = turn.loadPause;
+    pause.listen((change) => run.update({ loadPause: loadRecord(change) }));
+    setLoadHold(pause.hold);
+    console.log(loadPauseLine(settings.loadPause, readMachineCpu()));
+  }
   if (settings.usagePause !== undefined) console.log(usagePauseLine(settings.usagePause, planUsage.map((u) => u.provider)));
   if (planUsage.length) run.update({ usage: [...planUsage] });
   // Also without a plan to show: a ticket's tokens, as its running pass spends them, are the status view's TOKENS column.
@@ -3411,6 +3535,7 @@ export const burndown = async (
       (kept.length ? `; keeping ${kept.join(", ")}` : "") +
       // The count and the list are the repo's items; Claude Code's own bundled skills are off in every sandbox (container/managed-settings.json).
       "; Claude Code's bundled skills off" +
+      alwaysLoadedSegment(alwaysLoadedRules(project.root)) +
       `; ${lean.hooks.length} hook(s) kept${dropped ? `, ${dropped} dropped by lean.dropHooks` : ""} (\`sandcastle lean\` for detail).`,
   );
   for (const line of unmatchedLines(unmatched(project, lean))) console.log(`Lean: ${line}.`);
@@ -3428,11 +3553,13 @@ export const burndown = async (
   if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
   // The base gates' times when they ran, the verify's fallback record for a gate far slower than it was (`likelyLoad`).
   let baseGateMs: Record<string, number> | undefined;
-  if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
+  // `turn.forceBaseGates`: the last turn's verify was red, likely load (`mustGateBase`), so the merged base is gated again here
+  // whatever SKIP_BASE_GATES says, and a base that is really red stops the drain at this check.
+  if (process.env.SKIP_BASE_GATES === "1" && !turn?.forceBaseGates) console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
       // Checked against the start's reading before its sandbox opens; closed behind a reading of its own (`gateBase`).
-      baseGateMs = gateMs(await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))));
+      baseGateMs = gateMs(await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, !turn?.forceBaseGates, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -3475,6 +3602,15 @@ export const burndown = async (
         if (step) step.phase = "gates: waiting for a gates slot";
         run.ticket(id, { note: "waiting for a gates slot" });
         // A ticket's gates only: a landing's, the base's and the verify's sandbox is a slot the run's end waits on.
+        if (!priority) gateWaits.get(id)?.();
+      },
+      // Held for the machine's CPU pressure before the pass asks for a slot (`LOAD_PAUSE`): the same words in the heartbeat and the
+      // ticket's note, and a ticket's own sandbox slot and worker are freed as a wait for a gates slot frees them. The base's and
+      // the verify's have no ticket; the hold's own line names them.
+      loadWait: () => {
+        const step = active.get(id) ?? landing.get(id);
+        if (step) step.phase = "gates: waiting: machine load";
+        run.ticket(id, { note: "waiting: machine load" });
         if (!priority) gateWaits.get(id)?.();
       },
       gate: (i, name) => {
@@ -3707,7 +3843,7 @@ export const burndown = async (
         gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when), undefined, host.exclusive),
       ).then((r) => {
         // The wait for the gates slot is inside the ticket's time but not its usual time, as a gates step's is.
-        if (r.waitMs) waited.set(id, (waited.get(id) ?? 0) + r.waitMs);
+        if (r.waitMs || r.loadHeldMs) waited.set(id, (waited.get(id) ?? 0) + (r.waitMs ?? 0) + (r.loadHeldMs ?? 0));
         return r;
       }),
     baseRecordedGreen: () => baseRecordedGreen(gateProject, image, planFile),
@@ -4128,7 +4264,15 @@ export const burndown = async (
       else if (same) verifyTreeOf = ref(same);
       // Timeouts alone, or a gate far slower than it was: the run was loaded, whatever tree it gated. Judged against the
       // gates of the landing that gated this tree, else the run's base gates.
-      verifyLoad = likelyLoad(gated.failures, gated.gates, { ...baseGateMs, ...(same && landed.get(same)?.clean ? landingGateMs.get(same) : undefined) });
+      const timingsText = () => {
+        try {
+          return readFileSync(timings, "utf8");
+        } catch {
+          return "";
+        }
+      };
+      // With no base gates this turn, each gate's typical time from earlier runs' green base gates and verifies stands in.
+      verifyLoad = likelyLoad(gated.failures, gated.gates, { ...(baseGateMs ?? typicalGateMs(timingsText(), project)), ...(same && landed.get(same)?.clean ? landingGateMs.get(same) : undefined) });
     }
     // A red merged base said "do not push" with nothing to read: its full output is in the verify log (`verifyBase`
     // streamed it as the gates ran). A skipped verify ran nothing: a log an earlier run left would read as this one's.

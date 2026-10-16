@@ -240,6 +240,27 @@ const instructionsTokens = (root: string) => {
   return walk("CLAUDE.md") || walk("AGENTS.md");
 };
 
+/**
+ * The tracked `.claude/rules/**\/*.md` files Claude Code loads into every session: those with no `paths:` key in
+ * their frontmatter (a first line of `---` up to the next `---` line). Tracked only, as a sandbox worktree has only
+ * tracked files. Reported and never hidden; a rule keeps its place in the sandbox.
+ */
+export const alwaysLoadedRules = (root: string): { path: string; tokens: number }[] =>
+  tracked(root, ".claude/rules")
+    .filter((f) => f.endsWith(".md") && existsSync(join(root, f)) && !lstatSync(join(root, f)).isDirectory())
+    .sort()
+    .flatMap((path) => {
+      const text = readFileSync(join(root, path), "utf8");
+      const lines = text.split("\n").map((l) => l.replace(/\r$/, ""));
+      const close = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
+      if (close > 0 && lines.slice(1, close).some((l) => /^paths\s*:/.test(l))) return [];
+      return [{ path, tokens: Math.ceil(text.length / 4) }];
+    });
+
+// The run's `Lean:` line's segment for the always-loaded rules; empty when there are none.
+export const alwaysLoadedSegment = (rules: { tokens: number }[]) =>
+  rules.length ? `; ${rules.length} always-loaded rule file(s), ~${rules.reduce((n, r) => n + r.tokens, 0)} tokens` : "";
+
 // Tracked files, outside what lean hides, that name a hidden path. Hiding a
 // skill a test reads (a guard over agent docs, say) turns the test gate red
 // on every branch - and on the base branch - for a reason no agent can fix.
@@ -331,6 +352,13 @@ export const report = (project: Project, p: Plan) => {
     `\n  Hidden: ~${hiddenTokens} tokens of descriptions${hiddenMcp ? ` and ${hiddenMcp} MCP server(s)' tool schemas` : ""}, per agent turn.` +
       `\n  Always loaded: CLAUDE.md and its imports, ~${instr} tokens${instr > 10_000 ? " - worth trimming" : ""}.`,
   );
+  const rules = alwaysLoadedRules(project.root);
+  if (rules.length) {
+    const w = Math.max(...rules.map((r) => r.path.length));
+    console.log(`  Always loaded: ${rules.length} rule file(s) in .claude/rules with no paths:, ~${rules.reduce((n, r) => n + r.tokens, 0)} tokens.`);
+    for (const r of rules) console.log(`    ${r.path.padEnd(w)}  ~${r.tokens}`);
+    console.log("  Every pass loads them: scope a rule with `paths:` frontmatter and it loads only when the agent reads a matching file.");
+  }
   const kept = p.items.filter((i) => i.kept && i.kind !== "hook");
   if (kept.length) console.log(`  Kept on purpose (lean.keep): ${kept.map((i) => `${i.kind}:${i.id}`).join(", ")}`);
   for (const line of unmatchedLines(unmatched(project, p))) console.log(`  WARN ${line}`);

@@ -58,11 +58,18 @@ export const needsDecision = (unmet: string): boolean =>
  */
 export const redBaseExit = (facts: Pick<Facts, "verify"> | undefined): 1 | undefined => (facts?.verify?.green === false ? 1 : undefined);
 
+/**
+ * Whether the turn's verify was red and judged likely load: the drain goes on past it, and the turn that follows runs its
+ * base gates uncached before any agent starts, so a base that is really red stops the drain there.
+ */
+export const mustGateBase = (facts: Pick<Facts, "verify"> | undefined): boolean => facts?.verify?.green === false && facts.verify.likelyLoad === true && !facts.verify.notRun;
+
 /** Why no further turn should follow a turn, or undefined when one may: the cause `drain` prints. */
 export const noRerunCause = (facts: Facts): string | undefined => {
   if (facts.dryRun) return "the run was a dry run";
   if (facts.stopped) return `the run stopped (${facts.stopped})`;
-  if (facts.verify?.green === false) return facts.verify.notRun ? "the merged base could not be re-gated" : "the merged base is red";
+  // Red twice, and judged the machine's load (`likelyLoad`): not a reason to stop. The next turn gates the base first (`mustGateBase`).
+  if (facts.verify?.green === false && !(facts.verify.likelyLoad === true && !facts.verify.notRun)) return facts.verify.notRun ? "the merged base could not be re-gated" : "the merged base is red";
   // A usage limit leaves no `stopped`, only skipped tickets whose note names it.
   const skipped = Object.values(facts.tickets).find((t) => t.state === "skipped");
   if (skipped) return `the run stopped early (${skipped.note?.replace(/^not started: /, "") || "tickets were not started"})`;

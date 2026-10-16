@@ -95,6 +95,8 @@ export type Facts = {
   sandboxWaitMs?: number;
   /** Milliseconds the run spent paused (the run record's `pausedMs`). */
   pausedMs?: number;
+  /** The run record's `loadPause`: the time gate passes were held for the machine's CPU pressure (`LOAD_PAUSE`) in all the run's turns so far, and that the run gave up holding. */
+  loadPause?: { heldMs: number; gaveUp?: true };
   /** What this run's timings lines say of its re-runs and its slot waits (`timeLostFromTimings`). */
   timeLost?: TimeLost;
   /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
@@ -655,6 +657,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     ...(ms(run.sharedMs) ? { sharedMs: ms(run.sharedMs) } : {}),
     ...(ms(run.sandboxWaitMs) ? { sandboxWaitMs: ms(run.sandboxWaitMs) } : {}),
     ...(ms(run.pausedMs) ? { pausedMs: ms(run.pausedMs) } : {}),
+    ...(ms(run.loadPause?.heldMs) ? { loadPause: { heldMs: ms(run.loadPause?.heldMs)!, ...(run.loadPause?.gaveUp === true ? { gaveUp: true as const } : {}) } } : {}),
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
@@ -842,6 +845,8 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   else if (s.usageGuard === false) items.push("usage guard off");
   const pause = count(s.usagePause);
   if (pause !== undefined) items.push(`usage pause at ${pause}%`);
+  const load = count(s.loadPause);
+  if (load !== undefined) items.push(`load pause at ${load}%`);
   // Never silent: red where colour is wanted, and the words say it where it is not.
   if (s.apiKey === true) items.push(bare ? API_CREDITS : red(API_CREDITS));
   if (!items.length) return usage;
@@ -1312,6 +1317,10 @@ export const render = (f: Facts, plain = false): string => {
   }
   if (f.cpu && f.cpu.mean >= CPU_PRESSURE_HIGH) {
     out.push(`CPU pressure: high - the machine's CPU pressure averaged ${f.cpu.mean}%${f.cpu.estimate ? " (an estimate from the load average)" : ""} over ${f.cpu.where}, so other work on the machine competed with the gates and they ran slower. Run \`sandcastle gates\` when the machine is quiet, or lower maxSandboxes.`);
+  }
+  if (f.loadPause && f.loadPause.heldMs > 0) {
+    const at = typeof f.settings?.loadPause === "number" ? `at or over ${f.settings.loadPause}%, ` : "";
+    out.push(`Load pause: gate passes waited ${span(f.loadPause.heldMs)} in all for the machine's CPU pressure (${at}some avg60)${f.loadPause.gaveUp ? " - gave up after 30 min, so later gate passes ran under load" : ""}`);
   }
   out.push(...estimateLines(f, end));
   out.push(...flakyLines(f));

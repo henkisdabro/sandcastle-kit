@@ -8,6 +8,7 @@ import type { RunSettings } from "../mod/hooks/run-record.ts";
 import { type CrossReviewSetting, crossReviewSetting } from "./agents.ts";
 import { autonomyLevel, type Level, turnCap } from "./autonomy.ts";
 import { DEFAULT_CONCURRENCY } from "./config.ts";
+import { parseLoadPause } from "./load-pause.ts";
 import { pipelineWorkers } from "./landing.ts";
 import { poolLimit, wholeNumber } from "./pool.ts";
 import { parseUsagePause, parseUsageStop } from "./usage.ts";
@@ -15,7 +16,7 @@ import { parseUsagePause, parseUsageStop } from "./usage.ts";
 export type SettingsSources = {
   env: Record<string, string | undefined>;
   /** The project's `.sandcastle/config.ts` with `.sandcastle/config.local.json` merged over it, as far as settings are concerned. */
-  project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown }; usagePause?: unknown; keepWarm?: unknown; localKeys?: string[] };
+  project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown }; usagePause?: unknown; loadPause?: unknown; keepWarm?: unknown; localKeys?: string[] };
   /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency. */
   machine: Record<string, unknown>;
   /** Whether the credentials files put `ANTHROPIC_API_KEY` in the sandboxes (`projectApiKeySpend`); read by the caller, so this stays pure. */
@@ -38,6 +39,8 @@ export type ResolvedSettings = {
   usageStop?: number;
   /** The plan usage in percent at which the run pauses itself and resumes after the window's reset (`USAGE_PAUSE`, or the project's `usagePause`); absent when it is off. In the settings group too, so a summary never reads as if nothing watched the plan. */
   usagePause?: number;
+  /** The machine-wide CPU pressure in percent (`some` `avg60`) at or over which the run holds each gate pass (`LOAD_PAUSE`, or the project's `loadPause`, else 60); absent when it is off. In the settings group too. */
+  loadPause?: number;
   /** Whether the session that started the run keeps its prompt cache warm while the run is live: false when the machine settings say `false`, else the project's value, else true. */
   keepWarm: boolean;
   /** True when the sandboxes spend an API key, billing API credits; absent otherwise. */
@@ -62,6 +65,7 @@ export const resolveSettings = ({ env, project, machine, apiKey = false }: Setti
   const asked = wholeNumber("CONCURRENCY", env.CONCURRENCY ?? project.concurrency ?? DEFAULT_CONCURRENCY, 1);
   const usageGuard = env.USAGE_CHECK === "1";
   const usagePause = parseUsagePause(env.USAGE_PAUSE, project.usagePause);
+  const loadPause = parseLoadPause(env.LOAD_PAUSE, project.loadPause);
   const local = (project.localKeys ?? []).filter((key) => !ENV_SETS[key]?.(env));
   return {
     autonomy: autonomyLevel(env.AUTONOMY_LEVEL, project.autonomy),
@@ -73,6 +77,7 @@ export const resolveSettings = ({ env, project, machine, apiKey = false }: Setti
     usageGuard,
     ...(usageGuard ? { usageStop: parseUsageStop(env.USAGE_STOP) } : {}),
     ...(usagePause === undefined ? {} : { usagePause }),
+    ...(loadPause === undefined ? {} : { loadPause }),
     // The machine's `false` is a person's off switch for every project, so it beats the project's `true`.
     keepWarm: machine.keepWarm === false ? false : project.keepWarm !== false,
     ...(apiKey ? { apiKey: true as const } : {}),
@@ -102,6 +107,7 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number, noReadin
     ...(settings.usageStop === undefined ? {} : { usageStop: settings.usageStop }),
     ...(settings.usageGuard && noReading ? { usageReading: "unavailable" as const } : {}),
     ...(settings.usagePause === undefined ? {} : { usagePause: settings.usagePause }),
+    ...(settings.loadPause === undefined ? {} : { loadPause: settings.loadPause }),
     // Always, true or false, so a reader never has to guess a default.
     keepWarm: settings.keepWarm,
     // Only when it does: a subscription run's record and view stay as they were.

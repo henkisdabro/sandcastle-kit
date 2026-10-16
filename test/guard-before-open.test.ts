@@ -428,7 +428,7 @@ test("a run's base gates open behind a check against the shared .git as the run 
   const body = src.indexOf("export const burndown = ");
   const reaped = src.indexOf("holdAndReap(project);", body);
   const reading = src.indexOf("const atStart = gitFingerprint(project);", body);
-  const gates = src.indexOf("requireGreenBase(gateProject, image, planFile, true, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))", body);
+  const gates = src.indexOf("requireGreenBase(gateProject, image, planFile, !turn?.forceBaseGates, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))", body);
   assert.ok(reaped > body && reaped < reading, "the reading is taken before the lock is held, or before a killed run's sandboxes are stopped");
   assert.ok(reading < gates, "the base gates open with no check against the start's reading");
   // Every sandbox a ticket's pipeline opens goes through the check: `open` is called in one place.

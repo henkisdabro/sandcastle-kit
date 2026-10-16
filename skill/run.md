@@ -43,6 +43,12 @@ This continues SKILL.md: run its "Before every action" first.
      would use and whose plan that is). Or `USAGE_PAUSE=90`, which has the run pause itself when a
      plan window reaches that percent and resume by itself after the window's reset (a pause a person can
      end with `sandcastle resume`); it reads the agents' own readings, so it needs no credential.
+   - **Load pause.** On by default: a run holds each gate pass, before it takes its gates slot, while the
+     machine's CPU pressure (`some` `avg60`; on macOS an estimate from the load average) is at or over 60%,
+     releases after 2 minutes under it, and holds at most 30 minutes in all per run. Agent passes go on, so a
+     busy machine can make a run wait before its gates. `LOAD_PAUSE=0` turns it off for one run,
+     `loadPause: false` in `.sandcastle/config.ts` for the project; `LOAD_PAUSE=<percent>` sets the threshold.
+     A ticket held shows `waiting: machine load`.
    - **API credits.** If `sandcastle doctor` prints a `warn API credits` line, an
      `ANTHROPIC_API_KEY` (in the personal or the project `.env`) reaches the sandboxes, and Claude
      Code spends it before any `CLAUDE_CODE_OAUTH_TOKEN`: the run bills API credits, not the plan.
@@ -80,7 +86,7 @@ This continues SKILL.md: run its "Before every action" first.
      the run started (unblocked) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
      (`drain` may repeat it; `2` and `3` take one per run); one a stop leaves unrun waits for the next `sandcastle run`. A drain stops when no ticket is left to
      run again or a stop holds: no progress, the same ticket conflicting, left partly done or failing to land in two
-     turns running, a red merged base, a usage limit or a stopped run, 20 turns at most.
+     turns running, a red merged base (not one judged likely load, red twice on test timeouts or a gate far slower than usual: the next turn gates the base again first, and a base that is really red stops it there), a usage limit or a stopped run, 20 turns at most.
    - **How long.** Once the project has run before, the run prints a rough estimate at its start
      (detached: in `.sandcastle/logs/run-output.log`). After `--detach` returns (step 2), read the
      log once for the line starting `Estimate` and quote it, as the only estimate you give. Do not
@@ -106,7 +112,10 @@ This continues SKILL.md: run its "Before every action" first.
    **Confirm that line.** Outside Herdr it says ``Status view: run `sandcastle status` ``. If the
    command refuses, prints `The run ended at once`, or names no status view where Herdr is in use,
    tell the user plainly that there is no run to watch. Otherwise tell them the pid, and the tab
-   and status pane ids. `.sandcastle/logs/run-output.log` is the run's own output; the status
+   and status pane ids. When the start was slow (`Status view: not reported within 60 s`, or the
+   user says so), read `.sandcastle/logs/run-output.log` once for its `Start took` line and report
+   its heaviest steps. If the line is not there yet (the run is still starting), say so and read
+   the log once more in step 4, when closing the run. `.sandcastle/logs/run-output.log` is the run's own output; the status
    view's bottom shows its last lines while the run is live.
 
    Watching the run from a Claude Code session in the same checkout is safe: its own writes to
@@ -174,6 +183,8 @@ This continues SKILL.md: run its "Before every action" first.
 
    Start by stopping the keep-warm loop of step 3, if you scheduled one.
 
+   A slow start whose `Start took` line step 2 did not find is named now, from `.sandcastle/logs/run-output.log`.
+
    The run ends with a closing summary (`## 🏁 Run finished` down to `## 👉 Next step`);
    `sandcastle report` prints it again at any time, with the blockers re-read and the local git
    state as it is now. Run it from the project root and take the summary from its own stdout, not
@@ -222,6 +233,9 @@ This continues SKILL.md: run its "Before every action" first.
       estimate from the load average, which the line says) says other work on the machine slowed the gates:
       relay it with the pass it names and its fix (`sandcastle gates` when the machine is quiet, or a lower
       `maxSandboxes`). A red gate in such a run may be the load, not the change.
+      A `Load pause: gate passes waited ...` line says the run held its gate passes for the machine's CPU
+      pressure (`LOAD_PAUSE`, 60% by default): relay the time. If it ends `gave up after 30 min`, later gate
+      passes ran under load, and a red gate in that run may be the load, not the change.
       A `Large context:` line names a ticket with an agent pass whose largest turn held over 150,000
       tokens of context: relay it with the pass and the peak it names.
       A `Tokens:` line (and `(incomplete)` or `tokens unknown` in the headline) names tickets with an

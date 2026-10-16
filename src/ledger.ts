@@ -50,6 +50,8 @@ export type Finished = {
   repairs: number;
   /** The line of a repair's `<verdict>outside-branch</verdict>`: a red ticket says the repairer judged the failure not this branch's. */
   outside?: { line: string };
+  /** Red on test timeouts while the machine's CPU pressure was high, twice, and not repaired (`loadMade`): the note says to run it again when the machine is quiet. */
+  loadRed?: true;
   gates: Gate[];
 };
 
@@ -380,7 +382,7 @@ const describePipeline = (o: Finished, c: Context): Said => {
       case "merged-earlier":
         return { state: "ready", note: `merged earlier (${o.head}) - to close` };
       case "gate-failed":
-        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}${o.outside ? ` - the repair judged it outside this branch${o.outside.line ? `: ${o.outside.line}` : ""}` : ""}` };
+        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}${o.outside ? ` - the repair judged it outside this branch${o.outside.line ? `: ${o.outside.line}` : ""}` : ""}${o.loadRed ? " - test timeouts under machine load, not repaired; run it again when the machine is quiet" : ""}` };
       case "held":
         return { state: "held", note: o.heldNote ?? "held for a human" };
       // The scheduler ends such a branch as a `conflict` (`describeConflict`): this is the pipeline's own word for it.

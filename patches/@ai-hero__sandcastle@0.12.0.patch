@@ -12,7 +12,7 @@ index 93f24d139b795c284915a10c34d82f2fa769eab0..52e7f4e874567251a6bec401c03588eb
          return { path: normalize(collision.path), branch };
        }
 diff --git a/dist/index.js b/dist/index.js
-index 2a1d6d7e902e34620d64929418b34c715ab65d7d..efe00e94346075ea23d89750eda2f0e44f5438e6 100644
+index 2a1d6d7e902e34620d64929418b34c715ab65d7d..2e5b88e8a28abadc5be66374b8b7be974e91b2f5 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -56,7 +56,7 @@ var agentStreamEmitterLayer = (onEvent) => Layer_exports.succeed(AgentStreamEmit
@@ -24,3 +24,14 @@ index 2a1d6d7e902e34620d64929418b34c715ab65d7d..efe00e94346075ea23d89750eda2f0e4
  var SHELL_BLOCK_MARKER = "";
  var MARKED_SHELL_BLOCK_PATTERN = new RegExp(
    `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,
+@@ -1997,9 +1997,7 @@ var createSandbox = async (options) => {
+   const { hostRepoDir, worktreePath, providerHandle, sandbox, sandboxRepoDir } = await Effect_exports.runPromise(
+     Effect_exports.gen(function* () {
+       const hostRepoDir2 = yield* resolveCwd(options.cwd);
+-      yield* pruneStale(hostRepoDir2).pipe(
+-        Effect_exports.catchAll(() => Effect_exports.void)
+-      );
++      // sandcastle-kit patch (#711): the kit prunes worktree records itself, inside its host-git mutex
+       const { path: worktreePath2 } = yield* create(
+         hostRepoDir2,
+         { branch, baseBranch: options.baseBranch }

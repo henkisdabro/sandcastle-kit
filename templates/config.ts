@@ -12,6 +12,7 @@ export default {
   // autonomy: 0,                           // 1 asks to re-run conflicted and unblocked tickets; 2 or 3 re-run them
   // autonomy: "drain",                     // runs turns until the queue is drained or a stop condition holds (20 at most)
   // usagePause: 95,                        // pause at this % of a plan window and resume after its reset (USAGE_PAUSE)
+  // loadPause: 60,                         // hold each gate pass while the machine's CPU pressure is at or over this % (LOAD_PAUSE); false turns it off
   // keepWarm: true,                        // false: the session that started the run stops keeping its prompt cache warm
   // herdr: { panes: "none" },              // "all": a Herdr pane per sandbox (SANDBOX_PANES)
 

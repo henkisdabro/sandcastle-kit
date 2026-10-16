@@ -128,7 +128,7 @@
 //                    and keys to Herdr's config (shows them and asks first); --remove
 //                    takes all of it out. Works from anywhere
 //
-// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, SANDCASTLE_API_KEY:
+// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, LOAD_PAUSE, SANDCASTLE_API_KEY:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
@@ -137,9 +137,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
+import { startClock } from "./start-clock.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
@@ -157,6 +158,8 @@ import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, pro
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
 import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine, versionFacts } from "./upgrading.ts";
+import { createLoadPause } from "./load-pause.ts";
+import { readMachineCpu } from "./peaks.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, toolsFloorLine, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -264,6 +267,8 @@ try {
       break;
     }
     case "run": {
+      // The start's own clock: the attached path times its steps and turn 1's burndown() prints the line.
+      const clock = startClock();
       // Parsed before anything that needs config or Docker, so a bad argument is refused for free.
       // An argument overrides the variable of the same name; burndown() reads them all at call time.
       const given = parseRunArgs(args);
@@ -276,7 +281,9 @@ try {
       let reading: { text: string | undefined } | undefined = child && process.env[DOCKER_INFO_ENV] ? { text: process.env[DOCKER_INFO_ENV] } : undefined;
       delete process.env[DOCKER_INFO_ENV];
       const docker = () => (reading ??= { text: readDockerInfo() }).text;
+      clock.step("docker info");
       const runtime = child ? undefined : runtimeProblemNow(docker);
+      clock.step();
       if (runtime) throw new OperatorError(`${runtime.label}: ${runtime.fix}`);
       if (given.issues) {
         // An argument overrides both names, so the older one is dropped rather than reported as a clash.
@@ -325,18 +332,28 @@ try {
       exitOnSignal();
       rewordLibraryLines();
       // Read before burndown, so a bad level is refused before Docker or any spend.
+      clock.step("config");
       const project = await loadProject(root);
+      clock.step();
       // The run's settings, resolved once: every turn's record carries them.
       const settings = resolveSettings({ env: process.env, project, machine: machineSettings(), apiKey: !!projectApiKeySpend(project) });
       const level = settings.autonomy;
+      // One hold for the whole run, so its 30 minutes are a total across the turns; each turn's record listens to it (`burndown`).
+      const loadPause =
+        settings.loadPause === undefined
+          ? undefined
+          : createLoadPause({ threshold: settings.loadPause, read: () => readMachineCpu(), now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), say: (line) => console.log(line) });
       sandboxPanes(project);
       checkUsageSettings();
       // A token that cannot see the repo would crash every ticket on its first `gh issue view`: refused before the billing question, an image or a sandbox.
+      clock.step("repo access");
       await requireRepoAccess(project);
+      clock.step();
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
       for (const line of upgradeLines(root, KIT, false)) console.log(line);
       // Once for the whole run, every turn included, and before any image, sandbox or model call.
-      await confirmApiKey(projectApiKeySpend(project), "This run", { ask: (q) => askingInPane("asks whether to bill API credits", () => confirm(q)) });
+      // An aside: the operator's time at the question is not the start's.
+      await clock.aside("API-key question", () => confirmApiKey(projectApiKeySpend(project), "This run", { ask: (q) => askingInPane("asks whether to bill API credits", () => confirm(q)) }));
       // `drain` keeps its own tally: each turn still prints its closing report, and the last line
       // says how many turns ran, what they landed and why the loop stopped.
       const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, inRun: new Set<string>(), unblocked: [] as string[], cause: undefined as string | undefined };
@@ -345,9 +362,11 @@ try {
       // Unreadable: no closing lines rather than wrong ones.
       let queuedAtStart: Set<string> | undefined;
       if (level === 2 || level === 3 || level === "drain") {
+        clock.step("queue at start");
         try {
           queuedAtStart = new Set(makeTracker(project).queued(false).map((t) => t.id));
         } catch {}
+        clock.step();
       }
       // What the operator named, kept for every turn: a later turn sets TICKETS to its own re-runnable tickets,
       // which says nothing of a queued ticket the operator left out. Nothing named: the whole queue, as always.
@@ -381,8 +400,11 @@ try {
         return true;
       };
       for (let turn = 1; ; turn++) {
+        // The last turn's verify was red, likely load: this turn, a re-run or a follow-on, gates the base before any agent starts.
+        const gateBase = mustGateBase(lastFacts);
+        if (gateBase) console.log(`The merged ${project.baseBranch} was red, likely load - this turn gates it again before any agent starts.`);
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
