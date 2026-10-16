@@ -12,7 +12,7 @@ This continues SKILL.md: run its "Before every action" first.
    draft: correct the gates to what CI really runs, then write `.sandcastle/rules.md` from those
    facts. The kit's `examples/` has two worked configs.
 
-   Before writing the rules, ask the user three questions with the harness's question tool
+   Before writing the rules, ask the user four questions with the harness's question tool
    (`AskUserQuestion` in Claude Code), proposing an answer for each from what you read:
    - **Generated files** - committed files a command writes (minified CSS, a data file built from
      JSON, a sitemap), with that command. Write each as a `generated: [{ paths, regen }]` entry in
@@ -22,6 +22,15 @@ This continues SKILL.md: run its "Before every action" first.
    - **Drift gate** - if there are generated files, propose a gate from the README's "A gate for
      generated files" recipe and add it to `gates` once the user agrees, or record in the rules
      why there is none.
+   - **Related tests** - the command that runs the tests covering changed files, proposed from
+     what you read (a related-tests script, the test runner's own option, or `git grep -l` over the
+     test directory), and the repo-wide tests (ratchets, scans of every file) that a new file can
+     trip. Write it as a rules line: the implement prompt sends agents there to find their tests.
+
+   Also offer a `rerun` for the test gate when its runner takes test ids or files (pytest,
+   vitest, jest): `{ name: "test", command: "pytest", rerun: "pytest {tests}" }`, with `{tests}`
+   (the failing ids) or `{files}` (their files). A red gate's re-run then runs only those, not the
+   whole suite; the full command still runs when the failing tests cannot be read.
 
    "None" is a fine answer to each; write it down so the next reader knows it was asked. Extend
    the Dockerfile (from the kit's `templates/Dockerfile` if init wrote none) only when the base

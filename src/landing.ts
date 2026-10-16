@@ -20,7 +20,7 @@ import { posix } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { Project } from "./config.ts";
 import { OperatorError, SlowStartError } from "./errors.ts";
-import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
+import { type GateRun, type ProofKind, namesFailingTest, redEvidence, redTests } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type LandingGate, type Opener, squashBody } from "./land.ts";
 import { claimSlot, createRunClaim, dropHandOff, handOffId, type RunClaim, type SlotClaim, withSlot } from "./pool.ts";
@@ -386,7 +386,7 @@ export const rememberFailed = <R extends Pick<GateRun, "failures" | "rerunOf" | 
   // Every run of the chain (`GateRun.rerunOf`): the third run's result, the re-run, the first red.
   for (let r: Pick<GateRun, "failures" | "rerunOf" | "head"> | undefined = run; r; r = r.rerunOf) {
     for (const f of r.failures) {
-      for (const t of failingTests(f.output, Infinity)) {
+      for (const t of redTests(f, Infinity)) {
         known.add(t);
         heads.set(t, r.head ?? run.head);
       }
@@ -739,7 +739,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
             }
             return undefined;
           };
-          subject = redSubject(result.run.failure.output, tree, read);
+          subject = redSubject(redEvidence(result.run.failure), tree, read);
         } catch {
           // Unread: the branch's own files still decide.
         }
@@ -747,10 +747,10 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       // Every test this red names failed on the branch's own ticket gates before (the whole list, not the few the line shows):
       // landed tickets are no cause of that, and naming them sent people through diffs that had nothing to do with it.
       const known = ctx.failedBefore?.get(o.issue);
-      const named = result.run.failures.flatMap((f) => failingTests(f.output, Infinity));
+      const named = result.run.failures.flatMap((f) => redTests(f, Infinity));
       const seen = !!known && named.length > 0 && named.every((t) => known.has(t));
       const earlier = seen ? [] : since().filter(([, r]) => r.files.some((f) => mine.includes(f) || subject.has(f))).map(([id]) => id);
-      const failing = result.run.failure ? failingTests(result.run.failure.output) : [];
+      const failing = result.run.failure ? redTests(result.run.failure) : [];
       if (result.run.failure) ctx.reds?.set(o.issue, { head: o.head!, base: result.base, failure: result.run.failure, gates: result.run.gates, ...(result.run.rerunOf ? { rerun: true as const } : {}) });
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}), ...(seen ? { seen: true as const } : {}) };
     }
