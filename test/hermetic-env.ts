@@ -50,7 +50,7 @@ import { delimiter, dirname, join } from "node:path";
 /** The settings and credential names `src/` reads from the environment that no prefix below covers. */
 export const SCRUBBED = [
   "AUTONOMY_LEVEL", "CONCURRENCY", "DRY_RUN", "TICKETS", "ISSUES", "KEEP_AWAKE", "SKIP_PREFLIGHT", "SKIP_BASE_GATES", "SANDBOX_PANES",
-  "IMPL_MODEL", "IMPL_EFFORT", "REVIEW_MODEL", "REVIEW_EFFORT", "CROSS_REVIEW", "CROSS_REVIEW_MODEL", "CROSS_REVIEW_EFFORT",
+  "IMPL_MODEL", "IMPL_EFFORT", "REVIEW_MODEL", "REVIEW_EFFORT", "CROSS_REVIEW", "CROSS_REVIEW_MODEL", "CROSS_REVIEW_EFFORT", "REPORT_SCHEMA",
   "USAGE_CHECK", "USAGE_PAUSE", "USAGE_STOP", "CLAUDE_CODE_VERSION", "CODEX_VERSION",
   "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY", "LINEAR_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID",
   // The terminal the click hint senses (src/click-hint.ts), and the colour switch.
