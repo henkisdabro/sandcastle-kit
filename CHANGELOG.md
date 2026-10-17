@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-17
+
 ### Upgrading
 
 - **The load pause is on by default**: a run on a busy machine may wait up to 30 minutes in all
@@ -2972,7 +2974,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.15.0...v0.16.0
