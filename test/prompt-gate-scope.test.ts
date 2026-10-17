@@ -16,11 +16,11 @@ import { test } from "node:test";
 
 const read = (name: string) => readFileSync(join(import.meta.dirname, "..", "prompts", name), "utf8").replace(/\s+/g, " ");
 
-test("the resolver runs the typecheck gate and the tests covering the conflicted files, not the full suite", () => {
+test("the resolver runs the typecheck gate and the tests covering the lines it resolved, not the full suite", () => {
   const p = read("resolve.md");
   assert.doesNotMatch(p, /Run all of these/);
   assert.match(p, /do not run the full suite yourself/);
-  assert.match(p, /Run only the typecheck gate .* and the test files that cover the conflicted files/);
+  assert.match(p, /Run only the typecheck gate [\s\S]* and the test\s+files that cover the lines you resolved - a handful at most, never every test of a central module/);
   assert.match(p, /The orchestrator gates the merge commit after you exit/);
 });
 
@@ -56,7 +56,7 @@ test("the implementer runs the typecheck gate and the tests covering its change,
   assert.match(p, /make sure the typecheck gate and the tests covering your change pass/);
   // The merge-conflict step and the closing reminder must not send it back to every gate.
   assert.doesNotMatch(p, /run the gates, then `git commit --no-edit`/);
-  assert.match(p, /run the typecheck gate and the tests that cover the conflicted files, then `git commit --no-edit`/);
+  assert.match(p, /run the typecheck gate and the tests that cover the lines you resolved\s+\(a handful, never every test of a central module\), then `git commit --no-edit`/);
   assert.doesNotMatch(p, /The same gates are re-run/);
 });
 

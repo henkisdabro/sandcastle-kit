@@ -11,6 +11,10 @@
 // or wording fails in the ticket's gate, not in the file the agent ran). `-` counts as part of a
 // word, so `land` does not match `land-command`. The basename keeps its extension because the bare
 // stem is prose: `run` or `status` alone matches most of the suite, where `run.ts` names the file.
+//
+// More than MOST files is refused unless `--all` is given: a central module (one that hundreds of
+// tests import or name) selects most of the suite, minutes an agent spent before a ticket gate ran
+// the same tests again. The refusal names the files, so the caller can run the few that matter.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
@@ -34,7 +38,9 @@ const exportedNames = (source: string): string[] => {
   return [...names];
 };
 
-const files = process.argv.slice(2);
+const MOST = 40;
+const all = process.argv.includes("--all");
+const files = process.argv.slice(2).filter((a) => a !== "--all");
 if (files.length === 0) {
   console.error("usage: pnpm test:related <file>...  (a path in the repository: src/land.ts, status.sh)");
   process.exit(2);
@@ -63,6 +69,10 @@ const related = readdirSync(dir)
   .filter((f) => given.has(f) || ((text) => terms.some((t) => t.test(text)))(readFileSync(join(root, f), "utf8")))
   .sort();
 
+if (related.length > MOST && !all) {
+  console.error(`${related.length} test files mention ${files.join(", ")} or what it exports - more than an agent should run, and the gates run them all anyway. Run the few that cover your change with \`pnpm test:file <files>\` (the files that import what you changed), or add --all to run every one:\n${related.map((f) => `  ${f}`).join("\n")}`);
+  process.exit(3);
+}
 if (related.length === 0) console.error(`No test file mentions ${files.join(", ")} (or what it exports): nothing to run.`);
 else console.error(`${related.length} test file${related.length === 1 ? "" : "s"} mention ${files.join(", ")} or what it exports:\n${related.map((f) => `  ${f}`).join("\n")}`);
 console.log(related.join("\n"));

@@ -52,7 +52,8 @@ the full suite included, so do not run the full suite yourself:
 ```
 
 Run only the typecheck gate (the gate above that type-checks or builds, if there is one) and the test
-files that cover the conflicted files, and make them pass. A conflict in a README or another document
+files that cover the lines you resolved - a handful at most, never every test of a central module -
+and make them pass. A conflict in a README or another document
 that no test file covers needs the typecheck gate alone.
 
 Run each gate in the foreground with the tool's longest timeout (`timeout: 900000` in Claude Code,

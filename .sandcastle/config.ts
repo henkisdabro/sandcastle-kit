@@ -42,7 +42,8 @@ export default {
     { name: "lint", command: "pnpm run lint" },
     { name: "typecheck", command: "pnpm run typecheck" },
     { name: "shell-syntax", command: "bash -n status.sh bin/sandcastle .githooks/pre-commit container/git-guard.sh" },
-    { name: "test", command: "pnpm run test" },
+    // A red's in-slot re-run runs only the failing files: a flake in one file no longer costs the whole suite again.
+    { name: "test", command: "pnpm run test", rerun: "pnpm test:file {files}" },
   ],
 
   // Extra bind mounts; never the project root, .sandcastle/ or .git.
