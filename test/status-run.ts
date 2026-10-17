@@ -470,12 +470,48 @@ export type Session = {
   signal: (name: NodeJS.Signals) => void;
   /** Waits for the view to end and its shell to read the terminal back; fails with `after` named when it does not. */
   ended: (after: string, ms?: number) => Promise<Ended>;
-  /** Ends whatever is left. */
+  /** Ends whatever is left - the view, its wrapper and every command the view has in flight - and returns once all of it has exited. */
   close: () => void;
 };
 
 const sessions = new Set<() => void>();
-process.once("exit", () => sessions.forEach((close) => close()));
+process.once("exit", () =>
+  sessions.forEach((close) => {
+    try {
+      close();
+    } catch {
+      // the process is exiting: what is left is reported by nothing that would still run
+    }
+  }),
+);
+
+type Listed = { pid: number; ppid: number; pgid: number; zombie: boolean };
+
+/** Every process on the machine, from one `ps` (the same columns on BSD and procps). */
+const processes = (): Listed[] =>
+  spawnSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,stat="], { encoding: "utf8" })
+    .stdout.split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .filter((cols) => cols.length >= 4)
+    .map(([pid, ppid, pgid, stat]) => ({ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), zombie: stat!.startsWith("Z") }));
+
+/** `roots` and every process descended from them, by parent pid. */
+const sessionTree = (listed: Listed[], roots: number[]): Listed[] => {
+  const found = listed.filter((p) => roots.includes(p.pid));
+  for (let i = 0; i < found.length; i++) found.push(...listed.filter((p) => p.ppid === found[i]!.pid && !found.includes(p)));
+  return found;
+};
+
+/** Waits, synchronously (an `afterEach` that does not await it still waits), until no process of `groups` and none of `pids` is running; a zombie holds nothing. */
+const awaitGone = (groups: Set<number>, pids: Set<number>, ms = 10_000) => {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const left = processes().filter((p) => (groups.has(p.pgid) || pids.has(p.pid)) && !p.zombie);
+    if (left.length === 0) return;
+    if (Date.now() > deadline) throw new Error(`a status session's processes did not end ${ms / 1000}s after SIGKILL: ${left.map((p) => p.pid).join(" ")}`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+};
 
 /** Starts the live view of `fixture` on a pty. Call `close()` when the test is done. */
 export const startSession = async (fixture: Fixture, { args = ["30"], env = {}, rows = 60, cols = 100 }: SessionOptions = {}): Promise<Session> => {
@@ -538,15 +574,36 @@ kill $helper 2>/dev/null
     if (closed) return;
     closed = true;
     sessions.delete(close);
-    // The wrapper first: once its view is gone it writes the status and the terminal's state into `dir`, which a
-    // removal running at that moment then finds not empty.
-    for (const file of [files.wrapper, files.pid]) {
-      const pid = existsSync(file) ? Number(readFileSync(file, "utf8")) : 0;
-      if (pid) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    // A view killed outright cannot end the commands it has in flight: each runs in a process group of its own
+    // (src/status-snapshot.ts), so they outlive it, and a fake that starts late appends its pid to the fixture's
+    // `fake-pids` after the test's `after` hook has begun removing the fixture, which then finds its directory not
+    // empty (ENOTEMPTY). The wrapper, once its view is gone, writes the status and the terminal's state into `dir`
+    // the same way. So the view is frozen first, where it can start nothing new, and every group of the processes
+    // under `script` (the wrapper, the view, its commands) is killed and waited for before anything is removed.
+    // Only while `script` is unreaped: its pid, and so the tree under it, is still this session's.
+    const signal = (pid: number, name: NodeJS.Signals) => {
+      try {
+        process.kill(pid, name);
+      } catch {
+        // already gone
+      }
+    };
+    const tree: Listed[] = [];
+    const groups = new Set<number>();
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      const viewPid = existsSync(files.pid) ? Number(readFileSync(files.pid, "utf8")) : 0;
+      if (sessionTree(processes(), [child.pid]).some((p) => p.pid === viewPid)) signal(viewPid, "SIGSTOP");
+      const listed = processes();
+      const own = listed.find((p) => p.pid === process.pid)?.pgid;
+      tree.push(...sessionTree(listed, [child.pid]));
+      for (const p of tree) if (p.pgid !== own && p.pgid > 1) groups.add(p.pgid);
+      for (const group of groups) signal(-group, "SIGKILL");
+      for (const p of tree) signal(p.pid, "SIGKILL");
     }
     child.kill("SIGKILL");
     endInput();
     try { closeSync(ctlFd); } catch { /* closed */ }
+    awaitGone(groups, new Set(tree.map((p) => p.pid)));
     rmSync(dir, { recursive: true, force: true });
   };
   sessions.add(close);
