@@ -71,9 +71,14 @@ jobs:
             run: STATUS_BASH=/bin/bash bash test/status.test.sh
       # Beside the log's spec reporter, each shard measures its files (test/weights-reporter.ts) and
       # keeps the reading: test/weights.ts turns a run's readings into test/shard.ts's weights.
+      # macOS runs three files at once, not node's default of cores - 1 (two on its 3-core runner):
+      # much of the suite waits (timers, child processes) rather than computes. Five dispatched runs
+      # each way, 20261017: the slowest shard's tests took 199 s (median; 179-214) against 272 s
+      # (259-311), with no failure in either. Arm's default is already three.
       - if: matrix.part != 'status'
         run: >-
-          pnpm test:shard --test-reporter=spec --test-reporter-destination=stdout
+          pnpm test:shard ${{ runner.os == 'macOS' && '--test-concurrency=3' || '' }}
+          --test-reporter=spec --test-reporter-destination=stdout
           --test-reporter=./test/weights-reporter.ts --test-reporter-destination="$RUNNER_TEMP/weights.json"
         env:
           TEST_SHARD: ${{ matrix.part }}/4
