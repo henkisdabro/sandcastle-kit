@@ -69,7 +69,18 @@ jobs:
           - name: Status view on bash 3.2
             if: matrix.part == 'status' && runner.os == 'macOS'
             run: STATUS_BASH=/bin/bash bash test/status.test.sh
+      # Beside the log's spec reporter, each shard measures its files (test/weights-reporter.ts) and
+      # keeps the reading: test/weights.ts turns a run's readings into test/shard.ts's weights.
       - if: matrix.part != 'status'
-        run: pnpm test:shard
+        run: >-
+          pnpm test:shard --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=./test/weights-reporter.ts --test-reporter-destination="$RUNNER_TEMP/weights.json"
         env:
           TEST_SHARD: ${{ matrix.part }}/4
+      - if: matrix.part != 'status'
+        uses: actions/upload-artifact@v7
+        with:
+          name: weights-${{ matrix.os }}-${{ matrix.part }}
+          path: ${{ runner.temp }}/weights.json
+          if-no-files-found: error
+          retention-days: 30
