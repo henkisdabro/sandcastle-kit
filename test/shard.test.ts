@@ -3,7 +3,7 @@
 //   pnpm test:file test/shard.test.ts
 
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { KIT, runKit } from "./cli-spawn.ts";
@@ -11,6 +11,12 @@ import { KIT, runKit } from "./cli-spawn.ts";
 const script = join(KIT, "test/shard.ts");
 const shard = (spec: string) => runKit([], { script, cwd: KIT, env: { ...process.env, TEST_SHARD: spec }, encoding: "utf8" });
 const all = readdirSync(join(KIT, "test")).filter((f) => f.endsWith(".test.ts")).map((f) => `test/${f}`).sort();
+
+// The two heaviest files in shard.ts's table, which the packing puts in different shards.
+const heaviest = [...readFileSync(join(KIT, "test/shard.ts"), "utf8").matchAll(/^ {2}"(test\/[^"]+)": (\d+),$/gm)]
+  .sort((a, b) => Number(b[2]) - Number(a[2]))
+  .slice(0, 2)
+  .map((m) => m[1]!);
 
 test("four shards hold every test file once between them, the two slowest apart", () => {
   const parts = [1, 2, 3, 4].map((i) => {
@@ -20,7 +26,8 @@ test("four shards hold every test file once between them, the two slowest apart"
   });
   assert.deepEqual(parts.flat().sort(), all);
   const holding = (file: string) => parts.findIndex((p) => p.includes(file));
-  assert.notEqual(holding("test/quiet-output.test.ts"), holding("test/detach.test.ts"));
+  assert.equal(heaviest.length, 2, "shard.ts has a WEIGHTS table");
+  assert.notEqual(holding(heaviest[0]!), holding(heaviest[1]!), heaviest.join(" and "));
 });
 
 test("a TEST_SHARD that is not i/n is refused", () => {
