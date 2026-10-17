@@ -3,3 +3,4 @@ logs/
 worktrees/
 .run/
 triage/
+config.local.json

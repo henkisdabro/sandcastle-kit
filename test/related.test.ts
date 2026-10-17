@@ -68,6 +68,22 @@ test("no match says so on stderr and exits 0", () => {
   assert.match(r.stderr, /nothing to run/);
 });
 
+test("more than 40 test files is refused, naming them, unless --all is given", () => {
+  const files: Record<string, string> = { "src/core.ts": "export const coreThing = 1;\n" };
+  for (let i = 0; i < 41; i++) files[`test/t${String(i).padStart(2, "0")}.test.ts`] = "coreThing;\n";
+  const dir = repo(files);
+  const refused = related(dir, "src/core.ts");
+  assert.equal(refused.status, 3);
+  assert.deepEqual(refused.files, []);
+  assert.match(refused.stderr, /^41 test files mention src\/core\.ts .*--all/);
+  assert.match(refused.stderr, /test\/t40\.test\.ts/);
+  const forced = related(dir, "src/core.ts", "--all");
+  assert.equal(forced.status, 0, forced.stderr);
+  assert.equal(forced.files.length, 41);
+  delete files["test/t40.test.ts"];
+  assert.equal(related(repo(files), "src/core.ts").files.length, 40);
+});
+
 test("no file given is a usage error", () => {
   const r = related(fixture());
   assert.equal(r.status, 2);

@@ -144,7 +144,7 @@ test("a fresh entry means no read, an old one is read again after ten minutes, a
 test("no read while the mark is hidden in the project, switched off on the machine, or the project is not set up", async ($, on) => {
   const hidden = world(on, { [MARK_KEY]: { hidden: true } });
   await $.session.start(START);
-  await hidden.clock.advance(30 * MIN);
+  await hidden.clock.advance(11 * MIN);
   expect(hidden.versionReads.length).toBe(0);
   expect(hidden.queueReads).toBe(0);
   expect(hidden.store.has(VERSION_KEY)).toBe(false);
@@ -159,7 +159,7 @@ test("no read when the machine switch is off", async ($, on) => {
   const w = world(on);
   w.settings = JSON.stringify({ idleMark: false });
   await $.session.start(START);
-  await w.clock.advance(30 * MIN);
+  await w.clock.advance(11 * MIN);
   expect(w.versionReads.length).toBe(0);
   expect(w.store.has(VERSION_KEY)).toBe(false);
 });
@@ -168,7 +168,7 @@ test("no read in a project that is not set up", async ($, on) => {
   const w = world(on);
   w.setUp = false;
   await $.session.start(START);
-  await w.clock.advance(30 * MIN);
+  await w.clock.advance(11 * MIN);
   expect(w.versionReads.length).toBe(0);
   expect(w.store.has(VERSION_KEY)).toBe(false);
   expect(await markNow($)).toBeUndefined();

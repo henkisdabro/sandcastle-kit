@@ -20,9 +20,15 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   the suite otherwise), limits each test to two minutes and exits when the file is done, so a red
   test that leaves a poll or a pool wait alive cannot hang the pass. A test that takes pool slots
   goes through `test/pool-sim.ts`, whose probe it needs.
-- **Final check: `pnpm exec tsc --noEmit` and `pnpm test:related <the files you changed>`.** It
-  runs every test that names a changed path or anything it exports, including the tests that pin
-  source text or wording, which a red ticket gate would otherwise find after you finish.
+- **Final check: `pnpm exec tsc --noEmit` and `pnpm test:related <the source and test files you
+  changed>`.** It runs every test that names a changed path or anything it exports, including the
+  tests that pin source text or wording, which a red ticket gate would otherwise find after you
+  finish. It refuses a change whose files over 40 tests name (a central module such as
+  `src/burndown.ts`, `src/gates.ts` or `src/report.ts`, which hundreds of tests import), and lists
+  them: run the few that cover the lines you changed with `pnpm test:file`, never `--all` - the
+  ticket gate runs the whole suite minutes later, and your run slows the gate it shares the machine
+  with. For a changed sentence in a doc, `grep -rln` a phrase of it under `test/` and run those
+  files. A conflict resolution runs only the tests that cover the lines it resolved.
 - **`burndown()` needs Docker, so no test drives it.** Put logic you add there in an exported helper
   a test calls, and hold the call site with a source-match test (as `test/ticket-first-start.test.ts`
   does). Before you edit a line of `burndown()` or `timed`, `grep -rn` `test/` for a phrase of it:
@@ -39,8 +45,9 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   under 3.2, which has no associative arrays, `mapfile`, `${x,,}` or `source <(...)`.
 - **Never run** `sandcastle run`, `preflight`, `build`, `lean --measure`, `setup` or `clean` here:
   they need Docker or spend model allowance. AGENTS.md's `doctor`, `status 0` and `lean` checks
-  are for the maintainer's machine: here they only report that Docker is missing. `pnpm lint`, `pnpm exec tsc --noEmit`, `bash -n` and
-  `pnpm test` are the checks.
+  are for the maintainer's machine: here they only report that Docker is missing. `pnpm lint`,
+  `pnpm exec tsc --noEmit`, `bash -n` and the tests above are your checks; the full `pnpm test` is
+  the gates' (it takes over six minutes).
 - **Do not edit `CHANGELOG.md`**, even where AGENTS.md or the ticket asks for a line: tickets in one
   run all add at the same spot and would conflict at landing. The maintainer writes the entries
   from the run's closing summary: give each line in a `<changelog>...</changelog>` tag in your final
