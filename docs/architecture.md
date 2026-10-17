@@ -1174,7 +1174,13 @@ shown + 2, 8 to 16; STATE 15, TIME 9, DIFF 13, CPU/MEM 13, TOKENS 14) and ACTIVI
 when it would fall under 40, CPU/MEM, DIFF and TOKENS give way in that order, then STATE narrows to
 11; below about 73 columns ACTIVITY takes what is left.
 DIFF is the lines added and removed on the ticket's branch against its base (`+96 −1159`, `-`
-without a branch), read by the snapshot's git step with `git diff --numstat`, never while drawing.
+without a branch), read by the snapshot's git step, never while drawing: the figures of
+`git diff --numstat base...branch`, for every branch in one `rev-parse` of the ranges (each one's
+merge base) and one `git diff-tree --stdin -M --textconv` (what the porcelain diff does by default).
+The step asks for each branch's commits over the base and its tip in one `for-each-ref` with
+`%(ahead-behind:base)` (git 2.41); an older git, as macOS's own `/usr/bin/git` can be, refuses the
+format and the step asks branch by branch, the facts the same (`test/status-branch-batch.test.ts`).
+The live fixture's `status 0` started 56 processes before, and 19 with them.
 TOKENS is `2.5M 94% 27k` - in, the share of it served from cache (amber under 70%), out - from the
 ticket's `cacheRead` in the run record over the input of its `tokens` text; a record without
 `cacheRead` shows `in/out`, and a cell wider than the column's 12 cells loses the space before out,

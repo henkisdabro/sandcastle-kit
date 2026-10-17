@@ -12,7 +12,7 @@ import { after, test } from "node:test";
 import { GROUPS, TICKET_STATES } from "../mod/hooks/run-record.ts";
 import { KIT, runNode } from "./cli-spawn.ts";
 import { buildFixture, NOW, type Fixture, type FixtureKind } from "./status-fixture.ts";
-import { agree, compareFacts, drawFrame, factsAt, type Facts } from "./status-run.ts";
+import { agree, compareFacts, drawFrames, factsAt, readFacts, type Facts } from "./status-run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-facts-"));
 const fixtures = Object.fromEntries((["live", "legacy", "ended"] as FixtureKind[]).map((kind) => [kind, buildFixture(kind, join(TMP, kind))])) as Record<FixtureKind, Fixture>;
@@ -39,8 +39,11 @@ const at = (kind: FixtureKind, cols: number, env: Record<string, string> = {}) =
 
 for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
   test(`the ${kind} fixture reads as the same facts at 80, 120, 200 and 330 columns`, () => {
-    const widest = at(kind, 330, { SANDCASTLE_LINKS: "1" });
-    for (const cols of WIDTHS.filter((w) => w !== 330)) assert.deepEqual(compareFacts(at(kind, cols, { SANDCASTLE_LINKS: "1" }), widest), [], `${cols} columns`);
+    // One reading of the fixture, laid out at each width (the widest also drawn by the view itself): the facts a
+    // layout keeps or hides, not four readings of the sources.
+    const order = [330, 80, 120, 200];
+    const [widest, ...rest] = drawFrames(fixtures[kind], order, { env: { SANDCASTLE_LINKS: "1" } }).map((d) => readFacts(d.raw, fixtures[kind].root)) as [Facts, ...Facts[]];
+    rest.forEach((facts, i) => assert.deepEqual(compareFacts(facts, widest), [], `${order[i + 1]} columns`));
     // Nothing is cut or hidden at the widest, so the comparison above is of whole facts there.
     assert.ok(widest.tickets.every((t) => !t.note.endsWith("…") && t.cpuMem !== undefined && t.tokens !== undefined && t.time !== undefined), "a fact hidden at 330 columns");
   });
@@ -141,10 +144,8 @@ test("a difference in a shown fact is found: a state, a time, a count, a note th
 
 test("every fixture frame fits its pane at every width", () => {
   for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
-    for (const cols of WIDTHS) {
-      const { frame, status, stderr } = drawFrame(fixtures[kind], { cols });
-      assert.equal(status, 0, stderr);
-      for (const line of frame.split("\n")) assert.ok([...line].length <= cols, `${kind} at ${cols}: wider than the pane: ${line}`);
-    }
+    drawFrames(fixtures[kind], WIDTHS).forEach(({ frame }, i) => {
+      for (const line of frame.split("\n")) assert.ok([...line].length <= WIDTHS[i]!, `${kind} at ${WIDTHS[i]}: wider than the pane: ${line}`);
+    });
   }
 });

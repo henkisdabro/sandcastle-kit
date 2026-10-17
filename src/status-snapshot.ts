@@ -257,10 +257,13 @@ const KILL_AFTER_MS = 2000;
  * status null, as spawnSync does. When `signal` aborts, the whole group is ended (a command it waits on too) and
  * the promise rejects: nothing a collector started outlives the refresh that started it.
  */
-const run = (command: string, args: string[], signal: AbortSignal, { cwd, env }: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<Ran> =>
+const run = (command: string, args: string[], signal: AbortSignal, { cwd, env, input }: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<Ran> =>
   new Promise((done, fail) => {
     if (signal.aborted) return fail(signal.reason);
-    const child = spawn(command, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, env, detached: true, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+    // A command that exits before reading all of its input closes the pipe: its answer, not the write, says how it went.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(input);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     const end = (name: NodeJS.Signals) => {
@@ -298,8 +301,8 @@ const run = (command: string, args: string[], signal: AbortSignal, { cwd, env }:
     });
   });
 
-const git = async (dir: string, env: NodeJS.ProcessEnv, args: string[], signal: AbortSignal): Promise<string | undefined> => {
-  const r = await run("git", args, signal, { cwd: dir, env });
+const git = async (dir: string, env: NodeJS.ProcessEnv, args: string[], signal: AbortSignal, input?: string): Promise<string | undefined> => {
+  const r = await run("git", args, signal, { cwd: dir, env, input });
   return r.status === 0 ? r.stdout : undefined;
 };
 
@@ -458,33 +461,94 @@ const readLandings = async (dir: string, env: NodeJS.ProcessEnv, base: string, s
       return { at: Number(at) || 0, parents: parents.split(" ").filter(Boolean), subject, message };
     });
 
-const readBranches = async (dir: string, env: NodeJS.ProcessEnv, base: string, ids: Set<string>, inferred: Set<string>, signal: AbortSignal): Promise<Record<string, BranchFact>> => {
+/** An agent branch: whether its tip is on the base, its commits over the base (absent when git could not count them), its tip. */
+type Head = { onBase: boolean; ahead?: number; tip?: string };
+
+/**
+ * Every agent branch's tip and commits over the base, from one `for-each-ref` (`%(ahead-behind)`, git 2.41): a
+ * `rev-list --count` per branch was most of a frame's processes. Undefined from an older git (macOS's own
+ * /usr/bin/git can be), or for a base the format cannot name, and the caller asks branch by branch as before.
+ */
+const readHeads = async (dir: string, env: NodeJS.ProcessEnv, base: string, signal: AbortSignal): Promise<Map<string, Head> | undefined> => {
+  if (!base || /[)%]/.test(base)) return undefined;
+  const out = await git(dir, env, ["for-each-ref", `--format=%(refname) %(objectname) %(ahead-behind:${base})`, "refs/heads/agent/"], signal);
+  if (out === undefined) return undefined;
+  const heads = new Map<string, Head>();
+  for (const line of out.split("\n").filter(Boolean)) {
+    const [ref = "", tip = "", ahead = ""] = line.split(" ");
+    if (!/^\d+$/.test(ahead)) return undefined;
+    // On the base is no commit over it: what `for-each-ref --merged` lists.
+    heads.set(ref, { onBase: ahead === "0", ahead: Number(ahead), tip });
+  }
+  return heads;
+};
+
+/** The same, branch by branch: the refs, those on the base, and a `rev-list --count` each; no tip, which is asked when wanted. */
+const readHeadsByBranch = async (dir: string, env: NodeJS.ProcessEnv, base: string, ids: Set<string>, signal: AbortSignal): Promise<Map<string, Head>> => {
   const refs = async (args: string[]) => new Set(((await git(dir, env, ["for-each-ref", ...args, "--format=%(refname)", "refs/heads/agent/"], signal)) ?? "").split("\n").filter(Boolean));
-  const heads = await refs([]);
+  const all = await refs([]);
   const onBase = await refs([`--merged=${base}`]);
+  const heads = new Map<string, Head>();
+  for (const id of ids) {
+    const ref = `refs/heads/agent/issue-${id}`;
+    if (!all.has(ref)) continue;
+    const n = (await git(dir, env, ["rev-list", "--count", `${base}..agent/issue-${id}`], signal))?.trim();
+    heads.set(ref, { onBase: onBase.has(ref), ahead: n !== undefined && /^\d+$/.test(n) ? Number(n) : undefined });
+  }
+  return heads;
+};
+
+/**
+ * Each branch's lines added and removed against the base, as `git diff --numstat base...branch` counts them - from
+ * its first merge base with the base, as that diff takes it - for all of them in two commands: one `rev-parse` of
+ * every `base...branch` (each range's tip, the base's, then its merge bases) and one `diff-tree --stdin`, which
+ * prints a pair's tip before its lines and nothing for a pair with no change. `-M` and `--textconv` are what the
+ * porcelain diff does by default. A branch with no merge base has no entry, as its diff failed. A binary file
+ * counts `-` for both and adds no line.
+ */
+const readDiffs = async (dir: string, env: NodeJS.ProcessEnv, base: string, ids: string[], signal: AbortSignal): Promise<Map<string, { added: number; removed: number }>> => {
+  const diffs = new Map<string, { added: number; removed: number }>();
+  if (!ids.length) return diffs;
+  const parsed = await git(dir, env, ["rev-parse", ...ids.map((id) => `${base}...agent/issue-${id}`)], signal);
+  if (parsed === undefined) return diffs;
+  const lines = parsed.split("\n").filter(Boolean);
+  const pairs: { id: string; tip: string; mergeBase: string }[] = [];
+  for (const id of ids) {
+    const tip = lines.shift() ?? "";
+    lines.shift(); // the base's tip
+    const mergeBase = lines[0]?.startsWith("^") ? lines[0].slice(1) : undefined;
+    while (lines[0]?.startsWith("^")) lines.shift();
+    if (mergeBase) pairs.push({ id, tip, mergeBase });
+  }
+  if (!pairs.length) return diffs;
+  const stat = await git(dir, env, ["diff-tree", "--stdin", "-r", "--numstat", "-M", "--textconv", "--no-ext-diff"], signal, pairs.map((p) => `${p.tip} ${p.mergeBase}\n`).join(""));
+  if (stat === undefined) return diffs;
+  // Two branches with one tip have one merge base and one diff, so a pair's figures are its tip's.
+  const byTip = new Map<string, { added: number; removed: number }>();
+  let counting: { added: number; removed: number } | undefined;
+  for (const line of stat.split("\n")) {
+    if (/^[0-9a-f]+$/.test(line)) byTip.set(line, (counting = { added: 0, removed: 0 }));
+    const m = /^(\d+)\t(\d+)\t/.exec(line);
+    if (m && counting) [counting.added, counting.removed] = [counting.added + Number(m[1]), counting.removed + Number(m[2])];
+  }
+  for (const p of pairs) diffs.set(p.id, byTip.get(p.tip) ?? { added: 0, removed: 0 });
+  return diffs;
+};
+
+const readBranches = async (dir: string, env: NodeJS.ProcessEnv, base: string, ids: Set<string>, inferred: Set<string>, signal: AbortSignal): Promise<Record<string, BranchFact>> => {
+  const heads = (await readHeads(dir, env, base, signal)) ?? (await readHeadsByBranch(dir, env, base, ids, signal));
   const landings = await readLandings(dir, env, base, signal);
   const originBase = (await git(dir, env, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${base}`], signal)) !== undefined;
+  const diffs = await readDiffs(dir, env, base, [...ids].filter((id) => (heads.get(`refs/heads/agent/issue-${id}`)?.ahead ?? 0) > 0), signal);
   const out: Record<string, BranchFact> = {};
   for (const id of ids) {
     const ref = `refs/heads/agent/issue-${id}`;
-    const exists = heads.has(ref);
-    const fact: BranchFact = { exists, onBase: onBase.has(ref) };
-    if (exists) {
-      const n = await git(dir, env, ["rev-list", "--count", `${base}..agent/issue-${id}`], signal);
-      if (n !== undefined && /^\d+$/.test(n.trim())) fact.commits = Number(n.trim());
+    const head = heads.get(ref);
+    const fact: BranchFact = { exists: !!head, onBase: !!head?.onBase };
+    if (head) {
+      if (head.ahead !== undefined) fact.commits = head.ahead;
       if (fact.commits === 0) fact.diff = { added: 0, removed: 0 };
-      else if (fact.commits !== undefined) {
-        // Read here with the rest of git, never while drawing. A binary file counts `-` for both and adds no line.
-        const stat = await git(dir, env, ["diff", "--numstat", "--no-ext-diff", `${base}...agent/issue-${id}`], signal);
-        if (stat !== undefined) {
-          const diff = { added: 0, removed: 0 };
-          for (const line of stat.split("\n")) {
-            const m = /^(\d+)\t(\d+)\t/.exec(line);
-            if (m) [diff.added, diff.removed] = [diff.added + Number(m[1]), diff.removed + Number(m[2])];
-          }
-          fact.diff = diff;
-        }
-      }
+      else if (diffs.has(id)) fact.diff = diffs.get(id);
       if (inferred.has(id) && (fact.commits ?? 0) > 0) fact.equalPatches = !/^\+/m.test((await git(dir, env, ["cherry", base, `agent/issue-${id}`], signal)) ?? "+");
     }
     const shown = shownId(id);
@@ -493,7 +557,7 @@ const readBranches = async (dir: string, env: NodeJS.ProcessEnv, base: string, i
     // A branch on the base, merged by hand: the merge that took its tip in (or the tip itself, for a fast-forward)
     // being on origin's base says the push happened. No fetch here - no network.
     if (fact.onBase && originBase) {
-      const tip = (await git(dir, env, ["rev-parse", "--verify", "--quiet", ref], signal))?.trim();
+      const tip = head?.tip ?? (await git(dir, env, ["rev-parse", "--verify", "--quiet", ref], signal))?.trim();
       if (tip) {
         const merges = (await git(dir, env, ["rev-list", "--merges", "--ancestry-path", "--parents", `${tip}..refs/heads/${base}`], signal)) ?? "";
         const merge = merges

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { buildFixture, type FixtureKind } from "./status-fixture.ts";
-import { drawFrame, spawnStatus } from "./status-run.ts";
+import { drawFrames, spawnStatus } from "./status-run.ts";
 
 const KIT = join(import.meta.dirname, "..");
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-seams-"));
@@ -86,7 +86,9 @@ for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
   test(`the ${kind} run's frame has no near-miss joints at the common widths`, () => {
     const fixture = buildFixture(kind, join(TMP, kind));
     try {
-      for (const cols of [72, 80, 83, 100, 110, 120, 132, 135, 148, 154, 160, 165, 200, 210, 240]) assert.deepEqual(nearMisses(drawFrame(fixture, { cols }).frame, cols), [], `${cols} columns`);
+      // One reading of the fixture, laid out at each width: the first is also the view's own frame.
+      const widths = [80, 72, 83, 100, 110, 120, 132, 135, 148, 154, 160, 165, 200, 210, 240];
+      drawFrames(fixture, widths).forEach(({ frame }, i) => assert.deepEqual(nearMisses(frame, widths[i]!), [], `${widths[i]} columns`));
     } finally {
       fixture.stop();
     }
