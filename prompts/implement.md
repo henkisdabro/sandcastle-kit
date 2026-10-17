@@ -42,8 +42,8 @@ Files where that merge conflicts (empty when none): !`git diff --name-only --dif
 **If any file is listed, resolve the merge before anything else**, even if the ticket looks done:
 the orchestrator merges this branch into `{{TARGET_BRANCH}}` when you finish, and an unresolved
 conflict leaves all of your work unmerged, run after run. Keep both sides' changes (theirs is
-merged work, not yours to undo), run the typecheck gate and the tests that cover the conflicted files,
-then `git commit --no-edit`. If resolving it is all this pass does, write no `<unmet>` line for a
+merged work, not yours to undo), run the typecheck gate and the tests that cover the lines you resolved
+(a handful, never every test of a central module), then `git commit --no-edit`. If resolving it is all this pass does, write no `<unmet>` line for a
 criterion you did not re-examine on the merged branch: an earlier pass's state is unknown to you.
 
 # Before you write anything

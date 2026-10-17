@@ -949,7 +949,7 @@ A queued ticket with a branch from an earlier run builds on that branch:
   [`generated`](#-a-gate-for-generated-files) paths is resolved by regenerating them, with no agent.
 - A branch that was reviewed and green, and has gained nothing since but merge commits, skips
   implement and review: a clean base merge goes straight to the gates, a conflicted one gets a short
-  resolver prompt first (it runs the typecheck gate and the tests that cover the conflicted files, not the
+  resolver prompt first (it runs the typecheck gate and the tests that cover the lines it resolved, not the
   full suite: the kit gates the merge commit once it exits), and a merge an earlier run left on it that no
   review has read (a held resolution, say) gets a review of the merge alone. If a person has commented
   on the ticket since that review, the full review runs instead, after any resolver, so the comment is
