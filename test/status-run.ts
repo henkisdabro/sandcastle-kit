@@ -72,6 +72,21 @@ export const drawFrame = (fixture: Fixture, { cols = 80, rows = 400, env = {} }:
   return { frame: plain(result.stdout), raw: result.stdout, status: result.status, stderr: result.stderr, result };
 };
 
+/**
+ * `status 0 all` of `fixture` at each of `widths`, from one reading of its sources (test/status-frames.ts): for a
+ * test of the layout, which needs no fresh snapshot a width. The first width is also drawn by the view itself, and
+ * the two must be the same frame, so this draws what the view would.
+ */
+export const drawFrames = (fixture: Fixture, widths: number[], { rows = 400, env = {} }: { rows?: number; env?: Record<string, string> } = {}): Drawn[] => {
+  const options = { encoding: "utf8" as const, env: viewEnv(fixture, { TERM_ROWS: String(rows), ...env }), stdio: ["ignore", "pipe", "pipe"] as ("ignore" | "pipe")[], timeout: 60_000 };
+  const result = spawnSync(process.execPath, kitArgs("--import", TS_CLOCK, join(KIT, "test/status-frames.ts"), String(rows), ...widths.map(String)), options);
+  if (result.status !== 0) throw new Error(`test/status-frames.ts ended ${result.status}: ${result.stderr}`);
+  const drawn = (JSON.parse(result.stdout) as string[]).map((raw): Drawn => ({ frame: plain(raw), raw, status: 0, stderr: "", result }));
+  const own = drawFrame(fixture, { cols: widths[0], rows, env });
+  if (own.raw !== drawn[0]?.raw) throw new Error(`the view's own frame at ${widths[0]} columns is not the one drawn from one snapshot:\n${own.raw}\n---\n${drawn[0]?.raw}`);
+  return drawn;
+};
+
 /** The slots the view's machine lane shows in use against the limit (`3/6`), drawn with `env` (`XDG_CACHE_HOME` says whose slots). */
 export const machineSlots = (fixture: Fixture, env: Record<string, string> = {}): { sandboxes?: string; gates?: string } => {
   const drawn = drawFrame(fixture, { cols: 200, env });

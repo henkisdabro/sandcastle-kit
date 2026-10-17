@@ -9,6 +9,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- **The status view asks git about every branch at once.** Each branch's commits over the base,
+  and the lines it adds and removes, come from three git commands for the whole run instead of two
+  per branch: a frame of a 20-ticket run starts 19 processes instead of 56, and draws in about half
+  the time. A git older than 2.41 (macOS's own `/usr/bin/git` can be) is asked branch by branch, as
+  before.
+
 ## [0.19.0] - 2026-10-17
 
 ### Upgrading
