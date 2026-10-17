@@ -229,6 +229,7 @@ test("approving prose the detector reads as a gap is not counted: no headline ne
 
 test("gaps a reviewer filled, a time between events and the kit's own gap sentence are no gaps; a gap still is", async () => {
   assert.equal(await gapOfReview("I made one fix and filled two gaps in the tests.\n"), undefined);
+  assert.equal(await gapOfReview("I added one commit (`abc1234`) to fill the one gap the implementer named: the new lines had no test.\n"), undefined);
   assert.equal(await gapOfReview("Its three 0.6 s gaps add up to more than the 1 s window, so the test fails if a line stops restarting it.\n"), undefined);
   assert.equal(await gapOfReview("The forward loop quotes the sentences after a lead-in gap sentence, and the eight other gap test files pass.\n"), undefined);
   assert.equal(await gapOfReview("Two gaps remain in the README: the install step and the update step.\n"), "Two gaps remain in the README: the install step and the update step.");
