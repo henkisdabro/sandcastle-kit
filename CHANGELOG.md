@@ -9,6 +9,70 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **The load pause is on by default**: a run on a busy machine may wait up to 30 minutes in all
+  before its gates. `LOAD_PAUSE=0` turns it off for one run, `loadPause: false` in
+  `.sandcastle/config.ts` for the project.
+- **A project's `.sandcastle/.gitignore` gains `config.local.json`**: `/sandcastle update` adds it,
+  or doctor prints the command. A clone that cannot commit that file lists
+  `.sandcastle/config.local.json` in `.git/info/exclude` instead.
+- **A project can add a related-tests line to its `.sandcastle/rules.md`**: the command that runs
+  the tests covering changed files, and any repo-wide tests (ratchets, scans of every file) a new
+  file can trip. `sandcastle init` now asks for it; an existing project adds it by hand.
+
+### Added
+
+- **A run holds its gate passes while the machine is busy** (`LOAD_PAUSE`, `loadPause`): before a
+  gate pass takes its gates slot, it waits while the machine's CPU pressure (`some avg60`) is at or
+  over 60%, until it has been under that for 2 minutes, and for at most 30 minutes per run.
+- **Each gate pass records the machine's CPU pressure beside its memory pressure**, and the closing
+  summary says when it was high: other work on the machine, not the branch, slowed the gates.
+- **A clone can keep its own run settings in `.sandcastle/config.local.json`**, gitignored:
+  autonomy, concurrency, cpus, herdr, usagePause, keepWarm, autoCompactWindow, implement, review
+  and repair, merged over `config.ts` and under the environment. Doctor and the run's start lines
+  name the keys it set, and the status view's SETTINGS lane marks such a value with a grey `local`.
+- **A gate can carry a `rerun` command** naming `{tests}` or `{files}`, which its in-slot re-run
+  runs instead of the whole command, so a deterministic red no longer costs the full suite twice.
+  The repair still gets the first full run's output.
+- **`sandcastle lean` lists the tracked `.claude/rules` files with no `paths:` frontmatter**, which
+  load into every agent pass, with their token estimates and the advice to scope them; a run's
+  `Lean:` line gives their count and tokens.
+- **`sandcastle init` asks for the project's related tests**, a fourth question for
+  `.sandcastle/rules.md`: the command that runs the tests covering changed files, and the repo-wide
+  tests a new file can trip.
+- **A run whose start took 10 s or more says where the time went**: `Start took N s: ...` after its
+  `Status view:` line, naming its slowest steps.
+- **`REPORT_SCHEMA=1` has Claude passes return a schema-validated report**, preferred over the
+  tags, and records per pass in `timings.jsonl` whether it came. It is opt-in while it is measured.
+
+### Changed
+
+- **A ticket gate red only on test timeouts while the machine's CPU pressure was high gets one more
+  gate run, not a repair pass**, and a red end-of-run verify judged likely load no longer stops a
+  drain: the next turn re-gates the base first.
+- **A ticket whose branch is behind the base has the base's tip merged in just before its gates**,
+  so a landing with no other landing in between fast-forwards on those results and skips the
+  landing gate. With `land: "merge"` a landed ticket gains an in-branch "Merge main into
+  agent/issue-N" commit.
+- **The implement prompt tells agents how to find the tests that cover their change** (`git grep
+  -l` the changed names over the test directories, and run every file listed), that a project's
+  "run the full suite before you commit" rule is the gates' job inside a sandbox, and that a step
+  only a person can do is an `<unmet who="person">` line even when the ticket says so.
+- **A conflict resolution runs only the tests covering the lines it resolved**, a handful at
+  most: the resolve prompt said the tests covering the conflicted files, which for a central module
+  is most of the suite, run again by the gates minutes later.
+
+### Fixed
+
+- **The sandbox open's `git worktree prune` runs inside the run's host-git mutex**, and another
+  ticket's open no longer deletes an unlisted directory under `.sandcastle/worktrees/`.
+- **The closing summary's `Likely flaky` line lists each test once**, with the tickets it hit,
+  from the gate run's failing test ids rather than the repair agent's wording. A test name with
+  `;` is no longer split, and a red verify whose failing tests all flaked earlier in the run says so.
+- **A reviewer who filled "the one gap" the implementer named is no longer flagged** under `Worth a
+  glance` as naming a gap.
+
 ## [0.18.0] - 2026-10-16
 
 ### Upgrading
