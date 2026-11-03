@@ -92,8 +92,26 @@ test("doctor in a Herdr 2 tab names herdr-core and hc's version, and the Herdr 1
   });
   const out = r.stdout + r.stderr;
   assert.match(out, /^ok {3}Herdr 2 \(herdr-core, hc 9\.9\.9\): opens the status view beside this terminal \(terminal t-kid\)$/m, out);
-  assert.match(out, /^info Herdr 1 plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr 1 tabs, not this Herdr 2 one$/m, out);
+  assert.match(out, /^info Herdr 1 plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr 1 tabs, and this is a Herdr 2 tab$/m, out);
   assert.doesNotMatch(out, /Herdr \(optional: opens the status pane automatically\)|Herdr plugin and sidebar rows/, "no Herdr 1 checks in a core tab");
+});
+
+test("doctor outside both hosts checks the Herdr 1 plugin when Herdr 1 is installed, and says nothing of it when not", () => {
+  const home = join(tmp, "home-plain");
+  mkdirSync(join(home, "config"), { recursive: true });
+  const doctor = (path: string[]) => {
+    const r = runKit(["doctor"], {
+      encoding: "utf8",
+      cwd: home,
+      env: { PATH: path.join(":"), HOME: home, XDG_CONFIG_HOME: join(home, "config"), XDG_CACHE_HOME: join(home, "cache"), GIT_CONFIG_GLOBAL: join(home, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", GIT_CEILING_DIRECTORIES: tmp },
+    });
+    return r.stdout + r.stderr;
+  };
+  const installed = doctor([bin, dirname(process.execPath), "/usr/bin", "/bin"]);
+  assert.match(installed, /^opt  Herdr \(optional: opens the status pane automatically\)$/m, installed);
+  assert.match(installed, /^info Herdr 1 plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr 1 tabs, and this is not a Herdr tab$/m, installed);
+  const absent = doctor([dirname(process.execPath), "/usr/bin", "/bin"]);
+  assert.doesNotMatch(absent, /Herdr 1 plugin/, absent);
 });
 
 test("the plugin's verbs in a Herdr 2 tab say they are Herdr 1's and exit 0, asking Herdr nothing", () => {

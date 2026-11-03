@@ -237,24 +237,25 @@ export const setup = async (repoRoot?: string) => {
     if (Object.keys(set).length) console.log(`done credentials saved to ${envFile}`);
   }
 
-  // 3. Inside Herdr, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
+  // 3. Wherever Herdr 1 is installed, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
   // config, so `configure` shows what it adds before asking; a config that already sets the
-  // same things is reported, not touched, and setup goes on. From a Herdr 2 tab too, when Herdr 1
-  // is installed: the plugin serves its tabs, and setup is where a person is offered it.
-  const host = terminalHost().kind;
-  if (host === "herdr1" || (host === "core" && spawnSync("herdr", ["--version"]).status === 0)) {
+  // same things is reported, not touched, and setup goes on. Not only from a Herdr 1 tab: setup run from a
+  // Herdr 2 tab or a plain terminal is still where a person is offered it.
+  const inside = terminalHost().kind === "herdr1";
+  if (inside || spawnSync("herdr", ["--version"]).status === 0) {
     const plugin = pluginState();
     if (!plugin.linkedHere || !plugin.block) {
       console.log(
-        host === "herdr1"
+        inside
           ? "\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar."
-          : "\nHerdr 1 is installed: in its tabs, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar (this Herdr 2 tab does not need it).",
+          : "\nHerdr 1 is installed: in its tabs, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar.",
       );
       try {
         await configure(false, false, true);
       } catch (error) {
-        if (!(error instanceof OperatorError)) throw error;
-        console.log(`     ${error.message}`);
+        // A `herdr` that fails on its own (a broken install, a server that refuses) costs the plugin, not the rest of setup.
+        if (!(error instanceof Error)) throw error;
+        console.log(`     ${error instanceof OperatorError ? error.message : `Herdr could not link the plugin (${error.message.split("\n")[0]}): \`sandcastle herdr configure\` tries again.`}`);
       }
     }
   }

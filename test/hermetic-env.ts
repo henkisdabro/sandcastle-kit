@@ -13,7 +13,9 @@
 //    answers slowly makes a test race it (a Mac with OrbStack), a stopped daemon fails the call (Docker installed on
 //    Linux, no daemon), and a `docker stop` there would reach a live run's containers. Neither a Linux sandbox (no
 //    `docker`) nor CI would show it. A test that needs a `docker` of its own puts it ahead (test/docker-stub.ts), and
-//    one that needs none at all points `PATH` elsewhere.
+//    one that needs none at all points `PATH` elsewhere. Beside it, a `herdr` and an `hc` that are not installed
+//    (`exit 127`): doctor and setup check the Herdr 1 plugin wherever `herdr` runs, and a developer's real one would
+//    answer from their own Herdr's files and server; a test of either host puts its own stub ahead.
 //  - No git identity is inherited: `GIT_CONFIG_GLOBAL` is an empty file, `GIT_CONFIG_NOSYSTEM` is 1, the author and
 //    committer variables are removed and `user.useConfigOnly=true` is appended to the `GIT_CONFIG_*` pairs (any pair
 //    already set, such as the gate's `commit.gpgsign=false`, stays). A fixture repo that never sets its own identity
@@ -100,6 +102,10 @@ if (process.env.NODE_TEST_CONTEXT) {
     bin = mkdtempSync(join(process.env.TMPDIR, "sandcastle-no-docker-"));
     writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 0\n");
     chmodSync(join(bin, "docker"), 0o755);
+    for (const name of ["herdr", "hc"]) {
+      writeFileSync(join(bin, name), "#!/bin/sh\nexit 127\n");
+      chmodSync(join(bin, name), 0o755);
+    }
     process.env[NO_DOCKER_DIR] = bin;
     const owned = bin;
     process.on("exit", () => rmSync(owned, { recursive: true, force: true }));
