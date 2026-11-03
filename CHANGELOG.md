@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-03
+
 ### Upgrading
 
 - **A run started in a herdr-core terminal now opens its status view there**, as a terminal
@@ -3002,7 +3004,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.16.0...v0.17.0
