@@ -1284,7 +1284,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   }
   if (gitHook) {
     console.log(`\nGit hook ${gitHook.name} fails in the sandbox - every agent commit would be refused:\n${gitHook.output.split("\n").slice(-15).join("\n")}`);
-    console.log("Add what it needs to the project's Dockerfile (README: Dockerfile), then `sandcastle gates` again.");
+    console.log("Add what it needs to the project's Dockerfile (the kit's docs/setup.md: Dockerfile), then `sandcastle gates` again.");
   }
   const red = [...run.failures.map((f) => f.name), ...redHooks.map((t) => `hook test "${t.name}"`), ...(gitHook ? [`git hook ${gitHook.name}`] : [])];
   throw new BaseRedError(

@@ -14,7 +14,7 @@ regression test, so future bumps update it. Other badges describe capabilities o
 check their claims when those capabilities change.
 
 At each release, compare every claim in `site/index.html` and `site/llms.txt` with the last three
-release notes and the README. Update the benefits, requirements and FAQ (including its JSON-LD)
+release notes, the README and the topic docs it points to. Update the benefits, requirements and FAQ (including its JSON-LD)
 for changed behaviour; keep historical run figures labelled as examples. Done when version checks
 pass, the visible FAQ agrees with its structured data, and a browser preview has been checked at
 desktop and mobile widths.

@@ -1,6 +1,6 @@
 // Sandcastle project config - read by sandcastle-kit (https://github.com/henkisdabro/sandcastle-kit).
 // Only what differs from the kit's defaults belongs here. Every other key is listed commented out,
-// at its default or with an example; README -> Configuration says what each does.
+// at its default or with an example; the kit's docs/configuration.md says what each does.
 
 export default {
   name: "my-project",
@@ -27,7 +27,7 @@ export default {
   // tracker: "github",
   // tracker: "files",                      // .scratch/<feature>/issues/NN-<slug>.md, `Status:` line
   // tracker: { type: "files", dir: "tickets", done: ["done", "shipped"] },
-  // Extra things a ticket may wait for: Linear issues, ticket files. README -> Blockers.
+  // Extra things a ticket may wait for: Linear issues, ticket files. The kit's docs/queue.md -> Blockers.
   // blockers: { linear: ["ENG"] },
 
   // {{KIT_STACK}}
@@ -36,7 +36,7 @@ export default {
   // mounts: [{ hostPath: "~/.cache/my-tool", sandboxPath: "/home/agent/.cache/my-tool", readonly: true }],
 
   // Committed files a command writes. A merge conflict only in these is resolved by taking
-  // either side and running `regen` in a sandbox. README -> A gate for generated files.
+  // either side and running `regen` in a sandbox. The kit's docs/setup.md -> A gate for generated files.
   // generated: [{ paths: ["dist/site.css"], regen: "pnpm run build:css" }],
 
   // Paths a branch may not change and still land by itself, on top of the kit's own list.

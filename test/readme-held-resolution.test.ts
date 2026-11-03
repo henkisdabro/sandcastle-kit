@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 process.env.XDG_CONFIG_HOME ??= join(dirname(fileURLToPath(import.meta.url)), "..", "node_modules", ".cache", "xdg");
 const { strayNote } = await import("../src/resolution.ts");
 
-const readme = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "README.md"), "utf8").replace(/\s+/g, " ");
+const docs = (f: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "docs", f), "utf8").replace(/\s+/g, " ");
+const readme = `${docs("running.md")} ${docs("troubleshooting.md")}`;
 
 test("README explains the hold on a resolution that edits cleanly merged files", () => {
   assert.match(readme, /resolution may change only the files git could not merge itself/);

@@ -19,8 +19,8 @@ This continues SKILL.md: run its "Before every action" first.
      the config, and a rules line telling agents to edit the source and run the command.
    - **No-touch paths** - what an agent must never change: a rules line, and `protectedPaths` for
      any that change how the repo executes.
-   - **Drift gate** - if there are generated files, propose a gate from the README's "A gate for
-     generated files" recipe and add it to `gates` once the user agrees, or record in the rules
+   - **Drift gate** - if there are generated files, propose a gate from the "A gate for
+     generated files" recipe in the kit's docs/setup.md and add it to `gates` once the user agrees, or record in the rules
      why there is none.
    - **Related tests** - the command that runs the tests covering changed files, proposed from
      what you read (a related-tests script, the test runner's own option, or `git grep -l` over the
@@ -86,7 +86,7 @@ This continues SKILL.md: run its "Before every action" first.
      that what they call is in the image and that none pushes or deploys. A `core.hooksPath` that
      is absolute (or outside the project) does not exist in the sandbox: set a relative one.
    - **Prove the guards.** The hook check only proves a hook can run. For each kept `PreToolUse`
-     guard that matters, add a `hookTests` entry to the config (README: Hook tests): a tool call
+     guard that matters, add a `hookTests` entry to the config (the kit's docs/setup.md: Hook tests): a tool call
      it must refuse, with `expect: "block"` - read the guard's script for what it refuses - and
      for a broad guard one ordinary call with `expect: "allow"`. Step 6 runs them.
 5. **Settings that stay.** Permissions and `env` in `.claude/settings.json` are kept. Check `env`

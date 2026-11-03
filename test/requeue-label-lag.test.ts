@@ -66,9 +66,9 @@ test("ticket files: a requeue has no label search to lag", () => {
   assert.equal(r.relabelled, false);
 });
 
-test("the README's Run section and the skill's run action tell the user to wait after labelling", () => {
+test("docs/running.md and the skill's run action tell the user to wait after labelling", () => {
   const kit = join(import.meta.dirname, "..");
-  for (const file of ["README.md", "skill/run.md"]) {
+  for (const file of ["docs/running.md", "skill/run.md"]) {
     assert.match(readFileSync(join(kit, file), "utf8"), /few seconds[^.]*before `sandcastle run`/, file);
   }
 });

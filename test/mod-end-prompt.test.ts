@@ -73,8 +73,8 @@ test("skill/run.md step 4 says what to do when the report is of a later run", ()
   assert.match(step, /leave the live run to the end prompt of its own/);
 });
 
-test("README.md no longer says the prompt carries only the exit code", () => {
-  const readme = flat(read("README.md"));
+test("docs/claude-mod.md no longer says the prompt carries only the exit code", () => {
+  const readme = flat(read("docs", "claude-mod.md"));
   assert.doesNotMatch(readme, /nothing from the record but a numeric exit code/);
   assert.match(readme, /nothing from the record but numbers: the exit code, the pid and the start time/);
 });

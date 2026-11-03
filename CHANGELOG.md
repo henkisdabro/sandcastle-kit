@@ -9,6 +9,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- **The README is a front page again.** It went from about 2,000 lines to about 300: the pitch,
+  the quick start, a short "how it works", a table of the docs, the command list and the section
+  for AI agents. The reference moved, unchanged and with the same anchors, into topic files under
+  `docs/` (setup, queue, running, commands, configuration, concurrency, safety, Herdr, the Claude
+  Code mod, troubleshooting, how a run works). The kit's own messages, templates and skill point
+  there.
+
 ## [0.20.0] - 2026-11-03
 
 ### Upgrading

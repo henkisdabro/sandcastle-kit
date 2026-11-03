@@ -133,7 +133,7 @@
 //                    takes all of it out. Works from anywhere
 //
 // Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, LOAD_PAUSE, SANDCASTLE_API_KEY:
-// environment variables, see README.md.
+// environment variables, see docs/configuration.md.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

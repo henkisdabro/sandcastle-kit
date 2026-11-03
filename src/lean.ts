@@ -391,7 +391,7 @@ export const report = (project: Project, p: Plan) => {
   if (guards && !project.hookTests.length) {
     console.log(
       `  WARNING: ${guards} PreToolUse guard(s) kept, but no hookTests in the config: nothing proves they block\n` +
-        "  anything in a sandbox. Add one test per guard that matters (README: Hook tests).",
+        "  anything in a sandbox. Add one test per guard that matters (the kit's docs/setup.md: Hook tests).",
     );
   } else if (project.hookTests.length) {
     console.log(`  Hook tests: ${project.hookTests.length} configured - run by \`sandcastle gates\` and every run's base check.`);

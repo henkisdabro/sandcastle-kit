@@ -296,7 +296,7 @@ const refuseUnknown = (refuse: (what: string) => never, keys: string[], known: s
   for (const k of keys) {
     if (known.includes(k)) continue;
     const near = nearest(k, known);
-    refuse(`unknown key \`${at}${k}\`${near ? ` - did you mean \`${at}${near}\`?` : ` (README -> Configuration lists the keys)`}`);
+    refuse(`unknown key \`${at}${k}\`${near ? ` - did you mean \`${at}${near}\`?` : ` (the kit's docs/configuration.md lists the keys)`}`);
   }
 };
 

@@ -35,9 +35,9 @@ test("a typo in a key is refused with the file and the nearest real key", () => 
   assert.equal(read(config), `OperatorError ${file}: unknown key \`keepawake\` - did you mean \`keepAwake\`?`);
 });
 
-test("a key near none is refused and points at the README", () => {
+test("a key near none is refused and points at the docs", () => {
   const { config, file } = configWith('{"colour": "red"}');
-  assert.equal(read(config), `OperatorError ${file}: unknown key \`colour\` (README -> Personal settings lists the keys)`);
+  assert.equal(read(config), `OperatorError ${file}: unknown key \`colour\` (the kit's docs/configuration.md -> Personal settings lists the keys)`);
 });
 
 test("every documented key is accepted", () => {

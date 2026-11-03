@@ -20,10 +20,10 @@ function between(text: string, from: string, to?: string): string {
   return end < 0 ? text.slice(start) : text.slice(start, end);
 }
 
-test("README setup step 3 names the dockerfile key beside the template", () => {
-  const step = between(read("README.md"), "3. **`.sandcastle/Dockerfile`**", "4. **Lean and hooks**");
+test("docs/setup.md step 3 names the dockerfile key beside the template", () => {
+  const step = between(read("docs/setup.md"), "3. **`.sandcastle/Dockerfile`**", "4. **Lean and hooks**");
   assert.match(step, /templates\/Dockerfile/);
-  assert.ok(step.includes(KEY), "README step 3 lacks the key");
+  assert.ok(step.includes(KEY), "docs/setup.md step 3 lacks the key");
 });
 
 test("skill init step 2 names the dockerfile key beside the template", () => {

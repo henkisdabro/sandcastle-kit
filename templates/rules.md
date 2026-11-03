@@ -5,7 +5,7 @@
      - Generated files: which committed files does a command write, and which command?
        Agents edit the source and run it. Declare them under `generated` in config.ts too.
      - Do not touch: which paths must an agent never change?
-     - Drift: which gate proves the generated files match their sources (README: A gate
+     - Drift: which gate proves the generated files match their sources (the kit's docs/setup.md: A gate
        for generated files)? If none, say why.
      - Related tests: which command runs the tests that cover changed files? Which
        repo-wide tests (ratchets, scans of every file) can a new file trip? -->

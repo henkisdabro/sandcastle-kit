@@ -390,17 +390,25 @@ const cells = (row: string) =>
 type Surface = { config: Map<string, string>; personal: Map<string, string>; env: Map<string, string>; commands: Map<string, Set<string>> };
 
 /**
- * The README Configuration section's tables, by their first header cell: `Field` (project config
+ * The Configuration section's tables (`docs/configuration.md`; the README's own before 0.21), by their first header cell: `Field` (project config
  * keys), `Key` (personal settings) and `Variable` (environment variables), each name -> its default.
  * A row naming several (`` `a` / `b` ``, `` `A`, `B` ``) gives each its own entry, with the same default.
  */
 const readmeTables = (readme: string): Pick<Surface, "config" | "personal" | "env"> => {
   const out = { config: new Map<string, string>(), personal: new Map<string, string>(), env: new Map<string, string>() };
-  let inside = false;
+  // The section runs from a heading ending "Configuration" to the next heading at its level or above: an
+  // H2 in the README of 0.20 and before, the H1 of docs/configuration.md since. A fence's `#` lines are shell.
+  let level = 0;
+  let fence = false;
   let into: Map<string, string> | undefined;
   for (const line of readme.split("\n")) {
-    if (line.startsWith("## ")) inside = /^## .*Configuration\s*$/.test(line);
-    if (!inside || !line.trimStart().startsWith("|")) {
+    if (line.trimStart().startsWith("```")) fence = !fence;
+    const heading = fence ? null : /^(#{1,6}) /.exec(line);
+    if (heading) {
+      if (level && heading[1]!.length <= level) level = 0;
+      if (!level && /Configuration\s*$/.test(line)) level = heading[1]!.length;
+    }
+    if (!level || !line.trimStart().startsWith("|")) {
       into = undefined;
       continue;
     }
@@ -435,7 +443,8 @@ const helpCommands = (cli: string): Map<string, Set<string>> => {
 };
 
 const surfaceAt = (kit: string, tag: string): Surface => ({
-  ...readmeTables(showAt(kit, tag, "README.md") ?? ""),
+  // The tables moved from the README to docs/configuration.md after 0.20: a tag has one or the other.
+  ...readmeTables(`${showAt(kit, tag, "README.md") ?? ""}\n${showAt(kit, tag, "docs/configuration.md") ?? ""}`),
   commands: helpCommands(showAt(kit, tag, "src/cli.ts") ?? ""),
 });
 
@@ -447,7 +456,7 @@ const compareMaps = (was: Map<string, string>, now: Map<string, string>): string
 
 /**
  * `sandcastle changes`, second part: what the changelog's prose can bury. Between the git tags of the
- * release counted from and the kit's own, the README Configuration section's config keys, personal
+ * release counted from and the kit's own, the Configuration section's config keys, personal
  * settings and environment variables (added, removed, default changed) and the help text's commands
  * and flags. Nothing when there is no release to count from or nothing new. A missing tag (a shallow
  * clone, a kit outside git) is said, and the changelog part stands alone.

@@ -138,7 +138,7 @@ from it, and only in plain text: a line inside a code block or backticks is not 
   Files tracker: a `Blocked by: NN, NN` line in the ticket's header block, next to `Status:`,
   naming tickets in the same feature by number. A Linear issue or an in-repo task file can be
   named (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has
-  `blockers` for it (README -> Blockers); otherwise the line is ignored.
+  `blockers` for it (the kit's docs/queue.md -> Blockers); otherwise the line is ignored.
 - **`Touches:` line.** One line, `Touches: <path or glob>, <path or glob>, ...`, with
   repo-relative paths and `*` (within a directory) or `**` (across directories) globs. A
   directory path covers everything under it. Name only files an agent may edit under the

@@ -47,7 +47,7 @@ Declining is not skipping: every step still runs its check, and only the asking 
    - **`claude-mod`**: if doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it
      shows a live run above the prompt, says when a ticket needs the user, and tells the session
      when the run ends. It is code that runs inside Claude Code with the user's permissions (the
-     README's "The Claude Code mod" says what it reads), so show them doctor's command and run it
+     kit's docs/claude-mod.md says what it reads), so show them doctor's command and run it
      once they agree.
 2. **What's new.** From the project's root, run `sandcastle changes` (read-only, no model calls): the
    CHANGELOG entries of every release since this project's last recorded update, up to the kit's
@@ -91,7 +91,7 @@ Declining is not skipping: every step still runs its check, and only the asking 
       updating projects in parallel only queues the builds, and the extra opens and gates running
       beside them load the machine until container starts pass the 120 s limit and gates run slowly
       enough to turn a base red that CI has green.
-   2. **Config.** Compare `.sandcastle/config.ts` with the README's Configuration table. A field
+   2. **Config.** Compare `.sandcastle/config.ts` with the Configuration tables in the kit's docs/configuration.md. A field
       it leaves out takes the kit's default, so nothing breaks - but name every new default that
       changes what a run does or spends (step 2's decisions and Upgrading notes list them) and ask
       whether to set it explicitly. Edit only the fields the user agrees to, one by one.
@@ -117,8 +117,8 @@ Declining is not skipping: every step still runs its check, and only the asking 
    7. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
       entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
       yes).
-   8. **Generated files** (**`generated`**). If a gate regenerates committed files (the README's "A gate for
-      generated files" recipe, or any gate that runs a build and diffs its output) and `generated`
+   8. **Generated files** (**`generated`**). If a gate regenerates committed files (the "A gate for
+      generated files" recipe in the kit's docs/setup.md, or any gate that runs a build and diffs its output) and `generated`
       is not set in `.sandcastle/config.ts`, propose declaring those paths with the command that
       writes them.
    9. **Gates and the kit's tokens** (**`gate-token`**). Gates run without `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and

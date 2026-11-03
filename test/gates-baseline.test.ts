@@ -75,8 +75,8 @@ test("gates and a red land record the clean end after their .git check, whatever
   assert.ok(red.indexOf("recordGitConfigEnd(project)") > 0 && red.indexOf("recordGitConfigEnd(project)") < red.indexOf("throw new OperatorError"));
 });
 
-test("the README says run, land, gates and clean record the baseline", () => {
-  const readme = read("README.md").replace(/\s+/g, " ");
+test("docs/safety.md says run, land, gates and clean record the baseline", () => {
+  const readme = read("docs/safety.md").replace(/\s+/g, " ");
   assert.match(readme, /So `sandcastle run`, `land`, `gates` and `clean` record what makes git run a program/);
   assert.match(readme, /the first of those four commands to start records and goes on, `sandcastle gates` included/);
 });

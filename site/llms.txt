@@ -6,7 +6,13 @@ An AI coding agent setting this up for someone should start at the README's sect
 
 ## Docs
 
-- [README](https://github.com/henkisdabro/sandcastle-kit/blob/main/README.md): who it is for, quick start, how a run works, configuration, safety model, troubleshooting
+- [README](https://github.com/henkisdabro/sandcastle-kit/blob/main/README.md): who it is for, quick start, how a run works, and a table of the docs below
+- [Setting up a project](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/setup.md): `sandcastle init`, gates, the Dockerfile, lean sandboxes and hooks
+- [Tickets and the queue](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/queue.md): a ticket an agent can finish, the queue label, blockers, trackers
+- [Running](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/running.md): starting, detached runs, pausing, the closing summary, re-runs
+- [Commands](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/commands.md) and [Configuration](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/configuration.md): every command, key, setting and variable
+- [Safety model](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/safety.md), [Concurrency](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/concurrency.md), [Troubleshooting](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/troubleshooting.md)
+- [Herdr](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/herdr.md) and [the Claude Code mod](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/claude-mod.md): watching a run
 - [For AI coding agents](https://github.com/henkisdabro/sandcastle-kit/blob/main/README.md#-if-you-are-an-ai-coding-agent-reading-this): the steps an agent follows to install and use the kit
 - [Install](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/INSTALL.md): requirements, what `sandcastle setup` does, a manual install, updating
 - [Changelog](https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md): releases, with Upgrading notes per version

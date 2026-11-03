@@ -44,7 +44,7 @@ export const machineSettings = (): Record<string, unknown> => {
   for (const key of Object.keys(settings)) {
     if (MACHINE_KEYS.includes(key)) continue;
     const near = nearest(key, MACHINE_KEYS);
-    throw new OperatorError(`${file}: unknown key \`${key}\`${near ? ` - did you mean \`${near}\`?` : ` (README -> Personal settings lists the keys)`}`);
+    throw new OperatorError(`${file}: unknown key \`${key}\`${near ? ` - did you mean \`${near}\`?` : ` (the kit's docs/configuration.md -> Personal settings lists the keys)`}`);
   }
   return settings as Record<string, unknown>;
 };

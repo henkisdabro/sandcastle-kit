@@ -121,6 +121,7 @@ read a module's section there before changing it.
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
+| `docs/setup.md`, `queue.md`, `running.md`, `commands.md`, `configuration.md`, `concurrency.md`, `safety.md`, `herdr.md`, `claude-mod.md`, `troubleshooting.md`, `how-it-works.md` | The user documentation the README's Documentation table points to, one topic each. A behaviour's reference lives in its topic file; the README keeps the pitch, quick start, a short how-it-works, the command list and the agent section. `docs/configuration.md`'s tables are what `sandcastle changes` compares between releases |
 | `docs/img/` | The README's pictures. GitHub plays no SVG animation in a README, so the moving ones are GIFs, rebuilt by `record-gifs.sh` there; the castle's colours are the status view's |
 | `docs/releasing.md` | Version bumps, the tag and the release notes' shape |
 | `test/full-check.sh` | Every check below on this machine, in a Linux container and the outbound scan of the commits not yet on `origin/main`, all legs side by side; the suite runs as `test/shard.ts`'s shards through `test/run-shards.sh`, their count from `test/shard-count.sh` (the cores shared between the passes at once) |

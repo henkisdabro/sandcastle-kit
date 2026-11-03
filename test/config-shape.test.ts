@@ -30,7 +30,7 @@ test("a syntax error is one line naming the place, not a stack trace", async () 
 test("an unknown key is refused, with the nearest real one", async () => {
   await refused("concurency: 2", /unknown key `concurency` - did you mean `concurrency`\?/);
   await refused("repair: { attempt: 2 }", /unknown key `repair\.attempt` - did you mean `repair\.attempts`\?/);
-  await refused("frobnicate: 1", /unknown key `frobnicate` \(README -> Configuration/);
+  await refused("frobnicate: 1", /unknown key `frobnicate` \(the kit's docs\/configuration\.md lists the keys/);
 });
 
 test("wrong types are refused with what the key takes", async () => {

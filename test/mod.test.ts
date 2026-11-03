@@ -1,7 +1,7 @@
 // The Claude Code mod (mod/) against the kit it reports on: every state src/run.ts writes has a
 // group, the groups carry the status view's castle, glyphs and colours, and the band is cut to its width.
 // With Claude Code 2.1.287 or newer on PATH it also runs the mod's own tests and holds the mod
-// to the calls the README promises - a mod runs inside Claude Code with the user's permissions,
+// to the calls docs/claude-mod.md promises - a mod runs inside Claude Code with the user's permissions,
 // so a new call is a change a reviewer must see. No session and no model calls.
 //
 //   pnpm test:file test/mod.test.ts
@@ -237,7 +237,7 @@ test("the castle builds through five-cell frames and loops, holding complete at 
   assert.equal(building(summarise(parse(JSON.stringify({ tickets: { 1: { state: "red" }, 2: { state: "merged" }, 3: { state: "queued" } } }))!)), false);
 });
 
-// What the mod may ask of Claude Code. README.md ("What the mod touches") says the same in words.
+// What the mod may ask of Claude Code. docs/claude-mod.md ("What the mod touches") says the same in words.
 const CALLS = [
   "$.clock.after",
   "$.clock.every",
@@ -270,7 +270,7 @@ const version = spawnSync("claude", ["--version"], { encoding: "utf8" }).stdout?
 const newEnough = !!version && [2, 1, 287].reduce((d, min, i) => d || Number(version[i + 1]) - min, 0) >= 0;
 const skip = newEnough ? false : "needs Claude Code 2.1.287 or newer on PATH";
 
-test("the mod validates, and calls only what the README says", { skip }, () => {
+test("the mod validates, and calls only what docs/claude-mod.md says", { skip }, () => {
   const r = claude(["plugin", "validate", "mod", "--strict", "--json"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const notes: string[] = JSON.parse(r.stdout).contents.flatMap((c: { notes: string[] }) => c.notes);
@@ -283,10 +283,10 @@ test("the mod validates, and calls only what the README says", { skip }, () => {
   for (const call of ["$.fs.read", "$.fs.stat", "$.fs.exists", "$.process.run", "$.prompt.submit"]) {
     assert.equal(read("mod", "hooks", "register.tsx").split(call + "(").length, 2, `${call} is called from one place`);
   }
-  // The README prints both lists, as `claude plugin validate` does.
-  const readme = read("README.md");
-  assert.ok(readme.includes(`❯ ./register.tsx calls: ${CALLS.join(", ")}\n`), "the README lists the calls");
-  assert.ok(readme.includes(`❯ ${notes.find((n) => n.startsWith("./register.tsx hooks: "))}\n`), "the README lists the hooks");
+  // docs/claude-mod.md prints both lists, as `claude plugin validate` does.
+  const readme = read("docs", "claude-mod.md");
+  assert.ok(readme.includes(`❯ ./register.tsx calls: ${CALLS.join(", ")}\n`), "docs/claude-mod.md lists the calls");
+  assert.ok(readme.includes(`❯ ${notes.find((n) => n.startsWith("./register.tsx hooks: "))}\n`), "docs/claude-mod.md lists the hooks");
 });
 
 test("the mod's own tests pass", { skip }, (t) => {

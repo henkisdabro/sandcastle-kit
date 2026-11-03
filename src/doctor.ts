@@ -460,7 +460,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         ? `Needs Claude Code ${MOD_MIN.join(".")} or newer (this is ${claude.version}): \`claude update\`, then \`sandcastle doctor\` again.`
         : off
         ? `Linked, but Claude Code says mods are ${off}. Until they are on again nothing is drawn, and the skill waits for the run's end its own way.`
-        : `\`ln -sfn ${shellQuote(join(KIT, "mod"))} ~/.claude/skills/sandcastle-mod\` - it runs inside Claude Code with your permissions; the README's "The Claude Code mod" says what it reads. \`rm ~/.claude/skills/sandcastle-mod\` takes it out.`,
+        : `\`ln -sfn ${shellQuote(join(KIT, "mod"))} ~/.claude/skills/sandcastle-mod\` - it runs inside Claude Code with your permissions; the kit's docs/claude-mod.md says what it reads. \`rm ~/.claude/skills/sandcastle-mod\` takes it out.`,
       true,
     );
   }
@@ -638,7 +638,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     const otherKit = otherKitCheckoutNote(repoRoot);
     if (otherKit) console.log(otherKit);
     const hasConfig = existsSync(join(repoRoot, CONFIG_PATH));
-    check(hasConfig, CONFIG_PATH, "`sandcastle init` (then fill in gates, setup and lean - see the kit README)");
+    check(hasConfig, CONFIG_PATH, "`sandcastle init` (then fill in gates, setup and lean - see the kit's docs/setup.md)");
     // A warning, never a FIX: a pulled kit still runs, but a note may ask this project to act.
     if (hasConfig) for (const line of upgradeLines(repoRoot)) console.log(line);
     if (mountRefusal) check(false, `${CONFIG_PATH} mounts stay out of the run's own state`, `${(mountRefusal as MountRefused).message} Remove the entry or mount a directory elsewhere (a cache under the project is fine, the project root, .sandcastle/ and .git are not).`);

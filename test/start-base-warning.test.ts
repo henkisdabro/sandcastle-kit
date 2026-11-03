@@ -33,9 +33,9 @@ test("a run prints that line, for its own base branch, after the keep-awake line
   assert.ok(awake > 0 && said > awake);
 });
 
-test("skill/run.md and the README's safety model say the same", () => {
+test("skill/run.md and docs/safety.md's safety model say the same", () => {
   const run = read("../skill/run.md");
   assert.match(run, /commits, pulls or merges on the base/);
   assert.match(run, /sandcastle status/);
-  assert.match(read("../README.md"), /cannot tell a person's commit on the base from a sandbox's/);
+  assert.match(read("../docs/safety.md"), /cannot tell a person's commit on the base from a sandbox's/);
 });

@@ -165,3 +165,23 @@ test("sandcastle changes prints the settings part after the changelog, a blank l
   assert.equal(out[at - 1], "");
   assert.ok(out.slice(0, at).some((l) => /^## \d+\.\d+\.\d+ - /.test(l)), "the changelog's releases come first");
 });
+
+test("changes reads the tables from docs/configuration.md once they moved there, against a README of before", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-kit-"));
+  git(dir, "init", "-q");
+  release(dir, "0.1.0", V1);
+  // The next release: the README keeps no Configuration section, the docs file holds it as an H1 with
+  // its personal settings under an H2, and a fenced `#` line inside it is shell, not a heading.
+  mkdirSync(join(dir, "docs"), { recursive: true });
+  writeFileSync(
+    join(dir, "docs/configuration.md"),
+    V2.readme.replace("# Kit\n\n## Configuration", "# 🔧 Configuration\n\n```bash\n# a comment, not a heading\n```").replace("## Other", "# Other") +
+      "\n",
+  );
+  release(dir, "0.2.0", { readme: "# Kit\n\nA front page.\n", cli: V2.cli });
+  const lines = changesDiffLines(project(), dir, "0.1.0");
+  assert.ok(lines.includes("- added `usagePause` (default: unset)"), lines.join("\n"));
+  assert.ok(lines.includes("- changed `concurrency` default: `4` -> `6`"), lines.join("\n"));
+  assert.ok(lines.includes("- added `USAGE_PAUSE` (default: off)"), lines.join("\n"));
+  assert.ok(!lines.some((l) => l.includes("removed `name`") || l.includes("notConfig")), lines.join("\n"));
+});

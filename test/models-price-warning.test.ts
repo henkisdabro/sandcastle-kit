@@ -1,6 +1,6 @@
 // The models guidance warns that Claude Haiku 5.5 is billed at five times its price for a prompt
 // over 100K tokens, and that the kit's `high` effort default applies to any model: the skill's
-// "Models and effort" and the README's effort note say it in the same terms.
+// "Models and effort" and docs/configuration.md's effort note say it in the same terms.
 //
 //   pnpm test:file test/models-price-warning.test.ts
 
@@ -17,11 +17,11 @@ const flat = (text: string) => text.replace(/\s+/g, " ");
 const skillSection = flat(
   read("skill", "run.md").match(/^## Models and effort\b[\s\S]*?(?=^## |(?![\s\S]))/m)?.[0] ?? "",
 );
-const readmeNote = flat(read("README.md").match(/A project that always wants different models[\s\S]*?<\/details>/)?.[0] ?? "");
+const readmeNote = flat(read("docs", "configuration.md").match(/A project that always wants different models[\s\S]*?<\/details>/)?.[0] ?? "");
 
 for (const [where, text] of [
   ["skill/run.md's Models and effort", skillSection],
-  ["the README's effort note", readmeNote],
+  ["docs/configuration.md's effort note", readmeNote],
 ] as const) {
   test(`${where} warns about Haiku 5.5's long-prompt price`, () => {
     assert.match(text, /Haiku 5\.5/);

@@ -37,9 +37,9 @@ the same by hand.
 > on any OS, and Podman or rootless Docker on Linux, where the agent could not write its worktree.
 
 **Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) 0.9.3 or later (a tab with the status view,
-opened automatically; a pane per sandbox is opt-in with `herdr: { panes: "all" }`; `sandcastle herdr configure` adds the kit's plugin - see the README's
-[The Herdr plugin](../README.md#the-herdr-plugin)) or herdr-core (`hc` 0.1.17 or later: the status view as a terminal beside yours - see the README's
-[herdr-core](../README.md#herdr-core)), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
+opened automatically; a pane per sandbox is opt-in with `herdr: { panes: "all" }`; `sandcastle herdr configure` adds the kit's plugin - see
+[The Herdr plugin](herdr.md#the-herdr-plugin)) or herdr-core (`hc` 0.1.17 or later: the status view as a terminal beside yours - see
+[herdr-core](herdr.md#herdr-core)), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
 
 ## 🧙 What `sandcastle setup` does
 
@@ -50,7 +50,7 @@ install ends with it; to run it again later: `sandcastle setup`.
    on your `PATH`. It never edits your shell files.
 2. **Links the skill** for Claude Code (`~/.claude/skills`, which OpenCode also reads), and for
    Codex (`~/.agents/skills`) if Codex is installed and you say yes. With Claude Code 2.1.287 or
-   newer it also offers [the Claude Code mod](../README.md#-the-claude-code-mod), which shows a
+   newer it also offers [the Claude Code mod](claude-mod.md#-the-claude-code-mod), which shows a
    run in the session that started it; it is code that runs inside Claude Code, so it asks first.
 3. **Claude credential** - offers to run `claude setup-token` for your subscription, or takes an
    Anthropic API key, and drops the other one from the file. A run with an API key bills API
@@ -82,7 +82,7 @@ ln -sf "$PWD/bin/sandcastle" ~/.local/bin/sandcastle
 mkdir -p ~/.claude/skills && ln -sfn "$PWD/skill" ~/.claude/skills/sandcastle   # Claude Code, OpenCode
 mkdir -p ~/.agents/skills && ln -sfn "$PWD/skill" ~/.agents/skills/sandcastle   # Codex only
 
-# The Claude Code mod (optional; runs inside Claude Code - see the README's "The Claude Code mod")
+# The Claude Code mod (optional; runs inside Claude Code - see docs/claude-mod.md)
 ln -sfn "$PWD/mod" ~/.claude/skills/sandcastle-mod
 
 # Credentials, outside the repo
@@ -107,8 +107,8 @@ Then uncomment and fill in `~/.config/sandcastle-kit/.env`:
   It stays on the host.
 
 Leave unused keys commented out: an empty value stops a run. Machine-wide limits, keep-awake, an
-end-of-run notification and the Claude Code mod's idle mark switch go in an optional `~/.config/sandcastle-kit/config.json` - see the README's
-[Personal settings](../README.md#personal-settings).
+end-of-run notification and the Claude Code mod's idle mark switch go in an optional `~/.config/sandcastle-kit/config.json` - see
+[Personal settings](configuration.md#personal-settings).
 
 > [!IMPORTANT]
 > Classic (`ghp_`) and OAuth (`gho_`, e.g. `gh auth token`) tokens are refused, because sandbox
@@ -133,8 +133,8 @@ and stops a live run's containers. While neither limit is set (no `maxSandboxes`
 here; `init` does not, as the pool is machine-wide. Once a run has recorded the anonymous memory a
 gate used, limits that need more memory than the VM has (the gates priced at the gate's figure, the
 other sandboxes at an agent's) are a `warn` in doctor and a `warning:` on a run's start line instead,
-naming both numbers and the key to set. The reasoning is in the README's
-[Concurrency](../README.md#-concurrency) section.
+naming both numbers and the key to set. The reasoning is in
+[Concurrency](concurrency.md#-concurrency).
 
 ## 🔄 Updating
 
@@ -165,6 +165,6 @@ start: after pulling, start a new session (Claude Code, Codex or OpenCode) befor
 `/sandcastle` action. A mod linked by the update loads only in a new session too.
 
 The sandbox image picks up new Claude Code and Codex releases by itself (README,
-[The image's agent versions](../README.md#-the-images-agent-versions)), but not Debian and Node
+[The image's agent versions](configuration.md#-the-images-agent-versions)), but not Debian and Node
 security updates: run `sandcastle build --force` now and then; `sandcastle doctor` warns once a
 project's base image is more than 30 days old.

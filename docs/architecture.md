@@ -951,7 +951,7 @@ kit commit is read through git, and declines none) against the kit's own notes, 
 and a run print.
 Also `changesLines` (`sandcastle changes`: the changelog entries of the releases after the record's,
 or `--since`, each cut to its bold lead; read-only), `changesDiffLines` (its second part, between
-the git tags of the two releases: the README Configuration tables' keys and defaults and the help
+the git tags of the two releases: the Configuration tables' (`docs/configuration.md`, the README before 0.21) keys and defaults and the help
 text's commands and flags, added, removed or changed; a missing tag is said and the first part
 stands alone), `recordedRelease` (the record's release, an older record's read from the kit's
 `package.json` at its commit, read before `sandcastle updated` replaces it, so the update action

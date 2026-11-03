@@ -29,8 +29,9 @@ then the `queue` action. A request to change a project's models or effort is ans
 
 ## Before every action
 
-1. Run `sandcastle doctor`. Its first line is the kit's location; that kit's `README.md` covers
-   anything this skill does not. If `sandcastle` is not found, the kit is not installed: have the
+1. Run `sandcastle doctor`. Its first line is the kit's location; that kit's `README.md` and its
+   `docs/` (the README's Documentation table says which file holds what) cover anything this skill
+   does not. If `sandcastle` is not found, the kit is not installed: have the
    user clone it and run `./bin/sandcastle setup` in their own terminal (it asks for tokens).
 2. Fix every `FIX` line doctor prints before going further, and mention each `warn` line to the
    user. Tokens are the user's to create. When a run or preflight fails on auth,
