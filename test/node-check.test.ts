@@ -26,8 +26,8 @@ test("with type stripping on, the preload says nothing", () => {
   assert.equal(r.stderr, "");
 });
 
-test("both launcher lines preload it, and it is plain JavaScript that any Node loads", () => {
-  assert.equal(launcherLines.length, 2);
+test("every launcher line preloads it, and it is plain JavaScript that any Node loads", () => {
+  assert.equal(launcherLines.length, 3, "the slot line, the herdr line and the CLI line");
   for (const line of launcherLines) assert.ok(line.includes(`--import "$KIT/${LOADER.slice(KIT.length)}"`), line);
   assert.match(LOADER, /\.mjs$/);
   assert.doesNotMatch(readFileSync(LOADER, "utf8"), /^import |:\s*(string|number|boolean)\b/m, "no import, no type annotation");

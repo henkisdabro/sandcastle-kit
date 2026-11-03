@@ -46,9 +46,9 @@ import type { PlanUsage, TicketRecord } from "../mod/hooks/run-record.ts";
 import { viewRecord } from "./live-runs.ts";
 import { KIT } from "./sandbox.ts";
 import { inHerdr1, terminalHost } from "./terminal-host.ts";
-import { askingInCore } from "./herdr-core.ts";
+import { askingInCore, openCoreView } from "./herdr-core.ts";
 import { readPlanUsages, usageBand } from "./usage.ts";
-import { bareShell as bareShellIn, progress, type RunCounts, runCounts, showsStatus as showsStatusIn } from "./view-facts.ts";
+import { bareShell as bareShellIn, PHASE_LOG as LOG, progress, type RunCounts, runCounts, showsStatus as showsStatusIn } from "./view-facts.ts";
 
 export { viewRecord };
 
@@ -412,11 +412,6 @@ const SOURCE = "sandcastle-kit";
 // Two and a half of the minute's re-sends: no flicker between them, gone soon after a kill.
 const TTL = "150000";
 
-// Phase -> the sandbox.run name its log is written under (burndown.ts).
-// Gates have one too: the orchestrator writes their output as it arrives
-// (burndown.ts), so a pane shows the test run instead of the review's closing lines.
-const LOG = { implement: "impl", resolve: "resolve", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
-
 export const openSandboxView = (
   project: Project,
   panes: number,
@@ -435,6 +430,12 @@ export const openSandboxView = (
     retireViewRecord(project.root);
     return NONE;
   };
+  // herdr-core first, its own view (src/herdr-core.ts): a core terminal's HERDR_* can be stale ones.
+  const host = terminalHost();
+  if (host.kind === "core") {
+    retireViewRecord(project.root);
+    return openCoreView(project.root, host.terminal, { kit: KIT, panes, slots: mode === "all" && process.env.SANDCASTLE_HERDR_VIEW !== "0", ref });
+  }
   if (process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1 || !inHerdr1()) return none();
   const logs = join(project.root, ".sandcastle/logs");
   const record = viewRecord(project.root);

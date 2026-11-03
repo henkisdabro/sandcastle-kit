@@ -552,6 +552,8 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
   NOTE.push(`${c.gry}ready = gates green, waits for the landing worker${c.off}`, `${c.gry}time = in state, ~ what it usually has left; once finished, start to end${c.off}`, `${c.gry}red time = past twice the usual${c.off}`);
   if (has("TOKENS")) NOTE.push(`${c.gry}tokens = in, % of it from cache (amber under ${CACHE_AMBER}%), out${c.off}`);
   if (has("CPU/MEM")) NOTE.push(`${c.gry}CPU in cores of ${snapshot.cpus}${c.off}`);
+  // Each sandbox terminal by its herdr-core address: what `hc` and the apps take to find it.
+  if (snapshot.terminals?.length) NOTE.push(`${c.gry}terminals: ${snapshot.terminals.join(", ")}${c.off}`);
   if (snapshot.links) NOTE.push(`${c.gry}${HINT_TEXT[snapshot.clickMod === "ctrl" || snapshot.clickMod === "cmd" ? snapshot.clickMod : "fallback"]}${c.off}`);
   // Cells as wide as their text needs: every item on one row from 130 columns where they fit (halved until they
   // do), else rows of four, or of two where four do not fit. The legend's bars snap onto the table's, so the seam

@@ -123,6 +123,10 @@
 //                    --json prints the facts the Claude Code mod's idle mark reads (the
 //                    version, and this project's update record and pending Upgrading notes;
 //                    works outside a project)
+//   slot <n> --instance <id>
+//                    what a herdr-core sandbox terminal runs (the run starts it, with
+//                    `herdr.panes: "all"`): the sandbox's log as it goes, and its ticket and step
+//                    as the terminal's record; ends once that run is over. Not for typing in
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
 //                    and keys to Herdr's config (shows them and asks first); --remove

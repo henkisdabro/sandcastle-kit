@@ -6,21 +6,23 @@
 //   pnpm test:file test/herdr-core.test.ts
 
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
 import { buildFixture } from "./status-fixture.ts";
 import { needsScript, startSession } from "./status-run.ts";
 import { quietly } from "./quiet.ts";
+import { kitLikeProcess } from "./kit-process.ts";
 
 const stub = mkdtempSync(join(tmpdir(), "sandcastle-hc-stub-"));
 const bin = join(stub, "bin");
 mkdirSync(bin);
 const log = join(stub, "calls.log");
 // `get T`: answers/get-T.json, else not found. `keys T`: answers/keys-T.json, when there, becomes T's next answer
-// (Ctrl-C turning a view into a shell). `run`: answers/run.json, else fails. Every other verb answers `{}`.
+// (Ctrl-C turning a view into a shell). `run`: answers/runs/* one at a time, else answers/run.json, else fails;
+// with answers/name-taken, a named slot fails as hc does. Every other verb answers `{}`.
 writeFileSync(
   join(bin, "hc"),
   `#!/bin/sh
@@ -31,7 +33,9 @@ case "$1" in
        [ -f "$A/get-$2.json" ] && { cat "$A/get-$2.json"; exit 0; }
        echo '{"error":{"kind":"not_found"}}' >&2; exit 3 ;;
   keys) [ -f "$A/keys-$2.json" ] && cp "$A/keys-$2.json" "$A/get-$2.json"; echo '{}' ;;
-  run) [ -f "$A/run.json" ] && { cat "$A/run.json"; exit 0; }; echo '{"error":{"message":"core not running"}}' >&2; exit 1 ;;
+  run) case " $* " in *" --name sc-"*"-slot-"*) [ -f "$A/name-taken" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; } ;; esac
+       f=$(ls "$A/runs" 2>/dev/null | head -n 1); [ -n "$f" ] && { cat "$A/runs/$f"; rm "$A/runs/$f"; exit 0; }
+       [ -f "$A/run.json" ] && { cat "$A/run.json"; exit 0; }; echo '{"error":{"message":"core not running"}}' >&2; exit 1 ;;
   *) echo '{}' ;;
 esac
 `,
@@ -39,9 +43,13 @@ esac
 chmodSync(join(bin, "hc"), 0o755);
 Object.assign(process.env, { PATH: `${bin}${delimiter}${process.env.PATH}`, HC_TERMINAL_ID: "t-mine" });
 
-const { coreRecords, coreViewRecord, openCoreStatus, projectKey, readCoreView, runRecords, statusName, teardown, askingInCore } = await import("../src/herdr-core.ts");
+const { coreRecords, coreViewRecord, openCoreStatus, openCoreView, projectKey, readCoreView, readSlotState, runRecords, slotAddresses, slotLink, slotName, slotStateFile, statusName, teardown, askingInCore } =
+  await import("../src/herdr-core.ts");
 const { askingInPane, openSandboxView, viewRecord } = await import("../src/herdr.ts");
 const { openStatusPane } = await import("../src/run.ts");
+const { readRecord, snapshotOf } = await import("../src/status-snapshot.ts");
+const { palette, renderFrame } = await import("../src/status-render.ts");
+const { ticketRows } = await import("../src/status-rows.ts");
 const { tabAwaitsReport } = await import("../src/live-runs.ts");
 const { clear, record, windowTitle } = await import("../src/osc7501.ts");
 
@@ -49,7 +57,10 @@ const answers = join(stub, "answers");
 const reset = (files: Record<string, unknown> = {}) => {
   rmSync(answers, { recursive: true, force: true });
   mkdirSync(answers);
-  for (const [name, value] of Object.entries(files)) writeFileSync(join(answers, name), JSON.stringify(value));
+  for (const [name, value] of Object.entries(files)) {
+    mkdirSync(dirname(join(answers, name)), { recursive: true });
+    writeFileSync(join(answers, name), JSON.stringify(value));
+  }
   writeFileSync(log, "");
 };
 const calls = () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => line.split("\u001f").slice(0, -1));
@@ -170,13 +181,148 @@ test("teardown ends only the addresses this instance recorded, and keeps the sta
   assert.deepEqual(readCoreView(root), { instance: "i1", status: "t3", slots: [] });
 });
 
+const slotView = (root: string, panes = 2) => openCoreView(root, CALLER, { kit: KIT, instance: "i1", panes, slots: true, ref: (id) => `#${id}` });
+const addresses = (...a: string[]) => Object.fromEntries(a.map((address, i) => [`runs/${i}.json`, { address }]));
+
+test("slots: argv only, the core flags under the status terminal, this run's labels, a name each, and the record", () => {
+  const root = project();
+  reset(addresses("t7", "t8", "t9"));
+  const view = slotView(root);
+  assert.equal(view.status, "t7");
+  view.claim("12", "Add cart");
+  view.claim("14", "Fix it");
+  view.claim("15", "No room");
+  const runs = calls().filter((c) => c[0] === "run");
+  assert.equal(runs.length, 3, "the status terminal and two slots: panes 2");
+  assert.deepEqual(runs[1], [
+    "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--rm", "--parent", "t7", "--name", slotName(root, 0), "--cwd", root,
+    "--label", "herdr.space=sp1", "--label", "herdr.tab=tb1", "--label", `sandcastle.root=${projectKey(root)}`, "--label", "sandcastle.instance=i1",
+    "--", `${KIT}/bin/sandcastle`, "slot", "0", "--instance", "i1",
+  ]);
+  assert.equal(runs[2].at(-3), "1");
+  assert.match(slotName(root, 99), /^[a-z0-9_-]{1,32}$/);
+  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t7", slots: ["t8", "t9"] });
+  assert.deepEqual(readSlotState(slotStateFile(root, 0)), { address: "t8", issue: "12", ref: "#12", title: "Add cart", phase: "setup", state: "working" });
+  assert.equal(readlinkSync(slotLink(root, 0)), "none.log");
+});
+
+test("a slot follows its ticket: the phase's log, the outcome, reuse by the next ticket, closed when released", () => {
+  const root = project();
+  // An earlier run's link and state would replay its log.
+  writeFileSync(join(root, ".sandcastle/logs/core-slot-5.json"), "{}");
+  writeFileSync(join(root, ".sandcastle/logs/herdr-pane-5.log"), "");
+  reset(addresses("t7", "t8", "t9"));
+  const view = slotView(root);
+  assert.ok(!existsSync(join(root, ".sandcastle/logs/core-slot-5.json")) && !existsSync(join(root, ".sandcastle/logs/herdr-pane-5.log")));
+  view.claim("12", "Add cart");
+  view.claim("14", "Fix it");
+  view.phase("12", "implement");
+  assert.equal(readlinkSync(slotLink(root, 0)), "agent-issue-12-impl-12.log");
+  assert.equal(readSlotState(slotStateFile(root, 0))?.phase, "implement");
+  view.finish("12", "green");
+  assert.deepEqual(readSlotState(slotStateFile(root, 0)), { address: "t8", issue: "12", ref: "#12", title: "Add cart", phase: "green", state: "idle" });
+  view.landed("12", false, "conflict");
+  assert.equal(readSlotState(slotStateFile(root, 0))?.state, "blocked", "a landing a person must act on");
+  view.claim("15", "Next");
+  assert.equal(calls().filter((c) => c[0] === "run").length, 3, "the free slot is reused");
+  assert.equal(readSlotState(slotStateFile(root, 0))?.issue, "15");
+  view.landed("12", true, "merged");
+  assert.equal(readSlotState(slotStateFile(root, 0))?.issue, "15", "a later ticket's slot keeps its own");
+  view.finish("14", "crashed");
+  assert.equal(readSlotState(slotStateFile(root, 1))?.state, "blocked");
+  assert.deepEqual(slotAddresses(join(root, ".sandcastle/logs")), ["#15 t8", "#14 t9"]);
+
+  writeFileSync(log, "");
+  view.finish("15", "merged", true);
+  assert.deepEqual(calls(), [["kill", "t8", "--json"], ["rm", "t8", "--json"]]);
+  assert.deepEqual(readCoreView(root)?.slots, ["t9"]);
+  assert.ok(!existsSync(slotStateFile(root, 0)) && !existsSync(slotLink(root, 0)));
+});
+
+test("a slot's name a killed run's slot still holds: this one starts unnamed", () => {
+  const root = project();
+  reset({ ...addresses("t7", "t8"), "name-taken": {} });
+  slotView(root).claim("12", "Add cart");
+  const runs = calls().filter((c) => c[0] === "run");
+  assert.equal(runs.length, 3);
+  assert.ok(runs[1].includes("--name") && !runs[2].includes("--name"));
+  assert.deepEqual(readCoreView(root)?.slots, ["t8"]);
+});
+
+test("slot teardown: this instance's slots only, never a successor's; an autonomy run's next turn ends the last turn's", () => {
+  const root = project();
+  reset(addresses("t7", "t8", "t9"));
+  const view = slotView(root);
+  view.claim("12", "a");
+  view.claim("14", "b");
+  writeFileSync(log, "");
+  teardown(root, "i1");
+  assert.deepEqual(calls(), [["kill", "t8", "--json"], ["rm", "t8", "--json"], ["kill", "t9", "--json"], ["rm", "t9", "--json"]]);
+
+  writeFileSync(coreViewRecord(root), JSON.stringify({ instance: "i2", status: "t7", slots: ["t20"] }));
+  reset();
+  teardown(root, "i1");
+  assert.deepEqual(calls(), [], "a successor's slots are untouched");
+
+  writeFileSync(coreViewRecord(root), JSON.stringify({ instance: "i1", status: "t7", slots: ["t8"] }));
+  reset({ "get-t7.json": shellOf("t7", projectKey(root), ["node", "/k/src/cli.ts", "status"]), ...addresses("t10") });
+  slotView(root);
+  assert.deepEqual(calls().filter((c) => c[0] !== "get"), [["kill", "t8", "--json"], ["rm", "t8", "--json"]]);
+  assert.deepEqual(readCoreView(root)?.slots, []);
+});
+
+test("the status view names a live run's slot terminals by ticket and address, and a finished run's none", async () => {
+  const root = project();
+  const dir = join(root, ".sandcastle");
+  reset(addresses("t7", "t8"));
+  slotView(root).claim("12", "Add cart");
+  const kit = kitLikeProcess();
+  try {
+    const frame = async (finished: boolean) => {
+      writeFileSync(join(dir, "logs/run.json"), JSON.stringify({ pid: kit.pid, startedAt: "2026-11-03T00:00:00Z", ...(finished ? { finishedAt: "2026-11-03T01:00:00Z" } : {}), tickets: { "12": { state: "implement" } } }));
+      const part = await readRecord(dir, process.env, new AbortController().signal);
+      const loading = { status: "loading" } as const;
+      const snapshot = snapshotOf(dir, { record: { status: "current", value: part }, git: loading, docker: loading, queue: { status: "current", value: [] }, pool: loading });
+      return renderFrame(snapshot, ticketRows(snapshot), { cols: 160, rows: 60, showAll: true, colours: palette(false, false) });
+    };
+    assert.match(await frame(false), /terminals: #12 t8/);
+    assert.doesNotMatch(await frame(true), /terminals:/);
+  } finally {
+    kit.kill();
+  }
+});
+
+test("in a core terminal, slots only with panes \"all\" and the view on", () => {
+  const root = project();
+  const p = { root, name: "shop", herdr: {} } as unknown as Project;
+  reset(addresses("t7", "t8"));
+  const view = openSandboxView(p, 2, (id) => `#${id}`, undefined, "all");
+  assert.equal(view.status, "t7");
+  view.claim("12", "a");
+  assert.equal(calls().filter((c) => c[0] === "run").length, 2);
+
+  for (const [mode, env] of [["none", undefined], ["all", "0"]] as const) {
+    const other = project();
+    reset(addresses("t7", "t8"));
+    process.env.SANDCASTLE_HERDR_VIEW = env;
+    try {
+      const off = openSandboxView({ ...p, root: other } as Project, 2, (id) => `#${id}`, undefined, mode);
+      off.claim("12", "a");
+      assert.equal(off.status, undefined, "the caller opens the status view");
+      assert.deepEqual(calls(), [], `${mode}, SANDCASTLE_HERDR_VIEW=${env}: no slot`);
+    } finally {
+      delete process.env.SANDCASTLE_HERDR_VIEW;
+    }
+  }
+});
+
 test("in a core terminal, openStatusPane opens the core view; openSandboxView retires a Herdr 1 record and drives no herdr", () => {
   const root = project();
   // An earlier Herdr 1 run's own tab: the plugin would type the report into it, and register it as awaiting.
   writeFileSync(viewRecord(root), JSON.stringify({ tab: "w1:t2", adopted: false, status: "w1:t2-1", panes: [] }));
   reset({ "run.json": { address: "t7" } });
   const p = { root, name: "shop", herdr: {} } as unknown as Project;
-  const view = openSandboxView(p, 2, (id) => `#${id}`);
+  const view = openSandboxView(p, 2, (id) => `#${id}`, undefined, "none");
   assert.equal(view.status, undefined);
   assert.equal(JSON.parse(readFileSync(viewRecord(root), "utf8")).reported, true);
   assert.equal(tabAwaitsReport(root), false);

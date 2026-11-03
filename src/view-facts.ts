@@ -40,3 +40,8 @@ export const bareShell = (cmdlines: string[]) => {
   const [command, ...flags] = cmdlines[0].trim().split(/\s+/);
   return SHELLS.has(basename(command.replace(/^-/, ""))) && flags.every((f) => SHELL_FLAGS.has(f));
 };
+
+// Phase -> the sandbox.run name its log is written under (burndown.ts).
+// Gates have one too: the orchestrator writes their output as it arrives
+// (burndown.ts), so a pane shows the test run instead of the review's closing lines.
+export const PHASE_LOG = { implement: "impl", resolve: "resolve", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;

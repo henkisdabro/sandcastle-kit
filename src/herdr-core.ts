@@ -14,13 +14,14 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GROUPS, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { real } from "./live-runs.ts";
 import { clear, record, windowTitle } from "./osc7501.ts";
 import type { CoreTerminal } from "./terminal-host.ts";
-import { bareShell, progress, runCounts, showsStatus } from "./view-facts.ts";
+import type { SandboxView } from "./herdr.ts";
+import { bareShell, PHASE_LOG, progress, runCounts, showsStatus } from "./view-facts.ts";
 
 /** One `hc` call: its stdout. Throws as `execFileSync` does; the tests put a stub `hc` on PATH. */
 export type Hc = (args: string[]) => string;
@@ -30,6 +31,7 @@ const hcCli: Hc = (args) => execFileSync("hc", args, { encoding: "utf8", stdio: 
 export const projectKey = (root: string) => createHash("sha1").update(real(root)).digest("hex").slice(0, 10);
 /** Fits hc's names (`[a-z0-9_-]{1,32}`). */
 export const statusName = (root: string) => `sc-${projectKey(root)}-status`;
+export const slotName = (root: string, n: number) => `sc-${projectKey(root)}-slot-${n}`;
 /** Fresh in each process: an autonomy run's turns are one run. */
 export const RUN_INSTANCE = randomUUID().replaceAll("-", "").slice(0, 12);
 
@@ -44,13 +46,13 @@ const readView = (file: string): CoreView | undefined => {
   }
 };
 export const readCoreView = (root: string) => readView(coreViewRecord(root));
-// Whole or not at all: a status view reads it at any moment.
-const writeCoreView = (root: string, view: CoreView) => {
-  const file = coreViewRecord(root);
+// Whole or not at all: a status view and the slots read it at any moment.
+const writeWhole = (file: string, value: unknown) => {
   const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(tmp, JSON.stringify(view) + "\n");
+  writeFileSync(tmp, JSON.stringify(value) + "\n");
   renameSync(tmp, file);
 };
+const writeCoreView = (root: string, view: CoreView) => writeWhole(coreViewRecord(root), view);
 
 type Terminal = { address: string; state?: string; labels?: Record<string, string>; foreground?: { argv?: string[] } };
 const get = (hc: Hc, t: string): Terminal | undefined => {
@@ -262,4 +264,178 @@ export const coreRecords = (dir: string, env: NodeJS.ProcessEnv, terminal: boole
       return clear();
     },
   };
+};
+
+/**
+ * What a slot terminal shows, written by the run and read by `sandcastle slot` (src/core-slot.ts) and the status
+ * view: the ticket (`issue`, kept after its pipeline ends so a landing can still say how it went), its ref and
+ * title, the step or outcome, and the state its record reads. Beside it the slot's log link, `herdr-pane-N.log`, the
+ * name Herdr 1's panes follow, repointed per phase (src/herdr.ts).
+ */
+export type SlotState = { address: string; issue?: string; ref: string; title: string; phase: string; state: "working" | "blocked" | "idle" };
+export const slotStateFile = (root: string, n: number) => join(root, `.sandcastle/logs/core-slot-${n}.json`);
+export const slotLink = (root: string, n: number) => join(root, `.sandcastle/logs/herdr-pane-${n}.log`);
+export const readSlotState = (file: string): SlotState | undefined => {
+  try {
+    const s = JSON.parse(readFileSync(file, "utf8"));
+    return s && typeof s === "object" && typeof s.ref === "string" && typeof s.title === "string" && typeof s.phase === "string" ? (s as SlotState) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const NO_SLOTS: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, refresh() {}, close() {} };
+
+export type CoreViewOptions = CoreStatusOptions & {
+  /** At most this many slots at once; none with `slots` false (`herdr.panes: "none"`, or SANDCASTLE_HERDR_VIEW=0). */
+  panes: number;
+  slots: boolean;
+  ref: (id: string) => string;
+};
+
+/**
+ * The run's view on herdr-core: the status terminal, and with slots on, a terminal per sandbox beside it - as Herdr
+ * 1's sandbox panes (src/herdr.ts), each tailing its ticket's current log, and saying the ticket and its step as the
+ * terminal's record. A slot is `sandcastle slot N`, a terminal of its own the run starts and ends: started `--rm`
+ * (gone once it exits) under the status terminal (`--parent`, so the apps nest it there), and recorded under this
+ * run instance so `teardown` ends it. A slot also ends itself once the run is not live or a later run owns the
+ * project's view: a run killed with no exit handler leaves none behind.
+ */
+export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots: slotsOn, ref, ...opts }: CoreViewOptions): SandboxView => {
+  const { hc = hcCli, instance = RUN_INSTANCE } = opts;
+  // An autonomy run's next turn: what the last turn left open goes, as a Herdr 1 view's panes do.
+  teardown(root, instance, hc);
+  // No slots: the caller opens the status terminal (`openStatusPane`), as for a view that is off.
+  if (!slotsOn || panes < 1) return NO_SLOTS;
+  const status = openCoreStatus(root, caller, opts);
+  if (!status) return NO_SLOTS;
+
+  const logs = join(root, ".sandcastle/logs");
+  // Links and states an earlier run left would replay its logs.
+  for (const f of readdirSync(logs)) if (/^(herdr-pane-\d+\.log|core-slot-\d+\.json)$/.test(f)) rmSync(join(logs, f), { force: true });
+  const key = projectKey(root);
+  const bin = join(opts.kit, "bin/sandcastle");
+  const labels = [
+    ...(["herdr.space", "herdr.tab"] as const).flatMap((k) => (caller.labels[k] ? [`${k}=${caller.labels[k]}`] : [])),
+    `sandcastle.root=${key}`,
+    `sandcastle.instance=${instance}`,
+  ];
+  type Slot = { n: number; address: string; issue?: string; shown?: SlotState; closed?: boolean };
+  const slots: Slot[] = [];
+  let failed = false;
+  // One warning, then none: a broken view must not flood the run's output, and the run goes on without it.
+  const safe = (fn: () => void) => {
+    if (failed) return;
+    try {
+      fn();
+    } catch (error) {
+      failed = true;
+      console.log(`herdr-core sandbox terminals off for this run (${message(error)}).`);
+    }
+  };
+  const record = () => {
+    const view = readCoreView(root);
+    if (view?.instance === instance) writeCoreView(root, { ...view, slots: slots.filter((s) => !s.closed).map((s) => s.address) });
+  };
+  const follow = (n: number, log: string) => {
+    rmSync(slotLink(root, n), { force: true });
+    symlinkSync(log, slotLink(root, n));
+  };
+  const show = (slot: Slot, s: Omit<SlotState, "address">) => {
+    slot.shown = { address: slot.address, ...s };
+    writeWhole(slotStateFile(root, slot.n), slot.shown);
+  };
+  const start = (n: number): Slot => {
+    follow(n, "none.log");
+    const run = (named: boolean) =>
+      JSON.parse(
+        hc([
+          "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--rm", "--parent", status, ...(named ? ["--name", slotName(root, n)] : []), "--cwd", root,
+          ...labels.flatMap((l) => ["--label", l]), "--", bin, "slot", String(n), "--instance", instance,
+        ]),
+      ) as { address?: unknown };
+    let out: { address?: unknown };
+    try {
+      out = run(true);
+    } catch (error) {
+      // A killed run's slot of that name, still ending itself (it looks once a second): this one goes unnamed.
+      if (!/name_taken/.test(message(error))) throw error;
+      out = run(false);
+    }
+    if (typeof out.address !== "string") throw new Error(`hc run gave no address: ${JSON.stringify(out).slice(0, 120)}`);
+    const slot = { n, address: out.address };
+    slots.push(slot);
+    record();
+    return slot;
+  };
+  const slotOf = (issue: string) => slots.find((s) => s.issue === issue);
+
+  return {
+    status,
+    claim(issue, title) {
+      safe(() => {
+        const slot = slots.find((s) => !s.issue && !s.closed) ?? (slots.filter((s) => !s.closed).length < panes ? start(slots.length) : undefined);
+        if (!slot) return;
+        slot.issue = issue;
+        follow(slot.n, "none.log");
+        show(slot, { issue, ref: ref(issue), title, phase: "setup", state: "working" });
+      });
+    },
+    phase(issue, phase) {
+      const slot = slotOf(issue);
+      if (!slot?.shown) return;
+      safe(() => {
+        show(slot, { ...slot.shown!, phase, state: "working" });
+        const name = PHASE_LOG[phase as keyof typeof PHASE_LOG];
+        if (name) follow(slot.n, `agent-issue-${issue}-${name}-${issue}.log`); // setup has no log of its own
+      });
+    },
+    finish(issue, outcome, release) {
+      const slot = slotOf(issue);
+      if (!slot) return;
+      slot.issue = undefined;
+      safe(() => {
+        // A crash needs a person; a red branch is a finished result, read from the report.
+        if (!release) return void (slot.shown && show(slot, { ...slot.shown, phase: outcome, state: outcome === "crashed" ? "blocked" : "idle" }));
+        // Nothing will reuse it: left open, a finished agent's last words read as a stuck sandbox.
+        slot.closed = true;
+        rmSync(slotLink(root, slot.n), { force: true });
+        rmSync(slotStateFile(root, slot.n), { force: true });
+        for (const verb of ["kill", "rm"]) {
+          try {
+            hc([verb, slot.address, "--json"]);
+          } catch {
+            /* gone already (`--rm`) */
+          }
+        }
+        record();
+      });
+    },
+    /** `ok` false: a person has to act - a conflict, a failed landing, a held branch. */
+    landed(issue, ok, outcome) {
+      const slot = slots.find((s) => !s.closed && s.shown?.issue === issue);
+      if (slot) safe(() => show(slot, { ...slot.shown!, phase: outcome, state: ok ? "idle" : "blocked" }));
+    },
+    // The run's own state is the status view's records; the slots go with the run (`teardown`).
+    refresh() {},
+    close() {},
+  };
+};
+
+/** The live slots the record holds, each as the ticket it shows and its address (`#12 t7`), for the status view. */
+export const slotAddresses = (logs: string): string[] => {
+  const view = readView(join(logs, "core-view.json"));
+  if (!view?.slots?.length) return [];
+  const shown: string[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(logs).filter((f) => /^core-slot-\d+\.json$/.test(f)).sort((a, b) => parseInt(a.slice(10)) - parseInt(b.slice(10)));
+  } catch {
+    return [];
+  }
+  for (const f of names) {
+    const s = readSlotState(join(logs, f));
+    if (s?.issue && view.slots.includes(s.address)) shown.push(`${s.ref} ${s.address}`);
+  }
+  return shown;
 };

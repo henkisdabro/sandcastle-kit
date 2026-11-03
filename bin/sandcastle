@@ -27,5 +27,8 @@ fi
 # `process.exit` joins the platform workers, and the process then never ends (nodejs/node#66171).
 # Drop both flags once a Node release that `engines` covers carries the fix. A detached run
 # inherits them through `process.execArgv`.
+# `slot` (a herdr-core sandbox terminal, src/core-slot.ts) likewise: a command line that named src/cli.ts would read
+# as a run to `liveness`.
+if [ "${1:-}" = slot ]; then exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/src/node-check.mjs" "$KIT/src/core-slot.ts" "$@"; fi
 if [ "${1:-}" = herdr ]; then exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/src/node-check.mjs" "$KIT/src/herdr-plugin.ts" "$@"; fi
 exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/src/node-check.mjs" "$KIT/src/cli.ts" "$@"
