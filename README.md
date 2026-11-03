@@ -205,7 +205,7 @@ flowchart LR
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
-| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view (the next run reuses that view wherever you put it), and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](#-works-best-in-herdr). |
+| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view (in Herdr 2, a terminal beside yours; the next run reuses that view wherever you put it), and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](#-works-best-in-herdr). |
 | 🔭 | **A Claude Code mod** | Optional: the session that started the run shows it above the prompt, says when a ticket needs you, and is told when the run ends - see [The Claude Code mod](#-the-claude-code-mod). |
 | 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, ticket triage, starting and closing runs, and updating. |
 
@@ -769,8 +769,8 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   other run live, the autonomy level - and refuses with the same message if one fails. The run's
   output goes to `.sandcastle/logs/run-output.log` (emptied at each start), and the command waits
   up to a minute for the run's status view, then prints `Run started detached (pid <pid>). Status
-  view: pane <id> (tab <id>). Output: ...`. Outside Herdr the status view is `sandcastle status`
-  in a terminal of yours. A run that ends before it is going is reported with the end of its
+  view: pane <id> (tab <id>). Output: ...` (in a Herdr 2 tab, `Status view: terminal <id>`). Outside
+  Herdr the status view is `sandcastle status` in a terminal of yours. A run that ends before it is going is reported with the end of its
   output. A detached run ignores SIGHUP.
 - **Not with autonomy level 1**, which asks whether to run again at the end of each turn and has
   no terminal to ask in: `Autonomy level 1 asks a question ... Use level 2 or 3, or run attached.`
@@ -1030,8 +1030,10 @@ decide it for every teammate's machine.
 ## 🪟 Works best in Herdr
 
 sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https://herdr.dev), the
-terminal multiplexer for coding agents. Start `sandcastle run` in a Herdr pane and the run lays
-out its own view:
+terminal multiplexer for coding agents. Both of its engines work: Herdr 1 (the `herdr` server and
+TUI, and Herdr 1 panes in Herdr UI) as described here, and Herdr 2 (herdr-core, `hc`, under Herdr
+UI or the official Herdr app) as in [Herdr 2](#herdr-2-herdr-core) below. Start `sandcastle run`
+in a Herdr 1 pane and the run lays out its own view:
 
 - 🗂️ **A tab of its own.** A run you start by hand, in a terminal that is the only pane of its
   tab, adopts that tab, names it `sandcastle <project>` and puts the status view beside its own
@@ -1074,6 +1076,38 @@ sandboxes (with `panes: "all"`) 25% in one column of equal rows (status below th
 narrow screen; 2/3 in a tab of its own, and all of it with no sandbox panes).
 The run never moves your focus: it works in the background until you switch to its tab.
 
+### Herdr 2 (herdr-core)
+
+Started in a Herdr 2 tab, by hand or with `--detach`, the run opens its status view as a core
+terminal split into that tab, and prints `Status view: terminal <id>`. It never adopts the tab or
+opens one. The kit talks to herdr-core alone (`hc`), so Herdr UI and the official Herdr app show
+the same thing:
+
+- 🚦 **The run in the sidebar.** The status terminal reports the run as an agent: *working* while
+  it goes, *blocked* while a ticket needs you, during the run or after it (the app raises its own
+  needs-you alert), else *done* at the end (*error* when the run ended early), with the merged share of the run as its progress and
+  the run line as its title.
+- 🧱 **A terminal per sandbox, if you want them.** `herdr: { panes: "all" }` (or
+  `SANDBOX_PANES=all`) opens one terminal per concurrent sandbox, nested under the status view,
+  following its ticket's log and titled with its ticket and step; the status view's note lists
+  them (`terminals: #12 t8`). Each ends with its sandbox, and on its own within seconds of a run
+  killed outright.
+- ♻️ **The same view, run after run.** The status terminal stays when the run ends, showing how it
+  ended, and the next run of the project reuses it by name wherever you moved it - while it shows
+  the status view or a bare shell; a terminal running your own command keeps it, and the run's view
+  opens beside you instead.
+
+What Herdr 1's plugin does has no Herdr 2 counterpart yet: no tab bar line, ticket card or
+Ctrl-click links, and no status view brought back after a restart of the core (the status terminal
+comes back as a shell, and the next run reuses it; `sandcastle status` there shows the run
+meanwhile). `sandcastle herdr ...` in a Herdr 2 tab says so. `SANDCASTLE_HERDR_VIEW=0` opens no
+sandbox terminals; the status view still opens.
+
+A command counts as running in Herdr 2 only when the terminal `HC_TERMINAL_ID` names is one of its
+own ancestors, so a stale variable a Herdr 1 server or a core started from the other inherited is
+never followed; otherwise Herdr 1's own rule applies (`HERDR_ENV=1`). `sandcastle doctor` names
+the host it found.
+
 ### The Herdr plugin
 
 The kit ships a [Herdr plugin](https://herdr.dev/docs/plugins) in `herdr/`. It is optional, and
@@ -1086,10 +1120,11 @@ sandcastle herdr configure --remove   # takes all of it out again
 
 It links the plugin from the kit's own checkout (no build step: a `git pull` of the kit updates
 it), appends one marked block to Herdr's `config.toml`, and reloads Herdr's config. Nothing
-restarts and no pane is touched. `sandcastle setup` and `/sandcastle update` offer it inside
-Herdr, with yes as the default answer, and `sandcastle doctor` says whether it is in place. Nothing
-installs it without asking: it edits your own Herdr config. Outside Herdr none of this exists, and
-nothing asks. What you get:
+restarts and no pane is touched. `sandcastle setup` and `/sandcastle update` offer it wherever
+Herdr 1 is installed - from a Herdr 1 tab, a Herdr 2 tab or a plain terminal - with yes as the
+default answer, and `sandcastle doctor` says whether it is in place. Nothing installs it without
+asking: it edits your own Herdr config. It serves Herdr 1 tabs only. Without Herdr 1 installed none
+of this exists, and nothing asks. What you get:
 
 | | |
 |---|---|
@@ -1367,7 +1402,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
 | `cpus` | the VM's CPUs ÷ concurrency, ÷ `maxGates` for gate-only sandboxes | CPUs each sandbox container may use (`docker run --cpus`), so agents' own test runs - which `maxGates` does not limit - cannot starve each other and the gates beside them. Unset, from the container runtime's CPUs (`docker info`'s NCPU), each at least 2 and never more than the VM has: a **ticket's sandbox** (an agent works in it, and its gates run in it) gets them divided by the run's effective concurrency, raised to the gate share (below) while its gates hold a gates slot and set back after; a **gate-only sandbox** - a landing, the base and verify gates, `sandcastle gates` and `sandcastle land` - gets them divided by `maxGates`, since landings go one at a time and set the run's end (6 on a 12-CPU VM with `maxGates` 2, where a ticket's gets 2 at concurrency 5). A number sets the limit for both kinds (cut to the VM's CPUs, which `docker run` would otherwise refuse; at least 0.01, which `docker run` accepts), `false` sets none. The limit is a CPU time quota, not pinned cores: Node 24's `os.availableParallelism()` returns it, but `nproc`, `os.cpus()` and Python's `os.cpu_count()` still count the VM's CPUs, so give a runner sized from them a worker count in its gate command (`pytest -n <N>`, `make -j<N>`; see [Concurrency](#-concurrency)). The run's start lines say which applies (`Sandbox CPUs: 2 each, 6 while gates run`) |
-| `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
+| `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox (in a Herdr 2 tab, a terminal per sandbox). `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
 | `usagePause` | unset | Plan usage in percent (1 to 100) at which a run pauses itself and resumes after the window's reset; `USAGE_PAUSE` overrides it for one run. Unset: no pause, and a limit an agent hits stops the queue as before. See [Pausing a run](#-pausing-a-run) |
 | `loadPause` | `60` | Machine-wide CPU pressure in percent (1 to 100, PSI `some` `avg60`) at or over which a run holds each gate pass, before it takes its gates slot, until the pressure has stayed under it for 2 minutes; at most 30 minutes per run, then it holds nothing again. `false` turns it off; `LOAD_PAUSE` overrides it for one run (`LOAD_PAUSE=0` is off). Agent passes go on. See [Concurrency](#-concurrency) |
 | `keepWarm` | `true` | Whether the session that started the run keeps its prompt cache warm while the run is live. `false` turns it off for this project; `"keepWarm": false` in your [personal settings](#personal-settings) turns it off everywhere, and beats a project's `true`. Keeping warm costs a little allowance: a refresh request reads the cached conversation at about 0.1x the input price, and it saves the cold restart that re-reads the whole conversation at the full price. The run record's `settings.keepWarm` carries the value (a record from an older kit reads as `true`) |
@@ -1440,8 +1475,8 @@ optional, untracked `.sandcastle/config.local.json` holds your own run settings,
 | `SANDBOX_PANES=none` or `all` | `herdr.panes`, else `none` | Whether a run in Herdr opens a pane per sandbox; over the config key |
 | `SANDCASTLE_DETACH=1` | off | The same as `sandcastle run --detach` |
 | `SANDCASTLE_API_KEY=1` | off | The same as `--api-key`: the yes to billing API credits, for a run (or `preflight`, `lean --measure`) whose sandboxes would spend `ANTHROPIC_API_KEY`. Without it, such a run asks on a terminal and refuses without one ([Run](#-run)) |
-| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the run's Herdr view - its tab, panes and sidebar reports (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
-| `SANDCASTLE_LINKS=0` or `1` | on inside Herdr with the plugin | The status view's links from each ticket to its latest log (through the [Herdr plugin](#the-herdr-plugin), a click on one opens that ticket's card), and its click hint, which names the key for the terminal Herdr runs in (`SANDCASTLE_CLICK_HINT` below); on inside Herdr once `sandcastle herdr configure` has linked the plugin, off outside Herdr, into a pipe and without the plugin |
+| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the run's Herdr view - its tab, panes and sidebar reports, and in a Herdr 2 tab its sandbox terminals (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
+| `SANDCASTLE_LINKS=0` or `1` | on inside Herdr with the plugin | The status view's links from each ticket to its latest log (through the [Herdr plugin](#the-herdr-plugin), a click on one opens that ticket's card), and its click hint, which names the key for the terminal Herdr runs in (`SANDCASTLE_CLICK_HINT` below); on inside Herdr 1 once `sandcastle herdr configure` has linked the plugin, off outside Herdr 1 (a Herdr 2 tab too), into a pipe and without the plugin |
 | `SANDCASTLE_CLICK_HINT=auto`, `ctrl` or `cmd` | `herdr.clickHint`, else `auto` | Which key the status view's hint names for a click on a ticket: `auto` senses the terminal the Herdr client runs in ([The Herdr plugin](#the-herdr-plugin)); over the personal setting. A value it does not know gives the hint that names both |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Separate from the status view's plan lane, which shows the plan's usage from the agents' own readings (see [Run](#-run)) whether or not this is on, with no request and no credential. Before each ticket it prefers the agents' own readings to the endpoint: while the newest reading of the run's Claude agents is under 10 minutes old it decides from that and makes no request (a window whose reset has passed counts as spent no more), and it asks the endpoint only before the first reading and once the newest is older. Applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`): with `ANTHROPIC_API_KEY`, alone or beside the token (Claude Code spends it first), they spend API credits, no plan's usage describes that, and the start line says the guard does not apply instead of reading the host login's unrelated plan. Reads usage with the host's Claude Code login when there is one (macOS: the keychain entry `Claude Code-credentials`, or `Claude Code-credentials-<h>` when `CLAUDE_CONFIG_DIR` is set, with `<h>` the first 8 hex characters of the SHA-256 of its value, a trailing slash removed; Linux: `~/.claude/.credentials.json`, under `CLAUDE_CONFIG_DIR` when that is set), else with `CLAUDE_CODE_OAUTH_TOKEN`. The kit cannot tell whether the login and the token are one account, so the start line and `doctor --verify` say whose plan is read (the login's account, or the token's); a token from another account than the login is guarded by the login's plan, so keep them the same account, or leave the guard off. A `claude setup-token` token is inference-only and the endpoint answers it HTTP 403, so the login is the one that works. The login is read-only, on the host: the kit never refreshes it (a refresh could sign Claude Code out), never writes it anywhere, never puts it in a sandbox's environment or mounts and never prints it. Its access token lasts about 8 hours and Claude Code refreshes it; an expired one is no reading until then. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and it is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows beforehand which credential the guard would use, where it looks for the login (the keychain service's name or the credentials file's path), whose plan that is and the HTTP status the endpoint answers it (never the token), an `info` line that the guard does not apply under an API key, and a `warn` line under a setup token the endpoint refuses with 403 |
