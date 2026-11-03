@@ -609,15 +609,15 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const herdr1 = host.kind === "herdr1";
   if (host.kind === "core") {
     const hc = run("hc", ["--version"]);
-    console.log(`ok   Herdr 2 (herdr-core${hc ? `, ${hc}` : ""}): opens the status view beside this terminal (terminal ${host.terminal.address})`);
+    console.log(`ok   herdr-core${hc ? ` (${hc})` : ""}: opens the status view beside this terminal (terminal ${host.terminal.address})`);
   } else check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
-  // The Herdr 1 plugin is checked wherever Herdr 1 is installed, not only from one of its tabs: setup from a
-  // Herdr 2 tab or a plain terminal offers it too. Outside a Herdr 1 tab it is information, since nothing in
+  // The Herdr TUI plugin is checked wherever Herdr TUI is installed, not only from one of its tabs: setup from a
+  // herdr-core terminal or a plain terminal offers it too. Outside a Herdr TUI tab it is information, since nothing in
   // this terminal needs it. `herdr plugin list` reads Herdr's own files, so a stopped server answers too.
   if (!herdr1 && run("herdr", ["--version"])) {
     const plugin = pluginState();
     const state = plugin.linkedHere && plugin.block ? "linked from this checkout" : plugin.linkedFrom ? `linked from ${plugin.linkedFrom}` : "not linked (`sandcastle herdr configure` links it)";
-    console.log(`info Herdr 1 plugin: ${state} - it serves Herdr 1 tabs, and this is ${host.kind === "core" ? "a Herdr 2 tab" : "not a Herdr tab"}`);
+    console.log(`info Herdr TUI plugin: ${state} - it serves Herdr TUI tabs, and this is ${host.kind === "core" ? "a herdr-core terminal" : "not a Herdr tab"}`);
   }
   if (herdr1) {
     const plugin = pluginState();

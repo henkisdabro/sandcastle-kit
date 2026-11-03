@@ -1,5 +1,5 @@
-// herdr-core beside the rest of the kit: doctor names the host, the Herdr 1 plugin's verbs and tab-bar line leave a
-// core run alone, ticket links stay Herdr 1's, and `--detach` hands its host to the child, which adopts it without
+// herdr-core beside the rest of the kit: doctor names the host, the Herdr TUI plugin's verbs and tab-bar line leave a
+// core run alone, ticket links stay Herdr TUI's, and `--detach` hands its host to the child, which adopts it without
 // probing. A stub `hc` and a stub `herdr` on PATH log every call; no real core, no Herdr, no Docker.
 //
 //   pnpm test:file test/herdr-core-host.test.ts
@@ -71,7 +71,7 @@ test("a snapshot round-trips the host it was written from, and anything else rea
   }
 });
 
-test("doctor in a Herdr 2 tab names herdr-core and hc's version, and the Herdr 1 plugin as information", () => {
+test("doctor in a herdr-core terminal names herdr-core and hc's version, and the Herdr TUI plugin as information", () => {
   const home = join(tmp, "home-doctor");
   mkdirSync(join(home, "config"), { recursive: true });
   const r = runKit(["doctor"], {
@@ -91,12 +91,12 @@ test("doctor in a Herdr 2 tab names herdr-core and hc's version, and the Herdr 1
     },
   });
   const out = r.stdout + r.stderr;
-  assert.match(out, /^ok {3}Herdr 2 \(herdr-core, hc 9\.9\.9\): opens the status view beside this terminal \(terminal t-kid\)$/m, out);
-  assert.match(out, /^info Herdr 1 plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr 1 tabs, and this is a Herdr 2 tab$/m, out);
-  assert.doesNotMatch(out, /Herdr \(optional: opens the status pane automatically\)|Herdr plugin and sidebar rows/, "no Herdr 1 checks in a core tab");
+  assert.match(out, /^ok {3}herdr-core \(hc 9\.9\.9\): opens the status view beside this terminal \(terminal t-kid\)$/m, out);
+  assert.match(out, /^info Herdr TUI plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr TUI tabs, and this is a herdr-core terminal$/m, out);
+  assert.doesNotMatch(out, /Herdr \(optional: opens the status pane automatically\)|Herdr plugin and sidebar rows/, "no Herdr TUI checks in a core tab");
 });
 
-test("doctor outside both hosts checks the Herdr 1 plugin when Herdr 1 is installed, and says nothing of it when not", () => {
+test("doctor outside both hosts checks the Herdr TUI plugin when Herdr TUI is installed, and says nothing of it when not", () => {
   const home = join(tmp, "home-plain");
   mkdirSync(join(home, "config"), { recursive: true });
   const doctor = (path: string[]) => {
@@ -109,17 +109,17 @@ test("doctor outside both hosts checks the Herdr 1 plugin when Herdr 1 is instal
   };
   const installed = doctor([bin, dirname(process.execPath), "/usr/bin", "/bin"]);
   assert.match(installed, /^opt  Herdr \(optional: opens the status pane automatically\)$/m, installed);
-  assert.match(installed, /^info Herdr 1 plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr 1 tabs, and this is not a Herdr tab$/m, installed);
+  assert.match(installed, /^info Herdr TUI plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr TUI tabs, and this is not a Herdr tab$/m, installed);
   const absent = doctor([dirname(process.execPath), "/usr/bin", "/bin"]);
-  assert.doesNotMatch(absent, /Herdr 1 plugin/, absent);
+  assert.doesNotMatch(absent, /Herdr TUI plugin/, absent);
 });
 
-test("the plugin's verbs in a Herdr 2 tab say they are Herdr 1's and exit 0, asking Herdr nothing", () => {
+test("the plugin's verbs in a herdr-core terminal say they are Herdr TUI's and exit 0, asking Herdr nothing", () => {
   for (const verb of ["line", "open", "card", "view", "startup"]) {
     writeFileSync(log, "");
     const r = runKit(["herdr", verb], { encoding: "utf8", script: PLUGIN_ENTRY, env: { ...process.env, HC_TERMINAL_ID: "t-kid" } });
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout, `\`sandcastle herdr ${verb}\` is a Herdr 1 plugin verb, and this is a Herdr 2 (herdr-core) terminal: nothing to do here.\n`);
+    assert.equal(r.stdout, `\`sandcastle herdr ${verb}\` is a Herdr TUI plugin verb, and this is a herdr-core terminal: nothing to do here.\n`);
     assert.deepEqual(herdrCalls(), []);
   }
   // Outside a core terminal the tab bar's line is what it always was: here no run, so nothing.
@@ -128,13 +128,13 @@ test("the plugin's verbs in a Herdr 2 tab say they are Herdr 1's and exit 0, ask
   assert.equal(r.stdout, "");
 });
 
-test("the Herdr 1 tab bar shows a live core run and never acts on it, alive or dead", async () => {
+test("the Herdr TUI tab bar shows a live core run and never acts on it, alive or dead", async () => {
   const root = join(tmp, "core project");
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   const runs = join(tmp, "runs");
   mkdirSync(runs, { recursive: true });
   writeFileSync(runFile(root, runs), root);
-  // The plugin is linked, and the run retired a Herdr 1 run's record before opening its own core one.
+  // The plugin is linked, and the run retired a Herdr TUI run's record before opening its own core one.
   mkdirSync(dirname(PLUGIN_MARKER), { recursive: true });
   writeFileSync(PLUGIN_MARKER, "");
   const herdrView = JSON.stringify({ tab: "w1:t2", status: "w1:p3", adopted: false, reported: true }) + "\n";
@@ -153,13 +153,13 @@ test("the Herdr 1 tab bar shows a live core run and never acts on it, alive or d
   }
   assert.equal(tick(), "", "a dead run drops out");
   assert.ok(!existsSync(runFile(root, runs)), "its file goes");
-  assert.deepEqual(existsSync(awaitingDir(runs)) ? readdirSync(awaitingDir(runs)) : [], [], "and is not parked for a Herdr 1 tab it never had");
+  assert.deepEqual(existsSync(awaitingDir(runs)) ? readdirSync(awaitingDir(runs)) : [], [], "and is not parked for a Herdr TUI tab it never had");
   assert.deepEqual(herdrCalls(), []);
   assert.equal(readFileSync(join(root, ".sandcastle/logs/herdr-view.json"), "utf8"), herdrView);
   assert.equal(readFileSync(join(root, ".sandcastle/logs/core-view.json"), "utf8"), coreView);
 });
 
-test("ticket links stay Herdr 1's: a core terminal with the plugin linked gets none unless SANDCASTLE_LINKS asks", () => {
+test("ticket links stay Herdr TUI's: a core terminal with the plugin linked gets none unless SANDCASTLE_LINKS asks", () => {
   mkdirSync(dirname(PLUGIN_MARKER), { recursive: true });
   writeFileSync(PLUGIN_MARKER, "");
   const dir = join(tmp, "links/.sandcastle");
@@ -170,7 +170,7 @@ test("ticket links stay Herdr 1's: a core terminal with the plugin linked gets n
   // Stale HERDR_ENV beside the core terminal this process runs in.
   assert.equal(links({ HC_TERMINAL_ID: "t-in", HERDR_ENV: "1" }), false);
   assert.equal(links({ HC_TERMINAL_ID: "t-in", HERDR_ENV: "1", SANDCASTLE_LINKS: "1" }), true);
-  assert.equal(links({ HERDR_ENV: "1" }), true, "Herdr 1 as before");
+  assert.equal(links({ HERDR_ENV: "1" }), true, "Herdr TUI as before");
 });
 
 // The stand-in for a detached run: it takes the run lock, says what host it was handed, prints the core status line.

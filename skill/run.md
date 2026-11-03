@@ -103,7 +103,7 @@ This continues SKILL.md: run its "Before every action" first.
    `drain`, or run it attached (below); and it refuses a run that would bill API credits unless
    given `--api-key`, which only the user's own yes to that (step 1) allows. Inside Herdr the run opens a tab of its own holding only
    the status view (or reuses the status pane an earlier run left, wherever it now is), which is the one status view; expect no pane per sandbox unless the config
-   sets `herdr.panes: "all"` (the sidebar carries the run). In a Herdr 2 (herdr-core) tab it opens
+   sets `herdr.panes: "all"` (the sidebar carries the run). In a herdr-core terminal it opens
    the status view as a terminal split into the tab it was started from, and slot terminals only
    with `herdr.panes: "all"`. It prints:
 
@@ -111,7 +111,7 @@ This continues SKILL.md: run its "Before every action" first.
    Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: .sandcastle/logs/run-output.log. ...
    ```
 
-   **Confirm that line.** In a Herdr 2 tab it says `Status view: terminal <id>`, outside Herdr
+   **Confirm that line.** In a herdr-core terminal it says `Status view: terminal <id>`, outside Herdr
    ``Status view: run `sandcastle status` ``. If the
    command refuses, prints `The run ended at once`, or names no status view where Herdr is in use,
    tell the user plainly that there is no run to watch. Otherwise tell them the pid, and the tab
@@ -119,7 +119,7 @@ This continues SKILL.md: run its "Before every action" first.
 
    The kit lays out Herdr itself: never open a pane, tab or terminal for the run or its view. To
    look at one yourself (read the status view's screen, say), the host's own CLI serves its current
-   instructions - `herdr --skill` for Herdr 1, `hc --skill` for herdr-core, and `herdr-app --skill`
+   instructions - `herdr --skill` for Herdr TUI, `hc --skill` for herdr-core, and `herdr-app --skill`
    for what the official Herdr app shows; `sandcastle doctor` names the host. Read the matching one
    before its first command, and leave alone what the run started: it ends its own. When the start was slow (`Status view: not reported within 60 s`, or the
    user says so), read `.sandcastle/logs/run-output.log` once for its `Start took` line and report

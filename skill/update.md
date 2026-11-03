@@ -29,8 +29,8 @@ Declining is not skipping: every step still runs its check, and only the asking 
      (`sandcastle status` in a pane, a Herdr popup) keeps the old code, and the next redraw can show a
      frame the new kit would not draw. Tell the user to close and reopen any they have open; a run's own
      Herdr status pane is replaced by the next run's.
-   - **`herdr-plugin`**: if doctor lists `opt  Herdr plugin and sidebar rows`, or `info Herdr 1 plugin: not linked`
-     (Herdr 1 is installed, and this is a Herdr 2 tab or a plain terminal: the plugin serves Herdr 1's
+   - **`herdr-plugin`**: if doctor lists `opt  Herdr plugin and sidebar rows`, or `info Herdr TUI plugin: not linked`
+     (Herdr TUI is installed, and this is a herdr-core terminal or a plain terminal: the plugin serves Herdr TUI's
      tabs), recommend the kit's Herdr plugin: run
      `sandcastle herdr configure` (outside a terminal it prints what it would add and stops), show
      the user that block, and once they agree run it again with `--yes`. It edits Herdr's own

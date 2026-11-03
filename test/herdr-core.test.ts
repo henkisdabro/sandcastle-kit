@@ -1,4 +1,4 @@
-// herdr-core (Herdr 2): the run's status view as a core terminal (src/herdr-core.ts). A stub `hc` on PATH logs every
+// herdr-core (herdr-core): the run's status view as a core terminal (src/herdr-core.ts). A stub `hc` on PATH logs every
 // call's argv, one word per field, and answers from files the test writes; this process is made a core terminal's
 // (HC_TERMINAL_ID, which the stub answers with this process's parent as its root pid), so the dispatch in
 // `openStatusPane`, `askingInPane` and `openSandboxView` is the real one. No real core, no Herdr.
@@ -316,9 +316,9 @@ test("in a core terminal, slots only with panes \"all\" and the view on", () => 
   }
 });
 
-test("in a core terminal, openStatusPane opens the core view; openSandboxView retires a Herdr 1 record and drives no herdr", () => {
+test("in a core terminal, openStatusPane opens the core view; openSandboxView retires a Herdr TUI record and drives no herdr", () => {
   const root = project();
-  // An earlier Herdr 1 run's own tab: the plugin would type the report into it, and register it as awaiting.
+  // An earlier Herdr TUI run's own tab: the plugin would type the report into it, and register it as awaiting.
   writeFileSync(viewRecord(root), JSON.stringify({ tab: "w1:t2", adopted: false, status: "w1:t2-1", panes: [] }));
   reset({ "run.json": { address: "t7" } });
   const p = { root, name: "shop", herdr: {} } as unknown as Project;
@@ -327,7 +327,7 @@ test("in a core terminal, openStatusPane opens the core view; openSandboxView re
   assert.equal(JSON.parse(readFileSync(viewRecord(root), "utf8")).reported, true);
   assert.equal(tabAwaitsReport(root), false);
   assert.equal(openStatusPane(p), "t7");
-  assert.ok(!calls().some((c) => c.includes("w1:t2") || c.includes("w1:t2-1")), "no id from the Herdr 1 record reaches hc");
+  assert.ok(!calls().some((c) => c.includes("w1:t2") || c.includes("w1:t2-1")), "no id from the Herdr TUI record reaches hc");
   assert.ok(!existsSync(join(root, ".sandcastle/logs/status-pane")));
 });
 
@@ -339,7 +339,7 @@ test("a question in a core terminal: blocked with kind=question while asked, the
   written = "";
   await askingInCore("asks", async () => 1, { isTTY: false, write: (s: string) => (written += s) });
   assert.equal(written, "");
-  // The dispatch: in a core terminal with stdout piped (as under the test runner), no Herdr 1 report and no record.
+  // The dispatch: in a core terminal with stdout piped (as under the test runner), no Herdr TUI report and no record.
   reset();
   assert.equal(await askingInPane("asks", async () => 2), 2);
   assert.deepEqual(verbs(), []);

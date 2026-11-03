@@ -1,4 +1,4 @@
-// OSC 7501, the one way a program tells herdr-core (Herdr 2) what it is doing: written into its own
+// OSC 7501, the one way a program tells herdr-core (herdr-core) what it is doing: written into its own
 // terminal, read by the core and shown by its apps. Pure: the strings only, never where they go.
 //
 // Verified against hc 0.1.17: fields are `:`-separated (a `;` between fields is silently ignored),

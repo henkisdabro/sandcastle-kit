@@ -1,5 +1,5 @@
-// herdr-core (Herdr 2, `hc`): the run's status view as a core terminal split into the caller's tab, and what the
-// view tells the core about the run (OSC 7501). It shares no state with the Herdr 1 view (src/herdr.ts): its own
+// herdr-core (herdr-core, `hc`): the run's status view as a core terminal split into the caller's tab, and what the
+// view tells the core about the run (OSC 7501). It shares no state with the Herdr TUI view (src/herdr.ts): its own
 // record, `.sandcastle/logs/core-view.json`, so nothing that reads `herdr-view.json` - the plugin's tick, the dead
 // tab, the restart, `tabAwaitsReport` - ever acts on a core address.
 //
@@ -78,7 +78,7 @@ const message = (error: unknown) => String((error as { stderr?: string }).stderr
 const opened = new Map<string, { instance: string; hc: Hc }>();
 /**
  * Ends what this run instance started, by the addresses its record holds - never by label, so a successor's terminals
- * are untouched - and forgets them. The status terminal stays (`--keep`), as on Herdr 1: it shows how the run ended,
+ * are untouched - and forgets them. The status terminal stays (`--keep`), as on Herdr TUI: it shows how the run ended,
  * and the next run reuses it. A record a later instance wrote holds nothing of this one's.
  */
 export const teardown = (root: string, instance = RUN_INSTANCE, hc: Hc = hcCli) => {
@@ -270,7 +270,7 @@ export const coreRecords = (dir: string, env: NodeJS.ProcessEnv, terminal: boole
  * What a slot terminal shows, written by the run and read by `sandcastle slot` (src/core-slot.ts) and the status
  * view: the ticket (`issue`, kept after its pipeline ends so a landing can still say how it went), its ref and
  * title, the step or outcome, and the state its record reads. Beside it the slot's log link, `herdr-pane-N.log`, the
- * name Herdr 1's panes follow, repointed per phase (src/herdr.ts).
+ * name Herdr TUI's panes follow, repointed per phase (src/herdr.ts).
  */
 export type SlotState = { address: string; issue?: string; ref: string; title: string; phase: string; state: "working" | "blocked" | "idle" };
 export const slotStateFile = (root: string, n: number) => join(root, `.sandcastle/logs/core-slot-${n}.json`);
@@ -303,7 +303,7 @@ export type CoreViewOptions = CoreStatusOptions & {
  */
 export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots: slotsOn, ref, ...opts }: CoreViewOptions): SandboxView => {
   const { hc = hcCli, instance = RUN_INSTANCE } = opts;
-  // An autonomy run's next turn: what the last turn left open goes, as a Herdr 1 view's panes do.
+  // An autonomy run's next turn: what the last turn left open goes, as a Herdr TUI view's panes do.
   teardown(root, instance, hc);
   // No slots: the caller opens the status terminal (`openStatusPane`), as for a view that is off.
   if (!slotsOn || panes < 1) return NO_SLOTS;

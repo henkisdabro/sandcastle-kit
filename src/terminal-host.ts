@@ -1,4 +1,4 @@
-// Which terminal host a command runs in: herdr-core (`hc`, Herdr 2), Herdr 1 (the `herdr` server), or
+// Which terminal host a command runs in: herdr-core (`hc`), Herdr TUI (the `herdr` server), or
 // neither. Asked lazily, by the commands that open or report into a host, never at import: the
 // Claude Code mod runs `queue --json` and `--version --json` every few seconds and parses their stdout.
 
@@ -17,10 +17,10 @@ export type HostProbe = {
 
 /**
  * Herdr-core wins only when the terminal `HC_TERMINAL_ID` names is really ours: its root process is one of
- * this process's ancestors. Either host's variables can be stale - a core first started from a Herdr 1
- * pane hands every terminal `HERDR_*`, and a Herdr 1 server started from a core terminal hands its panes
+ * this process's ancestors. Either host's variables can be stale - a core first started from a Herdr TUI
+ * pane hands every terminal `HERDR_*`, and a Herdr TUI server started from a core terminal hands its panes
  * `HC_TERMINAL_ID` - and a stale id can still name a live terminal, so "hc answers" alone proves nothing.
- * Failing that, Herdr 1 by the rule the kit always used.
+ * Failing that, Herdr TUI by the rule the kit always used.
  */
 export const detectHost = (env: NodeJS.ProcessEnv, probe: HostProbe): TerminalHost => {
   const id = env.HC_TERMINAL_ID;
@@ -78,7 +78,7 @@ export const PROBE: HostProbe = { core: hcGet, ancestors: psAncestors };
 
 /**
  * The host a `--detach` parent found, handed to its child: the child is started in a session of its own and
- * outlives the parent, so its ancestors are no longer the core terminal's and its own probe would say Herdr 1
+ * outlives the parent, so its ancestors are no longer the core terminal's and its own probe would say Herdr TUI
  * or none. The child takes this once and never probes; anything it starts inherits nothing (`adoptHost`).
  */
 export const HOST_ENV = "SANDCASTLE_TERMINAL_HOST";
@@ -109,8 +109,8 @@ export const adoptHost = (take: boolean, env: NodeJS.ProcessEnv = process.env): 
   if (take) adopted = parseHost(text);
 };
 
-/** The host this process runs in. With no `HC_TERMINAL_ID` nothing is spawned: Herdr 1 and plain terminals decide on `HERDR_ENV` alone, as before. */
+/** The host this process runs in. With no `HC_TERMINAL_ID` nothing is spawned: Herdr TUI and plain terminals decide on `HERDR_ENV` alone, as before. */
 export const terminalHost = (env: NodeJS.ProcessEnv = process.env, probe: HostProbe = PROBE): TerminalHost => adopted ?? detectHost(env, probe);
 
-/** Herdr 1, the `herdr` server: what `IN_HERDR` meant before herdr-core, minus a core terminal's stale `HERDR_*`. */
+/** Herdr TUI, the `herdr` server: what `IN_HERDR` meant before herdr-core, minus a core terminal's stale `HERDR_*`. */
 export const inHerdr1 = (env: NodeJS.ProcessEnv = process.env, probe: HostProbe = PROBE): boolean => terminalHost(env, probe).kind === "herdr1";

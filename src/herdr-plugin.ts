@@ -814,11 +814,11 @@ export const herdrCommand = async (args: string[]) => {
   const [verb, ...rest] = args;
   // Before any verb: `configure --help` must not edit Herdr's config.
   if (wantsHelp(args)) return console.log(helpFor("herdr"));
-  // The plugin's verbs answer Herdr 1 (its tab bar, actions and popups), which runs them from its own
-  // daemonised server, never under a core terminal. Typed in a Herdr 2 tab they have nothing to act on;
-  // `configure` still links the plugin for Herdr 1's tabs.
+  // The plugin's verbs answer Herdr TUI (its tab bar, actions and popups), which runs them from its own
+  // daemonised server, never under a core terminal. Typed in a herdr-core terminal they have nothing to act on;
+  // `configure` still links the plugin for Herdr TUI's tabs.
   if (verb && verb !== "configure" && terminalHost().kind === "core") {
-    return console.log(`\`sandcastle herdr ${verb}\` is a Herdr 1 plugin verb, and this is a Herdr 2 (herdr-core) terminal: nothing to do here.`);
+    return console.log(`\`sandcastle herdr ${verb}\` is a Herdr TUI plugin verb, and this is a herdr-core terminal: nothing to do here.`);
   }
   switch (verb) {
     case "configure":

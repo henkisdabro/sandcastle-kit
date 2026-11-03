@@ -1,5 +1,5 @@
 // Which terminal host a command runs in (src/terminal-host.ts): herdr-core only when the terminal
-// HC_TERMINAL_ID names is an ancestor of this process, else Herdr 1 by HERDR_ENV as always, else none.
+// HC_TERMINAL_ID names is an ancestor of this process, else Herdr TUI by HERDR_ENV as always, else none.
 // Either host's variables can be stale, in both directions. With no HC_TERMINAL_ID nothing is probed,
 // and the commands the Claude Code mod parses never probe at all.
 
@@ -33,7 +33,7 @@ test("a core terminal that is an ancestor is core, and wins over stale HERDR_*",
   assert.equal(inHerdr1({ HC_TERMINAL_ID: "t1", HERDR_ENV: "1" }, p), false);
 });
 
-test("a stale HC_TERMINAL_ID naming a live terminal that is not an ancestor leaves Herdr 1 as it was", () => {
+test("a stale HC_TERMINAL_ID naming a live terminal that is not an ancestor leaves Herdr TUI as it was", () => {
   const { p } = probe(999);
   assert.deepEqual(detectHost({ HC_TERMINAL_ID: "t1", HERDR_ENV: "1" }, p), { kind: "herdr1" });
   assert.deepEqual(detectHost({ HC_TERMINAL_ID: "t1" }, p), { kind: "none" });

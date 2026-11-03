@@ -14,7 +14,7 @@
 //    Linux, no daemon), and a `docker stop` there would reach a live run's containers. Neither a Linux sandbox (no
 //    `docker`) nor CI would show it. A test that needs a `docker` of its own puts it ahead (test/docker-stub.ts), and
 //    one that needs none at all points `PATH` elsewhere. Beside it, a `herdr` and an `hc` that are not installed
-//    (`exit 127`): doctor and setup check the Herdr 1 plugin wherever `herdr` runs, and a developer's real one would
+//    (`exit 127`): doctor and setup check the Herdr TUI plugin wherever `herdr` runs, and a developer's real one would
 //    answer from their own Herdr's files and server; a test of either host puts its own stub ahead.
 //  - No git identity is inherited: `GIT_CONFIG_GLOBAL` is an empty file, `GIT_CONFIG_NOSYSTEM` is 1, the author and
 //    committer variables are removed and `user.useConfigOnly=true` is appended to the `GIT_CONFIG_*` pairs (any pair
@@ -40,7 +40,7 @@
 //    reading, so no test's gate pass, judgement or hold depends on the machine's real CPU load (a loaded developer
 //    machine, full-check and the macOS CI leg would flake otherwise). A test that wants readings injects them.
 //  - Names the code reads as a setting or a credential are removed: HERDR_*, HC_* (herdr-core's, so a test run
-//    from a Herdr 2 tab never probes the developer's core), TMUX*, SANDCASTLE_* (but not
+//    from a herdr-core terminal never probes the developer's core), TMUX*, SANDCASTLE_* (but not
 //    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests and which are the tests' own switches, such as
 //    SANDCASTLE_TEST_NOW, the fixture clock: test/status-clock.ts) and the names in `SCRUBBED` below. A test that
 //    needs one sets it itself. test/hermetic-env.test.ts fails when `src/` reads a name that is neither

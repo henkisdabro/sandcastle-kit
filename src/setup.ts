@@ -237,10 +237,10 @@ export const setup = async (repoRoot?: string) => {
     if (Object.keys(set).length) console.log(`done credentials saved to ${envFile}`);
   }
 
-  // 3. Wherever Herdr 1 is installed, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
+  // 3. Wherever Herdr TUI is installed, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
   // config, so `configure` shows what it adds before asking; a config that already sets the
-  // same things is reported, not touched, and setup goes on. Not only from a Herdr 1 tab: setup run from a
-  // Herdr 2 tab or a plain terminal is still where a person is offered it.
+  // same things is reported, not touched, and setup goes on. Not only from a Herdr TUI tab: setup run from a
+  // herdr-core terminal or a plain terminal is still where a person is offered it.
   const inside = terminalHost().kind === "herdr1";
   if (inside || spawnSync("herdr", ["--version"]).status === 0) {
     const plugin = pluginState();
@@ -248,7 +248,7 @@ export const setup = async (repoRoot?: string) => {
       console.log(
         inside
           ? "\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar."
-          : "\nHerdr 1 is installed: in its tabs, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar.",
+          : "\nHerdr TUI is installed: in its tabs, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar.",
       );
       try {
         await configure(false, false, true);

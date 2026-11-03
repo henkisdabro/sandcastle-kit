@@ -1,4 +1,4 @@
-// What both terminal hosts' views share (src/herdr.ts for Herdr 1, src/herdr-core.ts for herdr-core): a run's
+// What both terminal hosts' views share (src/herdr.ts for Herdr TUI, src/herdr-core.ts for herdr-core): a run's
 // tickets counted in the status view's groups, the line that says so, and what a terminal's foreground command
 // is. Pure and light: the status view imports it through src/herdr-core.ts, and must not load the run's modules.
 

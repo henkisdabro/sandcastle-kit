@@ -56,7 +56,7 @@ test("a test sees the machine's CPU pressure switched off, whatever the shell ha
   assert.equal(process.env.SANDCASTLE_TEST_MACHINE_CPU, "none");
 });
 
-test("a test never reaches the machine's own Herdr 1 or herdr-core: `herdr` and `hc` are not installed", () => {
+test("a test never reaches the machine's own Herdr TUI or herdr-core: `herdr` and `hc` are not installed", () => {
   for (const name of ["herdr", "hc"]) {
     const r = spawnSync(name, ["--version"], { encoding: "utf8" });
     assert.equal(r.status, 127, name);

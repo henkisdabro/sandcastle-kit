@@ -1,5 +1,5 @@
 // `sandcastle slot <n> --instance <id>`: what a herdr-core slot terminal runs (src/herdr-core.ts, `openCoreView`).
-// It tails the slot's log link, `herdr-pane-N.log`, which the run repoints per phase, as a Herdr 1 sandbox pane does,
+// It tails the slot's log link, `herdr-pane-N.log`, which the run repoints per phase, as a Herdr TUI sandbox pane does,
 // and tells the core which ticket and step it shows: the terminal's root record (OSC 7501) and title (OSC 2), written
 // when the run's slot state changes. Its own entry (`bin/sandcastle` runs it alone, as `herdr`), so its command line
 // never names `src/cli.ts`, which `liveness` reads as a run.

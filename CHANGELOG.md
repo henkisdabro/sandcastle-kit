@@ -11,22 +11,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
-- **A run started in a Herdr 2 (herdr-core) tab now opens its status view there**, as a terminal
-  split into that tab, where it opened none before (or, with a Herdr 1 tab's variables left in the
-  environment, acted on Herdr 1). Nothing to change in a project; `sandcastle doctor` names the
-  host it finds. Where Herdr 1 is installed, setup and `/sandcastle update` now offer its plugin
-  from any terminal, not only from a Herdr 1 tab.
+- **A run started in a herdr-core terminal now opens its status view there**, as a terminal
+  split into that tab, where it opened none before (or, with a Herdr TUI tab's variables left in the
+  environment, acted on Herdr TUI). Nothing to change in a project; `sandcastle doctor` names the
+  host it finds. Where Herdr TUI is installed, setup and `/sandcastle update` now offer its plugin
+  from any terminal, not only from a Herdr TUI tab.
 
 ### Added
 
-- **Herdr 2 (herdr-core, `hc`) beside Herdr 1.** In a Herdr 2 tab, under Herdr UI or the official
+- **herdr-core (`hc`) beside Herdr TUI.** In a herdr-core terminal, under Herdr UI or the official
   Herdr app, the status view opens as a terminal beside yours and reports the run to the sidebar:
   working, blocked while a ticket needs you (the app's own needs-you alert), done or ended early,
   with its progress and title. `herdr.panes: "all"` opens a terminal per sandbox, nested under the
   view, each ending itself once its run is gone, even a run killed outright. The next run reuses
-  the status terminal wherever you moved it. A terminal counts as Herdr 2 only when it is one of the
-  command's own ancestors, so stale variables from either host are never followed. Herdr 1 is
-  unchanged; its plugin's verbs, typed in a Herdr 2 tab, say they are Herdr 1's. A `--detach` run
+  the status terminal wherever you moved it. A terminal counts as herdr-core only when it is one of the
+  command's own ancestors, so stale variables from either host are never followed. Herdr TUI is
+  unchanged; its plugin's verbs, typed in a herdr-core terminal, say they are Herdr TUI's. A `--detach` run
   takes its starter's host with it.
 
 ### Changed

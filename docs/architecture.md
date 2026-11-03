@@ -1075,24 +1075,24 @@ exit). `restartStatusView`, `tellDeadTab` and `registerRun` all ignore a `report
 
 ## `src/terminal-host.ts`
 
-Which terminal host a command runs in: `core` (herdr-core, `hc`, Herdr 2), `herdr1` (the `herdr`
+Which terminal host a command runs in: `core` (herdr-core, `hc`), `herdr1` (the `herdr`
 server) or `none`.
 Asked lazily, by the commands that open or report into a host (`run`, `status`, `doctor`, `setup`,
 the plugin's verbs), never at import: the Claude Code mod runs `queue --json` and
 `--version --json` every few seconds and parses their stdout.
 Core wins only when `hc get $HC_TERMINAL_ID` answers within 2 s with a live terminal whose root
 `pid` is one of this process's ancestors (one `ps -A` walked here): either host's variables can be
-stale both ways - a core started from a Herdr 1 pane hands every terminal `HERDR_*`, a Herdr 1
+stale both ways - a core started from a Herdr TUI pane hands every terminal `HERDR_*`, a Herdr TUI
 server started from a core terminal hands its panes `HC_TERMINAL_ID` - and a stale id can still
 name a live terminal.
-Failing that, Herdr 1 by the rule the kit always had (`HERDR_ENV=1`), so a Herdr 1 pane with a
-stale core id stays Herdr 1.
+Failing that, Herdr TUI by the rule the kit always had (`HERDR_ENV=1`), so a Herdr TUI pane with a
+stale core id stays Herdr TUI.
 With no `HC_TERMINAL_ID` nothing is spawned.
-Every Herdr 1 check in `src/` goes through `inHerdr1()`; Herdr 1 code gains no host branch of its
+Every Herdr TUI check in `src/` goes through `inHerdr1()`; Herdr TUI code gains no host branch of its
 own, and its socket and pane reads stay dynamic (`test/herdr-dead-tab-socket.test.ts` changes the
 socket between calls).
-The Herdr 1 server is daemonised (its parent is pid 1), so a command its plugin runs never passes
-the ancestor check: the plugin's verbs refuse only when typed in a Herdr 2 tab.
+The Herdr TUI server is daemonised (its parent is pid 1), so a command its plugin runs never passes
+the ancestor check: the plugin's verbs refuse only when typed in a herdr-core terminal.
 
 A `--detach` child starts in a session of its own and outlives its parent, so its ancestors are no
 longer the core terminal's.
@@ -1110,9 +1110,9 @@ teardown.
 It shares no state with `src/herdr.ts`.
 Its record is `.sandcastle/logs/core-view.json` (`instance`, `status`, `slots`), so nothing that
 reads `herdr-view.json` - the plugin's tick, `tellDeadTab`, `restartStatusView`,
-`tabAwaitsReport` - ever acts on a core address; a core run retires a Herdr 1 run's
+`tabAwaitsReport` - ever acts on a core address; a core run retires a Herdr TUI run's
 `herdr-view.json` (`retireViewRecord`) and never `hc kill`s an id from it.
-The live-runs registry is unchanged, so the Herdr 1 tab bar lists a core run like any other and
+The live-runs registry is unchanged, so the Herdr TUI tab bar lists a core run like any other and
 finds no tab of it to act on (`test/herdr-core-host.test.ts`).
 
 The seam is the one `burndown()` already calls: `openStatusPane` (`src/run.ts`), `openSandboxView`
@@ -1134,12 +1134,12 @@ command with every word quoted; a person's program in it keeps the name, and the
 unnamed.
 Slots (`herdr.panes: "all"` and not `SANDCASTLE_HERDR_VIEW=0`) are `--rm --parent <status>`,
 running `sandcastle slot N --instance <id>`; their numbers are not reused within a run, and each
-slot's state is `.sandcastle/logs/core-slot-N.json`, its log link `herdr-pane-N.log` as on Herdr 1.
+slot's state is `.sandcastle/logs/core-slot-N.json`, its log link `herdr-pane-N.log` as on Herdr TUI.
 Teardown at exit kills and removes the slots this instance's record holds, never by label: a
 successor that took the lock as this run exited (the lock's exit handler runs first) owns what it
 started.
 A start that fails part-way ends what it started; a run with no status view refuses to start, as
-on Herdr 1.
+on Herdr TUI.
 
 What the status view tells the core (`coreRecords`, `runRecords`): the terminal's root record is
 `working`, `blocked` with `kind=question` while any ticket needs a person, `done` once the record
@@ -1153,8 +1153,8 @@ write none, and the view clears its records on exit.
 `askingInCore` marks a person's own core terminal `blocked` with `kind=question` while a question
 waits (a terminal on stdout only) and clears it after.
 
-The restart gap: none of Herdr 1's `restartStatusView`, `tellDeadTab` or `markQuit` runs on core
-(their driver is the Herdr 1 plugin's tick).
+The restart gap: none of Herdr TUI's `restartStatusView`, `tellDeadTab` or `markQuit` runs on core
+(their driver is the Herdr TUI plugin's tick).
 A status terminal lost to a core restart comes back as a shell, which the next run reuses; nothing
 types into a shell it merely finds, except at a run's start by name and recorded instance.
 
@@ -1199,7 +1199,7 @@ into every sandbox as it opens) and `status.sh` and `src/status-*.ts` (each time
 starts) - so a pull under it gives its later tickets newer templates than its own code expects; a
 run does not snapshot them, and `skill/update.md` checks for live runs before its pull.
 `PLUGIN_MARKER` (`herdr-plugin-linked`, beside it) is left by `sandcastle herdr configure` and
-removed by `--remove`; the status view decides once at start-up whether it is inside Herdr 1 (`inHerdr1`: never in a Herdr 2 tab) and on a
+removed by `--remove`; the status view decides once at start-up whether it is inside Herdr TUI (`inHerdr1`: never in a herdr-core terminal) and on a
 terminal, and re-reads the marker on every redraw (a file test, at the loop's top level) to decide
 whether to emit ticket links and the click hint, as a Ctrl-click does nothing without the plugin: a
 view opened before `configure` shows them within one redraw of the link.
