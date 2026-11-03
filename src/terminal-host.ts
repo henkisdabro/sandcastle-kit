@@ -76,8 +76,41 @@ const psAncestors = (): number[] => {
 
 export const PROBE: HostProbe = { core: hcGet, ancestors: psAncestors };
 
+/**
+ * The host a `--detach` parent found, handed to its child: the child is started in a session of its own and
+ * outlives the parent, so its ancestors are no longer the core terminal's and its own probe would say Herdr 1
+ * or none. The child takes this once and never probes; anything it starts inherits nothing (`adoptHost`).
+ */
+export const HOST_ENV = "SANDCASTLE_TERMINAL_HOST";
+let adopted: TerminalHost | undefined;
+
+/** A snapshot read back, or undefined when it is not one `JSON.stringify(terminalHost())` wrote. */
+export const parseHost = (text: string | undefined): TerminalHost | undefined => {
+  try {
+    const h = JSON.parse(text ?? "") as { kind?: unknown; terminal?: { address?: unknown; pid?: unknown; labels?: unknown } };
+    if (h.kind === "herdr1" || h.kind === "none") return { kind: h.kind };
+    const t = h.terminal;
+    if (h.kind !== "core" || typeof t?.address !== "string" || !Number.isInteger(t.pid) || !t.labels || typeof t.labels !== "object") return undefined;
+    const labels = Object.fromEntries(Object.entries(t.labels).filter(([, v]) => typeof v === "string")) as Record<string, string>;
+    return { kind: "core", terminal: { address: t.address, pid: t.pid as number, labels } };
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Removes the snapshot from `env` whatever it holds, so no process the kit starts inherits it, and in the
+ * detached child (`take`) keeps a valid one as this process's host. A snapshot that does not parse is
+ * dropped: the child detects for itself, as before the snapshot.
+ */
+export const adoptHost = (take: boolean, env: NodeJS.ProcessEnv = process.env): void => {
+  const text = env[HOST_ENV];
+  delete env[HOST_ENV];
+  if (take) adopted = parseHost(text);
+};
+
 /** The host this process runs in. With no `HC_TERMINAL_ID` nothing is spawned: Herdr 1 and plain terminals decide on `HERDR_ENV` alone, as before. */
-export const terminalHost = (env: NodeJS.ProcessEnv = process.env, probe: HostProbe = PROBE): TerminalHost => detectHost(env, probe);
+export const terminalHost = (env: NodeJS.ProcessEnv = process.env, probe: HostProbe = PROBE): TerminalHost => adopted ?? detectHost(env, probe);
 
 /** Herdr 1, the `herdr` server: what `IN_HERDR` meant before herdr-core, minus a core terminal's stale `HERDR_*`. */
 export const inHerdr1 = (env: NodeJS.ProcessEnv = process.env, probe: HostProbe = PROBE): boolean => terminalHost(env, probe).kind === "herdr1";

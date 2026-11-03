@@ -29,6 +29,7 @@ import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { readTickets, type TicketRecord, type TicketState, WORDS } from "../mod/hooks/run-record.ts";
 import type { TicketPass } from "./report.ts";
 import { KIT } from "./sandbox.ts";
+import { terminalHost } from "./terminal-host.ts";
 
 export const PLUGIN_ID = "sandcastle-kit";
 export const PLUGIN_DIR = join(KIT, "herdr");
@@ -813,6 +814,12 @@ export const herdrCommand = async (args: string[]) => {
   const [verb, ...rest] = args;
   // Before any verb: `configure --help` must not edit Herdr's config.
   if (wantsHelp(args)) return console.log(helpFor("herdr"));
+  // The plugin's verbs answer Herdr 1 (its tab bar, actions and popups), which runs them from its own
+  // daemonised server, never under a core terminal. Typed in a Herdr 2 tab they have nothing to act on;
+  // `configure` still links the plugin for Herdr 1's tabs.
+  if (verb && verb !== "configure" && terminalHost().kind === "core") {
+    return console.log(`\`sandcastle herdr ${verb}\` is a Herdr 1 plugin verb, and this is a Herdr 2 (herdr-core) terminal: nothing to do here.`);
+  }
   switch (verb) {
     case "configure":
       return configure(rest.includes("--remove"), rest.includes("--yes"));

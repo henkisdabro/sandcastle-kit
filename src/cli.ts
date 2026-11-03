@@ -169,7 +169,7 @@ import { resolveVersions, toolsFloorLine, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor, requireRepoAccess } from "./doctor.ts";
 import { askingInPane, sandboxPanes } from "./herdr.ts";
-import { inHerdr1 } from "./terminal-host.ts";
+import { adoptHost, inHerdr1, terminalHost } from "./terminal-host.ts";
 import { HELP, helpFor, wantsHelp } from "./help.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError, wasReported } from "./errors.ts";
@@ -285,6 +285,7 @@ try {
       const child = process.env.SANDCASTLE_DETACHED === "1";
       let reading: { text: string | undefined } | undefined = child && process.env[DOCKER_INFO_ENV] ? { text: process.env[DOCKER_INFO_ENV] } : undefined;
       delete process.env[DOCKER_INFO_ENV];
+      adoptHost(child);
       const docker = () => (reading ??= { text: readDockerInfo() }).text;
       clock.step("docker info");
       const runtime = child ? undefined : runtimeProblemNow(docker);
@@ -318,7 +319,8 @@ try {
         }
         // A detached run has no terminal to ask on: only the opt-in says yes, given here and passed on.
         await confirmApiKey(projectApiKeySpend(project), "This run", { terminal: false });
-        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: inHerdr1(), dockerInfo: reading?.text });
+        const host = terminalHost();
+        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: host.kind !== "none", host: JSON.stringify(host), dockerInfo: reading?.text });
         // The child prints what its start took into its log, which nobody reads at once: this terminal shows it too.
         if (started.code === 0) for (const line of tookLines(baseline)) console.log(line);
         for (const line of started.lines) console.log(line);

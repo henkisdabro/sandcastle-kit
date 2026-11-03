@@ -13,7 +13,7 @@ import { parseEnv } from "node:util";
 import { claudeCode, doctor, probeGithubToken, run } from "./doctor.ts";
 import { OperatorError } from "./errors.ts";
 import { configure, pluginState } from "./herdr-plugin.ts";
-import { inHerdr1 } from "./terminal-host.ts";
+import { terminalHost } from "./terminal-host.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 import { sizePointerNow } from "./size.ts";
 
@@ -239,11 +239,17 @@ export const setup = async (repoRoot?: string) => {
 
   // 3. Inside Herdr, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
   // config, so `configure` shows what it adds before asking; a config that already sets the
-  // same things is reported, not touched, and setup goes on.
-  if (inHerdr1()) {
+  // same things is reported, not touched, and setup goes on. From a Herdr 2 tab too, when Herdr 1
+  // is installed: the plugin serves its tabs, and setup is where a person is offered it.
+  const host = terminalHost().kind;
+  if (host === "herdr1" || (host === "core" && spawnSync("herdr", ["--version"]).status === 0)) {
     const plugin = pluginState();
     if (!plugin.linkedHere || !plugin.block) {
-      console.log("\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar.");
+      console.log(
+        host === "herdr1"
+          ? "\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar."
+          : "\nHerdr 1 is installed: in its tabs, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar (this Herdr 2 tab does not need it).",
+      );
       try {
         await configure(false, false, true);
       } catch (error) {

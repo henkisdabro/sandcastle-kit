@@ -13,7 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { liveRuns, pluginState } from "./herdr-plugin.ts";
-import { inHerdr1 } from "./terminal-host.ts";
+import { terminalHost } from "./terminal-host.ts";
 import type { Probe } from "../mod/hooks/run-live.ts";
 import { RUNS_DIR, tabAwaitsReport } from "./live-runs.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
@@ -605,8 +605,19 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const pointer = pointToSize && !poolWarns.length ? sizePointerNow() : undefined;
   if (pointer) console.log(`info ${pointer}`);
   for (const line of liveRunLines()) console.log(line);
-  const herdr1 = inHerdr1();
-  check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
+  const host = terminalHost();
+  const herdr1 = host.kind === "herdr1";
+  if (host.kind === "core") {
+    const hc = run("hc", ["--version"]);
+    console.log(`ok   Herdr 2 (herdr-core${hc ? `, ${hc}` : ""}): opens the status view beside this terminal (terminal ${host.terminal.address})`);
+  } else check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
+  // The Herdr 1 plugin serves Herdr 1 tabs only: from a Herdr 2 tab it is still checked when Herdr 1 is
+  // installed, as information, since nothing in this tab needs it.
+  if (host.kind === "core" && run("herdr", ["--version"])) {
+    const plugin = pluginState();
+    const state = plugin.linkedHere && plugin.block ? "linked from this checkout" : plugin.linkedFrom ? `linked from ${plugin.linkedFrom}` : "not linked (`sandcastle herdr configure` links it)";
+    console.log(`info Herdr 1 plugin: ${state} - it serves Herdr 1 tabs, not this Herdr 2 one`);
+  }
   if (herdr1) {
     const plugin = pluginState();
     check(
