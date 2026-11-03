@@ -13,6 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { liveRuns, pluginState } from "./herdr-plugin.ts";
+import { inHerdr1 } from "./terminal-host.ts";
 import type { Probe } from "../mod/hooks/run-live.ts";
 import { RUNS_DIR, tabAwaitsReport } from "./live-runs.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
@@ -604,8 +605,9 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const pointer = pointToSize && !poolWarns.length ? sizePointerNow() : undefined;
   if (pointer) console.log(`info ${pointer}`);
   for (const line of liveRunLines()) console.log(line);
-  check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
-  if (process.env.HERDR_ENV === "1") {
+  const herdr1 = inHerdr1();
+  check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
+  if (herdr1) {
     const plugin = pluginState();
     check(
       plugin.linkedHere && plugin.block,

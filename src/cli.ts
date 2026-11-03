@@ -164,7 +164,8 @@ import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePaus
 import { resolveVersions, toolsFloorLine, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor, requireRepoAccess } from "./doctor.ts";
-import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
+import { askingInPane, sandboxPanes } from "./herdr.ts";
+import { inHerdr1 } from "./terminal-host.ts";
 import { HELP, helpFor, wantsHelp } from "./help.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError, wasReported } from "./errors.ts";
@@ -313,7 +314,7 @@ try {
         }
         // A detached run has no terminal to ask on: only the opt-in says yes, given here and passed on.
         await confirmApiKey(projectApiKeySpend(project), "This run", { terminal: false });
-        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR, dockerInfo: reading?.text });
+        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: inHerdr1(), dockerInfo: reading?.text });
         // The child prints what its start took into its log, which nobody reads at once: this terminal shows it too.
         if (started.code === 0) for (const line of tookLines(baseline)) console.log(line);
         for (const line of started.lines) console.log(line);
@@ -521,7 +522,7 @@ try {
           SANDCASTLE_MAX_GATES: String(limit("gates")),
           // Sensed once here, never per redraw: a `ps` listing every few seconds would cost the pane more than the hint is worth.
           // Only where the view can show the hint: `status 0` into a pipe never draws it.
-          SANDCASTLE_CLICK_MOD: process.stdout.isTTY && process.env.HERDR_ENV === "1" ? resolveClickHint().mod : "",
+          SANDCASTLE_CLICK_MOD: process.stdout.isTTY && inHerdr1() ? resolveClickHint().mod : "",
         },
       });
       process.exit(r.status ?? 0);

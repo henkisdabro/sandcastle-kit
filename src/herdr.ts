@@ -45,6 +45,7 @@ import { OperatorError } from "./errors.ts";
 import { GROUPS, type PlanUsage, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { viewRecord } from "./live-runs.ts";
 import { KIT } from "./sandbox.ts";
+import { inHerdr1 } from "./terminal-host.ts";
 import { readPlanUsages, usageBand } from "./usage.ts";
 
 export { viewRecord };
@@ -54,7 +55,6 @@ export { viewRecord };
 export const herdr = (args: string[]) =>
   execFileSync("herdr", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 export const herdrJson = (args: string[]) => JSON.parse(herdr(args));
-export const IN_HERDR = process.env.HERDR_ENV === "1";
 
 const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 
@@ -396,7 +396,7 @@ export const tokenArgs = (tokens: Record<string, string | null>) =>
  */
 export const askingInPane = async <T>(about: string, ask: () => Promise<T>): Promise<T> => {
   const pane = process.env.HERDR_PANE_ID;
-  if (!IN_HERDR || !pane) return ask();
+  if (!pane || !inHerdr1()) return ask();
   const tell = (args: string[]) => {
     try {
       herdr(args);
@@ -459,7 +459,7 @@ export const openSandboxView = (
     retireViewRecord(project.root);
     return NONE;
   };
-  if (!IN_HERDR || process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1) return none();
+  if (process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1 || !inHerdr1()) return none();
   const logs = join(project.root, ".sandcastle/logs");
   const record = viewRecord(project.root);
   let failed = false;

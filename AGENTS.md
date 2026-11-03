@@ -54,6 +54,7 @@ read a module's section there before changing it.
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/upgrading.ts` | Unacted **Upgrading** notes against the project's update record (`.sandcastle/.run/kit-updated`), `changesLines` (`sandcastle changes`), and `kitVersion` |
 | `src/herdr.ts` | Herdr helpers and the run's view: the tab, panes, agent-state reports, sidebar tokens |
+| `src/terminal-host.ts` | `terminalHost` / `inHerdr1`: which terminal host a command runs in - herdr-core (`hc`, Herdr 2) only when the terminal `HC_TERMINAL_ID` names is an ancestor of this process, else Herdr 1 by `HERDR_ENV` as always, else none. Asked lazily (never at import, so `queue --json` and `--version --json` never probe); with no `HC_TERMINAL_ID` nothing is spawned. Every Herdr 1 check in `src/` goes through `inHerdr1` |
 | `src/click-hint.ts` | The status view's click hint: the outer terminal sensed from the attached Herdr clients (`ps`, `herdr session list`), the override (`SANDCASTLE_CLICK_HINT`, `herdr.clickHint`), and the modifier `sandcastle status` hands `status.sh` |
 | `src/live-runs.ts` | The machine-wide live-runs directory (`RUNS_DIR`, under `KIT_CACHE`) that the Herdr tab bar and the Claude Code mod read |
 | `src/herdr-plugin.ts` | `sandcastle herdr`: `configure` (link the plugin, add or remove the config block), and the plugin's own verbs - the tab bar line, popups, the ticket card a Ctrl-click opens, the Agents view |

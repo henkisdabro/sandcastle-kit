@@ -27,6 +27,7 @@ import { palette, renderFrame } from "./status-render.ts";
 import { keysOf } from "./status-keys.ts";
 import { ticketRows } from "./status-rows.ts";
 import { createSources, readSnapshot, sandcastleDir, snapshotOf } from "./status-snapshot.ts";
+import { inHerdr1 } from "./terminal-host.ts";
 
 const digits = (s: string | undefined): s is string => !!s && /^[0-9]+$/.test(s);
 const pause = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -99,7 +100,7 @@ const out = (text: string): boolean => {
  * a run that reuses the pane (src/herdr.ts) rewrites the record without `status` before it sends the Ctrl-C.
  */
 const markQuit = (dir: string, env: NodeJS.ProcessEnv) => {
-  if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID) return;
+  if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID || !inHerdr1(env)) return;
   const file = join(dir, "logs/herdr-view.json");
   const tmp = `${file}.${process.pid}.quit`;
   try {

@@ -37,7 +37,8 @@
 //  - `SANDCASTLE_TEST_MACHINE_CPU` is `none`: `readMachineCpu` (src/peaks.ts), called with no injected host, then gives no
 //    reading, so no test's gate pass, judgement or hold depends on the machine's real CPU load (a loaded developer
 //    machine, full-check and the macOS CI leg would flake otherwise). A test that wants readings injects them.
-//  - Names the code reads as a setting or a credential are removed: HERDR_*, TMUX*, SANDCASTLE_* (but not
+//  - Names the code reads as a setting or a credential are removed: HERDR_*, HC_* (herdr-core's, so a test run
+//    from a Herdr 2 tab never probes the developer's core), TMUX*, SANDCASTLE_* (but not
 //    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests and which are the tests' own switches, such as
 //    SANDCASTLE_TEST_NOW, the fixture clock: test/status-clock.ts) and the names in `SCRUBBED` below. A test that
 //    needs one sets it itself. test/hermetic-env.test.ts fails when `src/` reads a name that is neither
@@ -68,7 +69,7 @@ export const SCRUBBED = [
 
 /** Whether the preload removes this name from a test's environment. */
 export const scrubs = (name: string): boolean =>
-  SCRUBBED.includes(name) || name.startsWith("HERDR_") || name.startsWith("TMUX") || (name.startsWith("SANDCASTLE_") && !name.startsWith("SANDCASTLE_TEST_"));
+  SCRUBBED.includes(name) || name.startsWith("HERDR_") || name.startsWith("HC_") || name.startsWith("TMUX") || (name.startsWith("SANDCASTLE_") && !name.startsWith("SANDCASTLE_TEST_"));
 
 /**
  * The author identity variables: any one of them lets a commit through in a repo with no identity of its own. The

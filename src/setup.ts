@@ -13,6 +13,7 @@ import { parseEnv } from "node:util";
 import { claudeCode, doctor, probeGithubToken, run } from "./doctor.ts";
 import { OperatorError } from "./errors.ts";
 import { configure, pluginState } from "./herdr-plugin.ts";
+import { inHerdr1 } from "./terminal-host.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 import { sizePointerNow } from "./size.ts";
 
@@ -239,7 +240,7 @@ export const setup = async (repoRoot?: string) => {
   // 3. Inside Herdr, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
   // config, so `configure` shows what it adds before asking; a config that already sets the
   // same things is reported, not touched, and setup goes on.
-  if (process.env.HERDR_ENV === "1") {
+  if (inHerdr1()) {
     const plugin = pluginState();
     if (!plugin.linkedHere || !plugin.block) {
       console.log("\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar.");

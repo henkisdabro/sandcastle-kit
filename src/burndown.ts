@@ -35,7 +35,8 @@ import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, ty
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
-import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
+import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
+import { inHerdr1 } from "./terminal-host.ts";
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
@@ -3347,7 +3348,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   clock.step("status view");
   const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage, run.paused);
   const statusPane = view.status ?? openStatusPane(project);
-  if (IN_HERDR && !statusPane) {
+  if (!statusPane && inHerdr1()) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
   }
   if (statusPane) console.log(`Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
