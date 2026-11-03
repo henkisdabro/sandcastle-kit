@@ -39,14 +39,16 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { GROUPS, type PlanUsage, type TicketRecord } from "../mod/hooks/run-record.ts";
+import type { PlanUsage, TicketRecord } from "../mod/hooks/run-record.ts";
 import { viewRecord } from "./live-runs.ts";
 import { KIT } from "./sandbox.ts";
-import { inHerdr1 } from "./terminal-host.ts";
+import { inHerdr1, terminalHost } from "./terminal-host.ts";
+import { askingInCore } from "./herdr-core.ts";
 import { readPlanUsages, usageBand } from "./usage.ts";
+import { bareShell as bareShellIn, progress, type RunCounts, runCounts, showsStatus as showsStatusIn } from "./view-facts.ts";
 
 export { viewRecord };
 
@@ -68,22 +70,12 @@ export const STATUS_COMMAND = statusCommand();
 export const statusPaneRecord = (project: Project) => join(project.root, ".sandcastle/logs/status-pane");
 type Foreground = { cmdline: string }[];
 const foreground = (pane: string) => herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as Foreground;
-// The status view by its command line: `node ... src/status-view.ts 10`, which status.sh `exec`s in its place - or
-// `bash .../status.sh 10`, a pane an older kit left open. Pane reuse, the dead tab and the restart all go by it.
-const STATUS_VIEW_FILES = ["status.sh", "status-view.ts"];
-const showsStatus = (processes: Foreground) => processes.some((p) => STATUS_VIEW_FILES.some((file) => p.cmdline.includes(file)));
+// The status view by its command line (src/view-facts.ts). Pane reuse, the dead tab and the restart all go by it.
+const showsStatus = (processes: Foreground) => showsStatusIn(processes.map((p) => p.cmdline));
 export const runsStatus = (pane: string) => showsStatus(foreground(pane));
 
-// A pane's foreground is a bare shell: one process, a known shell's name, and at most the flags
-// that make it a login or interactive shell. `bash status.sh`, `claude`, `vim` and a REPL are not,
-// and neither is a pane with no foreground process Herdr can name.
-const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu"]);
-const SHELL_FLAGS = new Set(["-l", "-i", "--login", "--interactive"]);
-const bareShell = (processes: Foreground) => {
-  if (processes.length !== 1) return false;
-  const [command, ...flags] = processes[0].cmdline.trim().split(/\s+/);
-  return SHELLS.has(basename(command.replace(/^-/, ""))) && flags.every((f) => SHELL_FLAGS.has(f));
-};
+// A pane's foreground is a bare shell (src/view-facts.ts); a pane with no foreground process Herdr can name is not.
+const bareShell = (processes: Foreground) => bareShellIn(processes.map((p) => p.cmdline));
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 // The closing report the plugin types into a finished run's status pane (`bin/sandcastle` runs the CLI as `node ... cli.ts report`).
 const showsReport = (processes: Foreground) => processes.some((p) => /\bcli\.ts\s+report(\s|$)/.test(p.cmdline));
@@ -298,25 +290,7 @@ export const layoutRatios = (adopted: boolean, wide: boolean) =>
 // each time left five sandboxes at 1/2, 1/4, 1/8, 1/16, 1/16 of the column.
 export const stackRatio = (open: number, panes: number) => 1 / (panes - open + 1);
 
-// A run's tickets counted in the status view's own groups (`ticketRows`, src/status-rows.ts), so the
-// sidebar never says "needs you" about a ticket the view shows as fine, or the other way.
-// `paused` is present (true) only for a run a person has paused: the tickets still finishing are not
-// "working" then, the run is held.
-export type RunCounts = { working: number; needsYou: number; merged: number; total: number; paused?: true };
-export const runCounts = (tickets: Record<string, TicketRecord>, paused = false): RunCounts => {
-  // A ticket with no state, or one the guard dropped, is in the "other" group: counted in the total only.
-  const groups = Object.values(tickets).map((t) => (t.state ? GROUPS[t.state] : "other"));
-  return {
-    working: groups.filter((g) => g === "working").length,
-    needsYou: groups.filter((g) => g === "needs you").length,
-    merged: groups.filter((g) => g === "merged").length,
-    total: groups.length,
-    ...(paused ? { paused: true as const } : {}),
-  };
-};
-
-// What needs you first, as that is why anyone looks; then that the run is paused, which "N working" would not say.
-const progress = (c: RunCounts) => `${c.merged}/${c.total}` + (c.needsYou ? ` · ${c.needsYou} needs you` : c.paused ? " · paused" : c.working ? ` · ${c.working} working` : "");
+export { runCounts, type RunCounts };
 
 // The workspace row in the sidebar, about 22 columns wide. A `contains = "needs you"` rule in
 // the sidebar config turns it red.
@@ -396,6 +370,8 @@ export const tokenArgs = (tokens: Record<string, string | null>) =>
  */
 export const askingInPane = async <T>(about: string, ask: () => Promise<T>): Promise<T> => {
   const pane = process.env.HERDR_PANE_ID;
+  // herdr-core first: a core terminal's HERDR_PANE_ID can be a stale one (src/terminal-host.ts).
+  if (terminalHost().kind === "core") return askingInCore(about.slice(0, 80), ask);
   if (!pane || !inHerdr1()) return ask();
   const tell = (args: string[]) => {
     try {
