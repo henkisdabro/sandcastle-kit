@@ -35,7 +35,8 @@ import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, ty
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
-import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
+import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
+import { terminalHost } from "./terminal-host.ts";
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
@@ -3347,10 +3348,14 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   clock.step("status view");
   const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage, run.paused);
   const statusPane = view.status ?? openStatusPane(project);
-  if (IN_HERDR && !statusPane) {
+  const viewHost = terminalHost().kind;
+  if (!statusPane && viewHost === "herdr1") {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
   }
-  if (statusPane) console.log(`Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
+  if (!statusPane && viewHost === "core") {
+    throw new OperatorError("Could not open the status view in herdr-core - nothing was started. Check `hc ls`, or run `sandcastle status` yourself.");
+  }
+  if (statusPane) console.log(viewHost === "core" ? `Status view: terminal ${statusPane}` : `Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
   // A statement of its own, not part of the line above: a start with no pane still says where its time went. `startTook`, as `took` below is the tickets' times.
   const startTook = clock.line();
   if (startTook) console.log(startTook);

@@ -56,6 +56,14 @@ test("a test sees the machine's CPU pressure switched off, whatever the shell ha
   assert.equal(process.env.SANDCASTLE_TEST_MACHINE_CPU, "none");
 });
 
+test("a test never reaches the machine's own Herdr TUI or herdr-core: `herdr` and `hc` are not installed", () => {
+  for (const name of ["herdr", "hc"]) {
+    const r = spawnSync(name, ["--version"], { encoding: "utf8" });
+    assert.equal(r.status, 127, name);
+    assert.equal(r.stdout, "", name);
+  }
+});
+
 test("a docker a test puts ahead of the no-op one is the one that runs", () => {
   const own = mkdtempSync(join(dir, "own-docker-"));
   writeFileSync(join(own, "docker"), "#!/bin/sh\necho own\n", { mode: 0o755 });

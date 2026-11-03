@@ -13,6 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { liveRuns, pluginState } from "./herdr-plugin.ts";
+import { terminalHost } from "./terminal-host.ts";
 import type { Probe } from "../mod/hooks/run-live.ts";
 import { RUNS_DIR, tabAwaitsReport } from "./live-runs.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
@@ -604,8 +605,21 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const pointer = pointToSize && !poolWarns.length ? sizePointerNow() : undefined;
   if (pointer) console.log(`info ${pointer}`);
   for (const line of liveRunLines()) console.log(line);
-  check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
-  if (process.env.HERDR_ENV === "1") {
+  const host = terminalHost();
+  const herdr1 = host.kind === "herdr1";
+  if (host.kind === "core") {
+    const hc = run("hc", ["--version"]);
+    console.log(`ok   herdr-core${hc ? ` (${hc})` : ""}: opens the status view beside this terminal (terminal ${host.terminal.address})`);
+  } else check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
+  // The Herdr TUI plugin is checked wherever Herdr TUI is installed, not only from one of its tabs: setup from a
+  // herdr-core terminal or a plain terminal offers it too. Outside a Herdr TUI tab it is information, since nothing in
+  // this terminal needs it. `herdr plugin list` reads Herdr's own files, so a stopped server answers too.
+  if (!herdr1 && run("herdr", ["--version"])) {
+    const plugin = pluginState();
+    const state = plugin.linkedHere && plugin.block ? "linked from this checkout" : plugin.linkedFrom ? `linked from ${plugin.linkedFrom}` : "not linked (`sandcastle herdr configure` links it)";
+    console.log(`info Herdr TUI plugin: ${state} - it serves Herdr TUI tabs, and this is ${host.kind === "core" ? "a herdr-core terminal" : "not a Herdr tab"}`);
+  }
+  if (herdr1) {
     const plugin = pluginState();
     check(
       plugin.linkedHere && plugin.block,

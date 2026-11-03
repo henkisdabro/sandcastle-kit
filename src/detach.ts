@@ -20,6 +20,7 @@ import { OperatorError } from "./errors.ts";
 import { commandOf } from "./live-runs.ts";
 import { withLockSync } from "./pool.ts";
 import { DOCKER_INFO_ENV } from "./runtime.ts";
+import { HOST_ENV } from "./terminal-host.ts";
 import { readUsagePaused, type StandingPause } from "./usage.ts";
 import type { UsagePaused } from "../mod/hooks/run-record.ts";
 import { kitRunning, liveness, type Probe } from "../mod/hooks/run-live.ts";
@@ -186,7 +187,7 @@ export type Detached = {
 export const startDetached = async (
   root: string,
   args: string[],
-  { entry = cliEntry(), inHerdr, timeoutMs = 60_000, dockerInfo }: { entry?: string[]; inHerdr: boolean; timeoutMs?: number; dockerInfo?: string },
+  { entry = cliEntry(), inHerdr, timeoutMs = 60_000, dockerInfo, host }: { entry?: string[]; inHerdr: boolean; timeoutMs?: number; dockerInfo?: string; host?: string },
 ): Promise<Detached> => {
   const log = join(root, OUTPUT_LOG);
   mkdirSync(dirname(log), { recursive: true });
@@ -204,6 +205,9 @@ export const startDetached = async (
   // The one `docker info` reading of this start, so the child asks the daemon nothing the parent already did; a stale one from the starter's environment is never passed on.
   delete env[DOCKER_INFO_ENV];
   if (dockerInfo !== undefined) env[DOCKER_INFO_ENV] = dockerInfo;
+  // The parent's terminal host, likewise: the child, in a session of its own, could no longer find a core terminal.
+  delete env[HOST_ENV];
+  if (host !== undefined) env[HOST_ENV] = host;
   let ended: number | undefined;
   let failed: Error | undefined;
   const child = spawn(process.execPath, [...entry, "run", ...args], { cwd: root, detached: true, stdio: ["ignore", fd, fd], env });
@@ -219,9 +223,8 @@ export const startDetached = async (
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline && ended === undefined && !failed) {
     if (inHerdr) {
-      // Printed by the run (burndown.ts) once its view is open.
-      const found = /^Status view: pane (\S+)(?: \(tab (\S+)\))?$/m.exec(readLog(log));
-      if (found) status = `Status view: pane ${found[1]}${found[2] ? ` (tab ${found[2]})` : ""}`;
+      // Printed by the run (burndown.ts) once its view is open: a Herdr TUI pane, or a herdr-core terminal.
+      status = /^Status view: (?:pane \S+(?: \(tab \S+\))?|terminal \S+)$/m.exec(readLog(log))?.[0];
     } else if (pid !== undefined && livePid(root) === pid) {
       status = "Status view: run `sandcastle status`";
     }

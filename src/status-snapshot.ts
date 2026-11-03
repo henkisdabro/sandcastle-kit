@@ -21,6 +21,8 @@ import { join, resolve } from "node:path";
 import { isKit, liveness } from "../mod/hooks/run-live.ts";
 import { readTickets, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { KIT_CACHE, PLUGIN_MARKER } from "./live-runs.ts";
+import { inHerdr1 } from "./terminal-host.ts";
+import { slotAddresses } from "./herdr-core.ts";
 
 /** One outcome of outcomes.json, as the view reads it: the run that wrote it, its kind (none from an older kit) and its line. */
 export type OutcomeFact = { run: string; kind: string; text: string };
@@ -98,6 +100,8 @@ export type Snapshot = {
   models: string;
   /** The last lines of a detached run's output, while it is live. */
   runOutput: string[];
+  /** A live run's herdr-core sandbox terminals, each as its ticket and address (`#12 t7`). */
+  terminals?: string[];
   /** Whether ticket ids link to their logs (OSC 8), and the click hint's modifier. */
   links: boolean;
   clickMod: string;
@@ -332,7 +336,7 @@ const exists = (path: string) => stat(path).then(() => true, () => false);
 // ---------------------------------------------------------------------------
 
 /** The run record and the logs: what `.sandcastle/logs` and the worktrees directory hold, and whether the run is live. */
-export type RecordPart = Pick<Snapshot, "hasRecord" | "record" | "tickets" | "live" | "outcomes" | "logs" | "tails" | "worktrees" | "runOutput">;
+export type RecordPart = Pick<Snapshot, "hasRecord" | "record" | "tickets" | "live" | "outcomes" | "logs" | "tails" | "worktrees" | "runOutput" | "terminals">;
 /** What git says: the base, each ticket's branch, the commits the base's upstream lacks. */
 export type GitPart = Pick<Snapshot, "base" | "branches" | "unpushed">;
 /** What Docker says: each sandbox container's CPU and memory, against the host's cores. */
@@ -433,6 +437,7 @@ export const readRecord = async (dir: string, env: NodeJS.ProcessEnv, signal: Ab
     tails: {},
     worktrees,
     runOutput: live ? await readRunOutput(join(logsDir, "run-output.log")) : [],
+    terminals: live ? slotAddresses(logsDir).map(plainText) : [],
   };
 
   // The logs a row may show: a recorded ticket's current step, an inferred ticket's newest phase.
@@ -859,7 +864,7 @@ export const createSources = (dir: string, env: NodeJS.ProcessEnv, onChange?: ()
 /** Whether ticket ids link to their logs: inside Herdr with the kit's plugin linked, on a terminal; `SANDCASTLE_LINKS` 1 or 0 overrides. */
 const linksOn = (env: NodeJS.ProcessEnv, terminal: boolean): boolean => {
   const given = env.SANDCASTLE_LINKS || "";
-  if (!given && env.HERDR_ENV === "1" && terminal) return existsSync(PLUGIN_MARKER);
+  if (!given && env.HERDR_ENV === "1" && terminal && inHerdr1(env)) return existsSync(PLUGIN_MARKER);
   return given === "1";
 };
 
@@ -870,7 +875,7 @@ const NO_RECORD: RecordPart = { hasRecord: false, record: {} as RunRecord, ticke
  * refreshes). A source with no value yet draws as empty, and `sources` says which are loading.
  */
 export const snapshotOf = (dir: string, readings: Readings, { env = process.env, terminal = false, now = Math.floor(Date.now() / 1000) }: { env?: NodeJS.ProcessEnv; terminal?: boolean; now?: number } = {}): Snapshot => {
-  const { hasRecord, record, tickets, live, outcomes, logs, tails, worktrees, runOutput } = readings.record.value ?? NO_RECORD;
+  const { hasRecord, record, tickets, live, outcomes, logs, tails, worktrees, runOutput, terminals } = readings.record.value ?? NO_RECORD;
   const { base, branches, unpushed } = readings.git.value ?? { base: env.SANDCASTLE_BASE || "", branches: {}, unpushed: 0 };
   const { containers, cpus } = readings.docker.value ?? { containers: {}, cpus: cores ?? 1 };
   const pool = readings.pool.value ?? { sandboxes: { used: 0, limit: env.SANDCASTLE_MAX_SANDBOXES || "6" }, gates: { used: 0, limit: env.SANDCASTLE_MAX_GATES || "2" } };
@@ -916,6 +921,7 @@ export const snapshotOf = (dir: string, readings: Readings, { env = process.env,
     settings,
     models,
     runOutput,
+    ...(terminals?.length ? { terminals } : {}),
     links: linksOn(env, terminal),
     clickMod: env.SANDCASTLE_CLICK_MOD || "",
     sources: { record: readings.record.status, git: readings.git.status, docker: readings.docker.status, queue: readings.queue.status, pool: readings.pool.status },

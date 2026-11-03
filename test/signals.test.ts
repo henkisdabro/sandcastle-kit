@@ -44,8 +44,8 @@ setInterval(() => {}, 1000);
 // The node flags the launcher passes (`exec node <flags> --import ...`), so the fixture runs as the
 // CLI does.
 
-test("the launcher turns concurrent Maglev and Sparkplug off on both exec lines", () => {
-  assert.equal(launcherLines.length, 2, "the herdr line and the CLI line");
+test("the launcher turns concurrent Maglev and Sparkplug off on every exec line", () => {
+  assert.equal(launcherLines.length, 3, "the slot line, the herdr line and the CLI line");
   for (const line of launcherLines) assert.deepEqual(flagsOf(line), ["--no-maglev", "--no-concurrent-sparkplug"]);
 });
 

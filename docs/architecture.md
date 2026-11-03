@@ -1073,6 +1073,111 @@ unreported tab would be acted on for this one (the tick typing the view into pan
 have given to someone's shell, `registerRun` moving the live-runs file to the awaiting directory at
 exit). `restartStatusView`, `tellDeadTab` and `registerRun` all ignore a `reported` record.
 
+## `src/terminal-host.ts`
+
+Which terminal host a command runs in: `core` (herdr-core, `hc`), `herdr1` (the `herdr`
+server) or `none`.
+Asked lazily, by the commands that open or report into a host (`run`, `status`, `doctor`, `setup`,
+the plugin's verbs), never at import: the Claude Code mod runs `queue --json` and
+`--version --json` every few seconds and parses their stdout.
+Core wins only when `hc get $HC_TERMINAL_ID` answers within 2 s with a live terminal whose root
+`pid` is one of this process's ancestors (one `ps -A` walked here): either host's variables can be
+stale both ways - a core started from a Herdr TUI pane hands every terminal `HERDR_*`, a Herdr TUI
+server started from a core terminal hands its panes `HC_TERMINAL_ID` - and a stale id can still
+name a live terminal.
+Failing that, Herdr TUI by the rule the kit always had (`HERDR_ENV=1`), so a Herdr TUI pane with a
+stale core id stays Herdr TUI.
+With no `HC_TERMINAL_ID` nothing is spawned.
+Every Herdr TUI check in `src/` goes through `inHerdr1()`; Herdr TUI code gains no host branch of its
+own, and its socket and pane reads stay dynamic (`test/herdr-dead-tab-socket.test.ts` changes the
+socket between calls).
+The Herdr TUI server is daemonised (its parent is pid 1), so a command its plugin runs never passes
+the ancestor check: the plugin's verbs refuse only when typed in a herdr-core terminal.
+
+A `--detach` child starts in a session of its own and outlives its parent, so its ancestors are no
+longer the core terminal's.
+The parent hands it the host it found as JSON (`SANDCASTLE_TERMINAL_HOST`, `HOST_ENV`, beside
+`DOCKER_INFO_ENV`), first deleting any it inherited; the child's `adoptHost(true)` keeps a valid one
+as its host for good and never probes, and every other `sandcastle run` drops an inherited one
+(`adoptHost(false)`).
+Both delete it from the environment, so no sandbox, gate or terminal the run starts inherits it.
+A snapshot that does not parse is dropped and the child detects for itself.
+
+## `src/herdr-core.ts`
+
+The core adapter: the run's status view as a core terminal, the slot terminals, and their
+teardown.
+It shares no state with `src/herdr.ts`.
+Its record is `.sandcastle/logs/core-view.json` (`instance`, `status`, `slots`), so nothing that
+reads `herdr-view.json` - the plugin's tick, `tellDeadTab`, `restartStatusView`,
+`tabAwaitsReport` - ever acts on a core address; a core run retires a Herdr TUI run's
+`herdr-view.json` (`retireViewRecord`) and never `hc kill`s an id from it.
+The live-runs registry is unchanged, so the Herdr TUI tab bar lists a core run like any other and
+finds no tab of it to act on (`test/herdr-core-host.test.ts`).
+
+The seam is the one `burndown()` already calls: `openStatusPane` (`src/run.ts`), `openSandboxView`
+and `askingInPane` (`src/herdr.ts`) each dispatch once on the host, `core` to here, `herdr1` to
+the code as it was.
+Identity: the project key (a short hash of the resolved root, so two checkouts never share a
+terminal) names the status terminal `sc-<key>-status` and the slots `sc-<key>-slot-N`, and labels
+both `sandcastle.root=<key>`; `RUN_INSTANCE`, fresh in each `sandcastle run` process (an autonomy
+run's turns are one run), labels what this run started (`sandcastle.instance`).
+Every terminal is `hc run --bg --json --no-notify --outlive-parent --cwd <root>` with the caller's
+`herdr.space` and `herdr.tab` labels (an unlabelled terminal stays hidden) and an argv command,
+never a shell string.
+`--no-notify`: hc would otherwise type each exit note into the caller, which may be the Claude
+Code session the mod sends its end prompt to.
+The status terminal is `--keep` and runs `env SANDCASTLE_CORE_VIEW=<instance> <kit>/bin/sandcastle
+status`; the next run finds it by name and reuses it while it runs the status view (stopped with
+`hc keys <t> ctrl+c`, which leaves a `--keep` terminal its shell) or a bare shell, typing the
+command with every word quoted; a person's program in it keeps the name, and the new view opens
+unnamed.
+Slots (`herdr.panes: "all"` and not `SANDCASTLE_HERDR_VIEW=0`) are `--rm --parent <status>`,
+running `sandcastle slot N --instance <id>`; their numbers are not reused within a run, and each
+slot's state is `.sandcastle/logs/core-slot-N.json`, its log link `herdr-pane-N.log` as on Herdr TUI.
+Teardown at exit kills and removes the slots this instance's record holds, never by label: a
+successor that took the lock as this run exited (the lock's exit handler runs first) owns what it
+started.
+A start that fails part-way ends what it started; a run with no status view refuses to start, as
+on Herdr TUI.
+
+What the status view tells the core (`coreRecords`, `runRecords`): the terminal's root record is
+`working`, `blocked` with `kind=question` while any ticket needs a person, `done` once the record
+has `finishedAt`, `error` when the run ended early, with `progress` the merged share and the run
+line as the title (OSC 2: the official app's Agents panel shows titles, not messages).
+One child record per ticket in flight, cleared as it leaves.
+Only a process that owns its terminal writes: the status view when `SANDCASTLE_CORE_VIEW` matches
+the record's instance and stdout is a terminal.
+A view a person types into their own terminal, a piped `status 0`, and anything under Claude Code
+write none, and the view clears its records on exit.
+`askingInCore` marks a person's own core terminal `blocked` with `kind=question` while a question
+waits (a terminal on stdout only) and clears it after.
+
+The restart gap: none of Herdr TUI's `restartStatusView`, `tellDeadTab` or `markQuit` runs on core
+(their driver is the Herdr TUI plugin's tick).
+A status terminal lost to a core restart comes back as a shell, which the next run reuses; nothing
+types into a shell it merely finds, except at a run's start by name and recorded instance.
+
+## `src/core-slot.ts`
+
+`sandcastle slot <n> --instance <id>`, what a slot terminal runs.
+`bin/sandcastle` runs it alone (as it does `herdr`), so its command line never names `src/cli.ts`,
+which `liveness` reads as a run.
+It tails the slot's log link (`tail -n 40 -F`), which the run repoints per phase, through
+`plainLog`: every control character but newline and tab goes, so an OSC 7501 or a title an agent
+printed into its log is shown as inert text.
+Once a second it writes the slot's root record and title when its state file changes, and it ends
+itself, clearing its record, once the run is not live by `liveness` (the run killed with no exit
+handler) or `core-view.json` names another instance: crash cleanup with no sweep, so no later
+run's slot is ever ended by mistake.
+
+## `src/osc7501.ts`
+
+The OSC 7501 strings herdr-core reads from a terminal's output: `record` (fields `:`-separated, as
+`;` is ignored; `progress` 0 to 100; `title` and `msg` base64; an `id` makes a child record),
+`clear(id?)` (`state=clear`; a root clear drops the children too) and `windowTitle` (OSC 2).
+Pure, length-capped and escape-safe, held by golden strings (`test/osc7501.test.ts`).
+
 ## `src/live-runs.ts`
 
 The machine-wide live-runs directory (`RUNS_DIR`, in `KIT_CACHE`: `sandcastle-kit` under
@@ -1094,7 +1199,7 @@ into every sandbox as it opens) and `status.sh` and `src/status-*.ts` (each time
 starts) - so a pull under it gives its later tickets newer templates than its own code expects; a
 run does not snapshot them, and `skill/update.md` checks for live runs before its pull.
 `PLUGIN_MARKER` (`herdr-plugin-linked`, beside it) is left by `sandcastle herdr configure` and
-removed by `--remove`; the status view decides once at start-up whether it is inside Herdr and on a
+removed by `--remove`; the status view decides once at start-up whether it is inside Herdr TUI (`inHerdr1`: never in a herdr-core terminal) and on a
 terminal, and re-reads the marker on every redraw (a file test, at the loop's top level) to decide
 whether to emit ticket links and the click hint, as a Ctrl-click does nothing without the plugin: a
 view opened before `configure` shows them within one redraw of the link.

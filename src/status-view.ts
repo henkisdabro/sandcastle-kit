@@ -27,6 +27,8 @@ import { palette, renderFrame } from "./status-render.ts";
 import { keysOf } from "./status-keys.ts";
 import { ticketRows } from "./status-rows.ts";
 import { createSources, readSnapshot, sandcastleDir, snapshotOf } from "./status-snapshot.ts";
+import { inHerdr1 } from "./terminal-host.ts";
+import { coreRecords } from "./herdr-core.ts";
 
 const digits = (s: string | undefined): s is string => !!s && /^[0-9]+$/.test(s);
 const pause = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -99,7 +101,7 @@ const out = (text: string): boolean => {
  * a run that reuses the pane (src/herdr.ts) rewrites the record without `status` before it sends the Ctrl-C.
  */
 const markQuit = (dir: string, env: NodeJS.ProcessEnv) => {
-  if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID) return;
+  if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID || !inHerdr1(env)) return;
   const file = join(dir, "logs/herdr-view.json");
   const tmp = `${file}.${process.pid}.quit`;
   try {
@@ -155,6 +157,8 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
   // In the Herdr plugin's popup, which only closes when this exits: q or Esc does it.
   const keys = !!env.SANDCASTLE_STATUS_KEYS && reading;
   const colours = palette(!env.NO_COLOR && terminal, env.COLORTERM === "truecolor" || env.COLORTERM === "24bit");
+  // In a herdr-core terminal a run opened for this view: the run's state as the terminal's records (src/herdr-core.ts).
+  const records = coreRecords(dir, env, terminal);
 
   let done = false;
   let painted = false;
@@ -174,9 +178,12 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
     const r = sources.readings();
     if (!painted && !firstDue && [r.record, r.git, r.pool].some((x) => x.status === "loading")) return;
     let body: string;
+    let said = "";
     try {
       const snapshot = snapshotOf(dir, r, { env, terminal });
       body = liveBody(renderFrame(snapshot, ticketRows(snapshot), { ...size, showAll, colours }), size.cols);
+      // Only what changed: a paint that redraws the same run says nothing to the core.
+      said = records?.update(snapshot) ?? "";
     } catch (error) {
       // A frame that failed keeps the last one on screen.
       if (errlog !== undefined) writeSync(errlog, `${(error as Error)?.stack ?? String(error)}\n`);
@@ -186,7 +193,7 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
     // Cursor home, the frame, then erase below it: one write, so a refresh replaces the screen and is never seen row by row.
     // A write that fails is the terminal gone without a hangup (EIO, EPIPE): ended as a hangup ends it, or the view
     // would keep collecting for nobody.
-    if (!out(`\x1b[H${body}\x1b[J`)) return finish(129);
+    if (!out(`${said}\x1b[H${body}\x1b[J`)) return finish(129);
     // The frames the tests count are whole ones: drawn once every source has answered.
     if (framesLeft !== undefined && sources.answered() && --framesLeft <= 0) finish(0);
   };
@@ -218,7 +225,8 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
       drain();
       stty(saved!);
     }
-    out(LEAVE);
+    // The records go with the view: a shell left behind is no run.
+    out((records?.end() ?? "") + LEAVE);
   };
   /** Ends every refresh in flight and what it started (each command's whole process group), and every timer. */
   const halt = () => {

@@ -103,7 +103,7 @@ This continues SKILL.md: run its "Before every action" first.
    Every run repeats this check and stops while a gate is red on base.
 7. **Show the user** the config, rules, lean table, hook decisions and the green gate line. Offer
    (costs a little allowance) `sandcastle preflight`, and optionally `sandcastle lean --measure`
-   to see the tokens saved. If `sandcastle doctor` lists `opt  Herdr plugin and sidebar rows`,
+   to see the tokens saved. If `sandcastle doctor` lists `opt  Herdr plugin and sidebar rows` (or `info Herdr TUI plugin: not linked`),
    recommend the kit's Herdr plugin as update.md step 1 does.
 8. **Commit** `.sandcastle/config.ts`, `rules.md`, the Dockerfile and `.sandcastle/.gitignore` by
    the repo's own commit rules. `.sandcastle/.env` stays uncommitted.

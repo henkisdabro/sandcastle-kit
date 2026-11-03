@@ -109,6 +109,28 @@ One labelled section of the status view's header - run, machine, models, setting
 beside the logo while the pane is wide enough, and folded into a summary line when it is not.
 _Avoid_: cell, panel, group (a bucket of ticket states)
 
+### Where a run is watched
+
+**Terminal host**:
+The terminal multiplexer a command runs in, as the kit finds it: Herdr TUI, herdr-core, or none. It
+decides where the status view opens and what the run reports to the sidebar.
+_Avoid_: Herdr (on its own it names neither engine), environment
+
+**Herdr TUI**:
+The `herdr` server and its TUI, and its panes inside Herdr UI. The kit's plugin (`herdr/`) is for
+it alone.
+_Avoid_: Herdr 1 (not Herdr's own name), classic Herdr, legacy Herdr
+
+**herdr-core**:
+The server the Herdr app's terminals run in (CLI `hc`): persistent terminals that the Herdr app and Herdr UI show. The kit
+talks to it, never to an app, so every front-end on it is covered.
+_Avoid_: Herdr 2 (not Herdr's own name), herdr-app (one front-end on it)
+
+**Slot terminal**:
+On herdr-core, the terminal that follows one sandbox's log for its ticket, nested under the status
+view; Herdr TUI's counterpart is a sandbox pane.
+_Avoid_: slot (a machine pool slot), sandbox pane (Herdr TUI's)
+
 ### Sharing the machine
 
 **Machine pool**:

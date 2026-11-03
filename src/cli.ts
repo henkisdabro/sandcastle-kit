@@ -123,6 +123,10 @@
 //                    --json prints the facts the Claude Code mod's idle mark reads (the
 //                    version, and this project's update record and pending Upgrading notes;
 //                    works outside a project)
+//   slot <n> --instance <id>
+//                    what a herdr-core sandbox terminal runs (the run starts it, with
+//                    `herdr.panes: "all"`): the sandbox's log as it goes, and its ticket and step
+//                    as the terminal's record; ends once that run is over. Not for typing in
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
 //                    and keys to Herdr's config (shows them and asks first); --remove
@@ -164,7 +168,8 @@ import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePaus
 import { resolveVersions, toolsFloorLine, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor, requireRepoAccess } from "./doctor.ts";
-import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
+import { askingInPane, sandboxPanes } from "./herdr.ts";
+import { adoptHost, inHerdr1, terminalHost } from "./terminal-host.ts";
 import { HELP, helpFor, wantsHelp } from "./help.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError, wasReported } from "./errors.ts";
@@ -280,6 +285,7 @@ try {
       const child = process.env.SANDCASTLE_DETACHED === "1";
       let reading: { text: string | undefined } | undefined = child && process.env[DOCKER_INFO_ENV] ? { text: process.env[DOCKER_INFO_ENV] } : undefined;
       delete process.env[DOCKER_INFO_ENV];
+      adoptHost(child);
       const docker = () => (reading ??= { text: readDockerInfo() }).text;
       clock.step("docker info");
       const runtime = child ? undefined : runtimeProblemNow(docker);
@@ -313,7 +319,8 @@ try {
         }
         // A detached run has no terminal to ask on: only the opt-in says yes, given here and passed on.
         await confirmApiKey(projectApiKeySpend(project), "This run", { terminal: false });
-        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR, dockerInfo: reading?.text });
+        const host = terminalHost();
+        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: host.kind !== "none", host: JSON.stringify(host), dockerInfo: reading?.text });
         // The child prints what its start took into its log, which nobody reads at once: this terminal shows it too.
         if (started.code === 0) for (const line of tookLines(baseline)) console.log(line);
         for (const line of started.lines) console.log(line);
@@ -521,7 +528,7 @@ try {
           SANDCASTLE_MAX_GATES: String(limit("gates")),
           // Sensed once here, never per redraw: a `ps` listing every few seconds would cost the pane more than the hint is worth.
           // Only where the view can show the hint: `status 0` into a pipe never draws it.
-          SANDCASTLE_CLICK_MOD: process.stdout.isTTY && process.env.HERDR_ENV === "1" ? resolveClickHint().mod : "",
+          SANDCASTLE_CLICK_MOD: process.stdout.isTTY && inHerdr1() ? resolveClickHint().mod : "",
         },
       });
       process.exit(r.status ?? 0);
