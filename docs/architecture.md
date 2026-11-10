@@ -1158,6 +1158,9 @@ status`; the next run finds it by name and, while it runs the status view (stopp
 `hc keys <t> ctrl+c`) or a bare shell, ends it (`hc kill`, `hc rm`) and opens its own view afresh
 by the name - never typing into it: once a terminal has published an OSC 7501 record, `hc send`
 from another terminal wraps the text in `<hc from=...>` tags (hc 0.1.19), which a shell cannot run.
+A view that has not given way 5 seconds after the Ctrl-C (hc takes about 2.5 s to hand the terminal its
+shell, longer on a loaded machine) is ended the same way, so a slow recovery never leaves two status
+terminals for one project (`test/herdr-core-slow-recovery.test.ts`).
 A shell hc does not remove keeps the name, and the new view opens unnamed; so does a person's
 program in it.
 A `--keep` terminal gives a shell only for a program lost to a signal, which the view is on Ctrl-C;
