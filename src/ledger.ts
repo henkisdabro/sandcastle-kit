@@ -167,7 +167,8 @@ const commentEntries = (comments: string[], by?: CommentBy[]): { text: string; h
       .filter((part) => part.startsWith("### "))
       .map((part) => {
         const [heading, ...rest] = part.split("\n");
-        return { heading: heading.trim(), text: rest.join("\n").trim() };
+        // A GitHub comment that holds such a section is still its author's, so an outsider's cannot pass for nobody's.
+        return { heading: heading.trim(), text: rest.join("\n").trim(), by: by?.[i] };
       });
   });
 

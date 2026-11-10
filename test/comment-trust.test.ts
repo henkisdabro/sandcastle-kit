@@ -14,7 +14,7 @@ import { quietly } from "./quiet.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { personCommentsSince, trustOf } = await import("../src/ledger.ts");
-const { AGENT_COMMENT_MARKER, makeTracker, tokenUserOf, trustedComment } = await import("../src/tracker.ts");
+const { AGENT_COMMENT_MARKER, makeTracker, tokenUserOf, trackerTokenUser, trustedComment } = await import("../src/tracker.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -52,6 +52,14 @@ test("a comment with the agent marker is the agent's only when the token's own a
   // A collaborator who copies the marker is a person: the review it asks for is not skipped.
   const copied = thread(["maintainer", "COLLABORATOR", AGENT]);
   assert.deepEqual(personCommentsSince(copied.comments, 0, trustOf(copied, "bot-account")), [AGENT]);
+});
+
+test("an outsider's comment holding a ticket file's comments section is still the outsider's", () => {
+  const section = `## Comments\n\n### 2026-10-17 - someone\n\n${PLAIN}`;
+  const t = thread(["stranger", "NONE", section]);
+  assert.deepEqual(personCommentsSince(t.comments, 0, trustOf(t, "bot-account")), []);
+  const own = thread(["maintainer", "COLLABORATOR", section]);
+  assert.deepEqual(personCommentsSince(own.comments, 0, trustOf(own, "bot-account")), [PLAIN]);
 });
 
 test("a ticket without authors (a ticket file) keeps telling the agent's comment by its marker", () => {
@@ -115,6 +123,16 @@ test("the token's account is read once, with the project's own GH_TOKEN", () => 
   assert.deepEqual(gh.calls(), ["api user --jq .login [GH_TOKEN=github_pat_example]"]);
 });
 
+test("a ticket-file project never asks gh whose token it is, and a GitHub one does", async () => {
+  const gh = fakeGh({ fails: "HTTP 401: Bad credentials" });
+  const { result, lines } = await quietly(() => withPath(gh.dir, () => trackerTokenUser({ kind: "files" }, projectIn())));
+  assert.equal(result, null);
+  assert.deepEqual(lines, []);
+  assert.deepEqual(gh.calls(), [""]);
+  const ok = fakeGh({ user: "bot-account" });
+  assert.equal(withPath(ok.dir, () => trackerTokenUser({ kind: "github" }, projectIn())), "bot-account");
+});
+
 test("the GitHub tracker keeps who wrote the ticket and each comment, beside the text", () => {
   const gh = fakeGh({
     listed: [
@@ -145,7 +163,8 @@ test("the GitHub tracker keeps who wrote the ticket and each comment, beside the
 
 test("burndown reads the token's account at its start and takes the late-comment check through the trust", () => {
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(source, /tracker\.kind === "github"\) tokenUserOf\(project\)/);
-  assert.match(source, /trustOf\(read, tokenUserOf\(project\)\)/);
-  assert.match(source, /carriedKindAtStart\(project\.root, project\.baseBranch, i, tracker\.kind === "github" \? tokenUserOf\(project\) : null\)/);
+  assert.match(source, /\n\s*trackerTokenUser\(tracker, project\);/);
+  assert.match(source, /trustOf\(read, trackerTokenUser\(tracker, project\)\)/);
+  assert.match(source, /carriedKindAtStart\(project\.root, project\.baseBranch, i, trackerTokenUser\(tracker, project\)\)/);
+  assert.doesNotMatch(source, /tokenUserOf\(project\)/);
 });

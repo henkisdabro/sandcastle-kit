@@ -59,6 +59,13 @@ export const tokenUserOf = (project: Pick<Project, "root">, read: () => string =
   return login;
 };
 
+/**
+ * `tokenUserOf` for a run's tracker: only a GitHub tracker's comments carry an author to hold the login against, so a
+ * ticket-file project never runs `gh api user` (nor prints its failure, on a machine with no `gh` login at all).
+ */
+export const trackerTokenUser = (tracker: Pick<Tracker, "kind">, project: Pick<Project, "root">): string | null =>
+  tracker.kind === "github" ? tokenUserOf(project) : null;
+
 /** The words every comment an agent posts on a ticket opens with (the GitHub tracker's `words`): the kit's own, to `personCommentsSince`. */
 export const AGENT_COMMENT_MARKER = "Sandcastle agent:";
 

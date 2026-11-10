@@ -52,7 +52,7 @@ import { startClock, type StartClock } from "./start-clock.ts";
 import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { memoryLine, poolWarningsNow, sandboxMemory } from "./size.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, tokenUserOf, type Ticket, type Tracker } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, trackerTokenUser, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
@@ -1827,7 +1827,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   /** A person's comments on the ticket past the count its head record kept, by accounts that may be trusted (`personCommentsSince`). */
   const personCommentsOn = async (issue: Issue): Promise<string[]> => {
     const read = (await ticketThread(issue.id)) ?? issue;
-    return personCommentsSince(read.comments ?? [], readHeads(project.root)[issue.id]?.comments, trustOf(read, tokenUserOf(project)));
+    return personCommentsSince(read.comments ?? [], readHeads(project.root)[issue.id]?.comments, trustOf(read, trackerTokenUser(tracker, project)));
   };
 
   // A later run skips work a branch already passed (see recordHead). A dry run's
@@ -3071,7 +3071,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const tracker = makeTracker(project);
   const ref = tracker.ref;
   // Read once, here, so a token the account of which cannot be told is said at the start (`tokenUserOf`).
-  if (tracker.kind === "github") tokenUserOf(project);
+  trackerTokenUser(tracker, project);
   const named = namedTicketsFromEnv();
   if (named.note) console.log(named.note);
   const queued: Issue[] = named.list ? namedTickets(tracker, named.list) : tracker.queued();
@@ -3245,7 +3245,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   clock.step("carried branches");
   // Carried branches, read before any agent touches them: a land-only or narrowly reviewed one is dearer than a fresh ticket's landing,
   // so the estimate and the timings say so; one that gets a full review is priced as a fresh ticket (`carriedKindAtStart`).
-  const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i, tracker.kind === "github" ? tokenUserOf(project) : null)] as const));
+  const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i, trackerTokenUser(tracker, project))] as const));
   const carriedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "carried").map((i) => i.id));
   const unreviewedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "unreviewed").map((i) => i.id));
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.

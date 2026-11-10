@@ -64,7 +64,6 @@ test("the comments view keeps an owner's, a member's, a collaborator's and the t
       "status:\tnone",
       "--",
       "Use the other design.",
-      "",
       "--",
       "author:\treporter",
       "association:\tnone",
@@ -72,7 +71,6 @@ test("the comments view keeps an owner's, a member's, a collaborator's and the t
       "status:\tnone",
       "--",
       "More detail from the author.",
-      "",
       "--",
       "3 comment(s) from accounts that are not the repository's owners, members or collaborators, or the ticket's author, left out",
       "",
@@ -82,6 +80,8 @@ test("the comments view keeps an owner's, a member's, a collaborator's and the t
 });
 
 // A block of `gh issue view N --comments` as it was printed for a ticket, which the view's lines follow field by field.
+// gh prints the body and then `--` on the next line (its `formatRawComment`): the blank line before `--` here is the
+// newline the posted body ended with, as a body posted from a file does.
 const RECORDED = [
   "author:\tmaintainer",
   "association:\towner",
@@ -99,7 +99,7 @@ const RECORDED = [
 ].join("\n");
 
 test("the comments view prints a comment as gh issue view --comments does: four fields, then the body between -- lines", { skip }, () => {
-  const body = "**Second opinion: CONFIRMED**\n\nThe fix is sound in shape.\n\n_Independent check, 20261017._";
+  const body = "**Second opinion: CONFIRMED**\n\nThe fix is sound in shape.\n\n_Independent check, 20261017._\n";
   const r = run("reporter", [[{ login: "maintainer", association: "OWNER", body }]]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, RECORDED);
