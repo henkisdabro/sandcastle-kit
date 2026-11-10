@@ -142,7 +142,8 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
       nameFree = false;
       if (found.labels?.["sandcastle.root"] === key) {
         let t: Terminal | undefined = found;
-        if (runsStatusView(t)) {
+        const wasView = runsStatusView(t);
+        if (wasView) {
           hc(["keys", found.address, "ctrl+c", "--json"]);
           for (let waited = 0; waited < 5000 && !bareShell(foregroundOf(t)) && t?.state !== "finished"; waited += 100) {
             pause(100);
@@ -154,7 +155,10 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
         // root record would be handed a line the shell cannot run. A live shell is killed before it is removed, as
         // every terminal the kit ends is; and the name is taken again only once the terminal is gone, so a shell hc
         // would not remove costs the view its name, never the view.
-        if (t?.state === "finished" || bareShell(foregroundOf(t))) {
+        // A view that has not given way within the wait (a loaded machine takes longer than hc's usual 2.5 s to hand a
+        // `--keep` terminal its shell) is ended too: opening beside it would leave two status terminals, the old one a
+        // bare shell a moment later that the next run reuses. It is this project's own (the root label), never a person's.
+        if (t?.state === "finished" || bareShell(foregroundOf(t)) || (wasView && runsStatusView(t))) {
           for (const verb of t?.state === "finished" ? ["rm"] : ["kill", "rm"]) {
             try {
               hc([verb, found.address, "--json"]);
