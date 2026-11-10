@@ -216,10 +216,37 @@ export const writePlan = (project: Project, dir = join(project.root, ".sandcastl
 // ignore the removals and rewrites, so they can never be committed by an
 // agent's `git add -A`.
 export const apply = (p: Plan, cwd = process.cwd()) => {
-  const files = [...p.hide.flatMap((path) => tracked(cwd, path)), ...Object.keys(p.write).flatMap((path) => tracked(cwd, path))];
+  // The worktree holds a sandbox branch's tree, so a path in it may be a symlink the branch committed to somewhere on
+  // the host (`.claude` -> the operator's own). A path that goes through one is left alone, and said so: the removal
+  // and the write below run on the host, before any guard check.
+  const through = (path: string) => {
+    const parts = path.split("/").filter(Boolean);
+    for (let i = 1; i < parts.length; i++) {
+      const prefix = parts.slice(0, i).join("/");
+      try {
+        if (lstatSync(join(cwd, prefix)).isSymbolicLink()) return prefix;
+      } catch {
+        return undefined; // nothing there, so nothing to cross
+      }
+    }
+    return undefined;
+  };
+  const safe = (path: string) => {
+    const link = through(path);
+    if (link === undefined) return true;
+    console.log(`lean-apply: left ${path} alone - ${link} is a symlink in this worktree`);
+    return false;
+  };
+  const hide = p.hide.filter(safe);
+  const write = Object.entries(p.write).filter(([path]) => safe(path));
+  const files = [...hide.flatMap((path) => tracked(cwd, path)), ...write.flatMap(([path]) => tracked(cwd, path))];
   if (files.length) execFileSync("git", ["update-index", "--skip-worktree", "--", ...files], { cwd });
-  for (const path of p.hide) rmSync(join(cwd, path), { recursive: true, force: true });
-  for (const [path, content] of Object.entries(p.write)) writeFileSync(join(cwd, path), content);
+  // rmSync removes a final symlink itself and never follows it; writeFileSync would, so a link is removed first.
+  for (const path of hide) rmSync(join(cwd, path), { recursive: true, force: true });
+  for (const [path, content] of write) {
+    if (lstatSync(join(cwd, path), { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(join(cwd, path), { force: true });
+    writeFileSync(join(cwd, path), content);
+  }
 };
 
 // ---------------------------------------------------------------------------
