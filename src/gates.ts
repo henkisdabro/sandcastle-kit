@@ -979,6 +979,18 @@ export const timedGate = async <T>(
 const gateTimeLine =(gates: Gate[]) =>
   [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${seconds(g.ms!)}`).join(", ");
 
+/**
+ * Refuses a base branch that names no commit yet (a fresh `git init` with a config): every later step resolves it
+ * with `git rev-parse`, which died with a Node stack trace. An OperatorError, so the CLI prints the cause and the fix.
+ */
+export const assertBaseHasCommit = (project: Pick<Project, "root" | "baseBranch">) => {
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `${project.baseBranch}^{commit}`], project.root);
+  } catch {
+    throw new OperatorError(`NOT STARTED: the base branch ${project.baseBranch} has no commit yet. Commit something on ${project.baseBranch} first (or set baseBranch in .sandcastle/config.ts to the branch you work on).`);
+  }
+};
+
 // A green result holds for as long as nothing it depended on changes: the
 // base commit, the image, the config that shapes a sandbox, and the Sandcastle
 // that opens it (a new version may mount, or make read-only, what a gate's setup writes).
@@ -1275,6 +1287,7 @@ export const writeGateLog = (log: string, header: string, failures: GateRun["fai
  * `beforeOpen` the one before it opens when that is another (`gateBase`).
  */
 export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true, runId?: string, check?: (when: string) => unknown, beforeOpen = check) => {
+  assertBaseHasCommit(project);
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
