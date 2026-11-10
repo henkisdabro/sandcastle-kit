@@ -233,6 +233,11 @@ Git hooks run on agent commits inside the sandbox as usual, so `sandcastle gates
 base check also run the repo's `pre-commit` and `commit-msg` hooks there (`git hook run`, nothing
 committed, git 2.36 or newer): a hook the image cannot satisfy stops the run before any agent
 starts, and the fix is in the project's Dockerfile.
+A setup step cannot install hooks or write repo config: a sandbox's `.git/config`, `.git/hooks/`
+and `.git/info/` are read-only, so a hook installer there (`husky` in a `prepare` script,
+`pre-commit install`, `lefthook install`, `git lfs install --local`) fails or installs nothing, and
+the base check warns when the host has commit hooks the sandbox finds none of.
+Install hooks on your machine, in `.git/hooks` or a tracked directory `core.hooksPath` names.
 A `core.hooksPath` that is an absolute host path (or climbs out of the project) names a directory no
 sandbox has, so git finds no hooks and agent commits run none: `sandcastle doctor`,
 `sandcastle lean` and the base check flag it, naming the value, and the fix is

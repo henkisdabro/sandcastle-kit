@@ -1515,7 +1515,7 @@ A change to the base or an agent branch since that reading stops the open too, a
 check. `test/guard-before-open.test.ts` plants a smudge filter and its attribute between two opens
 at each site and holds that the second open never happens and the filter never runs.
 
-**`@ai-hero/sandcastle` is a patched dependency** (`patches/@ai-hero__sandcastle@0.12.0.patch`,
+**`@ai-hero/sandcastle` is a patched dependency** (`patches/@ai-hero__sandcastle@0.14.0.patch`,
 `patchedDependencies` in `pnpm-workspace.yaml`): the kit adds each ticket's worktree itself, under
 the host-git mutex, so Sandcastle's `create` always takes its reuse path, which unpatched ends in
 `fastForwardFromOrigin` - a host `git fetch origin <branch>` and an `--ff-only` merge outside the
@@ -1542,6 +1542,25 @@ does for the origin refresh; `test/sandbox-open-serialised.test.ts` drives the k
 The patch also raises `PROMPT_EXPANSION_TIMEOUT_MS` from 30 s to 120 s, so `gh-retry.sh`'s waits can
 ride out a GitHub 5xx that lasts a minute; `test/gh-retry.test.ts` holds the constant above the
 script's waits.
+On 0.14.0 the first change replaces the else arm of a ternary in `create`
+(`dirty ? warn : fastForwardFromOrigin(...)` becomes `dirty ? warn : Effect_exports.void`); upstream's
+unreleased reshaping of `createSandbox` moves the `pruneStale` hunk again on the next bump.
+`sandcastle doctor` checks the patch is applied (`kit dependencies installed`).
+
+**What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
+control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at
+each start, hence an empty `hooks/` reading as absent, above), the worktree's `.git` file and its
+record's `commondir` - and runs its own host git with the repository's filters, drivers, hooks and
+remote helpers turned off, `GIT_DIR` pinned, `PATH` entries inside the repo dropped and transports
+restricted, refusing (`Refusing to run git on the host`) a worktree whose `.git` file does not lead
+to the project's.
+It trusts command-scope config, so the kit's pins (`GIT_CONFIG_*`) survive.
+None of it replaces the kit's guard: a host-side rewrite of `.git/config` by rename may detach the
+read-only mount in a live container, the rest of `.git` (refs, objects, `modules/`, the person's own
+worktree records) stays writable, and the kit's own host git runs outside Sandcastle's hardening.
+The fingerprint, the start record, the branch backup and the worktree-record checks stay as they are.
+What the read-only files cost a project: a setup step that installs hooks or writes repo config
+fails or installs nothing (`hooksMissingWarning`, `src/gates.ts`, warns at the base check).
 
 **Before every sandbox closes** (`checkBeforeClose`): Sandcastle's close stops the container, then
 runs `git status` on the host in the sandbox's worktree with the run's environment (and
@@ -2884,7 +2903,7 @@ They are reported only: not plan items, so `hide`, `write` and the plan file nev
 The managed settings do not choose the pass's tools.
 Each Claude pass gets its allow-list in `claude()` (`src/agents.ts`): `withTools` inserts
 `--tools '<list>'` right after `--output-format stream-json` in Sandcastle's command (as `withSchema`
-puts `--json-schema`), which both its shapes carry - 0.12.0's ends in ` -p -`, a later one drops
+puts `--json-schema`), which both its shapes carry - 0.14.0's ends in ` -p -`, a later one drops
 that tail - and throws when the command no longer starts with `claude `, has no
 `--output-format stream-json`, or has a ` -p -` that is not its end, so a Sandcastle update cannot
 run passes without the cut (an unknown name in `--tools` is ignored silently by Claude Code).
@@ -2892,8 +2911,13 @@ run passes without the cut (an unknown name in `--tools` is ignored silently by 
 `skill:` or `command:` and ToolSearch for a kept `mcp:`, then the name of each kept `tool:<Name>`,
 once (`loadProject` refuses one that `src/claude-tools.ts` does not list, or that the managed
 settings deny); `configureTools` sets it from `loadProject`, as `configureModels` sets the models.
-`claude()` also sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the agent's environment
-(`test/claude-tools-allow-list.test.ts`).
+`claude()` also gives the agent its own environment (`claudeEnv`: `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
+and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` when `autoCompactWindow` is set), which Sandcastle puts on each
+pass's command as `export KEY='value'; ` before it (`withAgentEnv`, from 0.14.0: 0.12.0 dropped it,
+so auto memory stayed on); the container's environment is the sandbox's alone.
+Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnv`
+(`src/sandbox.ts`) leaves the agent's keys out, a person's `.env` naming one included: the exported
+value would win anyway (`test/agent-env.test.ts`, `test/claude-tools-allow-list.test.ts`).
 The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does
 not govern, and `git-guard.sh` is unchanged.
 

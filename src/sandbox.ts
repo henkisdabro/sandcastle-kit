@@ -3,12 +3,12 @@
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv, stripVTControlCharacters } from "node:util";
-import { CROSS_REVIEW } from "./agents.ts";
+import { claudeEnv, CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
 import { nearest, OperatorError, SetupFailed } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
@@ -31,6 +31,51 @@ export const sandcastleVersion = (kit = KIT): string => {
   } catch {
     return "unknown";
   }
+};
+
+/**
+ * What is wrong with the installed `@ai-hero/sandcastle` for this kit, one line each (none: it is the pinned version,
+ * patched). `pnpm install` applies the kit's patch (`patchedDependencies`); `npm install`, or a `git pull` with no
+ * install after it, leaves a dependency that runs unpatched - a host fetch from origin on every open (#711), Sandcastle's
+ * own worktree prune outside the host-git mutex, a 30 s limit on a prompt's shell expression (#782) - with nothing
+ * failing until a run does. Each `dist/*.js` is read, since chunk names change with every release; text it cannot find
+ * is a problem named, never a crash.
+ */
+export const sandcastlePatchProblems = (kit = KIT): string[] => {
+  const pkg = join(kit, "node_modules", "@ai-hero", "sandcastle");
+  if (!existsSync(pkg)) return ["@ai-hero/sandcastle is not installed"];
+  const problems: string[] = [];
+  const installed = sandcastleVersion(kit);
+  let pinned = "unknown";
+  try {
+    pinned = String(JSON.parse(readFileSync(join(kit, "package.json"), "utf8")).dependencies?.["@ai-hero/sandcastle"]);
+  } catch {
+    /* named below */
+  }
+  if (installed !== pinned) problems.push(`@ai-hero/sandcastle ${installed} is installed, the kit pins ${pinned}`);
+  let texts: string[] = [];
+  try {
+    const dist = join(pkg, "dist");
+    texts = readdirSync(dist).filter((f) => f.endsWith(".js")).map((f) => readFileSync(join(dist, f), "utf8"));
+  } catch {
+    return [...problems, "its dist cannot be read"];
+  }
+  /** The text of the function `start` begins, up to `end`, in whichever module holds it. */
+  const slice = (start: string, end: string) => {
+    for (const text of texts) {
+      const at = text.indexOf(start);
+      const to = at === -1 ? -1 : text.indexOf(end, at);
+      if (to > at) return text.slice(at, to);
+    }
+    return undefined;
+  };
+  const reuse = slice("var create = (repoDir, opts)", "return { path: normalize(collision.path), branch };");
+  if (reuse === undefined || /fastForwardFromOrigin\s*\(/.test(reuse)) problems.push("the kit's patch is not applied: a sandbox open refreshes its branch from origin (#711)");
+  const open = slice("var createSandbox = async (options) =>", "yield* create(");
+  if (open === undefined || /pruneStale\s*\(/.test(open)) problems.push("the kit's patch is not applied: a sandbox open prunes worktrees outside the kit's lock (#711)");
+  const limit = texts.map((t) => /PROMPT_EXPANSION_TIMEOUT_MS = (\d+(?:e\d+)?);/.exec(t)?.[1]).find(Boolean);
+  if (!(Number(limit) >= 120_000)) problems.push("the kit's patch is not applied: a prompt's shell expression has 30 s, too short for gh-retry.sh (#782)");
+  return problems;
 };
 
 // Everything personal - tokens, machine-wide limits - lives here, never in the
@@ -983,7 +1028,11 @@ export const hostTimeZone = (): string | undefined => {
 // so gates run in the host's zone too, not CI's usual UTC.
 export const sandboxEnv = (project: Project): Record<string, string> => {
   const TZ = hostTimeZone();
-  return withGitMaintenanceOff({ ...credentials(project), ...AGENT_COMMITTER, ...(TZ && { TZ }) });
+  // A key the agent's own env sets (`claudeEnv`) stays out: Sandcastle refuses every pass whose agent and sandbox name
+  // the same key, and the agent's value, exported before its command, would win anyway.
+  const env = credentials(project);
+  for (const key of Object.keys(claudeEnv())) delete env[key];
+  return withGitMaintenanceOff({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) });
 };
 
 // Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a

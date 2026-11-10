@@ -18,6 +18,17 @@ and the kit narrows what can cross it:
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not
   run it on your machine when it lands.
+- 🔏 **Read-only git control files.** Sandcastle mounts `.git/config`, `.git/hooks/`, `.git/info/`,
+  the sandbox worktree's `.git` file and its record's `commondir` read-only in every container, and
+  creates `.git/hooks/` and `.git/info/` on your machine when they are missing, to mount them (the
+  kit reads an empty `.git/hooks/` as none).
+  So in a sandbox `git config` without `--global` fails, and a setup step that installs hooks or
+  writes repo config (`husky`, `pre-commit install`, `lefthook install`, `git lfs install --local`)
+  installs nothing there: install hooks on your machine only.
+  It is not a guarantee: a rewrite of `.git/config` on your machine by rename may detach the mount
+  in a running container, so the fingerprint below stays the guard.
+  Sandcastle's own git on your machine also runs with the repository's filters, drivers, hooks and
+  remote helpers turned off; the kit's pins below hold beside it.
 - 📌 **Command-running config pinned.** For the run's own git calls, `core.fsmonitor` and commit
   signing are off, and every filter, merge or diff driver, pager, editor and signing program
   configured when the run starts keeps that value, through git's command-scope config. A value a
@@ -37,8 +48,7 @@ and the kit narrows what can cross it:
   - what your own later git command runs: every `alias.*` (a repo-local alias overrides yours),
     `pager.*`, `difftool.*.cmd`, `mergetool.*.cmd`, `submodule.*.update`, `interactive.diffFilter`,
     `gpg.ssh.defaultKeyCommand`, `core.alternateRefsCommand` and `lfs.*`;
-  - what a `git fetch` reads there (Sandcastle runs one on your machine when it reuses a kept
-    worktree): `remote.*.url`, `.pushurl`, `.uploadpack`, `.receivepack` and `.proxy`,
+  - what a `git fetch` reads there (your own next fetch runs it on your machine): `remote.*.url`, `.pushurl`, `.uploadpack`, `.receivepack` and `.proxy`,
     `url.*.insteadOf` and `.pushInsteadOf`, every `credential.*` and `protocol.*` key, and
     `http.proxy`, `http.sslCAInfo` and `http.sslCAPath`, with or without a URL;
   - `merge.verifySignatures` and `log.showSignature`, which run the signing program, and every
@@ -116,7 +126,8 @@ and the kit narrows what can cross it:
   branch.
 - 🛂 **Checked before every sandbox opens.** Sandcastle's open runs git on your machine in the
   project: `git worktree add`, whose checkout writes every file out through the filters
-  `.git/config` names, or `git status`, `git fetch` and `git merge` in a worktree it reuses.
+  `.git/config` names, or `git status` in a worktree it reuses (the kit's patch of Sandcastle drops
+  the `git fetch` and fast-forward from origin that followed it).
   The pins hold only the filters configured when the run started, so a filter another sandbox
   planted since the last check would run there.
   So the fingerprint is checked last thing before each sandbox is created - a ticket's, as it starts

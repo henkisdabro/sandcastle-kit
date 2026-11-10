@@ -25,7 +25,7 @@
   },
   "packageManager": "pnpm@12.8.2",
   "dependencies": {
-    "@ai-hero/sandcastle": "0.12.0"
+    "@ai-hero/sandcastle": "0.14.0"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",

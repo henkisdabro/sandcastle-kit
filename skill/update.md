@@ -200,6 +200,18 @@ Declining is not skipping: every step still runs its check, and only the asking 
        but not in the sandbox` means a hook installer (husky, `pre-commit install`, `lefthook
        install`) in `setup` installs nothing there: propose dropping it and installing the hooks on
        the host only, then `sandcastle gates`.
+   21. **Read-only git config and hooks in sandboxes.** A sandbox's `.git/config`, `.git/hooks`
+       and `.git/info` are read-only, so a step that installs hooks or writes repo config fails or
+       installs nothing there. Read `setup` in `.sandcastle/config.ts`, and the `prepare`,
+       `postinstall` and `install` scripts of the root `package.json` that a setup step's install
+       runs, for a hook installer (`husky`, `pre-commit install`, `lefthook install`,
+       `simple-git-hooks`, `git lfs install`) or a `git config` without `--global`. For each, propose
+       moving it to the host (run it once there; hooks belong in `.git/hooks` or a tracked directory
+       `core.hooksPath` names) and dropping it from `setup` - a `prepare` script the project needs
+       elsewhere stays, as husky 9 exits 0 in a sandbox. Then run `sandcastle gates` and compare its
+       `git hooks:` line with the hooks the host has (`ls .git/hooks`, `git config core.hooksPath`):
+       a hook the host runs that the line shows as `none` is still missing; the base check's
+       WARNING names it. Nothing found and no WARNING: nothing to do.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

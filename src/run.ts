@@ -524,20 +524,6 @@ export const limitResets = (text: string): string | undefined => {
   return undefined;
 };
 
-/**
- * The library ends each pass with "Context window: Nk", which is the sum of input, cache-write and cache-read
- * tokens over every turn - tokens processed, not a window. Rewritten once the pass has returned; safe to repeat.
- */
-export const relabelContextWindow = (log: string) => {
-  try {
-    const text = readFileSync(log, "utf8");
-    const out = text.replace(/^Context window: (\d+k)$/gm, "Tokens processed (all turns): $1");
-    if (out !== text) writeFileSync(log, out);
-  } catch {
-    // No log to rewrite (the pass died before writing one) is not a failure of the pass.
-  }
-};
-
 export { localStamp };
 
 /**

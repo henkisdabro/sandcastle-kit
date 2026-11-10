@@ -11,14 +11,43 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **Built on Sandcastle 0.14.0, whose sandboxes cannot write their repo's git config or hooks.**
+  `.git/config`, `.git/hooks` and `.git/info` are read-only in a sandbox, so `git config` without
+  `--global`, and a hook installer in `setup` or a `prepare` / `postinstall` script it runs
+  (`husky`, `pre-commit install`, `lefthook install`, `git lfs install --local`), fails or installs
+  nothing there. Install hooks on the host only and drop those steps (`/sandcastle update` checks
+  `setup` and those scripts, then compares `sandcastle gates`' `git hooks:` line).
+- **`autoCompactWindow` takes effect for the first time.** It never reached an agent before; a
+  project that set it gets the window it asked for from this release. Auto memory is now really off
+  in sandboxes too.
+- **The base is gated once more** at each project's first run or `sandcastle gates`: the green-base
+  record now carries the Sandcastle version, so the old record does not count.
+- Update the kit with `pnpm install` after the pull, as always: `sandcastle doctor` now fails
+  "kit dependencies installed" when the installed Sandcastle is not the pinned, patched one.
+
 - **A failed `setup` step now stops the run.** It used to be ignored, and the agents worked in a
   half-set-up sandbox. Run `sandcastle gates`: a step that fails shows as a red `setup` gate, with
   the step, its exit status and its last output. Fix it before the next run (`/sandcastle update`
   checks it). A run whose base check is skipped on a green record from before stops starting
   tickets once two tickets' setup has failed the same way.
 
+### Fixed
+
+- **Auto memory is really off in sandboxes, and `autoCompactWindow` takes effect.** The agent's
+  environment (`CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`) never reached a
+  pass on Sandcastle 0.12.0; on 0.14.0 it is exported before each Claude command. A key the
+  personal `.env` sets that the agent's environment also sets is left out of the container's, where
+  Sandcastle would refuse every pass.
+- **An agent log's last line is the real context size.** `Context window: Nk` is now the last
+  call's input, the size the pass ended at; the kit no longer renames it to
+  `Tokens processed (all turns)`.
+- **`sandcastle doctor` checks the kit's patch to Sandcastle is applied.** "kit dependencies
+  installed" fails, naming what is wrong, when the installed `@ai-hero/sandcastle` is not the pinned
+  version or runs without the kit's patch (installed with `npm`, or pulled with no `pnpm install`).
+
 ### Changed
 
+- **Built on Sandcastle 0.14.0** (from 0.12.0), with the kit's patch remade for it.
 - **A failed `setup` step is named, never silent.** Each step's exit status is recorded in the
   sandbox and checked once it opens, a `set -e` inside a step included. At the base gates a failure
   is a red `setup` gate, which stops the run; for a ticket it costs the attempt, and the ticket is

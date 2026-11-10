@@ -44,7 +44,7 @@ test("a kept agent or Codex skill adds no tool", () => {
   assert.deepEqual(toolsFor(["agent:reviewer", "codex-skill:verify"]), BASE_TOOLS);
 });
 
-// Sandcastle 0.12.0's command ends in " -p -"; its later releases drop that tail (upstream 7fdca8c6). Both shapes take the flag.
+// Sandcastle 0.14.0's command ends in " -p -"; its later releases drop that tail (upstream 7fdca8c6). Both shapes take the flag.
 const withoutTail = (command: string) => command.slice(0, -" -p -".length);
 
 test("--tools goes right after --output-format stream-json and nothing else changes, with or without the closing -p -", () => {

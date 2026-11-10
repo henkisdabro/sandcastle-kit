@@ -87,7 +87,8 @@ This continues SKILL.md: run its "Before every action" first.
      is absolute (or outside the project) does not exist in the sandbox: set a relative one.
      A hook installer (husky, `pre-commit install`, `lefthook install`) in `setup` installs nothing
      in a sandbox, which cannot write its `.git/config` or `.git/hooks`: install the hooks on the
-     host only and drop the installer from `setup`. `sandcastle gates` warns when the host has
+     host only and drop the installer from `setup`. No setup step may write repo config either
+     (`git config` without `--global`, `git lfs install --local`): it fails there. `sandcastle gates` warns when the host has
      hooks the sandbox does not.
    - **Prove the guards.** The hook check only proves a hook can run. For each kept `PreToolUse`
      guard that matters, add a `hookTests` entry to the config (the kit's docs/setup.md: Hook tests): a tool call

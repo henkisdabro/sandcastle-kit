@@ -20,7 +20,7 @@ import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
 import { poolWarningsNow, sizePointerNow } from "./size.ts";
-import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
+import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, sandcastlePatchProblems, USER_CONFIG } from "./sandbox.ts";
 import { kitRelease, kitVersion, newestRelease, releaseOut, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
@@ -369,7 +369,12 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   // 22.18 is the first Node 22 that strips the kit's TypeScript types by default (src/node-check.mjs).
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
   check(major > 22 || (major === 22 && minor >= 18), `Node ${process.versions.node}`, `Install Node 22.18 or newer (24 LTS recommended): \`nvm install 24\`, \`mise use -g node@24\` or ${mac ? "`brew install node`" : "your distribution's package"}`);
-  check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `\`pnpm -C ${shellQuote(KIT)} install\``);
+  const dependencyProblems = sandcastlePatchProblems();
+  check(
+    dependencyProblems.length === 0,
+    dependencyProblems.length ? `kit dependencies installed: ${dependencyProblems.join("; ")}` : "kit dependencies installed",
+    `\`pnpm -C ${shellQuote(KIT)} install\` (pnpm applies the kit's patch to Sandcastle; npm does not)`,
+  );
   // Not installed and not started need different fixes: "start OrbStack" to someone with no runtime sent them looking for an app they never had.
   const dockerInstalled = run("docker", ["--version"]) !== undefined;
   // The exit status alone: a `--format` field Podman lacks failed there, calling Podman "not running".

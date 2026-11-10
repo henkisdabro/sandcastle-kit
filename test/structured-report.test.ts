@@ -6,7 +6,8 @@
 // shapes are the documented ones), and the lines go through `createSandbox(...).run(...)` because the
 // library's `invokeAgent` is internal.
 //
-// These also pin what the kit relies on in the patched dependency today, for its next upgrade: the completion
+// These also pin what the kit relies on in the patched dependency today, for its next upgrade: the agent's env reaches
+// the command as `export KEY='value'; ` before it (test/agent-env.test.ts holds that apart), the completion
 // signal ends the idle timeout and starts a grace window that every further line restarts, the result of a pass
 // is the last `result` line's text (else the raw stdout), and the library's parser drops `structured_output`.
 //
@@ -76,7 +77,8 @@ const open = async (scripts: Script[]) => {
     create: async ({ worktreePath }) => ({
       worktreePath,
       exec: async (command, options) => {
-        if (!/^(claude|codex) /.test(command)) return { stdout: "", stderr: "", exitCode: 0 };
+        // An agent's command, behind the `export KEY='value'; ` its env puts first (Sandcastle 0.14.0's withAgentEnv).
+        if (!/^(export [A-Za-z_]\w*='[^']*'; )*(claude|codex) /.test(command)) return { stdout: "", stderr: "", exitCode: 0 };
         const script = scripts[Math.min(commands.length, scripts.length - 1)];
         commands.push(command);
         let stdout = "";
@@ -161,7 +163,7 @@ test("a normal schema-validated pass: the reply keeps the completion signal and 
   const raw: string[] = [];
   try {
     const r = await silent(() => passOf(fake, agent, (l) => raw.push(l)));
-    assert.match(fake.commands[0], /^claude --print --verbose .* --json-schema '.*' -p -$/, "the flag rides on the kit's own command: no change to the dependency");
+    assert.match(fake.commands[0], /^export CLAUDE_CODE_DISABLE_AUTO_MEMORY='1'; claude --print --verbose .* --json-schema '.*' -p -$/, "the flag rides on the kit's own command: no change to the dependency");
     assert.match(fake.commands[0], /--tools 'Bash,Read,Edit,Write,TaskStop'/, "the kit's tool cut is kept");
     assert.equal(r.completionSignal, SIGNAL);
     assert.equal(r.stdout, REPLY, "the pass's result is the text reply; structured_output is not in it");

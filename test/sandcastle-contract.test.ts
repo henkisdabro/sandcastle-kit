@@ -1,9 +1,8 @@
 // What the kit relies on in the installed @ai-hero/sandcastle, read from its `dist` (and its own claudeCode), so a bump
 // fails here, by name, where behaviour moved - not as every Claude pass failing at once in a run. Each failure message
-// says what changed and what in the kit to look at. Holds Sandcastle 0.12.0 (the version this was written on); the
-// next releases are known to move the agent env (0.14.0's `withAgentEnv`), the command's tail (after 0.14.0, upstream
-// 7fdca8c6), the ready hooks' exit status (upstream eb8c793b) and a signal-killed command's exit (upstream 676c8c5f,
-// 66eb8f1f). No Docker, no model.
+// says what changed and what in the kit to look at. Holds Sandcastle 0.14.0; the next releases are known to move the
+// command's tail (upstream 7fdca8c6), the ready hooks' exit status (upstream eb8c793b) and a signal-killed command's exit
+// (upstream 676c8c5f, 66eb8f1f). No Docker, no model.
 //
 //   pnpm test:file test/sandcastle-contract.test.ts
 
@@ -41,7 +40,7 @@ test("the claude command carries --output-format stream-json, where withTools an
   assert.match(command, /^claude .* --output-format stream-json /);
 });
 
-test("the claude command still ends in ' -p -' (0.12.0); a release that drops it fails here", () => {
+test("the claude command still ends in ' -p -' (0.14.0); a release that drops it fails here", () => {
   const { command } = claudeCode("claude-sonnet-5-5", { effort: "high", captureSessions: false }).buildPrintCommand({ prompt: "x", dangerouslySkipPermissions: true });
   assert.ok(
     command.endsWith(" -p -"),
@@ -50,21 +49,26 @@ test("the claude command still ends in ' -p -' (0.12.0); a release that drops it
   );
 });
 
-test("the agent provider's env is merged into the sandbox's env, with no per-command wrapper (no withAgentEnv)", () => {
-  // 0.12.0: `mergeProviderEnv` puts the agent's env (CLAUDE_CODE_DISABLE_AUTO_MEMORY, the auto-compact window) beside the
-  // sandbox's for the whole container, and refuses a key both name. 0.14.0 wraps the agent's command instead.
+test("the agent provider's env is put on its command as exports (withAgentEnv), outside the kit's own wrapper", () => {
+  // 0.14.0 prefixes each agent command with `export KEY='value'; ` for the agent's env (CLAUDE_CODE_DISABLE_AUTO_MEMORY,
+  // the auto-compact window); the container's env stays the sandbox's alone. 0.12.0 dropped the agent's env altogether.
+  // It wraps the agent the kit hands to `run`, so withTools / withSchema still see a command that starts with "claude ".
+  const wrapper = /var withAgentEnv = \(agent, sandboxProviderEnv\) => \{[\s\S]*?\n\};/.exec(index)?.[0] ?? "";
   assert.ok(
-    !/withAgentEnv/.test(all),
-    `Sandcastle ${pkg.version} has withAgentEnv: the agent's env is now put on its command, not on the container. ` +
-      `Check that src/agents.ts's claude() env still reaches each pass, that withTools / withSchema still see a command ` +
-      `that starts with "claude " (or move them past the wrapper), and that sandboxEnv's keys (src/sandbox.ts) need no change; then update this test.`,
+    wrapper,
+    `Sandcastle ${pkg.version} has no withAgentEnv: check how the agent's env (src/agents.ts's claude()) reaches a pass now, ` +
+      `and that withTools / withSchema still see a command that starts with "claude "; then update this test.`,
   );
-  assert.match(index, /agentProviderEnv: provider\.env/, `Sandcastle ${pkg.version}: the agent's env is no longer passed as agentProviderEnv - see the withAgentEnv message in this test`);
+  assert.match(wrapper, /export \$\{key\}=\$\{shellEscape\(value\)\}; /, `Sandcastle ${pkg.version}: withAgentEnv no longer writes \`export KEY='value'; \` - check test/agent-env.test.ts`);
+  assert.match(wrapper, /command: \w+\$?\d* \+ printCommand\.command/, `Sandcastle ${pkg.version}: withAgentEnv no longer puts the exports before the agent's own command`);
+  // A key both envs name is refused, so the kit's two lists must stay apart (test/agent-env.test.ts holds that they do).
+  assert.match(wrapper, /mergeProviderEnv\(\{[\s\S]*?agentProviderEnv: agent\.env,[\s\S]*?sandboxProviderEnv/, `Sandcastle ${pkg.version}: withAgentEnv no longer checks the agent's env against the sandbox's`);
+  assert.match(index, /const provider = withAgentEnv\(runOptions\.agent, ctx\.sandboxProviderEnv\);/, `Sandcastle ${pkg.version}: a sandbox's run no longer wraps the agent in withAgentEnv`);
 });
 
 test("a ready hook's exit status is ignored, so the kit's setup hook records its own (setupHook, src/sandbox.ts)", () => {
   // Every place that runs the sandbox ready hooks: from their list to the `Effect.all` that awaits them.
-  const blocks = [...index.matchAll(/const sandboxOnReady = options\.hooks\?\.sandbox\?\.onSandboxReady;[\s\S]*?concurrency: "unbounded"/g)].map((m) => m[0]);
+  const blocks = [...index.matchAll(/const sandboxOnReady = hooks\?\.sandbox\?\.onSandboxReady \?\? \[\];[\s\S]*?concurrency: "unbounded"/g)].map((m) => m[0]);
   assert.ok(
     blocks.length > 0,
     `Sandcastle ${pkg.version}: the ready hooks' block in dist/index.js no longer has the shape this test reads - the source ` +
@@ -80,6 +84,13 @@ test("a ready hook's exit status is ignored, so the kit's setup hook records its
         `The kit's setup hook always exits 0 and the kit reads its record (setupHook, assertSetup, setupFailure in src/sandbox.ts), ` +
         `so the outcome stays the kit's; check the kit's other ready hooks (git identity, Codex auth) exit 0, then update this test.`,
     );
+  }
+});
+
+test("an agent's failure reads as agentFailure parses it: 'exited with code N:' or 'reported an error:', the cause on the next line", () => {
+  // agentFailure (src/agents.ts) keeps the first line and, after "reported an error:", the next one: the ledger's crashed note.
+  for (const shape of [/message: `\$\{provider\.name\} exited with code \$\{execResult\.exitCode\}:\n\$\{errorDetail\}`/, /message: `\$\{provider\.name\} reported an error:\n\$\{streamError\}`/]) {
+    assert.match(index, shape, `Sandcastle ${pkg.version}: an AgentError's message no longer has the shape ${shape} - check agentFailure (src/agents.ts) and its tests, then update this test`);
   }
 });
 

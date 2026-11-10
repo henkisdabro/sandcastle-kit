@@ -1,0 +1,37 @@
+diff --git a/dist/chunk-G2R53CVZ.js b/dist/chunk-G2R53CVZ.js
+index f0364bc719336a66a05d72ab0290d2bd1907ed40..9a28ab5a6280b8cee81a51b59282378e51e6b6d7 100644
+--- a/dist/chunk-G2R53CVZ.js
++++ b/dist/chunk-G2R53CVZ.js
+@@ -708,7 +708,7 @@ var create = (repoDir, opts) => Effect_exports.gen(function* () {
+         const dirty = yield* hasUncommittedChanges(collision.path);
+         yield* dirty ? Console_exports.warn(
+           `Reusing worktree at ${collision.path} (branch '${branch}') \u2014 worktree has uncommitted changes`
+-        ) : fastForwardFromOrigin(collision.path, branch);
++        ) : Effect_exports.void; // sandcastle-kit patch (#711): the reused worktree was just created from the local branch; never refresh it from origin
+         return { path: normalize(collision.path), branch };
+       }
+       return yield* new WorktreeError({
+diff --git a/dist/index.js b/dist/index.js
+index d668894af9d0bba075c89521e6482bf602814eea..69d82a2782456e83b7eb3dc520ca3b216e6186af 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -73,7 +73,7 @@ var agentStreamEmitterLayer = (onEvent) => Layer_exports.succeed(AgentStreamEmit
+ });
+ 
+ // src/PromptPreprocessor.ts
+-var PROMPT_EXPANSION_TIMEOUT_MS = 3e4;
++var PROMPT_EXPANSION_TIMEOUT_MS = 12e4; // sandcastle-kit patch (#782): room for gh-retry.sh to ride out a GitHub 5xx
+ var SHELL_BLOCK_MARKER = "";
+ var MARKED_SHELL_BLOCK_PATTERN = new RegExp(
+   `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,
+@@ -2318,9 +2318,7 @@ var createSandbox = async (options) => {
+   const { hostRepoDir, worktreePath, providerHandle, sandbox, sandboxRepoDir } = await Effect_exports.runPromise(
+     Effect_exports.gen(function* () {
+       const hostRepoDir2 = yield* resolveCwd(options.cwd);
+-      yield* pruneStale(hostRepoDir2).pipe(
+-        Effect_exports.catchAll(() => Effect_exports.void)
+-      );
++      // sandcastle-kit patch (#711): the kit prunes worktree records itself, inside its host-git mutex
+       const { path: worktreePath2 } = yield* create(
+         hostRepoDir2,
+         { branch, baseBranch: options.baseBranch }
