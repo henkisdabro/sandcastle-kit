@@ -116,7 +116,7 @@ test("the project's status view from an earlier run is stopped and run again in 
 });
 
 // hc 0.1.19: a `--keep` terminal gives a shell only for a program lost to a signal; an ordinary exit is final.
-test("a status view that exits on Ctrl-C leaves a finished terminal: removed, and the view opened afresh by its name", () => {
+test("a status terminal left finished (an ordinary exit is final) is removed, and the view opened afresh by its name", () => {
   const root = project();
   const key = projectKey(root);
   reset({

@@ -101,8 +101,9 @@ shows the same thing:
   outright.
 - ♻️ **The same view, run after run.** The status terminal stays when the run ends, showing how it
   ended, and the next run of the project reuses it by name wherever you moved it - while it shows
-  the status view or a bare shell; a terminal running your own command keeps it, and the run's view
-  opens beside you instead.
+  the status view or a bare shell; a view you quit (with `q`) is opened afresh beside you, under
+  the same name; a terminal running your own command keeps it, and the run's view opens beside you
+  instead.
 - 🛰️ **A detached run outlives its terminal.** From hc 0.1.19, `sandcastle run --detach` started in
   a herdr-core terminal keeps running when that terminal closes (an older hc ended it with the
   terminal).

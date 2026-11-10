@@ -118,7 +118,12 @@ test("doctor outside both hosts checks the Herdr TUI plugin when Herdr TUI is in
 });
 
 test("doctor's herdr-core version floor: older than the checked version warns, newer or unreadable does not", async () => {
-  const { HC_VERIFIED, olderThan } = await import("../src/doctor.ts");
+  const { HC_VERIFIED, hcFloorLine, olderThan } = await import("../src/doctor.ts");
+  const line = hcFloorLine("hc 0.1.18");
+  assert.match(line, /^warn herdr-core hc 0\.1\.18 is older than 0\.1\.19,/, line);
+  assert.match(line, /an older hc ends a `sandcastle run --detach` with the terminal it was started from/, line);
+  assert.match(line, /a terminal opened before the update keeps doing so until it is recreated/, line);
+  assert.match(line, /`hc update`/, line);
   assert.equal(HC_VERIFIED, "0.1.19");
   assert.equal(olderThan("hc 0.1.18", HC_VERIFIED), true);
   assert.equal(olderThan("hc 0.0.99", "0.1.17"), true);
