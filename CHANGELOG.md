@@ -14,14 +14,17 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A failed `setup` step now stops the run.** It used to be ignored, and the agents worked in a
   half-set-up sandbox. Run `sandcastle gates`: a step that fails shows as a red `setup` gate, with
   the step, its exit status and its last output. Fix it before the next run (`/sandcastle update`
-  checks it).
+  checks it). A run whose base check is skipped on a green record from before stops starting
+  tickets once two tickets' setup has failed the same way.
 
 ### Changed
 
 - **A failed `setup` step is named, never silent.** Each step's exit status is recorded in the
-  sandbox and checked once it opens. At the base gates a failure is a red `setup` gate, which stops
-  the run; for a ticket it costs the attempt, and the ticket is tried once more in the run, then
-  ends as crashed with the step and its last output line in its note.
+  sandbox and checked once it opens, a `set -e` inside a step included. At the base gates a failure
+  is a red `setup` gate, which stops the run; for a ticket it costs the attempt, and the ticket is
+  tried once more in the run, then ends as crashed with the step and its last output line in its
+  note. The same step failing for two tickets stops the run starting tickets, as a failed prompt
+  expansion does, with `sandcastle gates` as the next step.
 - **An agent's own error keeps its cause.** A ticket that crashed with `claude-code reported an
   error` (or `codex reported an error`) now carries the cause from the next line in its note, and
   `docs/troubleshooting.md` has a row for it.

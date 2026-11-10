@@ -193,12 +193,13 @@ Declining is not skipping: every step still runs its check, and only the asking 
        case, would give the project's image the repository of one of the kit's own images, so
        every command refuses the config and names the fix. Propose a new name, then
        `sandcastle build`: the new name builds the image once under its own repository.
-   20. **Setup that failed in silence.** A failed `setup` step used to be ignored: the agents
-       worked in a half-set-up sandbox. `sandcastle gates` now shows it as a red `setup` gate,
-       naming the step, its exit status and its last output. Fix the step (or the Dockerfile) as
-       init.md step 6 says for a red gate. If it warns `git hook(s) ... run on the host but not in
-       the sandbox`, a hook installer (husky, `pre-commit install`, `lefthook install`) is likely in
-       `setup`: propose dropping it and installing the hooks on the host only, then `sandcastle gates`.
+   20. **Setup steps that fail.** Run `sandcastle gates`. A red `setup` gate means a step of
+       `setup` exits non-zero in the sandbox (the line names the step, its exit status and its last
+       output): a run would stop at it, so fix the step (or the Dockerfile) as init.md step 6 says
+       for a red gate, and run `sandcastle gates` again. A `WARNING: git hook(s) ... run on the host
+       but not in the sandbox` means a hook installer (husky, `pre-commit install`, `lefthook
+       install`) in `setup` installs nothing there: propose dropping it and installing the hooks on
+       the host only, then `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

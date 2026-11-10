@@ -43,6 +43,16 @@ test("agentFailure: codex's turn.failed keeps its cause", async () => {
   assert.equal(agentFailure(new Error("AgentError: codex reported an error:\n")), "codex reported an error");
 });
 
+test("agentFailure: no other line is joined - not after an exit code, and never JSON", async () => {
+  const { agentFailure } = await import("../src/agents.ts");
+  // With stderr empty, Sandcastle's exit-code error carries the stream's last lines: the note stays the first line.
+  const exited = new Error('(FiberFailure) AgentError: claude-code exited with code 1:\n{"type":"result","subtype":"error_during_execution","is_error":true}');
+  assert.equal(agentFailure(exited), "claude-code exited with code 1");
+  assert.equal(agentFailure(new Error("AgentError: codex exited with code 2:\nsome text")), "codex exited with code 2");
+  assert.equal(agentFailure(new Error('AgentError: claude-code reported an error:\n{"type":"result"}')), "claude-code reported an error");
+  assert.equal(agentFailure(new Error("AgentError: claude-code reported an error:\n[1, 2]")), "claude-code reported an error");
+});
+
 test("a commit git could not sign says so, and what to do", () => {
   const e = Object.assign(new Error("Command failed: git merge"), { stderr: "error: 1Password: agent refused operation\nfatal: failed to write commit object\n" });
   assert.equal(errorLine(e), "fatal: failed to write commit object - git could not sign the commit (commit.gpgsign is on): unlock your signing agent (1Password, gpg-agent), then try again");

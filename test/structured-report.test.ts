@@ -125,8 +125,8 @@ const passOf = (fake: Awaited<ReturnType<typeof open>>, agent: Agent, onRaw: (li
 const SCHEMA = JSON.stringify({ type: "object", required: ["status"], properties: { status: { type: "string" } } });
 
 /**
- * What a build would add to the kit's own provider, kept to the smallest form: `--json-schema` before the
- * command's closing ` -p -`, and the `structured_output` of the pass's own `result` line kept in the provider
+ * What a build would add to the kit's own provider, kept to the smallest form: `--json-schema` right after
+ * the command's `--output-format stream-json`, and the `structured_output` of the pass's own `result` line kept in the provider
  * object (one per pass, as `claude()` makes one) - the library's parser drops that field.
  */
 const withReport = (agent: ReturnType<typeof implAgent>) => {

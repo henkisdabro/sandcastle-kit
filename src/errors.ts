@@ -53,6 +53,12 @@ export const containerStartTimeout = (error: unknown): SlowStartError | undefine
   return Object.assign(slowStart(Math.round(ms / 1000), "start a container"), { cause: error });
 };
 
+// The step and its exit at the head of `SetupFailed`'s message (and of a note cut from it).
+const SETUP_STEP = /^setup failed(?: again after a requeue)?: (`[^`]*` (?:exited \d+|did not finish))/;
+
+/** Whether a line is `SetupFailed`'s: a setup problem's words then name the step and `sandcastle gates`, not `doctor --verify`. */
+export const isSetupLine = (line: string) => SETUP_STEP.test(line);
+
 /**
  * A command of the project's `setup` that failed as a sandbox opened (`assertSetup`, src/sandbox.ts): the step, its exit
  * status and its output's last lines. The message is one line - the step and its last output line - for a ticket's
@@ -63,7 +69,7 @@ export class SetupFailed extends Error {
   readonly failure: { name: "setup"; command: string; exitCode: number; output: string };
   constructor(failure: SetupFailed["failure"]) {
     const last = failure.output.split("\n").map((l) => l.trim()).filter(Boolean).at(-1);
-    super(`setup failed: \`${failure.command}\` ${failure.exitCode < 0 ? "did not finish" : `exited ${failure.exitCode}`}${last ? ` - ${last}` : ""}`);
+    super(`setup failed: \`${failure.command}\` ${failure.exitCode < 0 ? "did not finish" : `exited ${failure.exitCode}`}${last ? ` - ${cutAtWord(last, 120)}` : ""}`);
     this.failure = failure;
   }
 }
@@ -91,6 +97,9 @@ export const githubServerError = (line: string): string | undefined => /\bHTTP (
  * one failure, whatever follows the status: a 502 and then a 504 are the same GitHub outage.
  */
 export const sameExpansionFailure = (a: string, b: string): boolean => {
+  // A failed setup step (`SetupFailed`): the same step with the same exit, whatever its last output line says.
+  const step = (line: string) => SETUP_STEP.exec(line)?.[1];
+  if (step(a) !== undefined || step(b) !== undefined) return step(a) === step(b);
   const key = (line: string) =>
     line
       .replace(/`[^`]*`/g, "``")

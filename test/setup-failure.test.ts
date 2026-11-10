@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -142,4 +142,74 @@ test("the requeue's line and a later collision's note say the setup failed", asy
   const { againLine, requeuedLine } = await import("../src/landing.ts");
   assert.equal(requeuedLine("setup", [], { setup: "setup failed: `npm ci` exited 1 - npm ERR! network" }), "requeued after setup failed: `npm ci` exited 1 - npm ERR! network");
   assert.equal(againLine("conflict", ["2"], undefined, "setup"), "conflicted with #2 after a requeue for a failed setup");
+});
+
+test("a step's own set -e is honoured: a failure inside it is the step's failure", () => {
+  const s = inSandbox(["set -e; false; echo after"]);
+  const failure = s.read();
+  assert.equal(failure?.exitCode, 1);
+  assert.equal(failure?.output, "");
+});
+
+test("each step runs in a shell of its own, as the && chain of subshells before it did: a cd or export does not reach the next", () => {
+  const s = inSandbox(["mkdir sub && cd sub && export SETUP_X=1", "pwd >where; echo \"x=${SETUP_X:-}\" >>where"]);
+  assert.equal(s.read(), undefined);
+  const [where, x] = readFileSync(join(s.dir, "where"), "utf8").trim().split("\n");
+  assert.equal(realpathSync(where), realpathSync(s.dir));
+  assert.equal(x, "x=");
+});
+
+test("the output's colour codes and \\r progress lines are taken out, and a long tail is clipped", () => {
+  const failure = parseSetupState("fail 0 1\n@@output\n\u001b[31mred\u001b[0m\nloading 10%\rloading 100%\r\nend\r\n", ["npm ci"]);
+  assert.equal(failure?.output, "red\nloading 100%\nend");
+  const long = parseSetupState(`fail 0 1\n@@output\n${"x".repeat(9000)}\n`, ["npm ci"]);
+  assert.ok(long!.output.length <= 4005 && long!.output.startsWith("[...]"), String(long!.output.length));
+  // The message keeps the last line short: it is the ticket's note and the requeue line.
+  assert.ok(new SetupFailed(long!).message.length < 200);
+});
+
+test("two tickets whose setup fails the same way stop the run starting tickets, with sandcastle gates as the next step", async () => {
+  const { setupProblemWords } = await import("../src/ledger.ts");
+  const started: string[] = [];
+  const told: { kind: string; line?: string }[] = [];
+  const { endings, stop } = await createSchedule<T, G, string, string>({ tickets: [{ id: "1" }, { id: "2" }, { id: "3" }, { id: "4" }] }).run({
+    workers: 1,
+    attempt: async (t) => (started.push(t.id), { kind: "crashed", error: setupError() }),
+    land: async () => ({ kind: "merged" }) as const,
+    host: { check: async () => {}, failed: undefined },
+    tell: (c) => void told.push(c as never),
+  });
+  assert.ok(!started.includes("3") && !started.includes("4"), started.join());
+  assert.equal(stop.headline?.kind, "setup problem");
+  assert.equal(told.filter((c) => c.kind === "setup problem").length, 1);
+  for (const id of ["1", "2"]) assert.equal(endings.get(id)?.kind, "crashed");
+  const words = setupProblemWords(setupError().message);
+  assert.match(words, /`setup` failed alike/);
+  assert.match(words, /sandcastle gates/);
+  assert.doesNotMatch(words, /doctor --verify/);
+});
+
+test("setup failures of different steps do not stop the run", async () => {
+  const started: string[] = [];
+  const step = (id: string) => new SetupFailed({ name: "setup", command: `step-${id}`, exitCode: 1, output: "" });
+  await createSchedule<T, G, string, string>({ tickets: [{ id: "1" }, { id: "2" }, { id: "3" }] }).run({
+    workers: 1,
+    attempt: async (t) => (started.push(t.id), { kind: "crashed", error: step(t.id) }),
+    land: async () => ({ kind: "merged" }) as const,
+    host: { check: async () => {}, failed: undefined },
+    tell: () => {},
+  });
+  assert.ok(["1", "2", "3"].every((id) => started.includes(id)), started.join());
+});
+
+test("a crash after a setup requeue says so once, and clears the requeue line; an unstarted one clears it too", async () => {
+  const { describe } = await import("../src/ledger.ts");
+  const requeued = `requeued after ${setupError().message}`;
+  const again = describe({ kind: "crashed", error: setupError(), attempts: 2 }, { base: "main", gateNames: "test", requeued });
+  assert.deepEqual(again.record, { state: "crashed", note: "setup failed again after a requeue: `npm ci` exited 1 - npm ERR! network", requeued: null });
+  const unstarted = describe({ kind: "crashed", error: setupError(), attempts: 1 }, { base: "main", gateNames: "test", requeued });
+  assert.equal(unstarted.record?.requeued, null);
+  // A crash after a conflict's requeue keeps the line: it says something the note does not.
+  const other = describe({ kind: "crashed", error: new Error("boom"), attempts: 2 }, { base: "main", gateNames: "test", requeued: "requeued after conflict at landing with #2" });
+  assert.equal(other.record?.requeued, undefined);
 });

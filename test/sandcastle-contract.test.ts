@@ -65,7 +65,13 @@ test("the agent provider's env is merged into the sandbox's env, with no per-com
 test("a ready hook's exit status is ignored, so the kit's setup hook records its own (setupHook, src/sandbox.ts)", () => {
   // Every place that runs the sandbox ready hooks: from their list to the `Effect.all` that awaits them.
   const blocks = [...index.matchAll(/const sandboxOnReady = options\.hooks\?\.sandbox\?\.onSandboxReady;[\s\S]*?concurrency: "unbounded"/g)].map((m) => m[0]);
-  assert.ok(blocks.length > 0, `Sandcastle ${pkg.version}: no onSandboxReady block found in dist/index.js - find where ready hooks run and update this test`);
+  assert.ok(
+    blocks.length > 0,
+    `Sandcastle ${pkg.version}: the ready hooks' block in dist/index.js no longer has the shape this test reads - the source ` +
+      `moved, which is not yet a change of behaviour. Find where onSandboxReady hooks run (\`grep -n onSandboxReady\` in dist), ` +
+      `check they are still run as their command with the exit status ignored (the kit's setupHook, src/sandbox.ts, exits 0 ` +
+      `either way), and make this test read the new shape.`,
+  );
   for (const block of blocks) {
     assert.match(block, /sandbox\d?\.exec\(hook\.command,/, `Sandcastle ${pkg.version}: a ready hook is no longer run as its command - check setupHook (src/sandbox.ts)`);
     assert.ok(

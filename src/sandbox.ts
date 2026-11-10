@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, 
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseEnv } from "node:util";
+import { parseEnv, stripVTControlCharacters } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
 import { nearest, OperatorError, SetupFailed } from "./errors.ts";
@@ -1113,15 +1113,20 @@ const SETUP_STATE = "/tmp/sandcastle-setup";
  * with the failing step's output kept. Sandcastle ignores a ready hook's exit status up to 0.14.0, and a later
  * release (upstream eb8c793b) rejects `createSandbox` on it instead, so the hook always exits 0 and the kit reads the
  * record itself after the open (`assertSetup`, `setupFailure`): the same outcome on every release. A step that fails
- * stops the rest, as the `&&` chain before it did. A subshell each, ended on a line of its own so a step's trailing
- * comment cannot eat it.
+ * stops the rest, as the `&&` chain before it did. Each step runs in a subshell of its own, as in that chain, so a `cd`
+ * or an `export` in one does not reach the next; it ends on a line of its own so a step's trailing comment cannot eat
+ * it. Its status is taken after it, never on the left of `||`, where POSIX shells ignore a `set -e` the step sets.
+ * A step with a shell syntax error breaks the whole hook before it records anything: that reads as "did not finish".
  */
 export const setupHook = (setup: readonly string[]) =>
   [
     `s=${SETUP_STATE}; rm -f "$s.status" "$s.out"`,
-    ...setup.map((c, i) => `(${c}\n) >"$s.out" 2>&1 || { echo "fail ${i} $?" >"$s.status"; exit 0; }`),
+    ...setup.map((c, i) => `(${c}\n) >"$s.out" 2>&1; r=$?; [ "$r" -eq 0 ] || { echo "fail ${i} $r" >"$s.status"; exit 0; }`),
     `echo done >"$s.status"`,
   ].join("\n");
+
+// How much of a failed step's output is kept: the last lines that say why, not an install's whole log.
+const SETUP_TAIL_CHARS = 4000;
 
 /** What `setupFailure` reads, in one exec: the record, then the last output lines. */
 export const SETUP_READ = `cat ${SETUP_STATE}.status 2>/dev/null; echo @@output; tail -n 30 ${SETUP_STATE}.out 2>/dev/null`;
@@ -1133,7 +1138,14 @@ export const SETUP_READ = `cat ${SETUP_STATE}.status 2>/dev/null; echo @@output;
 export const parseSetupState = (stdout: string, setup: readonly string[]): SetupFailed["failure"] | undefined => {
   const at = stdout.indexOf("@@output\n");
   const status = (at < 0 ? stdout : stdout.slice(0, at)).trim();
-  const output = at < 0 ? "" : stdout.slice(at + "@@output\n".length).trim();
+  // A step's colour codes and `\r` progress lines would reach the note, run.json and the status view: each line is
+  // kept as a terminal would show it (after its last `\r`), and the tail clipped.
+  const shown = stripVTControlCharacters(at < 0 ? "" : stdout.slice(at + "@@output\n".length))
+    .split("\n")
+    .map((line) => line.slice(line.replace(/\r+$/, "").lastIndexOf("\r") + 1).replace(/\r+$/, ""))
+    .join("\n")
+    .trim();
+  const output = shown.length > SETUP_TAIL_CHARS ? `[...]${shown.slice(-SETUP_TAIL_CHARS)}` : shown;
   if (status === "done") return undefined;
   const m = /^fail (\d+) (\d+)$/.exec(status);
   if (m && setup[Number(m[1])] !== undefined) return { name: "setup", command: setup[Number(m[1])], exitCode: Number(m[2]), output };

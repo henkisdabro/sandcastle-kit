@@ -1392,11 +1392,13 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
         },
       });
-      // The tickets that crashed expanding their prompt, by the failure: the same one for SETUP_CRASHES tickets is the
-      // setup's. The stop holds before the second ticket's ending is told, so nothing starts in between.
+      // The tickets that crashed expanding their prompt, or whose `setup` step failed as their sandbox opened (counted at
+      // the first failure, before its requeue), by the failure: the same one for SETUP_CRASHES tickets is the setup's -
+      // a run on a cached green base, or one whose registry went down, would otherwise open two sandboxes per ticket for
+      // nothing. The stop holds before the second ticket's ending is told, so nothing starts in between.
       const setupCrashes: { line: string; ids: Set<string> }[] = [];
       const noteSetupCrash = (id: string, error: unknown) => {
-        const line = promptExpansionLine(error);
+        const line = promptExpansionLine(error) ?? (error instanceof SetupFailed ? error.message : undefined);
         if (line === undefined || stop.causes.some((c) => c.kind === "setup problem")) return;
         const same = setupCrashes.find((c) => sameExpansionFailure(c.line, line)) ?? (setupCrashes.push({ line, ids: new Set() }), setupCrashes.at(-1)!);
         same.ids.add(id);
@@ -1656,8 +1658,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               // Its agent died of the plan's limit: nothing failed, the ticket was cut short - not begun, and runnable again.
               const limit = r.causes?.find((c) => c.kind === "plan limit" && c.ticket === t.id);
               if (limit) return await end(t.id, { kind: "not begun", why: limit, cutShort: true });
-              if (r.error instanceof SetupFailed && sendBackSetup(t, r.error)) return;
               noteSetupCrash(t.id, r.error);
+              if (r.error instanceof SetupFailed && sendBackSetup(t, r.error)) return;
               return await end(t.id, { kind: "crashed", error: r.error, attempts: n });
             }
             case "stopped":

@@ -441,7 +441,9 @@ export const agentFailure = (error: unknown) => {
   const first = line.replace(/:\s*$/, "");
   const code = text.match(/\[[\w-]+:([a-z_]+)\]/)?.[1];
   if (code) return cutAtWord(`${first} - ${code.replace(/_/g, " ")}`);
-  const cause = /:\s*$/.test(line) ? rest.find((l) => l.trim())?.trim() : undefined;
+  // Only after "reported an error:": "exited with code 1:" is followed by the stream's own JSON when stderr was empty.
+  const next = /reported an error:\s*$/.test(line) ? rest.find((l) => l.trim())?.trim() : undefined;
+  const cause = next && !/^[[{]/.test(next) ? next : undefined;
   return cutAtWord(cause ? `${first}: ${cause}` : first);
 };
 

@@ -556,8 +556,10 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
         ...run,
         waitMs: slotWaitMs + (run.waitMs ?? 0),
         head,
-        hookTests: hookTests ? await runHookTests(project.hookTests, hooks, sandbox) : [],
-        gitHooks: hookTests ? await runGitHookProbe(sandbox) : undefined,
+        // Not after a failed setup: a hook that needs what setup installs would fail, and a hook manager setup never
+        // installed would read as `none` and send the person after the wrong cause (`hooksMissingWarning`).
+        hookTests: hookTests && !setup ? await runHookTests(project.hookTests, hooks, sandbox) : [],
+        gitHooks: hookTests && !setup ? await runGitHookProbe(sandbox) : undefined,
       };
     } finally {
       await recordPeak(sandbox, project.root, runId);

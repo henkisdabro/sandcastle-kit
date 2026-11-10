@@ -704,9 +704,20 @@ state.
   `openOrAbandon`, which removes what the open made.
   The attempt crashes; the scheduler sends a ticket that was not sent back before once more (`Again`
   of kind `setup`, its line `requeued after setup failed: ...`), and a second failure ends it as
-  `crashed`, the step and its last output line in the note.
-  At the base gates (`gateBase`) the same record is a red `setup` gate and no gate runs
-  (`test/setup-failure.test.ts`).
+  `crashed`, the note `setup failed again after a requeue: ...` (the step and its last output line,
+  colour codes and `\r` progress taken out) and the requeue line cleared.
+  That requeue is the ticket's one: a first conflict or red at landing after it is final, as the
+  ticket asks for one requeue, not one per cause.
+  Each failure also counts toward the `setup problem` stop below, at the first failure: the same step
+  failing on `SETUP_CRASHES` tickets stops the run starting tickets, which a base check skipped on a
+  cached green record (or `SKIP_BASE_GATES=1`) would otherwise leave to cost two opens per ticket.
+  Each step runs in a subshell of its own, as the `&&` chain before it did, its status taken after it
+  so a `set -e` inside it holds.
+  A step with a shell syntax error breaks the whole hook before it records anything, which reads as
+  "did not finish" with every step named; after upstream eb8c793b that hook's own exit status
+  rejects the open instead, Sandcastle's error rather than a red `setup` gate.
+  At the base gates (`gateBase`) the same record is a red `setup` gate: no gate, hook test or git-hook
+  probe runs (`test/setup-failure.test.ts`).
   A red one is not gated in full again when the requeue's merge joins the base tip and branch head
   that gate ran on (`repairFromRed`, `src/landing.ts`): the landing already re-ran its red gate in its slot (`rerun`), so
   no gate runs and the repair starts from the re-run's output; only a landing port that ran no re-run leaves the red gate
@@ -2868,8 +2879,8 @@ Each Claude pass gets its allow-list in `claude()` (`src/agents.ts`): `withTools
 puts `--json-schema`), which both its shapes carry - 0.12.0's ends in ` -p -`, a later one drops
 that tail - and throws when the command no longer starts with `claude `, has no
 `--output-format stream-json`, or has a ` -p -` that is not its end, so a Sandcastle update cannot
-run passes without the cut (an unknown name in `--tools` is ignored silently by Claude Code). `toolsFor(lean.keep)` is
-`BASE_TOOLS` (Bash, Read, Edit, Write, TaskStop), plus Skill for a kept `skill:` or `command:` and
+run passes without the cut (an unknown name in `--tools` is ignored silently by Claude Code).
+`toolsFor(lean.keep)` is `BASE_TOOLS` (Bash, Read, Edit, Write, TaskStop), plus Skill for a kept `skill:` or `command:` and
 ToolSearch for a kept `mcp:`, then the name of each kept `tool:<Name>`, once (`loadProject` refuses
 one that `src/claude-tools.ts` does not list, or that the managed settings deny); `configureTools`
 sets it from `loadProject`, as `configureModels` sets the models. `claude()` also sets
