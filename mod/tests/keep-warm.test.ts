@@ -43,10 +43,11 @@ const world = (on: Parameters<TestBody>[1], opts: { alive?: boolean; keepWarm?: 
   on("classic.SessionStart", () => ({}));
   on("session.root", () => ({ value: "/work" }));
   on("session.id", () => ({ value: "session-1" }));
-  on("session.usage", () => ({ value: { context: { tokens: 157094, window: 1000000, percent: 15 }, rateLimits: w.rateLimits, cost: {} } }));
+  // `as never`: Claude Code's types for these values differ between releases (2.1.311, 2.1.322), and the mod reads only what is built here.
+  on("session.usage", () => ({ value: { context: { tokens: 157094, window: 1000000, percent: 15 }, rateLimits: w.rateLimits, cost: {} } as never }));
   on("model.fork", ($, e) => {
     w.forks.push(String(e.prompt));
-    return { value: w.answers.length > 1 ? w.answers.shift() : w.answers[0] };
+    return { value: (w.answers.length > 1 ? w.answers.shift() : w.answers[0]) as never };
   });
   on("fs.exists", () => ({ value: true }));
   on("fs.stat", () => ({ value: { kind: "file", size: 1, mtimeMs: 0, isLink: false } }));
