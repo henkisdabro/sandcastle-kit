@@ -29,6 +29,12 @@ export const refLabel = (r: Ref) => (r.kind === "github" ? `#${r.id}` : r.kind =
 
 const TRIGGER = "(?:blocked by|depends on):?\\s+";
 
+// Between two refs of a list: a comma, "and", "or" or "&", or a serial comma before one of them
+// ("#1, #2, and #3"), then an optional repeated "by" ("#1 and by #2"). The words end at a word
+// boundary so "bypass" or "android" is prose, not a separator. "or" counts: reading "#1 or #2" as
+// two blockers holds a ticket back, and the header's rule is that a wrong guess never lets one start early.
+const SEPARATOR = "\\s*(?:,\\s*(?:(?:and|or)\\b|&)?|(?:and|or)\\b|&)\\s*(?:by\\s+)?";
+
 const tokens = (project: Project) => {
   const alts = ["#\\d+"];
   const linear = project.blockers?.linear ?? [];
@@ -67,7 +73,7 @@ export const stripCode = (text: string): string => {
 // to find what the stripping hid.
 const refsIn = (project: Project, text: string): Ref[] => {
   const token = tokens(project);
-  const phrase = new RegExp(`${TRIGGER}((?:${token})(?:\\s*(?:,|and|&)\\s*(?:${token}))*)`, "gi");
+  const phrase = new RegExp(`${TRIGGER}((?:${token})(?:${SEPARATOR}(?:${token}))*)`, "gi");
   const seen = new Map<string, Ref>();
   for (const m of text.matchAll(phrase)) {
     for (const t of m[1].match(new RegExp(token, "gi")) ?? []) {
