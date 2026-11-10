@@ -98,20 +98,20 @@ test("a caller with no tab labels starts a hidden view", () => {
   assert.ok(!run.some((w) => w.startsWith("herdr.")));
 });
 
-test("the project's status view from an earlier run is stopped and run again in place, with this run's marker", () => {
+test("the project's status view from an earlier run is stopped, removed and opened afresh by name, with this run's marker", () => {
   const root = project();
   const key = projectKey(root);
   reset({
     [`get-${statusName(root)}.json`]: shellOf("t3", key, ["node", "--import", "x", "/k/src/cli.ts", "status"]),
     "keys-t3.json": shellOf("t3", key),
+    "run.json": { address: "t9" },
   });
   writeFileSync(coreViewRecord(root), JSON.stringify({ instance: "old", status: "t3" }));
-  assert.equal(openCoreStatus(root, CALLER, { kit: KIT, instance: "i2" }), "t3");
-  assert.deepEqual(calls().filter((c) => c[0] !== "get"), [
-    ["keys", "t3", "ctrl+c", "--json"],
-    ["label", "t3", "sandcastle.instance=i2", "--json"],
-    ["send", "t3", `cd '${root.replaceAll("'", "'\\''")}' && env SANDCASTLE_CORE_VIEW=i2 '/the kit'\\''s/dir/bin/sandcastle' status`, "--json"],
-  ]);
+  assert.equal(openCoreStatus(root, CALLER, { kit: KIT, instance: "i2" }), "t9");
+  assert.deepEqual(verbs(), ["keys", "rm", "run"]);
+  const run = calls().find((c) => c[0] === "run")!;
+  assert.equal(run[run.indexOf("--name") + 1], statusName(root));
+  assert.deepEqual(run.slice(run.indexOf("--") + 1), ["env", "SANDCASTLE_CORE_VIEW=i2", `${KIT}/bin/sandcastle`, "status"]);
   assert.equal(readCoreView(root)?.instance, "i2");
 });
 
@@ -132,13 +132,6 @@ test("a status terminal left finished (an ordinary exit is final) is removed, an
   const run = calls().find((c) => c[0] === "run")!;
   assert.equal(run[run.indexOf("--name") + 1], statusName(root));
   assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [] });
-});
-
-test("a bare shell in the project's status terminal is typed into, with no Ctrl-C", () => {
-  const root = project();
-  reset({ [`get-${statusName(root)}.json`]: shellOf("t3", projectKey(root)) });
-  assert.equal(openCoreStatus(root, CALLER, { kit: KIT, instance: "i2" }), "t3");
-  assert.deepEqual(verbs(), ["label", "send"]);
 });
 
 test("the status terminal running a person's program keeps it, and its name: this run's view starts unnamed", () => {

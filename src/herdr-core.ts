@@ -82,7 +82,6 @@ const runsStatusView = (t: Terminal | undefined) => {
   return showsStatus(fg) || fg.some((c) => /\bcli\.ts\s+status(\s|$)/.test(c));
 };
 const pause = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 const message = (error: unknown) => String((error as { stderr?: string }).stderr || (error as Error)?.message || error).replace(/\s+/g, " ").trim().slice(0, 160);
 
 // The roots this process opened a view for, each torn down at exit by one listener.
@@ -118,7 +117,7 @@ export type CoreStatusOptions = { kit: string; hc?: Hc; instance?: string };
  * `--outlive-parent` (a detached run's caller may end first), `--no-notify` (hc would type its exit note into the
  * caller, which may be the Claude Code session the mod talks to) and `--keep` (the view comes back as a shell
  * after a core restart, where the next run finds it by name). Argv, never a shell string, so no path is quoted
- * wrong; only a reused shell is typed into, with every word quoted. The caller's `herdr.space` and `herdr.tab` put
+ * wrong, and nothing is ever typed into a terminal. The caller's `herdr.space` and `herdr.tab` put
  * it in the caller's tab (an unlabelled terminal stays hidden). Undefined, with the reason printed, when hc fails:
  * whatever this call started is ended first.
  */
@@ -133,12 +132,10 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     // An autonomy run's next turn: the view the first turn opened is already this run's.
     if (previous?.instance === instance && previous.status && runsStatusView(get(hc, previous.status))) return previous.status;
 
-    // The project's status terminal from an earlier run, reused in place wherever a person moved it: a view still
-    // running is stopped first, and a bare shell is as good. Ctrl-C leaves a `--keep` terminal a shell only when the
-    // view dies by the signal (hc 0.1.19: an ordinary exit is final), so a view that exits instead leaves it finished,
-    // which is removed and opened afresh by name. Anything else in it is a person's, and keeps the name; this run's
-    // view then goes unnamed.
-    let address: string | undefined;
+    // The project's status terminal from an earlier run: a view still running is stopped first, and what is left - a
+    // bare shell (Ctrl-C leaves a `--keep` terminal one only when the view dies by the signal) or a finished terminal
+    // (hc 0.1.19: an ordinary exit is final) - is removed and the view opened afresh by name. Anything else in it is a
+    // person's, and keeps the name; this run's view then goes unnamed.
     let nameFree = true;
     const found = get(hc, name);
     if (found?.state === "live") {
@@ -152,14 +149,12 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
             t = get(hc, found.address);
           }
         }
-        if (t?.state === "finished") {
+        // A bare shell is removed too, never typed into: once a terminal has published a status record, `hc send`
+        // from another terminal wraps the text in `<hc from=...>` tags (hc 0.1.19), and a view that died leaving its
+        // root record would be handed a line the shell cannot run.
+        if (t?.state === "finished" || bareShell(foregroundOf(t))) {
           hc(["rm", found.address, "--json"]);
           nameFree = true;
-        } else if (bareShell(foregroundOf(t))) {
-          hc(["label", found.address, `sandcastle.instance=${instance}`, "--json"]);
-          // `cd`: a shell a person kept may sit in another directory.
-          hc(["send", found.address, `cd ${quote(root)} && env ${marker} ${quote(bin)} status`, "--json"]);
-          address = found.address;
         }
       }
     } else if (found) {
@@ -167,21 +162,20 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
       hc(["rm", found.address, "--json"]);
     }
 
-    if (!address) {
-      const labels = [
-        ...(["herdr.space", "herdr.tab"] as const).flatMap((k) => (caller.labels[k] ? [`${k}=${caller.labels[k]}`] : [])),
-        `sandcastle.root=${key}`,
-        `sandcastle.instance=${instance}`,
-      ];
-      const out = JSON.parse(
-        hc([
-          "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--keep", ...(nameFree ? ["--name", name] : []), "--cwd", root,
-          ...labels.flatMap((l) => ["--label", l]), "--", "env", marker, bin, "status",
-        ]),
-      ) as { address?: unknown };
-      if (typeof out.address !== "string") throw new Error(`hc run gave no address: ${JSON.stringify(out).slice(0, 120)}`);
-      address = started = out.address;
-    }
+    const labels = [
+      ...(["herdr.space", "herdr.tab"] as const).flatMap((k) => (caller.labels[k] ? [`${k}=${caller.labels[k]}`] : [])),
+      `sandcastle.root=${key}`,
+      `sandcastle.instance=${instance}`,
+    ];
+    const out = JSON.parse(
+      hc([
+        "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--keep", ...(nameFree ? ["--name", name] : []), "--cwd", root,
+        ...labels.flatMap((l) => ["--label", l]), "--", "env", marker, bin, "status",
+      ]),
+    ) as { address?: unknown };
+    if (typeof out.address !== "string") throw new Error(`hc run gave no address: ${JSON.stringify(out).slice(0, 120)}`);
+    started = out.address;
+    const address = started;
     writeCoreView(root, { instance, status: address, slots: [] });
     if (!opened.size) process.on("exit", () => opened.forEach((o, r) => teardown(r, o.instance, o.hc)));
     opened.set(root, { instance, hc });
