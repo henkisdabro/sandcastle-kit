@@ -117,12 +117,11 @@ decides where the status view opens and what the run reports to the sidebar.
 _Avoid_: Herdr (on its own it names neither engine), environment
 
 **Herdr TUI**:
-The `herdr` server and its TUI, and its panes inside Herdr UI. The kit's plugin (`herdr/`) is for
-it alone.
+The `herdr` server and its TUI, the original Herdr. The kit's plugin (`herdr/`) is for it alone.
 _Avoid_: Herdr 1 (not Herdr's own name), classic Herdr, legacy Herdr
 
 **herdr-core**:
-The server the Herdr app's terminals run in (CLI `hc`): persistent terminals that the Herdr app and Herdr UI show. The kit
+The server the Herdr app's terminals run in (CLI `hc`): persistent terminals that the Herdr app shows. The kit
 talks to it, never to an app, so every front-end on it is covered.
 _Avoid_: Herdr 2 (not Herdr's own name), herdr-app (one front-end on it)
 

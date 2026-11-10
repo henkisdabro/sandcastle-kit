@@ -9,6 +9,23 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **In the Herdr app, a run's sandboxes now show by default.** A run started in a herdr-core
+  terminal starts a terminal per running sandbox even with `herdr.panes: "none"` (the default),
+  listed under the run's agent with no pane. Nothing to change; `SANDCASTLE_HERDR_VIEW=0` turns
+  them off, and `herdr.panes: "all"` keeps a pane per sandbox as before.
+
+### Added
+
+- **Sandboxes as sub-agents in the Herdr app.** In a herdr-core terminal, each running sandbox
+  is a terminal listed under the run's agent in the app's sidebar, named after the project and
+  ticket (`shop-12`), with no pane cluttering the tab; a click on it peeks at its log. With
+  `herdr.panes: "all"` each still gets a pane in the tab instead.
+- **`sandcastle doctor` names the Herdr app outside it.** In a terminal outside the app, with
+  herdr-core installed, it says a run started there opens no view, and to start it from one of
+  the app's terminals.
+
 ### Changed
 
 - **The README is a front page again.** It went from about 2,000 lines to about 300: the pitch,

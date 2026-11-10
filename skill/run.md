@@ -104,8 +104,8 @@ This continues SKILL.md: run its "Before every action" first.
    given `--api-key`, which only the user's own yes to that (step 1) allows. Inside Herdr the run opens a tab of its own holding only
    the status view (or reuses the status pane an earlier run left, wherever it now is), which is the one status view; expect no pane per sandbox unless the config
    sets `herdr.panes: "all"` (the sidebar carries the run). In a herdr-core terminal it opens
-   the status view as a terminal split into the tab it was started from, and slot terminals only
-   with `herdr.panes: "all"`. It prints:
+   the status view as a terminal split into the tab it was started from, and a terminal per
+   sandbox listed under it in the Herdr app's agents (panes in the tab with `herdr.panes: "all"`). It prints:
 
    ```
    Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: .sandcastle/logs/run-output.log. ...

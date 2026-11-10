@@ -107,11 +107,21 @@ test("doctor outside both hosts checks the Herdr TUI plugin when Herdr TUI is in
     });
     return r.stdout + r.stderr;
   };
+  const before = calls().length;
   const installed = doctor([bin, dirname(process.execPath), "/usr/bin", "/bin"]);
   assert.match(installed, /^opt  Herdr \(optional: opens the status pane automatically\)$/m, installed);
   assert.match(installed, /^info Herdr TUI plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr TUI tabs, and this is not a Herdr tab$/m, installed);
+  assert.match(installed, /^info herdr-core is installed, but this terminal is not one of its own: start a run from a terminal in the Herdr app to see it there\.$/m, installed);
+  assert.ok(!calls().slice(before).some((c) => c.startsWith("hc ") && c !== "hc --version"), "only hc --version: no core is started");
   const absent = doctor([dirname(process.execPath), "/usr/bin", "/bin"]);
-  assert.doesNotMatch(absent, /Herdr TUI plugin/, absent);
+  assert.doesNotMatch(absent, /Herdr TUI plugin|herdr-core is installed/, absent);
+});
+
+test("doctor's herdr-core version floor: older than the checked version warns, newer or unreadable does not", async () => {
+  const { HC_VERIFIED, olderThan } = await import("../src/doctor.ts");
+  assert.equal(olderThan("hc 0.1.16", HC_VERIFIED), true);
+  assert.equal(olderThan("hc 0.0.99", "0.1.17"), true);
+  for (const v of ["hc 0.1.17", "hc 0.1.19", "hc 0.2.0", "hc 1.0.0", "hc dev"]) assert.equal(olderThan(v, "0.1.17"), false, v);
 });
 
 test("the plugin's verbs in a herdr-core terminal say they are Herdr TUI's and exit 0, asking Herdr nothing", () => {

@@ -15,7 +15,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { GROUPS, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { real } from "./live-runs.ts";
 import { clear, record, windowTitle } from "./osc7501.ts";
@@ -32,6 +32,17 @@ export const projectKey = (root: string) => createHash("sha1").update(real(root)
 /** Fits hc's names (`[a-z0-9_-]{1,32}`). */
 export const statusName = (root: string) => `sc-${projectKey(root)}-status`;
 export const slotName = (root: string, n: number) => `sc-${projectKey(root)}-slot-${n}`;
+const nameWord = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+/**
+ * A sandbox sub-agent's name, `<project>-<ticket>` (`shop-12`): the app's agents list shows a terminal with no pane by
+ * its name alone, never its title or record, so the name is what says which ticket it is. Fits hc's names; not
+ * unique across checkouts of one project, so a taken name starts the terminal unnamed.
+ */
+export const ticketName = (root: string, issue: string) => {
+  const ticket = (nameWord(issue) || "ticket").slice(0, 20).replace(/-+$/, "");
+  const project = nameWord(basename(real(root))).slice(0, 31 - ticket.length).replace(/-+$/, "");
+  return project ? `${project}-${ticket}` : ticket;
+};
 /** Fresh in each process: an autonomy run's turns are one run. */
 export const RUN_INSTANCE = randomUUID().replaceAll("-", "").slice(0, 12);
 
@@ -287,21 +298,27 @@ export const readSlotState = (file: string): SlotState | undefined => {
 const NO_SLOTS: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, refresh() {}, close() {} };
 
 export type CoreViewOptions = CoreStatusOptions & {
-  /** At most this many slots at once; none with `slots` false (`herdr.panes: "none"`, or SANDCASTLE_HERDR_VIEW=0). */
+  /** At most this many slots at once; none with `slots` false (SANDCASTLE_HERDR_VIEW=0). */
   panes: number;
   slots: boolean;
+  /**
+   * `herdr.panes: "all"`: each slot a pane in the caller's tab (the caller's `herdr.*` labels), reused ticket after
+   * ticket. Otherwise a sub-agent of the status terminal, with no pane: the app lists it under the run's agent and a
+   * click peeks at it. Named after its ticket, as that list shows only a name, so a slot is started afresh per ticket.
+   */
+  paned?: boolean;
   ref: (id: string) => string;
 };
 
 /**
- * The run's view on herdr-core: the status terminal, and with slots on, a terminal per sandbox beside it - as Herdr
- * 1's sandbox panes (src/herdr.ts), each tailing its ticket's current log, and saying the ticket and its step as the
- * terminal's record. A slot is `sandcastle slot N`, a terminal of its own the run starts and ends: started `--rm`
+ * The run's view on herdr-core: the status terminal, and with slots on, a terminal per sandbox - a pane beside it
+ * (`paned`), as Herdr TUI's sandbox panes (src/herdr.ts), else a sub-agent listed under it - each tailing its ticket's
+ * current log, and saying the ticket and its step as the terminal's record. A slot is `sandcastle slot N`, a terminal of its own the run starts and ends: started `--rm`
  * (gone once it exits) under the status terminal (`--parent`, so the apps nest it there), and recorded under this
  * run instance so `teardown` ends it. A slot also ends itself once the run is not live or a later run owns the
  * project's view: a run killed with no exit handler leaves none behind.
  */
-export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots: slotsOn, ref, ...opts }: CoreViewOptions): SandboxView => {
+export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots: slotsOn, paned = true, ref, ...opts }: CoreViewOptions): SandboxView => {
   const { hc = hcCli, instance = RUN_INSTANCE } = opts;
   // An autonomy run's next turn: what the last turn left open goes, as a Herdr TUI view's panes do.
   teardown(root, instance, hc);
@@ -315,8 +332,9 @@ export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots:
   for (const f of readdirSync(logs)) if (/^(herdr-pane-\d+\.log|core-slot-\d+\.json)$/.test(f)) rmSync(join(logs, f), { force: true });
   const key = projectKey(root);
   const bin = join(opts.kit, "bin/sandcastle");
+  // Without the caller's `herdr.*` labels the app gives a slot no pane: it is the status terminal's sub-agent.
   const labels = [
-    ...(["herdr.space", "herdr.tab"] as const).flatMap((k) => (caller.labels[k] ? [`${k}=${caller.labels[k]}`] : [])),
+    ...(paned ? (["herdr.space", "herdr.tab"] as const).flatMap((k) => (caller.labels[k] ? [`${k}=${caller.labels[k]}`] : [])) : []),
     `sandcastle.root=${key}`,
     `sandcastle.instance=${instance}`,
   ];
@@ -345,12 +363,21 @@ export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots:
     slot.shown = { address: slot.address, ...s };
     writeWhole(slotStateFile(root, slot.n), slot.shown);
   };
-  const start = (n: number): Slot => {
+  const end = (address: string) => {
+    for (const verb of ["kill", "rm"]) {
+      try {
+        hc([verb, address, "--json"]);
+      } catch {
+        /* gone already (`--rm`) */
+      }
+    }
+  };
+  const launch = (n: number, issue: string): string => {
     follow(n, "none.log");
     const run = (named: boolean) =>
       JSON.parse(
         hc([
-          "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--rm", "--parent", status, ...(named ? ["--name", slotName(root, n)] : []), "--cwd", root,
+          "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--rm", "--parent", status, ...(named ? ["--name", paned ? slotName(root, n) : ticketName(root, issue)] : []), "--cwd", root,
           ...labels.flatMap((l) => ["--label", l]), "--", bin, "slot", String(n), "--instance", instance,
         ]),
       ) as { address?: unknown };
@@ -358,15 +385,29 @@ export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots:
     try {
       out = run(true);
     } catch (error) {
-      // A killed run's slot of that name, still ending itself (it looks once a second): this one goes unnamed.
+      // A killed run's slot of that name, still ending itself (it looks once a second), or another checkout's
+      // ticket of the same name: this one goes unnamed.
       if (!/name_taken/.test(message(error))) throw error;
       out = run(false);
     }
     if (typeof out.address !== "string") throw new Error(`hc run gave no address: ${JSON.stringify(out).slice(0, 120)}`);
-    const slot = { n, address: out.address };
+    return out.address;
+  };
+  const start = (n: number, issue: string): Slot => {
+    const slot = { n, address: launch(n, issue) };
     slots.push(slot);
     record();
     return slot;
+  };
+  // A sub-agent's name is its ticket's, fixed at start: the next ticket gets a terminal of its own.
+  // Closed until the new one has started: a failed start leaves no address on record that nothing runs at.
+  const restart = (slot: Slot, issue: string) => {
+    end(slot.address);
+    slot.closed = true;
+    record();
+    slot.address = launch(slot.n, issue);
+    slot.closed = false;
+    record();
   };
   const slotOf = (issue: string) => slots.find((s) => s.issue === issue);
 
@@ -374,7 +415,9 @@ export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots:
     status,
     claim(issue, title) {
       safe(() => {
-        const slot = slots.find((s) => !s.issue && !s.closed) ?? (slots.filter((s) => !s.closed).length < panes ? start(slots.length) : undefined);
+        const free = slots.find((s) => !s.issue && !s.closed);
+        if (free && !paned) restart(free, issue);
+        const slot = free ?? (slots.filter((s) => !s.closed).length < panes ? start(slots.length, issue) : undefined);
         if (!slot) return;
         slot.issue = issue;
         follow(slot.n, "none.log");
@@ -401,13 +444,7 @@ export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots:
         slot.closed = true;
         rmSync(slotLink(root, slot.n), { force: true });
         rmSync(slotStateFile(root, slot.n), { force: true });
-        for (const verb of ["kill", "rm"]) {
-          try {
-            hc([verb, slot.address, "--json"]);
-          } catch {
-            /* gone already (`--rm`) */
-          }
-        }
+        end(slot.address);
         record();
       });
     },

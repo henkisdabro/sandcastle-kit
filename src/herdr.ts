@@ -434,7 +434,7 @@ export const openSandboxView = (
   const host = terminalHost();
   if (host.kind === "core") {
     retireViewRecord(project.root);
-    return openCoreView(project.root, host.terminal, { kit: KIT, panes, slots: mode === "all" && process.env.SANDCASTLE_HERDR_VIEW !== "0", ref });
+    return openCoreView(project.root, host.terminal, { kit: KIT, panes, slots: process.env.SANDCASTLE_HERDR_VIEW !== "0", paned: mode === "all", ref });
   }
   if (process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1 || !inHerdr1()) return none();
   const logs = join(project.root, ".sandcastle/logs");
