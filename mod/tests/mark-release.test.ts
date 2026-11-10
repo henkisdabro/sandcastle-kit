@@ -29,7 +29,7 @@ const BAND = {
   component: "AbovePrompt",
   requestId: "band",
   viewport: { columns: 120, rows: 30 },
-  props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 3, bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 }, view: {} },
 } as const;
 
 /** The idle mark the band draws now - its parts' text joined by a space - or undefined. With no run alive the row's icon leads. */

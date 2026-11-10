@@ -16,7 +16,7 @@ const BAND = {
   component: "AbovePrompt",
   requestId: "band",
   viewport: { columns: 120, rows: 30 },
-  props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 3, bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 }, view: {} },
 } as const;
 const HIT = { isAnswered: true, text: "ok", usage: { input_tokens: 16, output_tokens: 40, cache_read_input_tokens: 157725, cache_creation_input_tokens: 0 } };
 const MISS = { isAnswered: true, text: "ok", usage: { input_tokens: 157000, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 157000 } };
@@ -43,7 +43,7 @@ const world = (on: Parameters<TestBody>[1], opts: { alive?: boolean; keepWarm?: 
   on("classic.SessionStart", () => ({}));
   on("session.root", () => ({ value: "/work" }));
   on("session.id", () => ({ value: "session-1" }));
-  // `as never`: Claude Code's types for these values differ between releases (2.1.311, 2.1.322), and the mod reads only what is built here.
+  // `as never`: these values hold only what the mod reads (no `startedAt`, a loose rate-limit `kind`, an untyped answer), which Claude Code's full types (2.1.311 and 2.1.322) refuse.
   on("session.usage", () => ({ value: { context: { tokens: 157094, window: 1000000, percent: 15 }, rateLimits: w.rateLimits, cost: {} } as never }));
   on("model.fork", ($, e) => {
     w.forks.push(String(e.prompt));
