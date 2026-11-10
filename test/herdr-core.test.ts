@@ -115,6 +115,25 @@ test("the project's status view from an earlier run is stopped and run again in 
   assert.equal(readCoreView(root)?.instance, "i2");
 });
 
+// hc 0.1.19: a `--keep` terminal gives a shell only for a program lost to a signal; an ordinary exit is final.
+test("a status view that exits on Ctrl-C leaves a finished terminal: removed, and the view opened afresh by its name", () => {
+  const root = project();
+  const key = projectKey(root);
+  reset({
+    [`get-${statusName(root)}.json`]: shellOf("t3", key, ["node", "--import", "x", "/k/src/cli.ts", "status"]),
+    "keys-t3.json": { address: "t3", state: "finished", labels: { "sandcastle.root": key } },
+    "run.json": { address: "t9" },
+  });
+  const started = Date.now();
+  assert.equal(openCoreStatus(root, CALLER, { kit: KIT, instance: "i2" }), "t9");
+  assert.ok(Date.now() - started < 2000, "no 5 s wait for a shell that never comes");
+  assert.deepEqual(verbs(), ["keys", "rm", "run"]);
+  assert.deepEqual(calls().find((c) => c[0] === "rm"), ["rm", "t3", "--json"]);
+  const run = calls().find((c) => c[0] === "run")!;
+  assert.equal(run[run.indexOf("--name") + 1], statusName(root));
+  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [] });
+});
+
 test("a bare shell in the project's status terminal is typed into, with no Ctrl-C", () => {
   const root = project();
   reset({ [`get-${statusName(root)}.json`]: shellOf("t3", projectKey(root)) });

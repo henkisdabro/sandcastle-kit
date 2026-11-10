@@ -9,6 +9,25 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **herdr-core 0.1.19.** `sandcastle doctor` now warns on an `hc` older than 0.1.19, the version
+  the kit's herdr-core view was checked against: `hc update` (or the Herdr app's update) brings it
+  up to date. Terminals opened before the update keep the old behaviour until recreated: a
+  `sandcastle run --detach` started in one still ends when it closes.
+
+### Changed
+
+- **A detached run outlives its herdr-core terminal.** From hc 0.1.19, `sandcastle run --detach`
+  started in a herdr-core terminal keeps running when that terminal closes; the docs say so.
+
+### Fixed
+
+- **The status terminal is reused when its view exits.** A `--keep` terminal gives a shell only
+  for a program lost to a signal; on hc 0.1.19 an ordinary exit is final. A status view that
+  exited on Ctrl-C left the terminal finished, and the next run waited 5 s for a shell that never
+  came, then opened its view unnamed. It is now removed and opened afresh by its name.
+
 ## [0.21.0] - 2026-11-10
 
 ### Upgrading

@@ -306,6 +306,9 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   Outside Herdr the status view is `sandcastle status` in a terminal of yours.
   A run that ends before it is going is reported with the end of its output.
   A detached run ignores SIGHUP.
+  Started in a herdr-core terminal, it outlives that terminal closing from hc 0.1.19 on; a
+  terminal opened before the update to 0.1.19 keeps the old behaviour (closing it ends the run)
+  until it is recreated.
 - **Not with autonomy level 1**, which asks whether to run again at the end of each turn and has
   no terminal to ask in: `Autonomy level 1 asks a question ... Use level 2 or 3, or run attached.`
   Levels 2, 3 and `drain` work as usual.

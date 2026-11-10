@@ -119,7 +119,8 @@ test("doctor outside both hosts checks the Herdr TUI plugin when Herdr TUI is in
 
 test("doctor's herdr-core version floor: older than the checked version warns, newer or unreadable does not", async () => {
   const { HC_VERIFIED, olderThan } = await import("../src/doctor.ts");
-  assert.equal(olderThan("hc 0.1.16", HC_VERIFIED), true);
+  assert.equal(HC_VERIFIED, "0.1.19");
+  assert.equal(olderThan("hc 0.1.18", HC_VERIFIED), true);
   assert.equal(olderThan("hc 0.0.99", "0.1.17"), true);
   for (const v of ["hc 0.1.17", "hc 0.1.19", "hc 0.2.0", "hc 1.0.0", "hc dev"]) assert.equal(olderThan(v, "0.1.17"), false, v);
 });

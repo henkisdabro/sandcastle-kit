@@ -27,8 +27,11 @@ import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
 import { runtimeProblemNow } from "./runtime.ts";
 import { resolveVersions, toolsFloorLine } from "./versions.ts";
 
-/** The herdr-core version the kit's view was last checked against (src/osc7501.ts's format, the sub-agent listing). */
-export const HC_VERIFIED = "0.1.17";
+/**
+ * The herdr-core version the kit's view was last checked against (src/osc7501.ts's format, the sub-agent listing, the
+ * status terminal's reuse), and the first whose terminals let a `sandcastle run --detach` outlive them.
+ */
+export const HC_VERIFIED = "0.1.19";
 /** Whether `hc --version`'s answer (`hc 0.1.19`) names a version below `floor`; an answer with no version is not. */
 export const olderThan = (answer: string, floor: string) => {
   const found = answer.match(/(\d+)\.(\d+)\.(\d+)/);
