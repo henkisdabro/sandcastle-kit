@@ -474,8 +474,8 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
 // Every key that runs a program, loads more config or decides where and how git connects. All of
 // `filter.*` (its `required` decides whether a failing filter stops git), every key `pinHostGitConfig`
 // pins (a value planted in a killed run would be pinned as the run's own, not refused), the other drivers
-// and commands, every `include` key; what a host `git fetch` reads (Sandcastle fetches in a kept worktree
-// it reuses): a remote's URLs, programs and proxy, URL rewrites, credentials, the protocols allowed, the
+// and commands, every `include` key; what a host `git fetch` reads (a person's own next one; Sandcastle's
+// reuse of a kept worktree fetched too, before the kit's patch): a remote's URLs, programs and proxy, URL rewrites, credentials, the protocols allowed, the
 // proxies and the CAs an HTTPS fetch trusts; the signature checks, which run `gpg.program`; and every
 // `extensions.*`; and what runs on a person's own later command (`alias.*`, which a repo-local alias overrides the
 // user's with, and `MORE_PROGRAM_KEYS`). Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
