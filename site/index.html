@@ -80,7 +80,7 @@
           { "@type": "Question", "name": "Can the text of a ticket make an agent do something else?", "acceptedAnswer": { "@type": "Answer", "text": "It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said." } },
           { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake while work is in flight (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and autonomy: \"drain\" keeps taking turns until the queue is drained or something stops it; end-of-run gates that went red only from machine load do not, as the next turn re-gates the base first. At autonomy 2, 3 and \"drain\", a ticket you queue while the run is live is taken as a follow-on turn, not left for the next run. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice." } },
           { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
-          { "@type": "Question", "name": "Does it work with the new Herdr app?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run started in a terminal of the Herdr app, or anything else on herdr-core, opens its status view as a terminal there and reports its state to the sidebar; sandbox terminals are optional. Herdr TUI works as before. Its plugin's key over any tab, tab bar line and ticket card have no herdr-core counterpart yet. sandcastle doctor names the host it found." } },
+          { "@type": "Question", "name": "Does it work with the new Herdr app?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run started in a terminal of the Herdr app, or anything else on herdr-core, opens its status view as a terminal there and reports its state to the sidebar, with each running sandbox listed under the run's agent there. Herdr TUI works as before. Its plugin's key over any tab, tab bar line and ticket card have no herdr-core counterpart yet. sandcastle doctor names the host it found." } },
           { "@type": "Question", "name": "Linear, Jira, Windows?", "acceptedAnswer": { "@type": "Answer", "text": "Linear issues can block a ticket today, but the queues are GitHub Issues and Markdown ticket files. The kit runs on macOS and Linux." } }
         ]
       }
@@ -582,7 +582,7 @@
             <ul>
               <li><b>Beside you.</b> Started in a herdr-core terminal, the run opens its status view as a terminal split into that tab. The next run reuses it where you moved it, if it still shows the status view or a bare shell.</li>
               <li><b>Run state.</b> The sidebar shows working, blocked, done or error, and the merged share of the run. Blocked raises the app's needs-you alert.</li>
-              <li><b>A terminal per sandbox, if you want them.</b> With <code>herdr: { panes: "all" }</code>, one terminal per concurrent sandbox, under the status view, follows its ticket's log. It closes itself once its run is gone, even a run killed outright.</li>
+              <li><b>Every sandbox, under the run.</b> Each running sandbox is a terminal listed under the run's agent in the sidebar, named after its ticket (<code>shop-12</code>), with no pane in your tab; click it to peek at its log. With <code>herdr: { panes: "all" }</code> each one also gets a pane in your tab. It closes itself once its run is gone, even a run killed outright.</li>
               <li><b>Not there yet.</b> The key over any tab, the tab bar line and the ticket card come from the Herdr TUI plugin, and have no herdr-core counterpart yet.</li>
             </ul>
           </div>
@@ -720,7 +720,7 @@
       </details>
       <details>
         <summary>Does it work with the new Herdr app?</summary>
-        <p>Yes. A run started in a terminal of the Herdr app, or anything else on herdr-core, opens its status view as a terminal there and reports its state to the sidebar; sandbox terminals are optional. Herdr TUI works as before. Its plugin's key over any tab, tab bar line and ticket card have no herdr-core counterpart yet. <code>sandcastle doctor</code> names the host it found.</p>
+        <p>Yes. A run started in a terminal of the Herdr app, or anything else on herdr-core, opens its status view as a terminal there and reports its state to the sidebar, with each running sandbox listed under the run's agent there. Herdr TUI works as before. Its plugin's key over any tab, tab bar line and ticket card have no herdr-core counterpart yet. <code>sandcastle doctor</code> names the host it found.</p>
       </details>
       <details>
         <summary>Linear, Jira, Windows?</summary>
