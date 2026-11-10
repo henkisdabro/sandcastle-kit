@@ -37,6 +37,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `--output-format stream-json` in Claude's command, so a command without the closing ` -p -` takes
   them too, and a new test reads the installed Sandcastle for what the kit relies on, so a bump
   fails there by name where behaviour moved.
+- **The green-base record carries the Sandcastle version.** A base proved green on one version is
+  proved again once on the next, since a new Sandcastle may mount, or make read-only, what a setup
+  writes.
+- **An empty `.git/hooks` counts as no hooks directory** in the `.git` check and the start record,
+  so the empty directory a sandbox's start creates in a repository with none no longer reads as
+  tampering, and `sandcastle clean` names a leftover sandbox by its worktree.
 
 ## [0.21.0] - 2026-11-10
 

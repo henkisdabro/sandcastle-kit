@@ -259,7 +259,8 @@ gates uncached even under `SKIP_BASE_GATES=1`, so a base that is really red stop
 `redBaseExit` still reads the last turn's facts (`test/verify-load-drain.test.ts`).
 The verify is **proof that the merged base is green in a clean gate-only sandbox**, not a clean
 re-gate on purpose: the green-base record (`.sandcastle/.run/base-gates.json`) holds the commit, the
-key (commit, image, plan and config), `by`, whose gates proved it (`#427` for a landing,
+key (commit, image, plan, config and the installed Sandcastle version, so a bump of the engine,
+which may mount or make read-only what a setup writes, proves the base once again), `by`, whose gates proved it (`#427` for a landing,
 `the base check`, `verify`) and `kind`, where they ran (`ProofKind`, `src/gates.ts`):
 `landing-sandbox` (a merge gated in its landing sandbox), `base` (the base check), `verify` (an
 earlier verify) or `ticket-sandbox` (a fast-forward of the tree the ticket's own gates passed on, in
@@ -1606,7 +1607,8 @@ A landing whose merge failed on an `index.lock` looks again after a few short wa
 same re-check, no merge abort), so a lock that stays stops the landings once and does not cost each
 later ticket a sandbox and a gate run (`test/landing-sandbox-lock.test.ts`).
 What is left, `sandcastle clean` removes: `reapOrphans` stops a running container of any worktree
-under the project's `.sandcastle/worktrees/`, not only `agent-issue-*`.
+under the project's `.sandcastle/worktrees/`, not only `agent-issue-*`, and names it by the
+worktree's own mount, not the read-only mount of its `.git` file that Sandcastle lists first.
 Its `docker ps`, `inspect` and `rm`, and those of `removeExitedSandboxes`, have the same 30 s limit
 (`dockerOrStop`): a daemon that gives no answer stops the run's start or `clean` with an
 `OperatorError` naming the call, since a container the kit could not ask about may still be running
@@ -1657,7 +1659,11 @@ opened, since a blocking read would hang the whole run.
   and `hooks/*` and `modules/*`: fingerprinted (each regular file's content hash in `files`, and its
   executable bits as a separate field, `modes`, beside it: `chmod +x` on a disabled hook with the
   same content enables it, and the hash alone does not see that; a mode-only difference is named
-  `(executable bit)` in the stop; `test/guard-hook-mode.test.ts`), and compared before every sandbox
+  `(executable bit)` in the stop; `test/guard-hook-mode.test.ts`; an empty `hooks/` reads as absent,
+  in the fingerprint and the start record alike (`hooksTree`): Sandcastle creates `hooks/` and
+  `info/` on the host at every sandbox start to mount them read-only, and in a repository that had
+  none the new directory stopped the run at its first sandbox, `test/guard-empty-hooks-root.test.ts`),
+  and compared before every sandbox
   opens, before every sandbox closes, before each landing and before each host write; the
   command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
   `core.hooksPath` and `core.fsmonitor` by environment.

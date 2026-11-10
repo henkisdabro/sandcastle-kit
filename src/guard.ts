@@ -181,6 +181,18 @@ const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet
   return found;
 };
 
+/**
+ * The hooks directory as a tree (`treeFiles`), with an empty one read as absent: Sandcastle (0.13 on) creates
+ * `<common>/hooks` on the host at every sandbox start, to mount it read-only, and in a repository that had none the
+ * new empty directory would otherwise stop the run at its first sandbox. An empty directory runs nothing; a file or a
+ * directory under it is still an entry.
+ */
+const hooksTree = (dir: string, hashOf: (f: string) => string, modes?: Record<string, string>): Record<string, string> => {
+  const top = join(dir, "hooks");
+  const found = treeFiles(top, hashOf, undefined, modes);
+  return Object.keys(found).length === 1 && found[top] === "directory" ? {} : found;
+};
+
 const commonDir = (root: string) => sh("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
 
 /** A ref's tip, or "" when it does not exist: a deleted ref is something to report, not a raw git error. */
@@ -232,7 +244,7 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   for (const f of paths) files[f] = hashOf(f);
   // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
   // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
-  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf, undefined, modes));
+  Object.assign(files, hooksTree(dir, hashOf, modes));
   Object.assign(files, moduleFiles(join(dir, "modules"), hashOf, modes));
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
@@ -506,7 +518,7 @@ const programState = (project: Project): ProgramState => {
   const files: Record<string, string> = {};
   const modes: Record<string, string> = {};
   const found: Record<string, string> = {};
-  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf, undefined, found), ...moduleFiles(join(dir, "modules"), hashOf, found) })) files[relative(dir, path)] = hash;
+  for (const [path, hash] of Object.entries({ ...hooksTree(dir, hashOf, found), ...moduleFiles(join(dir, "modules"), hashOf, found) })) files[relative(dir, path)] = hash;
   for (const [path, bits] of Object.entries(found)) modes[relative(dir, path)] = bits;
   const attributes = join(dir, "info", "attributes");
   return {

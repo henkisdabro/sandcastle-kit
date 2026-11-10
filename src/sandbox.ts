@@ -20,6 +20,19 @@ import { resolveVersions, type Versions } from "./versions.ts";
 
 export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
 
+/**
+ * The installed `@ai-hero/sandcastle`'s version (`unknown` when it is not installed: doctor says so). What a sandbox
+ * does - its mounts, the agent's environment, what it makes read-only - moves with it, so a base proved green on one
+ * version is proved again on the next (`baseKey`, `src/gates.ts`).
+ */
+export const sandcastleVersion = (kit = KIT): string => {
+  try {
+    return String(JSON.parse(readFileSync(join(kit, "node_modules", "@ai-hero", "sandcastle", "package.json"), "utf8")).version);
+  } catch {
+    return "unknown";
+  }
+};
+
 // Everything personal - tokens, machine-wide limits - lives here, never in the
 // kit's own directory, so the kit repo can be public and still in daily use.
 export const USER_CONFIG = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "sandcastle-kit");
@@ -179,7 +192,8 @@ export const reapOrphans = (project: Project, limitMs = DOCKER_ANSWER_MS) => {
   for (const id of ids) {
     try {
       const mounts = dockerOrStop(["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"], limitMs).split("\n");
-      const worktree = mounts.find((m) => prefixes.some((p) => m.startsWith(p)));
+      // Sandcastle (0.13 on) also mounts the worktree's `.git` file read-only, listed first: the worktree is the one named.
+      const worktree = mounts.find((m) => prefixes.some((p) => m.startsWith(p)) && !m.endsWith("/.git"));
       if (!worktree) continue;
       dockerOrStop(["rm", "-f", id], limitMs);
       console.log(`Stopped a sandbox a killed run left working: ${relative(worktree.startsWith(root) ? root : project.root, worktree)}`);

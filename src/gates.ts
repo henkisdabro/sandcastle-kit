@@ -18,7 +18,7 @@ import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, G
 import { type Hook, hooksPathLines, hooksPathOutside, hostHooks } from "./lean.ts";
 import { type MachineCpu, type PassReadings, cpuFields, cpuHigh, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
-import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, sandcastleVersion, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -969,13 +969,15 @@ const gateTimeLine =(gates: Gate[]) =>
   [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${seconds(g.ms!)}`).join(", ");
 
 // A green result holds for as long as nothing it depended on changes: the
-// base commit, the image, and the config that shapes a sandbox.
+// base commit, the image, the config that shapes a sandbox, and the Sandcastle
+// that opens it (a new version may mount, or make read-only, what a gate's setup writes).
 // `commit` is the one a gate ran on, when that is not what the base names now.
-const baseKey = (project: Project, image: string, planFile: string, commit = sh("git", ["rev-parse", project.baseBranch])) =>
+export const baseKey = (project: Project, image: string, planFile: string, commit = sh("git", ["rev-parse", project.baseBranch]), engine = sandcastleVersion()) =>
   createHash("sha256")
     .update(
       JSON.stringify([
         commit,
+        engine,
         image,
         project.gates,
         project.setup,
