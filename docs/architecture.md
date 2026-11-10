@@ -1154,9 +1154,12 @@ never a shell string.
 `--no-notify`: hc would otherwise type each exit note into the caller, which may be the Claude
 Code session the mod sends its end prompt to.
 The status terminal is `--keep` and runs `env SANDCASTLE_CORE_VIEW=<instance> <kit>/bin/sandcastle
-status`; the next run finds it by name and reuses it while it runs the status view (stopped with
-`hc keys <t> ctrl+c`) or a bare shell, typing the command with every word quoted; a person's
-program in it keeps the name, and the new view opens unnamed.
+status`; the next run finds it by name and, while it runs the status view (stopped with
+`hc keys <t> ctrl+c`) or a bare shell, ends it (`hc kill`, `hc rm`) and opens its own view afresh
+by the name - never typing into it: once a terminal has published an OSC 7501 record, `hc send`
+from another terminal wraps the text in `<hc from=...>` tags (hc 0.1.19), which a shell cannot run.
+A shell hc does not remove keeps the name, and the new view opens unnamed; so does a person's
+program in it.
 A `--keep` terminal gives a shell only for a program lost to a signal, which the view is on Ctrl-C;
 an ordinary exit is final (hc 0.1.19), so a view that exits instead leaves the terminal `finished`,
 which the reuse path removes (`hc rm`) and opens afresh by name.

@@ -151,10 +151,18 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
         }
         // A bare shell is removed too, never typed into: once a terminal has published a status record, `hc send`
         // from another terminal wraps the text in `<hc from=...>` tags (hc 0.1.19), and a view that died leaving its
-        // root record would be handed a line the shell cannot run.
+        // root record would be handed a line the shell cannot run. A live shell is killed before it is removed, as
+        // every terminal the kit ends is; and the name is taken again only once the terminal is gone, so a shell hc
+        // would not remove costs the view its name, never the view.
         if (t?.state === "finished" || bareShell(foregroundOf(t))) {
-          hc(["rm", found.address, "--json"]);
-          nameFree = true;
+          for (const verb of t?.state === "finished" ? ["rm"] : ["kill", "rm"]) {
+            try {
+              hc([verb, found.address, "--json"]);
+            } catch {
+              /* judged below, by whether it is gone */
+            }
+          }
+          nameFree = !get(hc, found.address);
         }
       }
     } else if (found) {

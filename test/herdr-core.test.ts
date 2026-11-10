@@ -21,7 +21,7 @@ const bin = join(stub, "bin");
 mkdirSync(bin);
 const log = join(stub, "calls.log");
 // `get T`: answers/get-T.json, else not found. `keys T`: answers/keys-T.json, when there, becomes T's next answer
-// (Ctrl-C turning a view into a shell). `run`: answers/runs/* one at a time, else answers/run.json, else fails;
+// (Ctrl-C turning a view into a shell). `rm T`: T is not found after. `run`: answers/runs/* one at a time, else answers/run.json, else fails;
 // with answers/name-taken, a named slot (paned or a sub-agent) fails as hc does. Every other verb answers `{}`.
 writeFileSync(
   join(bin, "hc"),
@@ -33,6 +33,7 @@ case "$1" in
        [ -f "$A/get-$2.json" ] && { cat "$A/get-$2.json"; exit 0; }
        echo '{"error":{"kind":"not_found"}}' >&2; exit 3 ;;
   keys) [ -f "$A/keys-$2.json" ] && cp "$A/keys-$2.json" "$A/get-$2.json"; echo '{}' ;;
+  rm) rm -f "$A/get-$2.json"; echo '{}' ;;
   run) case " $* " in *" --rm "*" --name "*) [ -f "$A/name-taken" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; } ;; esac
        f=$(ls "$A/runs" 2>/dev/null | head -n 1); [ -n "$f" ] && { cat "$A/runs/$f"; rm "$A/runs/$f"; exit 0; }
        [ -f "$A/run.json" ] && { cat "$A/run.json"; exit 0; }; echo '{"error":{"message":"core not running"}}' >&2; exit 1 ;;
@@ -108,7 +109,7 @@ test("the project's status view from an earlier run is stopped, removed and open
   });
   writeFileSync(coreViewRecord(root), JSON.stringify({ instance: "old", status: "t3" }));
   assert.equal(openCoreStatus(root, CALLER, { kit: KIT, instance: "i2" }), "t9");
-  assert.deepEqual(verbs(), ["keys", "rm", "run"]);
+  assert.deepEqual(verbs(), ["keys", "kill", "rm", "run"]);
   const run = calls().find((c) => c[0] === "run")!;
   assert.equal(run[run.indexOf("--name") + 1], statusName(root));
   assert.deepEqual(run.slice(run.indexOf("--") + 1), ["env", "SANDCASTLE_CORE_VIEW=i2", `${KIT}/bin/sandcastle`, "status"]);
