@@ -9,7 +9,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import { LOCAL_CONFIG_PATH, type Project } from "./config.ts";
-import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
+import { assertBaseHasCommit, type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { terminalHost } from "./terminal-host.ts";
@@ -264,6 +264,15 @@ export const assertCleanBase = (project: Project) => {
       `NOT STARTED: git left something half-done in this repo, and every landing would fail on it:\n${left.map((l) => `  ${l.file} (${l.what})`).join("\n")}\n${leftoverSteps(left)}`,
     );
   }
+  // Before the dirty files and the branch name: on a branch with no commit git cannot name the branch either.
+  // Only for such a checkout: a base that is missing while another branch is checked out is the wrong-branch refusal below.
+  let born = true;
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], project.root);
+  } catch {
+    born = false;
+  }
+  if (!born) assertBaseHasCommit(project);
   const dirty = dirtyFiles(project.root);
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
