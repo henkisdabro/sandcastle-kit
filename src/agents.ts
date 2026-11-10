@@ -115,20 +115,32 @@ export const configureAutoCompact = (window?: number) => {
   AUTO_COMPACT_WINDOW = window;
 };
 
+// Where the kit's flags go in Sandcastle's claude command: right after `--output-format stream-json`, which both of
+// its shapes carry - 0.12.0's, which ends in ` -p -`, and the later one that drops that tail (upstream 7fdca8c6).
+const STREAM_JSON = " --output-format stream-json";
+
 /**
- * Sandcastle's claude command with `--tools '<list>'` before its closing ` -p -`. Refuses a command of
- * another shape: an unknown tool name in `--tools` is ignored silently by Claude Code, and a Sandcastle
- * update that moved the end of the command must never run passes without the cut.
+ * Sandcastle's claude command with `flag` inserted after `--output-format stream-json`. Refuses a command of
+ * another shape (not claude's, no stream-json output, or a ` -p -` that is not its end), naming `what` and the
+ * function to update: a flag put in the wrong place, or dropped, must never run passes without it.
  */
-export const withTools = (command: string, tools: readonly string[]): string => {
-  const tail = " -p -";
-  if (!command.startsWith("claude ") || !command.endsWith(tail)) {
+const withFlag = (command: string, flag: string, what: string, fn: string): string => {
+  const at = / --output-format stream-json(?= |$)/.exec(command)?.index;
+  const strayTail = command.includes(" -p -") && !command.endsWith(" -p -");
+  if (!command.startsWith("claude ") || at === undefined || strayTail) {
     throw new Error(
-      `Sandcastle's claude command no longer has the shape the --tools allow-list needs (starts with "claude ", ends with "${tail}"): update withTools in src/agents.ts. Command: ${command}`,
+      `Sandcastle's claude command no longer has the shape the ${what} needs (starts with "claude ", carries "${STREAM_JSON.trim()}", any " -p -" at its end): update ${fn} in src/agents.ts. Command: ${command}`,
     );
   }
-  return `${command.slice(0, -tail.length)} --tools '${tools.join(",")}'${tail}`;
+  const after = at + STREAM_JSON.length;
+  return `${command.slice(0, after)} ${flag}${command.slice(after)}`;
 };
+
+/**
+ * Sandcastle's claude command with `--tools '<list>'` (`withFlag`): an unknown tool name in `--tools` is ignored
+ * silently by Claude Code, and a Sandcastle update that moved the command's shape must never run passes without the cut.
+ */
+export const withTools = (command: string, tools: readonly string[]): string => withFlag(command, `--tools '${tools.join(",")}'`, "--tools allow-list", "withTools");
 
 // The schema as the command carries it: compact, read on the host when the first command is built (the file is also
 // mounted at /etc/claude-code, but the flag takes the schema itself).
@@ -137,19 +149,10 @@ const reportSchemaJson = () =>
   (REPORT_SCHEMA_JSON ??= JSON.stringify(JSON.parse(readFileSync(new URL("../container/report.schema.json", import.meta.url), "utf8"))));
 
 /**
- * Sandcastle's claude command with `--json-schema '<schema>'` before its closing ` -p -`, as `withTools` adds
- * `--tools`, and with the same refusal of a command of another shape: a flag put in the wrong place would run
- * every pass without the report and record "no result" for it.
+ * Sandcastle's claude command with `--json-schema '<schema>'` (`withFlag`), as `withTools` adds `--tools`: a flag put
+ * in the wrong place would run every pass without the report and record "no result" for it.
  */
-export const withSchema = (command: string, schema: string): string => {
-  const tail = " -p -";
-  if (!command.startsWith("claude ") || !command.endsWith(tail)) {
-    throw new Error(
-      `Sandcastle's claude command no longer has the shape the --json-schema flag needs (starts with "claude ", ends with "${tail}"): update withSchema in src/agents.ts. Command: ${command}`,
-    );
-  }
-  return `${command.slice(0, -tail.length)} --json-schema ${shq(schema)}${tail}`;
-};
+export const withSchema = (command: string, schema: string): string => withFlag(command, `--json-schema ${shq(schema)}`, "--json-schema flag", "withSchema");
 
 /** The completion signal the library looks for by default, and the schema's only value for `signal`. */
 export const COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
@@ -427,13 +430,19 @@ export const implAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.e
 /**
  * One readable line for an agent that failed. The library's error is "(FiberFailure) AgentError:
  * claude-code exited with code 1:" with the cause on the next line as `[claude-code:<code>] {json}`;
- * the first line alone hid the cause, the whole thing broke the run pane's line mid-JSON. Cut at a word, not mid-word.
+ * the first line alone hid the cause, the whole thing broke the run pane's line mid-JSON. From Sandcastle 0.13.0 an
+ * error the agent reported in its stream (claude's `result` with `is_error`, codex's `turn.failed`) is
+ * "<agent> reported an error:" with the cause as plain text on the next line, which is kept: the crashed note said
+ * nothing without it. Cut at a word, not mid-word.
  */
 export const agentFailure = (error: unknown) => {
   const text = (error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
-  const first = text.split("\n")[0].replace(/:\s*$/, "");
+  const [line, ...rest] = text.split("\n");
+  const first = line.replace(/:\s*$/, "");
   const code = text.match(/\[[\w-]+:([a-z_]+)\]/)?.[1];
-  return cutAtWord(code ? `${first} - ${code.replace(/_/g, " ")}` : first);
+  if (code) return cutAtWord(`${first} - ${code.replace(/_/g, " ")}`);
+  const cause = /:\s*$/.test(line) ? rest.find((l) => l.trim())?.trim() : undefined;
+  return cutAtWord(cause ? `${first}: ${cause}` : first);
 };
 
 // Runs the review with REVIEW_MODEL, and once more with IMPL_MODEL if it throws - but not for a prompt that could

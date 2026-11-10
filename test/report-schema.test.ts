@@ -61,15 +61,15 @@ const quoted = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 
 test("off, a Claude pass's command is what it was", () => {
   const { command } = off.implAgent().buildPrintCommand(options);
-  assert.equal(command, "claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model 'claude-sonnet-5-5' --effort high --tools 'Bash,Read,Edit,Write,TaskStop' -p -");
+  assert.equal(command, "claude --print --verbose --dangerously-skip-permissions --output-format stream-json --tools 'Bash,Read,Edit,Write,TaskStop' --model 'claude-sonnet-5-5' --effort high -p -");
   assert.equal(passReport(off.implAgent()), undefined);
   assert.equal(off.REPORT_SCHEMA, false);
 });
 
-test("on, the command carries the compact schema before its closing -p -", () => {
+test("on, the command carries the compact schema right after --output-format stream-json", () => {
   const compact = JSON.stringify(schema);
   const { command } = on.implAgent().buildPrintCommand(options);
-  assert.ok(command.endsWith(` --json-schema ${quoted(compact)} -p -`));
+  assert.ok(command.includes(` --output-format stream-json --json-schema ${quoted(compact)} --tools `));
   assert.equal(command.replace(` --json-schema ${quoted(compact)}`, ""), off.implAgent().buildPrintCommand(options).command);
   assert.equal(on.REPORT_SCHEMA, true);
   // The shell reads the quoted schema back as the one argument, descriptions with apostrophes included.
@@ -77,8 +77,10 @@ test("on, the command carries the compact schema before its closing -p -", () =>
   assert.equal(back, compact);
 });
 
-test("a command of another shape is refused", () => {
+test("a command of either Sandcastle shape takes the schema; one of another shape is refused", () => {
+  for (const tail of [" -p -", ""]) assert.equal(on.withSchema(`claude --print --output-format stream-json --model 'm'${tail}`, "{}"), `claude --print --output-format stream-json --json-schema '{}' --model 'm'${tail}`);
   assert.throws(() => on.withSchema("claude --print -p - --extra", "{}"), /no longer has the shape/);
+  assert.throws(() => on.withSchema("claude --print --output-format stream-json -p - --extra", "{}"), /no longer has the shape/);
   assert.throws(() => on.withSchema("codex exec -p -", "{}"), /no longer has the shape/);
 });
 

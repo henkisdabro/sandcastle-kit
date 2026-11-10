@@ -404,8 +404,7 @@ export const landTicket = async (
       // The gated landing was checked (`landInSandbox`) before this result came back, so a red landing ends cleanly:
       // the next start must not blame a sandbox for a change made since.
       recordGitConfigEnd(project);
-      const setup = run.failure?.name === "setup" && project.setup.includes(run.failure.command);
-      for (const line of setup ? [`  FAIL  setup  $ ${run.failure!.command}`] : gateResultLines(project.gates, run.gates)) console.log(line);
+      for (const line of gateResultLines(project.gates, run.gates, run.failure)) console.log(line);
       if (run.failure) console.log(`\n--- ${run.failure.name} (exit ${run.failure.exitCode}), last lines:\n${run.failure.output.split("\n").slice(-15).join("\n")}`);
       throw new OperatorError(
         `Gates red on the merge of ${branch} into ${base}: ${run.failures.map((f) => f.name).join(", ")}. ` +

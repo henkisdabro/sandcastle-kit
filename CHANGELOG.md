@@ -9,6 +9,32 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **A failed `setup` step now stops the run.** It used to be ignored, and the agents worked in a
+  half-set-up sandbox. Run `sandcastle gates`: a step that fails shows as a red `setup` gate, with
+  the step, its exit status and its last output. Fix it before the next run (`/sandcastle update`
+  checks it).
+
+### Changed
+
+- **A failed `setup` step is named, never silent.** Each step's exit status is recorded in the
+  sandbox and checked once it opens. At the base gates a failure is a red `setup` gate, which stops
+  the run; for a ticket it costs the attempt, and the ticket is tried once more in the run, then
+  ends as crashed with the step and its last output line in its note.
+- **An agent's own error keeps its cause.** A ticket that crashed with `claude-code reported an
+  error` (or `codex reported an error`) now carries the cause from the next line in its note, and
+  `docs/troubleshooting.md` has a row for it.
+- **The base gates warn about commit hooks the sandbox does not run.** When the host has
+  `pre-commit` or `commit-msg` hooks and the sandbox finds none - a hook installer such as husky in
+  `setup` installs nothing there, as a sandbox cannot write its `.git/config` or `.git/hooks` - the
+  base check prints a WARNING with the cause and the fix: install the hooks on the host only, and
+  drop the installer from `setup`.
+- **Ready for the next Sandcastle releases.** The `--tools` and `--json-schema` flags go right after
+  `--output-format stream-json` in Claude's command, so a command without the closing ` -p -` takes
+  them too, and a new test reads the installed Sandcastle for what the kit relies on, so a bump
+  fails there by name where behaviour moved.
+
 ## [0.21.0] - 2026-11-10
 
 ### Upgrading

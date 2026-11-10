@@ -85,6 +85,10 @@ This continues SKILL.md: run its "Before every action" first.
    - Git hooks (`core.hooksPath`, `.husky`) run on every agent commit inside the sandbox. Check
      that what they call is in the image and that none pushes or deploys. A `core.hooksPath` that
      is absolute (or outside the project) does not exist in the sandbox: set a relative one.
+     A hook installer (husky, `pre-commit install`, `lefthook install`) in `setup` installs nothing
+     in a sandbox, which cannot write its `.git/config` or `.git/hooks`: install the hooks on the
+     host only and drop the installer from `setup`. `sandcastle gates` warns when the host has
+     hooks the sandbox does not.
    - **Prove the guards.** The hook check only proves a hook can run. For each kept `PreToolUse`
      guard that matters, add a `hookTests` entry to the config (the kit's docs/setup.md: Hook tests): a tool call
      it must refuse, with `expect: "block"` - read the guard's script for what it refuses - and

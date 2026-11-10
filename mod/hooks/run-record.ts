@@ -165,7 +165,7 @@ export type TicketRecord = {
   flaky?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];
-  /** The ticket's second attempt after a conflict (at landing, or found before its review or gates) or a red at landing ("requeued after conflict before review with #3"); null once that attempt is not going to run. */
+  /** The ticket's second attempt after a conflict (at landing, or found before its review or gates), a red at landing ("requeued after conflict before review with #3"), or a setup step that failed as its sandbox opened; null once that attempt is not going to run. */
   requeued?: string | null;
   /** Merged, but the tracker refused the close: the error, short. */
   closeFailed?: string;

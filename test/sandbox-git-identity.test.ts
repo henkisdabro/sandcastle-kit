@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -18,7 +18,7 @@ import type { Project } from "../src/config.ts";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { fakeTracker } = await import("./fixtures.ts");
 const { hostIdentity, hostIdentityParts } = await import("../src/generated.ts");
-const { AGENT_COMMITTER, sandboxConfig } = await import("../src/sandbox.ts");
+const { AGENT_COMMITTER, sandboxConfig, setupHook } = await import("../src/sandbox.ts");
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-git-identity-")));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -39,14 +39,17 @@ const hooks = () => sandboxConfig(project, "image", "plan.json").hooks.sandbox.o
 test("a ready hook sets the host identity, beside the project's setup", () => {
   const [first, second] = hooks();
   assert.match(first.command, /git config --file .* user\.name /);
-  assert.equal(second.command, "(echo setup\n)");
+  assert.equal(second.command, setupHook(["echo setup"]));
 });
 
 test("setup's steps run in order, in one hook: Sandcastle runs its ready hooks at once", () => {
-  const steps = ["echo one # first", "echo two"];
+  const steps = ["echo one >>order # first", "echo two >>order"];
   const all = sandboxConfig({ ...project, setup: steps } as Project, "image", "plan.json").hooks.sandbox.onSandboxReady;
   assert.equal(all.length, 2);
-  assert.equal(execFileSync("sh", ["-c", all[1].command], { encoding: "utf8" }), "one\ntwo\n");
+  // The hook's record (`setupHook`) moved out of /tmp into this test's own directory.
+  const cwd = mkdtempSync(join(tmp, "order-"));
+  execFileSync("sh", ["-c", all[1].command.replaceAll("/tmp/sandcastle-setup", join(cwd, "state"))], { cwd });
+  assert.equal(readFileSync(join(cwd, "order"), "utf8"), "one\ntwo\n");
 });
 
 // A clean HOME, as a fresh sandbox has: no ~/.gitconfig and no XDG git config.

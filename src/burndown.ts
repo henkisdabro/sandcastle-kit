@@ -49,7 +49,7 @@ import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeS
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { startClock, type StartClock } from "./start-clock.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { assertSetup, cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, type Ticket, type Tracker } from "./tracker.ts";
@@ -3841,7 +3841,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     testRedGate: TEST_RED_GATE,
     prompts,
     overrides,
-    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }), host.exclusive),
+    // A setup step that failed throws `SetupFailed` inside the open, so the open's clean-up removes what it made: the attempt
+    // is lost, and the scheduler sends the ticket back once (src/schedule.ts).
+    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }).then((s) => assertSetup(s, project.setup, branch)), host.exclusive),
     gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>

@@ -54,6 +54,21 @@ export const containerStartTimeout = (error: unknown): SlowStartError | undefine
 };
 
 /**
+ * A command of the project's `setup` that failed as a sandbox opened (`assertSetup`, src/sandbox.ts): the step, its exit
+ * status and its output's last lines. The message is one line - the step and its last output line - for a ticket's
+ * note; a ticket's open throws it, which costs that attempt, and the scheduler sends the ticket back once
+ * (`src/schedule.ts`).
+ */
+export class SetupFailed extends Error {
+  readonly failure: { name: "setup"; command: string; exitCode: number; output: string };
+  constructor(failure: SetupFailed["failure"]) {
+    const last = failure.output.split("\n").map((l) => l.trim()).filter(Boolean).at(-1);
+    super(`setup failed: \`${failure.command}\` ${failure.exitCode < 0 ? "did not finish" : `exited ${failure.exitCode}`}${last ? ` - ${last}` : ""}`);
+    this.failure = failure;
+  }
+}
+
+/**
  * `text` cut to at most `max` characters at a word, with "…" when it was cut. A text with no space to cut at is cut
  * at `max`.
  */

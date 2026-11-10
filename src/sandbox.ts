@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
-import { nearest, OperatorError } from "./errors.ts";
+import { nearest, OperatorError, SetupFailed } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
 import { commandOf, KIT_CACHE } from "./live-runs.ts";
 import { kitRunning } from "../mod/hooks/run-live.ts";
@@ -1105,6 +1105,57 @@ export const dockerOptions = (project: Project, image: string) => ({
   ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
 });
 
+// Where the setup hook records how it ended, inside the container (each sandbox has its own /tmp).
+const SETUP_STATE = "/tmp/sandcastle-setup";
+
+/**
+ * The ready hook that runs the project's `setup`, in order, and records how it ended: `done`, or `fail <step> <exit>`
+ * with the failing step's output kept. Sandcastle ignores a ready hook's exit status up to 0.14.0, and a later
+ * release (upstream eb8c793b) rejects `createSandbox` on it instead, so the hook always exits 0 and the kit reads the
+ * record itself after the open (`assertSetup`, `setupFailure`): the same outcome on every release. A step that fails
+ * stops the rest, as the `&&` chain before it did. A subshell each, ended on a line of its own so a step's trailing
+ * comment cannot eat it.
+ */
+export const setupHook = (setup: readonly string[]) =>
+  [
+    `s=${SETUP_STATE}; rm -f "$s.status" "$s.out"`,
+    ...setup.map((c, i) => `(${c}\n) >"$s.out" 2>&1 || { echo "fail ${i} $?" >"$s.status"; exit 0; }`),
+    `echo done >"$s.status"`,
+  ].join("\n");
+
+/** What `setupFailure` reads, in one exec: the record, then the last output lines. */
+export const SETUP_READ = `cat ${SETUP_STATE}.status 2>/dev/null; echo @@output; tail -n 30 ${SETUP_STATE}.out 2>/dev/null`;
+
+/**
+ * The failed step `setupHook` recorded, from `SETUP_READ`'s output; undefined when it ended `done`. No record at all is a
+ * setup that never finished (the hook was killed, or never ran): exit status -1, every step named.
+ */
+export const parseSetupState = (stdout: string, setup: readonly string[]): SetupFailed["failure"] | undefined => {
+  const at = stdout.indexOf("@@output\n");
+  const status = (at < 0 ? stdout : stdout.slice(0, at)).trim();
+  const output = at < 0 ? "" : stdout.slice(at + "@@output\n".length).trim();
+  if (status === "done") return undefined;
+  const m = /^fail (\d+) (\d+)$/.exec(status);
+  if (m && setup[Number(m[1])] !== undefined) return { name: "setup", command: setup[Number(m[1])], exitCode: Number(m[2]), output };
+  return { name: "setup", command: setup.join(" && "), exitCode: -1, output: output || "the setup hook left no record of how it ended" };
+};
+
+/** How the project's setup ended in this sandbox (`setupHook`); undefined when it passed, or when there is none. */
+export const setupFailure = async (sandbox: { exec(command: string): Promise<{ stdout: string }> }, setup: readonly string[]) =>
+  setup.length ? parseSetupState((await sandbox.exec(SETUP_READ)).stdout, setup) : undefined;
+
+/**
+ * The sandbox, once its setup passed; otherwise the failing step and its output's last lines are printed under `label`
+ * and `SetupFailed` is thrown. For a ticket's open, inside `openOrAbandon`, which then removes what the open made.
+ */
+export const assertSetup = async <S extends { exec(command: string): Promise<{ stdout: string }> }>(sandbox: S, setup: readonly string[], label: string): Promise<S> => {
+  const failure = await setupFailure(sandbox, setup);
+  if (!failure) return sandbox;
+  const error = new SetupFailed(failure);
+  console.log(`${label}: ${error.message}${failure.output ? `; last lines:\n${failure.output.split("\n").slice(-15).join("\n")}` : ""}`);
+  throw error;
+};
+
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
 // each fresh worktree before the agent sees it. A numeric `project.cpus` caps each container: a
 // run, `sandcastle gates` and `sandcastle land` set it from `sandboxCpus` (per kind of sandbox)
@@ -1126,8 +1177,7 @@ export const sandboxConfig = (project: Project, image: string, leanPlan: string)
           : []),
         // Sandcastle runs the ready hooks all at once, so setup's steps share one hook to keep their
         // order: pnpmStore's store-dir step raced the install, which then filled a store of its own.
-        // A subshell each, ended on a line of its own so a step's trailing comment cannot eat it.
-        ...(project.setup.length ? [{ command: project.setup.map((c) => `(${c}\n)`).join(" && ") }] : []),
+        ...(project.setup.length ? [{ command: setupHook(project.setup) }] : []),
       ],
     },
   },

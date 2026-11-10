@@ -15,10 +15,10 @@ import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
-import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
+import { type Hook, hooksPathLines, hooksPathOutside, hostHooks } from "./lean.ts";
 import { type MachineCpu, type PassReadings, cpuFields, cpuHigh, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
-import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -475,6 +475,24 @@ export const hooksPathWarning = (root: string): string[] => {
   return value ? hooksPathLines(value).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
 };
 
+/**
+ * The base check's lines for commit hooks the host has (`hostHooks`) that the sandbox's probe found none of; none when
+ * there is no such hook. From Sandcastle 0.13.0 a sandbox's `.git/config` and `.git/hooks` are read-only, so an
+ * installer in `setup` (husky 9 exits 0 without setting `core.hooksPath`; `pre-commit install`, `lefthook install`,
+ * `git lfs install --local` fail) installs nothing, and a hooks directory git ignores (husky's `.husky/_`) is not in
+ * the worktree: agent commits then run no hooks, with nothing red. The kit copies no hooks in; it says so.
+ */
+export const hooksMissingWarning = (root: string, g: GitHooks): string[] => {
+  const none = new Set(g.hooks.filter((h) => h.status === "none").map((h) => h.name));
+  const missing = hostHooks(root, [...none]);
+  if (!missing.length) return [];
+  return [
+    `  WARNING: git hook${missing.length > 1 ? "s" : ""} ${missing.join(", ")} run${missing.length > 1 ? "" : "s"} on the host but not in the sandbox: agent commits there run no hooks, and nothing fails to say so.`,
+    "    Cause: a sandbox cannot write its .git/config or .git/hooks, so a hook installer in the project's `setup` (husky, `pre-commit install`, `lefthook install`) installs nothing there, and a hooks directory git ignores (husky's `.husky/_`) is not in the worktree.",
+    "    -> Install the hooks on the host only - in `.git/hooks`, or a tracked directory that `core.hooksPath` names (such as `.githooks`) - and drop the installer from `setup`.",
+  ];
+};
+
 export const gitHooksLine = (g: GitHooks) =>
   g.unchecked !== undefined ? `git hooks: not checked (${g.unchecked})` : `git hooks: ${g.hooks.map((h) => `${h.name}=${h.status}`).join(" ")}`;
 
@@ -525,7 +543,11 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // landing after the caller read the tip is in here, and the run is that commit's, not the one asked about.
       const head = (await sandbox.exec("git rev-parse HEAD")).stdout.trim() || undefined;
       // The base and verify gates end a run's wait for them; the mid-run check (`ownSlot` false) is a ticket's, run in its slot.
-      const run: GateRun = withGates ? await runGates(project, sandbox, `${project.name} ${label}`, true, { log }, ownSlot) : { gates: [], failure: undefined, failures: [], waitMs: 0 };
+      // A setup step that failed (`setupFailure`) is a red `setup` gate, and no gate runs on a half-set-up sandbox.
+      const setup = await setupFailure(sandbox, project.setup);
+      const run: GateRun = setup
+        ? { gates: [{ name: "setup", pass: false }], failure: setup, failures: [setup], waitMs: 0 }
+        : withGates ? await runGates(project, sandbox, `${project.name} ${label}`, true, { log }, ownSlot) : { gates: [], failure: undefined, failures: [], waitMs: 0 };
       // Red on the base, whoever asked: a green record of it (a landing's, the verify's) would have the next
       // turn skip the check on a base known to be red - a flaky test passes once and fails the next time.
       if (run.failures.length || run.gates.some((g) => !g.pass)) noteBaseResult(project.root, "", false);
@@ -575,8 +597,11 @@ export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass 
 // reached the network went green unnoticed because only its name and verdict
 // were printed. runGates stops early, so `results` is a prefix of `configured`
 // and the command is found by position.
-export const gateResultLines = (configured: { name: string; command: string }[], results: Gate[]): string[] =>
-  results.map((g, i) => `  ${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}  ${g.name}  $ ${configured[i]?.command ?? ""}`);
+// A failed setup step (`setupFailure`) is a red `setup` result of its own, ahead of every gate: its command is the step's.
+export const gateResultLines = (configured: { name: string; command: string }[], results: Gate[], failure?: Failure): string[] =>
+  results.length === 1 && failure?.name === "setup" && results[0].name === "setup" && !results[0].pass
+    ? [`  FAIL  setup  $ ${failure.command}`]
+    : results.map((g, i) => `  ${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}  ${g.name}  $ ${configured[i]?.command ?? ""}`);
 
 // Where gate time goes, per gate. A slow gate runs on every branch, its
 // repair passes and the base check, so it is the first place to look when
@@ -1256,11 +1281,13 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const run = await gateBase(project, image, planFile, "base-gates", true, runId, true, !gatesGreen, check, beforeOpen);
   if (!gatesGreen) {
     console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
-    for (const line of gateResultLines(project.gates, run.gates)) console.log(line);
-    console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
+    for (const line of gateResultLines(project.gates, run.gates, run.failure)) console.log(line);
+    // None for a setup that failed: no gate ran.
+    if (run.gates.some((g) => typeof g.ms === "number")) console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   }
   for (const t of run.hookTests) console.log(`  hook test ${t.pass ? "pass" : "FAIL"}  ${t.name} - ${t.detail}`);
   if (run.gitHooks) console.log(`  ${gitHooksLine(run.gitHooks)}`);
+  for (const line of run.gitHooks ? hooksMissingWarning(project.root, run.gitHooks) : []) console.log(line);
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
