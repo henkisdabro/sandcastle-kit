@@ -21,8 +21,9 @@ type Project = import("../src/config.ts").Project;
 const haveJq = spawnSync("jq", ["--version"], { stdio: "ignore" }).status === 0;
 const skip = haveJq ? false : "jq is not installed here";
 
-type Comment = { login: string | null; association: string; body: string; created?: string; updated?: string };
-const json = (c: Comment) => ({ user: c.login === null ? null : { login: c.login }, author_association: c.association, body: c.body, created_at: c.created ?? "2026-10-17T10:00:00Z", updated_at: c.updated ?? c.created ?? "2026-10-17T10:00:00Z" });
+type Comment = { login: string | null; association: string; body: string; created?: string; updated?: string; id?: number };
+let ids = 0;
+const json = (c: Comment) => ({ id: c.id ?? ++ids, user: c.login === null ? null : { login: c.login }, author_association: c.association, body: c.body, created_at: c.created ?? "2026-10-17T10:00:00Z", updated_at: c.updated ?? c.created ?? "2026-10-17T10:00:00Z" });
 
 /** A `gh` that answers the ticket's author and the comments' two pages. */
 const run = (author: string, pages: Comment[][]) => {
@@ -115,6 +116,17 @@ test("a comment edited since it was written says so, and a ticket with nobody el
 test("a ticket whose comments are all an outsider's shows none and says how many were left out", { skip }, () => {
   const r = run("reporter", [[{ login: null, association: "NONE", body: "from a deleted account" }]]);
   assert.equal(r.stdout, "1 comment(s) from accounts that are not the repository's owners, members or collaborators, or the ticket's author, left out\n");
+});
+
+test("a page printed twice (a retry after a later page failed) shows its comments once, in their order", { skip }, () => {
+  const first: Comment[] = [
+    { id: 1, login: "maintainer", association: "OWNER", body: "one" },
+    { id: 2, login: "stranger", association: "NONE", body: "two" },
+  ];
+  const r = run("reporter", [first, first, [{ id: 3, login: "maintainer", association: "OWNER", body: "three" }]]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([...r.stdout.matchAll(/^--\n(.*)\n--$/gm)].map((m) => m[1]), ["one", "three"]);
+  assert.match(r.stdout, /^1 comment\(s\) from accounts/m);
 });
 
 test("the prompt's comments word runs that script, with the heading the prompts have always had", () => {

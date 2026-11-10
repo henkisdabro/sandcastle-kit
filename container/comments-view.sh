@@ -11,11 +11,12 @@ here=$(dirname "$0")
 n=$1
 
 author=$(sh "$here/gh-retry.sh" api "repos/{owner}/{repo}/issues/$n" --jq '.user.login // ""') || exit
-# --paginate prints one array per page; -s joins them.
+# --paginate prints one array per page; -s joins them. gh-retry.sh passes gh's output straight through, so a page that
+# failed after the first was read prints the first again: one comment once, by id (GitHub's ids rise with time).
 raw=$(sh "$here/gh-retry.sh" api --paginate "repos/{owner}/{repo}/issues/$n/comments") || exit
 
 printf '%s\n' "$raw" | jq -r -s --arg author "$author" '
-  (add // []) as $all
+  (add // [] | unique_by(.id)) as $all
   | ($all | map(select((.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")) or ($author != "" and .user.login == $author)))) as $kept
   | ($kept[] | "author:\t\(.user.login // "ghost")\nassociation:\t\(.author_association | ascii_downcase)\nedited:\t\(.updated_at != .created_at)\nstatus:\tnone\n--\n\(.body // "")\n--"),
     (($all | length) - ($kept | length)) as $out
