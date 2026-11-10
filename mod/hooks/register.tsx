@@ -17,7 +17,7 @@ import type { EngineInterface, Register } from "claude-code";
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
 import { activity, afterTurn, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
-import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, heldRelease, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Tone, type Trigger } from "./idle.ts";
+import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, heldRelease, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
@@ -27,7 +27,9 @@ const MARK_ICON = "♜";
 /** The idle mark's line the band draws between runs, as sand-coloured parts; null for none. */
 const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
 /** The sand each tone of the mark's line is drawn in: the hint in the castle's bright sand and bold, never Claude Code's notice colour. */
-const TONES: Record<Tone, { color: string; bold?: boolean }> = { name: { color: SAND.name }, hint: { color: SAND.top, bold: true } };
+type ToneStyle = { color: string; bold?: boolean };
+/** Indexed by any string: the stored mark's type (`PluginState`) names `muted`, a tone this mod no longer has, and Claude Code's newer types check the lookup. */
+const TONES: { [tone: string]: ToneStyle | undefined; name: ToneStyle; hint: ToneStyle } = { name: { color: SAND.name }, hint: { color: SAND.top, bold: true } };
 /** The cache refresh's row the band draws under the castle; null for none. */
 const warmLine = atom({ plugin: "sandcastle", key: "warm" } as const, null);
 /** What the cache refresh remembers; `$.state`, because a reload restarts module variables and not state. */
