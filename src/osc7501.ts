@@ -1,9 +1,10 @@
 // OSC 7501, the one way a program tells herdr-core (herdr-core) what it is doing: written into its own
 // terminal, read by the core and shown by its apps. Pure: the strings only, never where they go.
 //
-// Verified against hc 0.1.17: fields are `:`-separated (a `;` between fields is silently ignored),
-// `progress` is 0..100, `title` and `msg` are base64 (the core shows them decoded), a record with
-// `id=` is a child record beside the root, and `state=clear` removes a record (`clear` alone does not).
+// Verified against hc 0.1.19 (and 0.1.17 before it): fields are `:`-separated (a record whose fields
+// are `;`-separated is silently ignored), `progress` is 0..100, `title` and `msg` are base64 (the core
+// shows them decoded), a record with `id=` is a child record beside the root, and `state=clear` removes a
+// record (`clear` alone does not).
 
 export type State = "idle" | "working" | "done" | "blocked" | "error";
 /** Why a `blocked` record needs a person. */

@@ -1155,9 +1155,11 @@ never a shell string.
 Code session the mod sends its end prompt to.
 The status terminal is `--keep` and runs `env SANDCASTLE_CORE_VIEW=<instance> <kit>/bin/sandcastle
 status`; the next run finds it by name and reuses it while it runs the status view (stopped with
-`hc keys <t> ctrl+c`, which leaves a `--keep` terminal its shell) or a bare shell, typing the
-command with every word quoted; a person's program in it keeps the name, and the new view opens
-unnamed.
+`hc keys <t> ctrl+c`) or a bare shell, typing the command with every word quoted; a person's
+program in it keeps the name, and the new view opens unnamed.
+A `--keep` terminal gives a shell only for a program lost to a signal, which the view is on Ctrl-C;
+an ordinary exit is final (hc 0.1.19), so a view that exits instead leaves the terminal `finished`,
+which the reuse path removes (`hc rm`) and opens afresh by name.
 Slots (unless `SANDCASTLE_HERDR_VIEW=0`) are `--rm --parent <status>`, running `sandcastle slot N
 --instance <id>`; their numbers are not reused within a run, and each slot's state is
 `.sandcastle/logs/core-slot-N.json`, its log link `herdr-pane-N.log` as on Herdr TUI.

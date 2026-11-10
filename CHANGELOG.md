@@ -41,6 +41,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   the step, its exit status and its last output. Fix it before the next run (`/sandcastle update`
   checks it). A run whose base check is skipped on a green record from before stops starting
   tickets once two tickets' setup has failed the same way.
+- **herdr-core 0.1.19.** `sandcastle doctor` now warns on an `hc` older than 0.1.19, the version
+  the kit's herdr-core view was checked against: `hc update` (or the Herdr app's update) brings it
+  up to date. Terminals opened before the update keep the old behaviour until recreated: a
+  `sandcastle run --detach` started in one still ends when it closes.
 
 ### Added
 
@@ -103,6 +107,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **An empty `.git/hooks` counts as no hooks directory** in the `.git` check and the start record,
   so the empty directory a sandbox's start creates in a repository with none no longer reads as
   tampering, and `sandcastle clean` names a leftover sandbox by its worktree.
+- **A detached run outlives its herdr-core terminal.** From hc 0.1.19, `sandcastle run --detach`
+  started in a herdr-core terminal keeps running when that terminal closes; the docs say so.
+- **A status terminal left finished is reopened by name.** On hc 0.1.19 an ordinary exit is final
+  in a `--keep` terminal. A status terminal that ends finished when the next run stops its view is
+  now removed and opened afresh under the same name, as one found finished already was, rather
+  than waited on for 5 s.
 
 ## [0.21.0] - 2026-11-10
 

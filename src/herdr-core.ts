@@ -134,8 +134,10 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     if (previous?.instance === instance && previous.status && runsStatusView(get(hc, previous.status))) return previous.status;
 
     // The project's status terminal from an earlier run, reused in place wherever a person moved it: a view still
-    // running is stopped first (Ctrl-C leaves a `--keep` terminal a shell), and a bare shell is as good. Anything
-    // else in it is a person's, and keeps the name; this run's view then goes unnamed.
+    // running is stopped first, and a bare shell is as good. Ctrl-C leaves a `--keep` terminal a shell only when the
+    // view dies by the signal (hc 0.1.19: an ordinary exit is final), so a view that exits instead leaves it finished,
+    // which is removed and opened afresh by name. Anything else in it is a person's, and keeps the name; this run's
+    // view then goes unnamed.
     let address: string | undefined;
     let nameFree = true;
     const found = get(hc, name);
@@ -145,12 +147,15 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
         let t: Terminal | undefined = found;
         if (runsStatusView(t)) {
           hc(["keys", found.address, "ctrl+c", "--json"]);
-          for (let waited = 0; waited < 5000 && !bareShell(foregroundOf(t)); waited += 100) {
+          for (let waited = 0; waited < 5000 && !bareShell(foregroundOf(t)) && t?.state !== "finished"; waited += 100) {
             pause(100);
             t = get(hc, found.address);
           }
         }
-        if (bareShell(foregroundOf(t))) {
+        if (t?.state === "finished") {
+          hc(["rm", found.address, "--json"]);
+          nameFree = true;
+        } else if (bareShell(foregroundOf(t))) {
           hc(["label", found.address, `sandcastle.instance=${instance}`, "--json"]);
           // `cd`: a shell a person kept may sit in another directory.
           hc(["send", found.address, `cd ${quote(root)} && env ${marker} ${quote(bin)} status`, "--json"]);
