@@ -28,7 +28,7 @@ import { overrunLine, overrunNoted } from "./report.ts";
 import { HANDED_BACK, readOutcomes, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
 import type { Again, Change, Ending, StopCause } from "./schedule.ts";
-import { AGENT_COMMENT_MARKER, refOf } from "./tracker.ts";
+import { AGENT_COMMENT_MARKER, type CommentBy, refOf, trustedComment } from "./tracker.ts";
 
 /** What the ledger reads of a pipeline's result: burndown's own `Outcome` is one. */
 export type Finished = {
@@ -157,10 +157,11 @@ const KIT_COMMENT = /^(?:Sandcastle (?:ran this ticket|held this|could not finis
 /**
  * A ticket's comments one to an entry. GitHub's come that way; a Markdown ticket file holds them as one
  * section, so its entries are the `### ` headings under `## Comments` (the kit writes each as `### <date> - sandcastle`).
+ * `by` is who wrote each GitHub comment, in the same order.
  */
-const commentEntries = (comments: string[]): { text: string; heading?: string }[] =>
-  comments.flatMap((c) => {
-    if (!/^## Comments\b/m.test(c)) return [{ text: c.trim() }];
+const commentEntries = (comments: string[], by?: CommentBy[]): { text: string; heading?: string; by?: CommentBy }[] =>
+  comments.flatMap<{ text: string; heading?: string; by?: CommentBy }>((c, i) => {
+    if (!/^## Comments\b/m.test(c)) return [{ text: c.trim(), by: by?.[i] }];
     return c
       .split(/^(?=### )/m)
       .filter((part) => part.startsWith("### "))
@@ -173,17 +174,34 @@ const commentEntries = (comments: string[]): { text: string; heading?: string }[
 /** How many comments a ticket has, as `personCommentsSince` counts them. */
 export const commentCount = (comments: string[]): number => commentEntries(comments).length;
 
+/** Who wrote a GitHub ticket and its comments, and which account the run's token is: what `personCommentsSince` needs to trust a comment. */
+export type CommentTrust = { by?: CommentBy[]; ticketAuthor?: string; tokenUser?: string | null };
+
+/** `CommentTrust` for a ticket the tracker read, with the run's token user (`tokenUserOf`). */
+export const trustOf = (ticket: { author?: string; commentBy?: CommentBy[] }, tokenUser: string | null): CommentTrust => ({ by: ticket.commentBy, ticketAuthor: ticket.author, tokenUser });
+
 /**
  * The comments past the first `seen` that a person wrote: not one the kit wrote (its openings are fixed), and not
  * an agent's, which opens with `AGENT_COMMENT_MARKER`. `seen` is the count
  * recorded with a branch's head; none recorded means none can be told, and none is returned.
+ *
+ * With `trust` (a GitHub ticket), a comment by an account that is not the repository's owner, member or collaborator,
+ * or the ticket's author, is nobody's here, whatever it says: it never forces a review, and an outsider's comment
+ * that opens with the marker or like the kit's is not the agent's. A comment that opens with the marker is the agent's only
+ * when `tokenUser` wrote it, so with that login unknown it counts as a person's: a full review, never a skipped one.
  */
-export const personCommentsSince = (comments: string[], seen: number | undefined): string[] =>
+export const personCommentsSince = (comments: string[], seen: number | undefined, trust?: CommentTrust): string[] =>
   seen === undefined
     ? []
-    : commentEntries(comments)
+    : commentEntries(comments, trust?.by)
         .slice(seen)
-        .filter((e) => !KIT_COMMENT.test(e.text) && !e.text.startsWith(AGENT_COMMENT_MARKER) && !(e.heading ?? "").endsWith(" - sandcastle"))
+        .filter((e) => {
+          if (e.by && !trustedComment(e.by, trust?.ticketAuthor)) return false;
+          if (KIT_COMMENT.test(e.text) || (e.heading ?? "").endsWith(" - sandcastle")) return false;
+          if (!e.text.startsWith(AGENT_COMMENT_MARKER)) return true;
+          // Marked, but whose? Without the author (a ticket file's comment) the marker is all there is to go by.
+          return !!e.by && !(!!trust?.tokenUser && e.by.login === trust.tokenUser);
+        })
         .map((e) => e.text);
 
 // The one comment a ticket that did not land gets: the conflict (the other

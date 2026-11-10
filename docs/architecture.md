@@ -2999,6 +2999,17 @@ command stays short so a failed expansion's line, which `promptExpansionLine` cu
 `reviewWithFallback` (`src/agents.ts`) re-raises a prompt-expansion error: the other model would read
 the same ticket (`test/gh-retry.test.ts`).
 
+`comments-view.sh` is the tracker's `COMMENTS_VIEW`: `gh api repos/{owner}/{repo}/issues/N/comments`
+through `gh-retry.sh`, filtered with the image's `jq` to the comments whose `author_association` is
+`OWNER`, `MEMBER` or `COLLABORATOR` or whose author wrote the ticket, printed as `gh issue view N
+--comments` prints a comment, and one last line counts those left out. On a public repository a
+stranger's comment would otherwise reach an agent that holds a token (`test/comments-view.test.ts`).
+The run's side is `personCommentsSince` (`src/ledger.ts`): the same trust (`trustedComment`,
+`src/tracker.ts`, from the `author` and per-comment `authorAssociation` the GitHub tracker keeps on a
+`Ticket`) and the agent marker honoured only from `tokenUserOf`'s login, the account `gh api user`
+names for `GH_TOKEN`, read once per run and `null` after one printed line when it fails
+(`test/comment-trust.test.ts`). A ticket file's comments carry no author and keep the marker alone.
+
 ## `test/*.test.ts`
 
 One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split`

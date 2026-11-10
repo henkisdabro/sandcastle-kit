@@ -15,6 +15,17 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
 - 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
   `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an
   agent follows them anyway.
+- 💬 **Public repositories.** On a public repository anyone with a GitHub account can comment on a
+  queued ticket, and an agent reads the thread with a token in its environment. So the comments in
+  an agent's prompt are filtered: only an owner's, a member's or a collaborator's comment, and the
+  ticket author's, are shown, and the last line says how many were left out (bots such as
+  `github-actions[bot]` included). Every repository is filtered the same way, private ones too.
+  The run counts the same accounts when it asks whether a person commented on a carried branch's
+  ticket since its review: an outsider's comment never forces a full review. A comment that opens
+  with `Sandcastle agent:` is skipped as the agent's own only when the account `GH_TOKEN` belongs to
+  wrote it (read once per run with `gh api user`; when that fails the run says so and counts such a
+  comment as a person's). The ticket's own body is not filtered: **queueing an outsider's issue
+  trusts its body**, so read an issue from a stranger before you label it.
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not
   run it on your machine when it lands.

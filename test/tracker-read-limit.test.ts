@@ -166,7 +166,7 @@ test("the run's reads before a ticket starts, before it lands, for the overrun w
   const landing = readFileSync(new URL("../src/landing.ts", import.meta.url), "utf8");
   assert.match(burndown, /const withdrawal = async [^\n]*\n\s*const now = await readTicketState\(tracker, id\);/);
   assert.match(burndown, /\(await readTicketState\(tracker, o\.issue\)\)\.held/);
-  assert.match(burndown, /const ticketComments = async [^\n]*\n\s*try \{\n\s*return \(await readTicketState\(tracker, id\)\)\.comments;/);
+  assert.match(burndown, /const ticketThread = async [^\n]*\n\s*try \{\n\s*return await readTicketState\(tracker, id\);/);
   assert.doesNotMatch(burndown, /tracker\.get\(id\)\.comments/);
   assert.match(landing, /const called = await withdrawal\(o\.issue\);/);
   assert.match(landing, /\(await readTicketState\(tracker, o\.issue\)\)\.body/);

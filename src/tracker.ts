@@ -20,12 +20,51 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { MANAGED_SETTINGS, sh, shAsync } from "./sandbox.ts";
+import { githubToken, MANAGED_SETTINGS, sh, shAsync } from "./sandbox.ts";
+
+/**
+ * Whether a comment on a ticket is one the agents' prompts may show and a run may count as a person's: its author
+ * owns the repository, is a member of its organisation or a collaborator, or wrote the ticket. On a public repository
+ * anyone with an account can comment, and an agent reads the thread with a token in its environment.
+ */
+export const trustedComment = (by: CommentBy, ticketAuthor?: string): boolean =>
+  ["OWNER", "MEMBER", "COLLABORATOR"].includes((by.association ?? "").toUpperCase()) || (!!ticketAuthor && !!by.login && by.login === ticketAuthor);
+
+const githubTokenEnv = (project: Pick<Project, "root">): Record<string, string> | undefined => {
+  const token = githubToken(project as Project);
+  return token ? { GH_TOKEN: token } : undefined;
+};
+
+const tokenUsers = new Map<string, string | null>();
+
+/**
+ * The login the project's GH_TOKEN belongs to (`gh api user`, with that token when the project has one), read once per
+ * run and kept; null when it cannot be read, after one line naming why. A comment that opens with the agent marker
+ * counts as the agent's own only when this login wrote it, so an unknown login makes every such comment a person's:
+ * a full review, never a skipped one.
+ */
+export const tokenUserOf = (project: Pick<Project, "root">, read: () => string = () => sh("gh", ["api", "user", "--jq", ".login"], undefined, githubTokenEnv(project))): string | null => {
+  const key = project.root;
+  if (tokenUsers.has(key)) return tokenUsers.get(key)!;
+  let login: string | null;
+  try {
+    login = read().trim() || null;
+    if (!login) throw new Error("gh api user printed no login");
+  } catch (e) {
+    login = null;
+    const why = String((e as { stderr?: unknown }).stderr || (e as Error).message || e).split("\n").find((l) => l.trim())?.trim().slice(0, 160) ?? "no reason given";
+    console.log(`Could not read which account GH_TOKEN belongs to (gh api user: ${why}); a comment that opens with "${AGENT_COMMENT_MARKER}" counts as a person's, so a carried branch with one gets a full review.`);
+  }
+  tokenUsers.set(key, login);
+  return login;
+};
 
 /** The words every comment an agent posts on a ticket opens with (the GitHub tracker's `words`): the kit's own, to `personCommentsSince`. */
 export const AGENT_COMMENT_MARKER = "Sandcastle agent:";
 
-export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[] };
+/** Who wrote one comment, as GitHub says: the login and `authorAssociation` (`OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`...). */
+export type CommentBy = { login?: string; association?: string };
+export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[]; author?: string; commentBy?: CommentBy[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
 
 export type TrackerConfig = "github" | "files" | { type: "github" } | { type: "files"; dir?: string; done?: string[] };
@@ -252,7 +291,12 @@ const github = (project: Project): Tracker => {
       return call(fields);
     }
   };
-  const listFields = (withComments: boolean) => `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`;
+  // Who wrote the ticket and each comment, for `trustedComment`: kept beside the text, which every reader of `comments` takes as it is.
+  const authors = (i: any): Pick<Ticket, "author" | "commentBy"> => ({
+    author: i.author?.login,
+    commentBy: (i.comments ?? []).map((c: { author?: { login?: string }; authorAssociation?: string }) => ({ login: c.author?.login, association: c.authorAssociation })),
+  });
+  const listFields = (withComments: boolean) => `number,title,body,author,updatedAt,labels${withComments ? ",comments" : ""}`;
   const listArgs = (extra: string[]) => (fields: string) => ["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", fields];
   const shaped = (listed: any[], extra: string[]): Ticket[] => {
     if (nativeBlockers) for (const i of listed) native.set(String(i.number), nativeIds(i.blockedBy, thisRepo));
@@ -272,6 +316,7 @@ const github = (project: Project): Tracker => {
       title: i.title,
       body: i.body ?? "",
       comments: (i.comments ?? []).map((c: { body: string }) => c.body),
+      ...authors(i),
       updated: i.updatedAt ? Math.floor(Date.parse(i.updatedAt) / 1000) : undefined,
       labels: (i.labels ?? []).map((l: { name: string }) => l.name),
     }));
@@ -291,6 +336,7 @@ const github = (project: Project): Tracker => {
       title: i.title,
       body: i.body ?? "",
       comments: i.comments.map((c: { body: string }) => c.body),
+      ...authors(i),
       labels: (i.labels ?? []).map((l: { name: string }) => l.name),
       open: i.state === "OPEN",
       held: i.labels.some((l: { name: string }) => isHeld(project, l.name)),
@@ -306,9 +352,9 @@ const github = (project: Project): Tracker => {
     queued: (withComments = true) => list(["--label", project.label], withComments).map((t) => ({ ...t, status: project.label })),
     open: (withComments = true) => list([], withComments),
     openAsync: (withComments = true, limitMs = TRACKER_READ_MS) => listAsync([], withComments, limitMs),
-    get: (id) => ticketOf(JSON.parse(withNative("number,title,state,body,comments,labels", (fields) => gh(["issue", "view", id, "--json", fields])))),
+    get: (id) => ticketOf(JSON.parse(withNative("number,title,state,body,author,comments,labels", (fields) => gh(["issue", "view", id, "--json", fields])))),
     getAsync: async (id, limitMs = TRACKER_READ_MS) => {
-      const i = JSON.parse(await withNativeAsync("number,title,state,body,comments,labels", (fields) => ghAsync(["issue", "view", id, "--json", fields], limitMs)));
+      const i = JSON.parse(await withNativeAsync("number,title,state,body,author,comments,labels", (fields) => ghAsync(["issue", "view", id, "--json", fields], limitMs)));
       // The repository's name is asked only for a blocker from another repository, and not again.
       if (nativeBlockers && JSON.stringify(i.blockedBy ?? null).includes("nameWithOwner")) await thisRepoAsync(limitMs);
       return ticketOf(i);
@@ -448,7 +494,9 @@ const github = (project: Project): Tracker => {
     words: {
       // Through container/gh-retry.sh: a GitHub 5xx or timeout is retried there, a 4xx fails at once.
       TICKET_VIEW: `!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}}\``,
-      COMMENTS_VIEW: `# Comments on the ticket\n\n!\`sh ${MANAGED_SETTINGS}/gh-retry.sh issue view {{ISSUE_NUMBER}} --comments\`\n\n`,
+      // Only the owners', members' and collaborators' comments and the ticket author's (container/comments-view.sh): on a
+      // public repository anyone can comment, and the agent holds a token. It counts the rest.
+      COMMENTS_VIEW: `# Comments on the ticket\n\n!\`sh ${MANAGED_SETTINGS}/comments-view.sh {{ISSUE_NUMBER}}\`\n\n`,
       // Every comment an agent posts opens with the marker, as `SAY` below says why.
       LOST: `comment on the ticket, opening with the words "${AGENT_COMMENT_MARKER}", that the sandbox's git record was lost`,
       RECORD:
