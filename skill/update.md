@@ -7,8 +7,9 @@ apply it once the user agrees.
 A proposal the user declines leaves nothing in the project for its check to find, so the project's
 update record keeps it: `declined` in `.sandcastle/.run/kit-updated`, from a step's key (the bold
 key beside each proposal below) to the release it was declined at. Before proposing, read it
-(`cat .sandcastle/.run/kit-updated` from the project's root; no file, no `declined` field or a
-plain commit hash means none declined). For a declined key, say in one line that the user declined
+(`cat .sandcastle/.run/kit-updated 2>/dev/null || true` from the project's root, which prints
+nothing and succeeds when there is no file; no file, no `declined` field or a plain commit hash
+means none declined). For a declined key, say in one line that the user declined
 it at that release and may ask for it now, and do not ask. Step 4 records this update's declines.
 Declining is not skipping: every step still runs its check, and only the asking is left out.
 

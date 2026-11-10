@@ -1445,8 +1445,8 @@ landing drops it and, with no agent branch left, runs `gc --prune=now` in the ba
 git calls turn background maintenance and cruft packs off so the prune is never refused by a
 detached auto gc; a branch the kit never landed - merged by hand, or deleted by a person - is
 dropped by `pruneBackup`, which `burndown()` calls once it holds the run lock and `sandcastle clean`
-after its branch deletes: an entry goes when its branch no longer exists or its tip is an ancestor
-of the base, one the test cannot decide stays, and the same prune follows when no entry is left), a
+after its branch deletes: an entry goes when its tip is an ancestor of the base, or (`clean --all`
+only, `goneToo`) when its branch no longer exists, one the test cannot decide stays, and the same prune follows when no entry is left), a
 deleted or moved base stops with the `update-ref` that restores it, a worktree record rewritten to a
 container path is named, a sandbox's own worktree record held to what git writes before each host
 git command in that worktree (below), protected paths and files over 50 MB held for a person, run

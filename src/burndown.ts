@@ -3037,7 +3037,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // sandbox, the run's first, opens behind a check against it (the run's own fingerprint is taken once that sandbox
   // has closed). Sandcastle's open runs host git in the project, and the image build and preflight come between.
   const atStart = gitFingerprint(project);
-  // A held branch merged or deleted by hand leaves its backup entry behind: only a landing drops one.
+  // A held branch merged by hand leaves its backup entry behind: only a landing drops one. One deleted by hand
+  // unmerged keeps its entry, the only copy of that work, until `clean --all`.
   const swept = pruneBackup(project);
   if (swept.length) console.log(`Dropped the backup of ${swept.length} branch(es) that no longer need one: ${swept.join(", ")}.`);
 

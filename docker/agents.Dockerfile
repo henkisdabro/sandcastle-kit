@@ -18,7 +18,7 @@ FROM ${BASE}
 # CODEX_VERSION); this default is the offline fallback, used only when there is no network and
 # no cached value.
 USER root
-ARG CODEX_VERSION=0.160.0
+ARG CODEX_VERSION=0.167.0
 RUN npm install -g --prefix /opt/codex @openai/codex@$CODEX_VERSION && npm cache clean --force
 
 # Claude Code, as the agent user: it installs under the user's home (~/.local), which is what the
@@ -28,8 +28,14 @@ RUN npm install -g --prefix /opt/codex @openai/codex@$CODEX_VERSION && npm cache
 # built, and a model newer than that CLI is refused at the first call ("Claude Code 2.1.272 does
 # not support this model; version 2.1.280 or newer is required"). This default is the offline
 # fallback, used only when there is no network and no cached value.
+# Downloaded to a file, never piped: `sh -c` has no pipefail, so a failed download piped into bash
+# ran an empty script, exited 0 and cached a layer with no Claude Code. `claude --version` fails the
+# step on anything else the installer leaves out.
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 USER ${AGENT_UID}:${AGENT_GID}
-ARG CLAUDE_CODE_VERSION=2.1.285
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"
+ARG CLAUDE_CODE_VERSION=2.1.311
+RUN curl -fsSL -o /tmp/claude-install.sh https://claude.ai/install.sh \
+  && bash /tmp/claude-install.sh "$CLAUDE_CODE_VERSION" \
+  && rm /tmp/claude-install.sh \
+  && "$HOME/.local/bin/claude" --version
