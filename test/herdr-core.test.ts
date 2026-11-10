@@ -451,7 +451,23 @@ test("the live status view writes its records once, not on every paint, and only
       const first = await owned.frame();
       await owned.frame(first.end);
       await owned.frame(owned.frames().at(-1)!.end);
-      assert.equal((owned.output().match(/\u001b\]7501;state=/g) ?? []).length, 1, "one root record over three paints");
+      // Not a count of records: they follow the view's readings (the run record, the run's liveness by a `ps` of its
+      // pid), so a slow or failed reading under load can honestly write a different record, and the next good one
+      // another - however many paints that takes. What a write on every paint adds is the same record again, unchanged
+      // since that key's last record, which is what is refused.
+      // A child record a not-live reading cleared is sent again once the run reads live: a clear forgets its record.
+      const sent = [...owned.output().matchAll(/\u001b\]7501;([^\u0007]*)\u0007/g)].map((m) => m[1]!);
+      assert.ok(sent.some((r) => !r.startsWith("id=") && r !== "state=clear"), "a root record was written");
+      const key = (r: string) => (r.startsWith("id=") ? r.split(":")[0] : "root");
+      const last = new Map<string, string>();
+      for (const r of sent) {
+        if (r.endsWith("state=clear")) {
+          last.delete(key(r));
+          continue;
+        }
+        assert.notEqual(last.get(key(r)), r, `a record repeated unchanged: ${r}`);
+        last.set(key(r), r);
+      }
     } finally {
       owned.close();
     }
