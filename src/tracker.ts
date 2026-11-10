@@ -15,6 +15,7 @@
 // A ticket id is a string that is safe in a branch and file name: "12" for
 // GitHub, "checkout-03" for .scratch/checkout/issues/03-*.md.
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,13 +38,20 @@ const githubTokenEnv = (project: Pick<Project, "root">): Record<string, string> 
 
 const tokenUsers = new Map<string, string | null>();
 
+// Within TRACKER_READ_MS, as the run's other tracker reads: it is read at the start of every turn, and a GitHub that
+// never answers would otherwise hold the run's start with no line saying why.
+const readTokenUser = (project: Pick<Project, "root">): string => {
+  const env = githubTokenEnv(project);
+  return execFileSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: TRACKER_READ_MS, ...(env && { env: { ...process.env, ...env } }) }).trim();
+};
+
 /**
  * The login the project's GH_TOKEN belongs to (`gh api user`, with that token when the project has one), read once per
  * run and kept; null when it cannot be read, after one line naming why. A comment that opens with the agent marker
  * counts as the agent's own only when this login wrote it, so an unknown login makes every such comment a person's:
  * a full review, never a skipped one.
  */
-export const tokenUserOf = (project: Pick<Project, "root">, read: () => string = () => sh("gh", ["api", "user", "--jq", ".login"], undefined, githubTokenEnv(project))): string | null => {
+export const tokenUserOf = (project: Pick<Project, "root">, read: () => string = () => readTokenUser(project)): string | null => {
   const key = project.root;
   if (tokenUsers.has(key)) return tokenUsers.get(key)!;
   let login: string | null;

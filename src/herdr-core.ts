@@ -154,7 +154,7 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
         const wasView = runsStatusView(t);
         if (wasView) {
           hc(["keys", found.address, "ctrl+c", "--json"]);
-          for (let waited = 0; waited < 5000 && !bareShell(foregroundOf(t)) && t?.state !== "finished"; waited += 100) {
+          for (let waited = 0; waited < 5000 && t !== undefined && !bareShell(foregroundOf(t)) && t.state !== "finished"; waited += 100) {
             pause(100);
             t = get(hc, found.address);
           }

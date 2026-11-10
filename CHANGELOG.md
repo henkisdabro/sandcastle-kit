@@ -9,6 +9,37 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Agents see only trusted accounts' ticket comments, on any GitHub repository.** Comments from
+  the repository's owners, members and collaborators and the ticket's author reach the prompts; the
+  rest, bots' and integrations' included, are counted in one line. A comment opening with the agent
+  marker counts as the agent's own only when the `GH_TOKEN` account wrote it. Queueing an
+  outsider's issue trusts its body and that author's later comments, so read it before you label it.
+
+### Added
+
+- A "Public repositories" note in the safety docs: queued tickets' comments are filtered to
+  the repository's owners, members and collaborators and the ticket's author, and queueing an
+  outsider's issue trusts its body. (#829)
+
+### Fixed
+
+- Agents' prompts now show only ticket comments from the repository's owners, members and
+  collaborators and the ticket's author, with a line counting the rest, and a comment opening with
+  the agent marker is treated as the agent's own only when the `GH_TOKEN` account wrote it. (#829)
+- When a status terminal from an earlier herdr-core run cannot be removed, or vanishes while the
+  kit waits for it, the new status view now takes the project's name whenever it is free. If the
+  old terminal still holds the name, the view opens unnamed and one line names the old terminal to
+  close. (#891)
+- A ticket read inside a sandbox that GitHub answered with a 5xx and then served on a retry no
+  longer fails the comments view: a failed try's error body is never printed, and the view's two
+  reads share the prompt's 120 s instead of each taking 60. (#829)
+- The account `GH_TOKEN` belongs to is read within 30 s at a run's start, never left waiting on a
+  GitHub that does not answer. (#829)
+- A status terminal that vanished while the kit waited for it no longer holds the new view back
+  for 5 s. (#892)
+
 ## [0.22.0] - 2026-11-10
 
 ### Upgrading

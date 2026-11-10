@@ -10,10 +10,14 @@
 here=$(dirname "$0")
 n=$1
 
+# Both reads share the prompt expression's 120 s: a retry wait that would run past 100 s from now is not taken.
+GH_RETRY_UNTIL=$(($(date +%s) + 100))
+export GH_RETRY_UNTIL
+
 author=$(sh "$here/gh-retry.sh" api "repos/{owner}/{repo}/issues/$n" --jq '.user.login // ""') || exit
-# --paginate prints one array per page; -s joins them. gh-retry.sh passes gh's output straight through, so a page that
-# failed after the first was read prints the first again: one comment once, by id (GitHub's ids rise with time).
-raw=$(sh "$here/gh-retry.sh" api --paginate "repos/{owner}/{repo}/issues/$n/comments") || exit
+# --paginate prints one array per page; -s joins them. 100 a page (GitHub's most; 30 by default) keeps a long thread to
+# few requests. One comment is shown once, by id (GitHub's ids rise with time), should a page ever come twice.
+raw=$(sh "$here/gh-retry.sh" api --paginate "repos/{owner}/{repo}/issues/$n/comments?per_page=100") || exit
 
 printf '%s\n' "$raw" | jq -r -s --arg author "$author" '
   (add // [] | unique_by(.id)) as $all

@@ -60,6 +60,21 @@ test("a ticket read that gets a 502 twice and then succeeds is read on the third
   assert.deepEqual(f.log(), ["gh issue view 7", "sleep 15", "gh issue view 7", "sleep 45", "gh issue view 7"]);
 });
 
+test("a failed try's error body never reaches the output: only the try that succeeded is printed", () => {
+  const f = fakes(['1 {"message":"Server Error"}|HTTP 502: Bad Gateway (https://api.example.com/repos/o/r/issues/7/comments)', "0 [1,2]|"]);
+  const r = run(f, `sh '${join(KIT, "container/gh-retry.sh")}' api repos/o/r/issues/7/comments`);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "[1,2]");
+});
+
+test("a wait that would end past GH_RETRY_UNTIL is not taken, and the last error is given at once", () => {
+  const f = fakes(["1 |HTTP 503: Service Unavailable (https://api.example.com/graphql)"]);
+  const r = run(f, `GH_RETRY_UNTIL=$(($(date +%s) + 20)) sh '${join(KIT, "container/gh-retry.sh")}' issue view 7`);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /HTTP 503/);
+  assert.deepEqual(f.log(), ["gh issue view 7", "sleep 15", "gh issue view 7"]);
+});
+
 test("a ticket read that gets a 404 fails at once, with one call, no wait and gh's own words", () => {
   const f = fakes(["1 |GraphQL: Could not resolve to an issue or pull request with the number of 999. (repository.issue)"]);
   const r = run(f, `sh '${join(KIT, "container/gh-retry.sh")}' issue view 999`);

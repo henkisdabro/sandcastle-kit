@@ -25,7 +25,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   with `Sandcastle agent:` is skipped as the agent's own only when the account `GH_TOKEN` belongs to
   wrote it (read once per run with `gh api user`; when that fails the run says so and counts such a
   comment as a person's). The ticket's own body is not filtered: **queueing an outsider's issue
-  trusts its body**, so read an issue from a stranger before you label it.
+  trusts its body**, and that author can still edit it, and their later comments are shown as the
+  ticket author's, after you label it: read an issue from a stranger before you label it, and watch
+  it while it is queued.
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not
   run it on your machine when it lands.

@@ -2997,7 +2997,11 @@ not govern, and `git-guard.sh` is unchanged.
 `TICKET_VIEW` (`src/tracker.ts`) runs `gh issue view` through it, and `COMMENTS_VIEW`'s
 `comments-view.sh` its two `gh api` reads, so a moment of GitHub's trouble does not crash a ticket's
 prompt expansion, and a 4xx fails at once.
-Its waits (15 s and 45 s) fit the 120 s the patched Sandcastle gives a prompt's shell expression; the
+Its waits (15 s and 45 s) fit the 120 s the patched Sandcastle gives a prompt's shell expression;
+`comments-view.sh` makes two reads in one expression, so it sets `GH_RETRY_UNTIL` and a wait that would
+end past it is not taken.
+Each try's stdout is held and printed only when the try succeeds: gh prints an HTTP error's body to
+stdout, and a failed try's `{"message":...}` ahead of the good answer broke the `jq` that reads it. The
 command stays short so a failed expansion's line, which `promptExpansionLine` cuts, keeps gh's words.
 `reviewWithFallback` (`src/agents.ts`) re-raises a prompt-expansion error: the other model would read
 the same ticket (`test/gh-retry.test.ts`).
