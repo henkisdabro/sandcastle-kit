@@ -18,7 +18,7 @@ FROM ${BASE}
 # CODEX_VERSION); this default is the offline fallback, used only when there is no network and
 # no cached value.
 USER root
-ARG CODEX_VERSION=0.160.0
+ARG CODEX_VERSION=0.167.0
 RUN npm install -g --prefix /opt/codex @openai/codex@$CODEX_VERSION && npm cache clean --force
 
 # Claude Code, as the agent user: it installs under the user's home (~/.local), which is what the
@@ -34,7 +34,7 @@ RUN npm install -g --prefix /opt/codex @openai/codex@$CODEX_VERSION && npm cache
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 USER ${AGENT_UID}:${AGENT_GID}
-ARG CLAUDE_CODE_VERSION=2.1.285
+ARG CLAUDE_CODE_VERSION=2.1.311
 RUN curl -fsSL -o /tmp/claude-install.sh https://claude.ai/install.sh \
   && bash /tmp/claude-install.sh "$CLAUDE_CODE_VERSION" \
   && rm /tmp/claude-install.sh \

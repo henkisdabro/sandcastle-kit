@@ -45,6 +45,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The docs say when a deleted branch's backup copy goes.** The copy of an unmerged branch
   deleted by hand is kept until `sandcastle clean --all`, as the code always did; the safety docs
   and `clean`'s help said the next run or a plain `clean` dropped it.
+- **The offline fallback versions are current.** An image built when the release channels cannot
+  be reached and nothing is cached installs the Dockerfile's defaults: Claude Code 2.1.285, below
+  the 2.1.295 the passes' tool allow-list needs, and Codex 0.160.0. They are now 2.1.311 (today's
+  `stable`) and 0.167.0, and a test keeps the Claude Code default at or above that floor. A build
+  that reaches the network was never affected: it resolves `stable` itself.
 - **The changelog check counts dependencies.** `package.json`, the lockfile, `pnpm-workspace.yaml`
   and `patches/` now need a line under Unreleased, like the code they change.
 

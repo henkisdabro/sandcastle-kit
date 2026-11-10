@@ -35,3 +35,10 @@ test("doctor and the lean command both print toolsFloorLine's line", () => {
   assert.match(lean, /toolsFloorLine\(versions\.claude\)/);
   assert.match(lean, /console\.log\(`\\n {2}WARN \$\{floorLine\}`\)/);
 });
+
+test("the Dockerfile's offline fallback is not below the floor: an image built with no network still lists every tool", () => {
+  const dockerfile = readFileSync(new URL("../docker/agents.Dockerfile", import.meta.url), "utf8");
+  const fallback = dockerfile.match(/^ARG CLAUDE_CODE_VERSION=(\S+)$/m)?.[1];
+  assert.ok(fallback, "expected a CLAUDE_CODE_VERSION default");
+  assert.equal(belowToolsFloor(fallback), false, fallback);
+});
