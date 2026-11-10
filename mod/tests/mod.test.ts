@@ -16,7 +16,7 @@ const band = (bodyColumns: number) =>
     component: "AbovePrompt",
     requestId: "band",
     viewport: { columns: bodyColumns, rows: 30 },
-    props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+    props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 3, bodyColumns, scroll: { offset: 0, bodyRows: 3 }, view: {} },
   }) as const;
 
 /** The idle mark the band draws now: its one row's text, or undefined. A mounted band reads the same atoms the session's does. */

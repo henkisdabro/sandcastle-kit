@@ -9,10 +9,10 @@ import { stripVTControlCharacters } from "node:util";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import { LOCAL_CONFIG_PATH, type Project } from "./config.ts";
-import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
+import { assertBaseHasCommit, type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
-import { terminalHost } from "./terminal-host.ts";
+import { coreMiss, terminalHost } from "./terminal-host.ts";
 import { openCoreStatus } from "./herdr-core.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, staleBaseParents } from "./sandbox.ts";
 import { protectedPathsNote } from "./guard.ts";
@@ -264,6 +264,15 @@ export const assertCleanBase = (project: Project) => {
       `NOT STARTED: git left something half-done in this repo, and every landing would fail on it:\n${left.map((l) => `  ${l.file} (${l.what})`).join("\n")}\n${leftoverSteps(left)}`,
     );
   }
+  // Before the dirty files and the branch name: on a branch with no commit git cannot name the branch either.
+  // Only for such a checkout: a base that is missing while another branch is checked out is the wrong-branch refusal below.
+  let born = true;
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], project.root);
+  } catch {
+    born = false;
+  }
+  if (!born) assertBaseHasCommit(project);
   const dirty = dirtyFiles(project.root);
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
@@ -1929,7 +1938,8 @@ export const openStatusPane = (project: Project): string | undefined => {
   const host = terminalHost();
   if (host.kind === "core") return openCoreStatus(project.root, host.terminal, { kit: KIT });
   if (host.kind !== "herdr1") {
-    console.log("Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
+    const miss = coreMiss();
+    console.log(miss ? `Not opening a status view: ${miss}. Watch the run with \`sandcastle status\` in another terminal.` : "Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
     return undefined;
   }
   const record = statusPaneRecord(project);

@@ -193,7 +193,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   `git log --format='%h %an / %cn %s'` tells them from your own commits.
   GitHub issues and comments the agents write still show your GitHub account.
 - 🛡️ **Protected paths.** A green branch that changes hooks (git - the tracked directory
-  `core.hooksPath` names among them -, Claude Code, pre-commit tools), CI, agent settings
+  `core.hooksPath` names among them -, Claude Code, pre-commit tools, and the config of lint-staged, lefthook,
+  husky, simple-git-hooks and yorkie, in their own files or in a `package.json` key, and lefthook's script
+  directories `.lefthook/` and `.lefthook-local/`), CI, agent settings
   (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`, package-manager config
   or install scripts - plus anything in `protectedPaths` - is labelled `ready-for-human` and left
   for you to merge; `sandcastle land` refuses it too.

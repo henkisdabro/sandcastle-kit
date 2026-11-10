@@ -150,7 +150,7 @@ import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
-import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
+import { assertBaseHasCommit, hooksThatRanClean, requireGreenBase } from "./gates.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, holdAndReap, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, tookLines, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
@@ -723,6 +723,7 @@ try {
       // The sandbox shares the repo's .git, so the run's host guards apply.
       disableHostGitHooks();
       const project = await loadProject(root);
+      assertBaseHasCommit(project);
       // A live run's sandboxes apply the lean-plan file this writes, it reads the base record this
       // writes, and its commits and landings would read as tampering to the check below. A killed run's
       // containers are reaped under the lock before the config is read: one still alive could write it past the pins.

@@ -16,6 +16,8 @@ No tickets yet?
 
 A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 On GitHub a native "blocked by" edge (the issue's Relationships panel) holds it as well.
+Several refs share the line, separated by commas, `and`, `or` or `&`, a serial comma and a repeated
+`by` included (`Blocked by #12, #14, and by #15`): each one holds the ticket.
 A colon is read too (`Blocked by: #12`); blockers listed under a `## Blocked by` heading are not,
 and `sandcastle queue` warns about them.
 A run holds it while #12 is open.

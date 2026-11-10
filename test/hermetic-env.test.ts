@@ -126,9 +126,9 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   assert.deepEqual(
     [
       seen.env.GIT_CONFIG_COUNT, seen.env.GIT_CONFIG_KEY_0, seen.env.GIT_CONFIG_VALUE_0, seen.env.GIT_CONFIG_KEY_1, seen.env.GIT_CONFIG_VALUE_1,
-      seen.env.GIT_CONFIG_KEY_2, seen.env.GIT_CONFIG_VALUE_2,
+      seen.env.GIT_CONFIG_KEY_2, seen.env.GIT_CONFIG_VALUE_2, seen.env.GIT_CONFIG_KEY_3, seen.env.GIT_CONFIG_VALUE_3,
     ],
-    ["3", "commit.gpgsign", "false", "user.useConfigOnly", "true", "maintenance.auto", "false"],
+    ["4", "commit.gpgsign", "false", "user.useConfigOnly", "true", "maintenance.auto", "false", "core.excludesFile", "/dev/null"],
   );
 });
 

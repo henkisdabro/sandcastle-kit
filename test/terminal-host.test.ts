@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
-import { detectHost, type HostProbe, inHerdr1, PROBE } from "../src/terminal-host.ts";
+import { coreMiss, detectHost, type HostProbe, inHerdr1, PROBE } from "../src/terminal-host.ts";
 
 const probe = (pid: number | undefined, ancestors: number[] = [10, 20, 30]) => {
   const calls: string[] = [];
@@ -67,6 +67,7 @@ const stubHc = () => {
       'case "$2" in',
       `  t-mine) echo '{"address":"t-mine","pid":${process.ppid},"labels":{"herdr.space":"sp1"},"state":"live"}' ;;`,
       `  t-other) echo '{"address":"t-other","pid":999999,"labels":{},"state":"live"}' ;;`,
+      `  t-self) echo '{"address":"t-self","pid":${process.pid},"labels":{},"state":"live"}' ;;`,
       `  t-done) echo '{"address":"t-done","pid":${process.ppid},"labels":{},"state":"finished"}' ;;`,
       '  *) echo \'{"error":{"kind":"not_found"}}\' >&2; exit 3 ;;',
       "esac",
@@ -86,17 +87,26 @@ test("the real probe asks hc and ps, and judges by ancestry and liveness", () =>
       terminal: { address: "t-mine", pid: process.ppid, labels: { "herdr.space": "sp1" } },
     });
     assert.deepEqual(detectHost({ HC_TERMINAL_ID: "t-other", HERDR_ENV: "1" }, PROBE), { kind: "herdr1" });
+    // `hc run` starts its argv with no shell and bin/sandcastle execs node: the kit can be the terminal's root.
+    assert.equal(detectHost({ HC_TERMINAL_ID: "t-self" }, PROBE).kind, "core");
     assert.deepEqual(detectHost({ HC_TERMINAL_ID: "t-done" }, PROBE), { kind: "none" });
     assert.deepEqual(detectHost({ HC_TERMINAL_ID: "t-gone" }, PROBE), { kind: "none" });
     // Asked once per id, however often a command asks.
     detectHost({ HC_TERMINAL_ID: "t-mine" }, PROBE);
     assert.deepEqual(
       readFileSync(log, "utf8").trim().split("\n"),
-      ["get t-mine --json", "get t-other --json", "get t-done --json", "get t-gone --json"],
+      ["get t-mine --json", "get t-other --json", "get t-self --json", "get t-done --json", "get t-gone --json"],
     );
   } finally {
     process.env.PATH = path;
   }
+});
+
+test("a missed core names which part failed: no live terminal, or a terminal that is not this process's", () => {
+  assert.equal(coreMiss({}, probe(20).p), undefined);
+  assert.equal(coreMiss({ HC_TERMINAL_ID: "t1" }, probe(20).p), undefined);
+  assert.match(coreMiss({ HC_TERMINAL_ID: "t1" }, probe(undefined).p) ?? "", /`hc get t1` named no live terminal/);
+  assert.match(coreMiss({ HC_TERMINAL_ID: "t1" }, probe(999).p) ?? "", /pid 999\) is not this process or one of its ancestors/);
 });
 
 test("`--version --json`, which the Claude Code mod parses, never probes a core", () => {
