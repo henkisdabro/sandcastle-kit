@@ -1247,13 +1247,13 @@ export const worktreeRefusal = (project: Project) => (path: string): string | un
  * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
  * drivers configured at the start) or in config a changed record names would run there. The container is stopped
  * first (`stopSandboxContainer`), so nothing the sandbox left running writes after the check; one Docker cannot stop,
- * or gives no answer about in time (30 s; the stop's grace plus 30 s), fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. On a failure the container is removed
+ * or gives no answer about in time (30 s; the stop's grace plus 30 s), fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. `sandboxId`, the container's name when the handle has one, is the container stopped. On a failure the container is removed
  * here, without that close - the caller must not call it - the worktree is left as it stands for a person, and the
  * error is thrown.
  */
-export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown): Promise<void> => {
+export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown, sandboxId?: string): Promise<void> => {
   try {
-    const [running] = await stopSandboxContainer(worktree).catch((e) => {
+    const [running] = await stopSandboxContainer(worktree, sandboxId).catch((e) => {
       if (!(e instanceof DockerAnswerError)) throw e;
       const name = clean(basename(worktree));
       const said = clean(e.message).slice(0, 200);

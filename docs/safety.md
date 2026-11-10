@@ -3,8 +3,8 @@
 What an unattended agent can and cannot reach, and what holds a branch for a person.
 
 
-Agents run unattended with permission prompts off, inside Docker. The container is the boundary,
-and the kit narrows what can cross it:
+Agents run unattended with permission prompts off, inside Docker, as a plain user with every Linux
+capability dropped. The container is the boundary, and the kit narrows what can cross it:
 
 - 🔑 **Tokens.** Only a fine-grained GitHub token (issues and metadata on chosen repos) enters the
   sandbox. It cannot push, edit workflows or change settings (`sandcastle doctor --verify` checks it

@@ -368,8 +368,9 @@ run at half the gate share with one gates slot: `runGates` (`src/gates.ts`) take
 slot's lease, `withContainerCpus` (`src/sandbox.ts`) raises the container to the gate share with
 `docker update --cpus` and puts it back to the ticket share when the lease ends - after a red, a
 throw or a timeout too, the in-slot re-runs inside the one raise.
-The container's id is the sandbox's own `hostname` (the kit holds no name for it), taken only when it
-reads as a container id: an agent can put its own `hostname` on the sandbox's PATH.
+The container is the one Sandcastle's handle names (`sandboxId`, from 0.14.0: `sandcastle-<uuid>`,
+given on the host, taken only in that shape); a handle with none falls back to the sandbox's own
+`/proc/sys/kernel/hostname`, taken only when it reads as a container id.
 Nothing is raised when `cpus: false` leaves no limit, or when the gate share is no larger than the
 ticket's (a numeric `cpus`, or `maxGates` above the concurrency).
 A failed read or update says one line and leaves the limit as it was; it never fails the gate.
@@ -1547,6 +1548,14 @@ On 0.14.0 the first change replaces the else arm of a ternary in `create`
 unreleased reshaping of `createSandbox` moves the `pruneStale` hunk again on the next bump.
 `sandcastle doctor` checks the patch is applied (`kit dependencies installed`).
 
+**Capabilities.** Every sandbox container starts with every Linux capability dropped
+(`capDrop: ["ALL"]` in `dockerOptions`, `src/sandbox.ts`): the agent and the gates run as a plain
+user with no `sudo`, so the bounding set only mattered to a setuid binary or an escape, and the
+four test repositories' gates (the kit's dogfood clone, the smoke-test repository, a husky fixture
+and a repository with no `.git/hooks`) were green with none.
+A project whose setup or gates need one (`ping`'s `NET_RAW`, say) fails there with
+`Operation not permitted`.
+
 **What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
 control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at
 each start, hence an empty `hooks/` reading as absent, above), the worktree's `.git` file and its
@@ -1567,7 +1576,8 @@ runs `git status` on the host in the sandbox's worktree with the run's environme
 `git worktree remove` from the project), so a filter planted in the shared `.git/config` - the pins
 hold only the drivers configured at the start - would run there.
 Each close is preceded by a stop of the sandbox's container (`stopSandboxContainer`,
-`src/sandbox.ts`: found by its mount of the worktree, as `reapOrphans` finds one; `docker stop` with
+`src/sandbox.ts`: by the name the handle gives (`sandboxId`), whose mount of the worktree is still
+checked, or, for a handle with none, by that mount alone, as `reapOrphans` finds one; `docker stop` with
 a 3 s grace before Docker's kill, which the base image's `STOPSIGNAL SIGKILL` never waits for), so
 nothing the sandbox left running there - an agent's background job, a server a gate started - writes
 `.git` after the check: such a process can watch the worktree's lock, which the kit removes just

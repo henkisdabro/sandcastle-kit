@@ -1518,7 +1518,8 @@ export const ticketTime = (tookMs: number | undefined, waitedMs = 0, landingMs?:
 };
 
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
-export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close">;
+// `sandboxId`: the container's name (Sandcastle 0.14.0 on), which the CPU limit and the stop before a close address it by.
+export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close" | "sandboxId">;
 
 /**
  * What one ticket's pipeline works through, as `LandContext` is what a landing does: its sandbox
@@ -2059,7 +2060,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     // returned.
     const closeSandbox = async (when: string, check: () => unknown) => {
       await settleAfter(
-        () => checkBeforeClose(project, sandbox.worktreePath, when, check),
+        () => checkBeforeClose(project, sandbox.worktreePath, when, check, sandbox.sandboxId),
         (error) => {
           removed = true;
           if (!tampered.has(issue.id)) tampered.set(issue.id, error);

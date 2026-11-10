@@ -260,6 +260,10 @@ const spellings = (worktree: string) => {
   return paths;
 };
 
+// A sandbox container's name as Sandcastle's docker provider gives it (`sandcastle-<uuid>`): only such a name reaches a
+// `docker` argument, never a flag or a filter of another shape.
+const CONTAINER_NAME = /^sandcastle-[0-9a-f-]{8,64}$/;
+
 // How long a close's or an open's `docker ps`, `inspect` or `rm` may take before the kit stops waiting, and how long a
 // `docker stop` may take beyond its own grace. A daemon that is busy or hung gives no answer, and a close that waits
 // for one forever hangs every pipeline behind it.
@@ -314,11 +318,12 @@ const saidOf = (e: unknown) => {
  * or `inspect` of a listed container: a busy, restarting or hung daemon is not "nothing is running". Only a container
  * Docker says is gone meanwhile is skipped, and a missing `docker` program lists none.
  */
-const runningContainersOf = async (worktree: string): Promise<string[]> => {
+const runningContainersOf = async (worktree: string, sandboxId?: string): Promise<string[]> => {
   const paths = spellings(worktree);
   let ids: string[];
   try {
-    ids = (await dockerAsync(["ps", "-q", "--filter", "name=^sandcastle-"])).split("\n").filter(Boolean);
+    // By its name when the handle gives one (Sandcastle 0.14.0 on): that container alone, still checked for the mount.
+    ids = (await dockerAsync(["ps", "-q", "--filter", sandboxId && CONTAINER_NAME.test(sandboxId) ? `name=^${sandboxId}$` : "name=^sandcastle-"])).split("\n").filter(Boolean);
   } catch (e) {
     // No docker program at all (not installed, or not on this PATH): the kit started no container through it.
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -353,9 +358,9 @@ const STOP_GRACE_SECONDS = 3;
  * gone. Throws a `DockerAnswerError` when Docker cannot say what runs (`runningContainersOf`), which is no answer that
  * nothing does.
  */
-export const stopSandboxContainer = async (worktree: string): Promise<{ id: string; said: string }[]> => {
+export const stopSandboxContainer = async (worktree: string, sandboxId?: string): Promise<{ id: string; said: string }[]> => {
   const refused: { id: string; said: string }[] = [];
-  for (const id of await runningContainersOf(worktree)) {
+  for (const id of await runningContainersOf(worktree, sandboxId)) {
     try {
       await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id], STOP_GRACE_SECONDS * 1000 + DOCKER_ANSWER_MS);
     } catch (e) {
@@ -364,7 +369,7 @@ export const stopSandboxContainer = async (worktree: string): Promise<{ id: stri
   }
   if (!refused.length) return [];
   // One that stopped or went while Docker refused is no longer listed.
-  const running = new Set(await runningContainersOf(worktree));
+  const running = new Set(await runningContainersOf(worktree, sandboxId));
   return refused.filter((r) => running.has(r.id));
 };
 
@@ -1106,7 +1111,7 @@ export const sandboxCpus = (
  * limit as it was; it never fails `run`, and a limit that was not raised is not "put back".
  */
 export const withContainerCpus = async <T>(
-  sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> },
+  sandbox: { sandboxId?: string; exec(cmd: string): Promise<{ exitCode: number; stdout: string }> },
   cpus: { gate: number; ticket: number } | undefined,
   run: () => Promise<T>,
   say: (line: string) => void = console.log,
@@ -1121,15 +1126,19 @@ export const withContainerCpus = async <T>(
       return false;
     }
   };
-  let id = "";
-  try {
-    // Read inside the sandbox, where an agent can put its own `hostname` on PATH (one that prints another container's id
-    // would have the host raise, then "put back", that container's limit): the kernel's own file, by absolute paths,
-    // which the agent cannot change without CAP_SYS_ADMIN. Only a container id reaches `docker update`, never a flag.
-    const r = await sandbox.exec("/bin/cat /proc/sys/kernel/hostname");
-    id = r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
-  } catch {
-    /* said below */
+  // The container's name from Sandcastle's handle (0.14.0 on), given on the host: nothing inside the sandbox can change it.
+  let id = sandbox.sandboxId && CONTAINER_NAME.test(sandbox.sandboxId) ? sandbox.sandboxId : "";
+  if (!id) {
+    try {
+      // A handle with no name: read inside the sandbox, where an agent can put its own `hostname` on PATH (one that
+      // prints another container's id would have the host raise, then "put back", that container's limit): the
+      // kernel's own file, by absolute paths, which the agent cannot change without CAP_SYS_ADMIN. Only a container id
+      // reaches `docker update`, never a flag.
+      const r = await sandbox.exec("/bin/cat /proc/sys/kernel/hostname");
+      id = r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
+    } catch {
+      /* said below */
+    }
   }
   if (!id) {
     say("  could not read the sandbox's container id: its gates run at the ticket's CPU limit");
@@ -1165,6 +1174,9 @@ export const dockerOptions = (project: Project, image: string) => ({
   env: sandboxEnv(project),
   mounts: sandboxMounts(project),
   maxOutputTailChars: EXEC_TAIL_CHARS,
+  // The agent runs as a plain user with no sudo, and no gate of the kit's test projects needed a capability with
+  // every one dropped (docs/architecture.md, "capabilities"): a container escape or a setuid binary gets none either.
+  capDrop: ["ALL"] as const,
   ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
 });
 

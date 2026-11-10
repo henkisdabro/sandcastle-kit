@@ -186,7 +186,7 @@ export const setLoadHold = (hold: LoadHold | undefined) => {
 // `from` names the gate to start at, the first by default: a red gate's re-run (`PipelineContext.regate`) goes on
 // from the red one, in config order, since the gates before it already passed on this tree. The log and the
 // progress keep the configured numbering (`gate 2/3`), and a name that is no gate starts at the first.
-export const runGates = async (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim): Promise<GateRun> => {
+export const runGates = async (project: Project, sandbox: Parameters<typeof execGate>[0] & { sandboxId?: string }, label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim): Promise<GateRun> => {
   // Held for the machine's CPU pressure before the pass asks for its gates slot, so the hold is no part of the slot wait.
   let held = false;
   const heldSince = Date.now();
@@ -574,7 +574,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // check and the worktree's records made, before it. A failure throws with the container removed, the worktree
       // and its branch left for a person.
       const when = `before closing the ${label} sandbox`;
-      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when)).catch(leftBehind);
+      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when), sandbox.sandboxId).catch(leftBehind);
       unlockWorktree(sandbox.worktreePath);
       await sandbox.close();
       try {

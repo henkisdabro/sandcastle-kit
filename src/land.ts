@@ -22,7 +22,8 @@ import { AGENT_COMMITTER, errorLine, forgetFork, ownCommits, sandboxConfig, sh }
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
 
-export type Box = { worktreePath: string; exec: Exec["exec"]; close(): Promise<unknown> };
+// `sandboxId`: the container's name, which the stop before the close addresses it by.
+export type Box = { worktreePath: string; exec: Exec["exec"]; close(): Promise<unknown>; sandboxId?: string };
 export type Opener = (branch: string) => Promise<Box>;
 export type LandResult =
   | { kind: "merged"; commit: string; files: string[]; regen: string[] }
@@ -213,7 +214,7 @@ export const landInSandbox = async (
       // `.git` check and the worktree's records made, before it. A failure throws with the container removed and no
       // close - a stop, whatever the landing's own result or error.
       const when = `after landing ${t.branch} in a sandbox`;
-      await checkBeforeClose(project, box.worktreePath, when, () => assertGitUnchanged(project, before, when));
+      await checkBeforeClose(project, box.worktreePath, when, () => assertGitUnchanged(project, before, when), box.sandboxId);
       await box.close();
     }
     // A container ran with the shared .git mounted: the next host git call must not run what it may have planted.

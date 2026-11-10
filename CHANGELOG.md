@@ -22,6 +22,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   in sandboxes too.
 - **The base is gated once more** at each project's first run or `sandcastle gates`: the green-base
   record now carries the Sandcastle version, so the old record does not count.
+- **Sandboxes drop every Linux capability.** The agent and gates already ran as a plain user with no
+  `sudo`; a setup step or a test that needs a capability (`ping`, `chown` to another user, a raw
+  socket) now fails with `Operation not permitted`. `sandcastle gates` shows it.
 - Update the kit with `pnpm install` after the pull, as always: `sandcastle doctor` now fails
   "kit dependencies installed" when the installed Sandcastle is not the pinned, patched one.
 
@@ -47,7 +50,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
-- **Built on Sandcastle 0.14.0** (from 0.12.0), with the kit's patch remade for it.
+- **Built on Sandcastle 0.14.0** (from 0.12.0), with the kit's patch remade for it. The CPU limit
+  of a ticket's gates and the stop before a sandbox closes address the container by the name
+  Sandcastle gives it, and every container starts with all Linux capabilities dropped.
 - **A failed `setup` step is named, never silent.** Each step's exit status is recorded in the
   sandbox and checked once it opens, a `set -e` inside a step included. At the base gates a failure
   is a red `setup` gate, which stops the run; for a ticket it costs the attempt, and the ticket is

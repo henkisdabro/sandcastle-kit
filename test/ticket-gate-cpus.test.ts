@@ -115,3 +115,16 @@ test("burndown() hands a ticket's gates both shares, and a landing's gates none"
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   assert.match(source, /\.\.\.\(!priority && ticketCpus !== undefined && gateCpus !== undefined \? \{ cpus: \{ gate: gateCpus, ticket: ticketCpus \} \} : \{\}\)/);
 });
+
+test("a handle that names its container (Sandcastle 0.14.0's sandboxId) is addressed by that name, with nothing read inside", async () => {
+  fresh();
+  const named = { ...sandbox("green", ""), sandboxId: "sandcastle-0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0" };
+  await runGates(project, named, "ticket", false, asTicket);
+  assert.deepEqual(seen(), [`docker update --cpus 4 ${named.sandboxId}`, "gate", `docker update --cpus 2 ${named.sandboxId}`]);
+});
+
+test("a sandboxId that is not a sandbox container's name is never handed to docker: the id is read as before", async () => {
+  fresh();
+  await runGates(project, { ...sandbox("green"), sandboxId: "--help" }, "ticket", false, asTicket);
+  assert.deepEqual(seen(), ["docker update --cpus 4 abc123def456", "gate", "docker update --cpus 2 abc123def456"]);
+});
