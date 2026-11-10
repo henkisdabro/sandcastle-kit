@@ -128,6 +128,9 @@ if (process.env.NODE_TEST_CONTEXT) {
   for (const name of GIT_IDENTITY) delete process.env[name];
   addGitConfig("user.useConfigOnly", "true");
   addGitConfig("maintenance.auto", "false");
+  // git reads ~/.config/git/ignore with no global config at all: a developer's ignore of `.claude/settings.local.json`
+  // left a fixture's `git add -A` without it, and a test of that protected path failed on their machine only.
+  addGitConfig("core.excludesFile", "/dev/null");
   process.env.GIT_ALLOW_PROTOCOL ??= "file";
   process.env.SANDCASTLE_TEST_MACHINE_CPU = "none";
 }

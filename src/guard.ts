@@ -1450,8 +1450,10 @@ const DEFAULT_PROTECTED = [
   ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml",
   // Commit-hook runners' own config: their commands run on the host at the person's next commit. lefthook reads
   // `lefthook`, `.lefthook` and the `-local` variants (yml, yaml, json, toml) at the root and in `.config/`; husky 4
-  // reads `.huskyrc*` and `husky.config.*`; simple-git-hooks `.simple-git-hooks.*` and `simple-git-hooks.*`.
+  // reads `.huskyrc*` and `husky.config.*`; simple-git-hooks `.simple-git-hooks.*` and `simple-git-hooks.*`. lefthook
+  // also runs the scripts in its `source_dir` and `source_dir_local`, `.lefthook/` and `.lefthook-local/` by default.
   "lefthook.", "lefthook-local.", ".lefthook.", ".lefthook-local.", ".config/lefthook.", ".config/lefthook-local.",
+  ".lefthook/", ".lefthook-local/",
   ".huskyrc", "husky.config.", ".simple-git-hooks.", "simple-git-hooks.",
 ];
 // The tracked directory the local `core.hooksPath` names: its scripts run on the person's own next commit as the
@@ -1469,8 +1471,9 @@ const hooksDirProtected = (project: Project): string[] => {
 };
 const protectedPrefixes = (project: Project) => [...DEFAULT_PROTECTED, ...hooksDirProtected(project), ...(project.protectedPaths ?? [])];
 // The top-level `package.json` keys a commit-hook runner reads its commands from (the same config as the rc files
-// above), held when their value differs between the base and the branch.
-const HOOK_RUNNER_KEYS = ["lint-staged", "husky", "simple-git-hooks", "pre-commit"];
+// above), held when their value differs between the base and the branch. `gitHooks` is yorkie's (Vue CLI), `precommit`
+// the pre-commit package's other spelling.
+const HOOK_RUNNER_KEYS = ["lint-staged", "husky", "simple-git-hooks", "pre-commit", "precommit", "gitHooks"];
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
 
 /**

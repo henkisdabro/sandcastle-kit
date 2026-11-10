@@ -1088,10 +1088,11 @@ const MANIFEST = /^(package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-l
 // (`core.hooksPath`, `.husky`, `.git-hooks`, the default protected set), the files the lean plan's kept hooks run, the
 // package manifests and lockfiles, and `protectedPaths`. A conservative list, not a trace: anything it does not name
 // but a hook reads is a miss the maintainer chose to accept. A diff that cannot be read says yes.
-const hookInputsChanged = (project: Project, planFile: string, from: string, to: string): boolean => {
+export const hookInputsChanged = (project: Project, planFile: string, from: string, to: string): boolean => {
   let changed: string[];
   try {
-    changed = sh("git", ["diff", "--name-only", from, to], project.root).split("\n").filter(Boolean);
+    // Raw names, a rename as its delete and its add: a hook moved out of `.husky/` or a non-ASCII hook file is still seen.
+    changed = sh("git", ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", from, to], project.root).split("\0").filter(Boolean);
   } catch {
     return true;
   }

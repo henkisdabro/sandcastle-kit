@@ -133,7 +133,7 @@ Whenever this action or the audit writes or rewrites a ticket body, the run read
 from it, and only in plain text: a line inside a code block or backticks is not read.
 
 - **Blocker line.** GitHub: a native "blocked by" edge holds a ticket as a body line does, so either is enough; otherwise `Blocked by #12, #14` in the ticket *body* (`gh issue edit`), with the
-  refs on the same line (a colon after `Blocked by` is read too: `Blocked by: #12, #14` works) - a
+  refs on the same line, split by commas, `and`, `or` or `&` (a colon after `Blocked by` is read too: `Blocked by: #12, #14` works) - a
   list under a "Blocked by" heading (`## Blocked by`, then `- #12`) is not read, nor is a comment.
   Files tracker: a `Blocked by: NN, NN` line in the ticket's header block, next to `Status:`,
   naming tickets in the same feature by number. A Linear issue or an in-repo task file can be

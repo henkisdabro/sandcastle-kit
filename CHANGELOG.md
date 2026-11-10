@@ -45,6 +45,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   the kit's herdr-core view was checked against: `hc update` (or the Herdr app's update) brings it
   up to date. Terminals opened before the update keep the old behaviour until recreated: a
   `sandcastle run --detach` started in one still ends when it closes.
+- **More branches are held for you to merge.** A branch that renames a protected file away, or that
+  changes a commit-hook runner's config (above, under Security), is now labelled `ready-for-human`
+  instead of landing. Nothing to change; `sandcastle land <n>` merges one once you have read it.
 
 ### Added
 
@@ -58,8 +61,35 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A run says once when the sandboxes' kernel has no PSI** (OrbStack's has none), so empty memory
   pressure figures are not read as calm.
 
+### Security
+
+- **Opening a sandbox no longer follows symlinks a branch committed.** `lean-apply`, which runs on
+  the host before each sandbox starts, deleted and wrote through a committed `.claude` or `.mcp.json`
+  link (into `~/.claude`, say). It now skips any path that crosses a link, nested ones included, and
+  says so. (#827)
+- **A protected file renamed away, or one with a non-ASCII name, holds the branch.** The landing's
+  listing folded a rename into its new path and quoted non-ASCII names, so a workflow moved out of
+  `.github/` landed by itself. The base check's hook re-check lists changes the same way, and a large
+  file with a non-ASCII name is now held instead of failing the check. (#828)
+- **A commit-hook runner's config holds the branch**: the `lint-staged`, `husky`, `simple-git-hooks`,
+  `pre-commit`, `precommit` and `gitHooks` keys of a `package.json`, lefthook's other file names and its
+  script directories (`.lefthook/`, `.lefthook-local/`), husky 4's `.huskyrc*` and simple-git-hooks'
+  files. Their commands run on your machine at your next commit. (#830, #889)
+
 ### Fixed
 
+- **A `Blocked by` line with a serial comma, a repeated `by` or `or` holds on every ref.**
+  `Blocked by #1, #2, and #3` read only #1 and #2, so the ticket could start before #3 closed. (#831)
+- **`sandcastle gates` and `sandcastle run` on a base branch with no commit say so** in one line naming
+  the fix, not with a Node stack trace. (#884)
+- **A herdr-core status view left as a bare shell is replaced, not typed into.** herdr-core 0.1.19
+  wraps text sent to a terminal that has published a status, so the next run's status command could
+  reach the shell as tags. The old terminal is ended and a fresh view opens under the same name, also
+  when its shell comes back slowly after Ctrl-C. (#885, #886)
+- **The mod type-checks against Claude Code 2.1.322.** (#879)
+- **A test of a protected path no longer fails on a machine whose git ignores it globally.** The test
+  environment leaves out git's global excludes file, and the live status view's record test no
+  longer fails under a loaded full suite. (#883)
 - **`sandcastle size` is not set by one outlier.** A figure now needs 10 samples of one project
   before it counts (the 90th percentile of fewer was their highest: one 7.2 GiB pass among seven
   set a pool of one sandbox for every project); a figure short of them falls back to the next, and

@@ -49,6 +49,12 @@ test("a lint-staged key added to package.json is held", () => {
   assert.deepEqual(scenario({ "package.json": pkg({}) }, { "package.json": pkg({ "lint-staged": { "*": "sh evil.sh" } }) }), ["package.json (lint-staged)"]);
 });
 
+for (const key of ["gitHooks", "precommit"]) {
+  test(`a changed ${key} key in package.json is held`, () => {
+    assert.deepEqual(scenario({ "package.json": pkg({ [key]: { "pre-commit": "a" } }) }, { "package.json": pkg({ [key]: { "pre-commit": "b" } }) }), [`package.json (${key})`]);
+  });
+}
+
 test("a changed simple-git-hooks command in package.json is held", () => {
   assert.deepEqual(
     scenario({ "package.json": pkg({ "simple-git-hooks": { "pre-commit": "a" } }) }, { "package.json": pkg({ "simple-git-hooks": { "pre-commit": "b" } }) }),
@@ -88,6 +94,7 @@ for (const file of [
   ".lefthook.yml", ".lefthook.yaml", "lefthook.yaml", "lefthook-local.yml", ".lefthook-local.yml", ".lefthook-local.yaml",
   ".config/lefthook.yml", ".config/lefthook.yaml", ".huskyrc", ".huskyrc.json", "husky.config.js",
   ".simple-git-hooks.json", ".simple-git-hooks.cjs", "simple-git-hooks.js",
+  ".lefthook/pre-commit/lint.sh", ".lefthook-local/pre-push/check.sh",
 ]) {
   test(`a branch that adds ${file} is held`, () => {
     assert.deepEqual(scenario({}, { [file]: "x\n" }), [file]);
