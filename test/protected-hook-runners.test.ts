@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { protectedChanges } from "../src/guard.ts";
+import { protectedChanges, protectedPathsNote } from "../src/guard.ts";
 
 const BRANCH = "agent/issue-1";
 
@@ -93,3 +93,10 @@ for (const file of [
     assert.deepEqual(scenario({}, { [file]: "x\n" }), [file]);
   });
 }
+
+test("the agents' protected-paths note names the package.json keys that hold a branch", () => {
+  // An agent not told tidies a lint-staged entry on the side, and the branch it spent a pipeline on is held.
+  const note = protectedPathsNote({ root: tmpdir(), baseBranch: "main" } as Project, "implement");
+  for (const key of ["lint-staged", "husky", "simple-git-hooks", "pre-commit"]) assert.ok(note.includes(`\`${key}\``), key);
+  assert.match(note, /`\.huskyrc`/);
+});

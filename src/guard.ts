@@ -1486,7 +1486,7 @@ export const protectedPathsNote = (project: Project, role: "implement" | "review
       : "Change one only when the ticket needs it, never for a comment, a tidy-up or a formatting fix on the side.";
   return (
     "# Protected paths\n\n" +
-    `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ${ask}\n`
+    `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}) or its commit-hook runner keys (${HOOK_RUNNER_KEYS.map((k) => `\`${k}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ${ask}\n`
   );
 };
 
