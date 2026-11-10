@@ -138,7 +138,7 @@ test("a land-only branch with a person's comment since its review is priced as o
 
 test("a run records an unreviewed branch on its timings lines in place of carried, and prices its estimate by it", () => {
   const source = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(source, /const carriedKinds = new Map\(candidates\.map\(\(i\) => \[i\.id, carriedKindAtStart\(project\.root, project\.baseBranch, i\)\] as const\)\)/);
+  assert.match(source, /const carriedKinds = new Map\(candidates\.map\(\(i\) => \[i\.id, carriedKindAtStart\(project\.root, project\.baseBranch, i, trackerTokenUser\(tracker, project\)\)\] as const\)\)/);
   assert.match(source, /const carriedAtStart = new Set\(candidates\.filter\(\(i\) => carriedKinds\.get\(i\.id\) === "carried"\)/);
   assert.match(source, /const unreviewedAtStart = new Set\(candidates\.filter\(\(i\) => carriedKinds\.get\(i\.id\) === "unreviewed"\)/);
   assert.match(source, /unreviewed: candidates\.map\(\(i\) => unreviewedAtStart\.has\(i\.id\)\)/);

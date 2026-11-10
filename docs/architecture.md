@@ -2994,12 +2994,24 @@ The deny list above stays as the safety net, for an older Claude Code and anythi
 not govern, and `git-guard.sh` is unchanged.
 
 `gh-retry.sh` is `gh` retried on a GitHub 5xx or a timeout, three tries: the GitHub tracker's
-`TICKET_VIEW` and `COMMENTS_VIEW` (`src/tracker.ts`) run `gh issue view` through it, so a moment of
-GitHub's trouble does not crash a ticket's prompt expansion, and a 4xx fails at once.
+`TICKET_VIEW` (`src/tracker.ts`) runs `gh issue view` through it, and `COMMENTS_VIEW`'s
+`comments-view.sh` its two `gh api` reads, so a moment of GitHub's trouble does not crash a ticket's
+prompt expansion, and a 4xx fails at once.
 Its waits (15 s and 45 s) fit the 120 s the patched Sandcastle gives a prompt's shell expression; the
 command stays short so a failed expansion's line, which `promptExpansionLine` cuts, keeps gh's words.
 `reviewWithFallback` (`src/agents.ts`) re-raises a prompt-expansion error: the other model would read
 the same ticket (`test/gh-retry.test.ts`).
+
+`comments-view.sh` is the tracker's `COMMENTS_VIEW`: `gh api repos/{owner}/{repo}/issues/N/comments`
+through `gh-retry.sh`, filtered with the image's `jq` to the comments whose `author_association` is
+`OWNER`, `MEMBER` or `COLLABORATOR` or whose author wrote the ticket, printed as `gh issue view N
+--comments` prints a comment, and one last line counts those left out. On a public repository a
+stranger's comment would otherwise reach an agent that holds a token (`test/comments-view.test.ts`).
+The run's side is `personCommentsSince` (`src/ledger.ts`): the same trust (`trustedComment`,
+`src/tracker.ts`, from the `author` and per-comment `authorAssociation` the GitHub tracker keeps on a
+`Ticket`) and the agent marker honoured only from `tokenUserOf`'s login, the account `gh api user`
+names for `GH_TOKEN`, read once per run and `null` after one printed line when it fails
+(`test/comment-trust.test.ts`). A ticket file's comments carry no author and keep the marker alone.
 
 ## `test/*.test.ts`
 

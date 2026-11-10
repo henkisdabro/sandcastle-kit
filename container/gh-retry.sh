@@ -1,6 +1,6 @@
 #!/bin/sh
-# `gh "$@"`, retried on a GitHub 5xx or a timeout. A prompt's ticket reads (`gh issue view N`, with
-# or without `--comments`) run through it, so a moment of GitHub's trouble is not a crashed ticket.
+# `gh "$@"`, retried on a GitHub 5xx or a timeout. A prompt's ticket reads (`gh issue view N`, and
+# comments-view.sh's `gh api` calls) run through it, so a moment of GitHub's trouble is not a crashed ticket.
 # A 4xx (not found, no access) or any other failure ends at once, with gh's own words on stderr and
 # its exit code. Three tries; the waits before the second and the third are RETRY_WAITS.
 #
