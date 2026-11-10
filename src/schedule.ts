@@ -1406,6 +1406,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         stop.add({ kind: "setup problem", line });
         tell({ kind: "setup problem", line });
       };
+      const forgetSetupCrash = (id: string) => {
+        for (const c of setupCrashes) c.ids.delete(id);
+      };
       const last = () => stop.startsNothing || (pipelines.size - retaking === 0 && !waits.waitsForFlight && !hold?.size);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
@@ -1634,6 +1637,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           }
           sentBack.delete(t.id);
           attempts.set(t.id, n);
+          // Past its open this time: a setup failure of an earlier attempt was a blip the requeue was for, not the setup's.
+          if (!(r.kind === "crashed" && r.error instanceof SetupFailed)) forgetSetupCrash(t.id);
           switch (r.kind) {
             case "green":
               pushed++;

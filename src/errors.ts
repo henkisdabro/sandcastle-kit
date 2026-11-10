@@ -54,10 +54,27 @@ export const containerStartTimeout = (error: unknown): SlowStartError | undefine
 };
 
 // The step and its exit at the head of `SetupFailed`'s message (and of a note cut from it).
-const SETUP_STEP = /^setup failed(?: again after a requeue)?: (`[^`]*` (?:exited \d+|did not finish))/;
+// A step may hold backticks of its own, and a note cut at a word may end before the step's closing one, so the prefix
+// is what says a line is `SetupFailed`'s, and the step with its exit is read up to the last "` exited N".
+const SETUP_PREFIX = /^setup failed(?: again after a requeue)?: (?=`)/;
 
 /** Whether a line is `SetupFailed`'s: a setup problem's words then name the step and `sandcastle gates`, not `doctor --verify`. */
-export const isSetupLine = (line: string) => SETUP_STEP.test(line);
+export const isSetupLine = (line: string) => SETUP_PREFIX.test(line);
+
+/**
+ * Whether two `SetupFailed` lines (a message, or a note cut from one) name the same step with the same exit, whatever
+ * the output's last line says. A note cut before its exit matches a line whose step begins with what it kept.
+ */
+const sameSetupStep = (a: string, b: string): boolean => {
+  const body = (line: string) => {
+    const rest = line.replace(SETUP_PREFIX, "");
+    const whole = /^(`[\s\S]*` (?:exited \d+|did not finish))(?: - [\s\S]*)?$/.exec(rest)?.[1];
+    return whole ? { text: whole, cut: false } : { text: rest.replace(/…$/, ""), cut: true };
+  };
+  const [x, y] = [body(a), body(b)];
+  if (!x.cut && !y.cut) return x.text === y.text;
+  return x.cut ? y.text.startsWith(x.text) : x.text.startsWith(y.text);
+};
 
 /**
  * A command of the project's `setup` that failed as a sandbox opened (`assertSetup`, src/sandbox.ts): the step, its exit
@@ -98,8 +115,7 @@ export const githubServerError = (line: string): string | undefined => /\bHTTP (
  */
 export const sameExpansionFailure = (a: string, b: string): boolean => {
   // A failed setup step (`SetupFailed`): the same step with the same exit, whatever its last output line says.
-  const step = (line: string) => SETUP_STEP.exec(line)?.[1];
-  if (step(a) !== undefined || step(b) !== undefined) return step(a) === step(b);
+  if (isSetupLine(a) || isSetupLine(b)) return isSetupLine(a) && isSetupLine(b) && sameSetupStep(a, b);
   const key = (line: string) =>
     line
       .replace(/`[^`]*`/g, "``")

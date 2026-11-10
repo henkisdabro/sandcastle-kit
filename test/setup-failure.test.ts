@@ -213,3 +213,39 @@ test("a crash after a setup requeue says so once, and clears the requeue line; a
   const other = describe({ kind: "crashed", error: new Error("boom"), attempts: 2 }, { base: "main", gateNames: "test", requeued: "requeued after conflict at landing with #2" });
   assert.equal(other.record?.requeued, undefined);
 });
+
+test("a ticket whose setup recovered on its requeue does not count toward the stop", async () => {
+  // #1 fails setup once and lands on its second attempt; #4 fails the same step once later: two blips, no setup problem.
+  const tries = new Map<string, number>();
+  const told: { kind: string }[] = [];
+  const { endings, stop } = await createSchedule<T, G, string, string>({ tickets: ["1", "2", "3", "4", "5"].map((id) => ({ id })) }).run({
+    workers: 1,
+    attempt: async (t) => {
+      const n = (tries.get(t.id) ?? 0) + 1;
+      tries.set(t.id, n);
+      return (t.id === "1" || t.id === "4") && n === 1 ? { kind: "crashed", error: setupError() } : { kind: "green", green: { issue: t.id } };
+    },
+    land: async () => ({ kind: "merged" }) as const,
+    host: { check: async () => {}, failed: undefined },
+    tell: (c) => void told.push(c as never),
+  });
+  assert.equal(stop.headline, undefined);
+  assert.equal(told.filter((c) => c.kind === "setup problem").length, 0);
+  for (const id of ["1", "2", "3", "4", "5"]) assert.equal(endings.get(id)?.kind, "landing", id);
+  assert.equal(tries.get("4"), 2);
+});
+
+test("a setup line is recognised by its prefix: a step with backticks, or a note cut before the step ends", async () => {
+  const { isSetupLine, sameExpansionFailure } = await import("../src/errors.ts");
+  const ticked = new SetupFailed({ name: "setup", command: "echo `date`; false", exitCode: 1, output: "Mon" }).message;
+  assert.ok(isSetupLine(ticked), ticked);
+  assert.ok(sameExpansionFailure(ticked, new SetupFailed({ name: "setup", command: "echo `date`; false", exitCode: 1, output: "Tue" }).message));
+  assert.ok(!sameExpansionFailure(ticked, new SetupFailed({ name: "setup", command: "echo `date`; false", exitCode: 2, output: "Mon" }).message));
+  const long = new SetupFailed({ name: "setup", command: `pnpm install ${"--flag ".repeat(30)}`, exitCode: 1, output: "x" }).message;
+  const note = agentFailure(new Error(long));
+  assert.ok(note.endsWith("…") && !note.includes("exited"), note);
+  assert.ok(isSetupLine(note));
+  assert.ok(sameExpansionFailure(note, long));
+  assert.ok(!sameExpansionFailure(note, setupError().message));
+  assert.ok(!isSetupLine("Command `gh issue view 2` exited with code 1: HTTP 404"));
+});
