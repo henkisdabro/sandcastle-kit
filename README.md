@@ -209,7 +209,7 @@ A run starts in a project, on its base branch, with a clean tree:
 1. **Checks** - the token type, the images (built if stale), one short reply from each model, the hook check, the `.git` fingerprint.
 2. **The base** - every gate on the base commit. Red stops the run before any agent starts.
 3. **Per ticket**, in its own git worktree and Docker sandbox, up to `CONCURRENCY` at once - an implement agent, a review agent, then your gates, run by the orchestrator, with repair passes on red.
-4. **Landing** - a green branch is merged into the local base branch and its ticket closed; a branch that touches hooks, CI or install scripts is held for a person.
+4. **Landing** - a green branch is merged into the local base branch and its ticket closed; a branch that touches hooks (hook-runner config included), CI or install scripts is held for a person.
 5. **The end** - the merged base is gated once more, and the closing summary says what merged, what is red and what needs you. Nothing is pushed.
 
 A green gate run proves only that the configured gate commands passed on that branch - no more than those commands check. Whether the change does what the ticket asked is the review agent's job, which is why every branch is reviewed before it is gated.

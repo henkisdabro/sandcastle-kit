@@ -1447,7 +1447,12 @@ const DEFAULT_PROTECTED = [
   ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/",
   ".mcp.json", ".codex/", ".agents/", ".sandcastle/",
   ".npmrc", "pnpm-workspace.yaml", ".yarnrc.yml",
-  ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml", "lefthook.yml",
+  ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml",
+  // Commit-hook runners' own config: their commands run on the host at the person's next commit. lefthook reads
+  // `lefthook`, `.lefthook` and the `-local` variants (yml, yaml, json, toml) at the root and in `.config/`; husky 4
+  // reads `.huskyrc*` and `husky.config.*`; simple-git-hooks `.simple-git-hooks.*` and `simple-git-hooks.*`.
+  "lefthook.", "lefthook-local.", ".lefthook.", ".lefthook-local.", ".config/lefthook.", ".config/lefthook-local.",
+  ".huskyrc", "husky.config.", ".simple-git-hooks.", "simple-git-hooks.",
 ];
 // The tracked directory the local `core.hooksPath` names: its scripts run on the person's own next commit as the
 // defaults' `.husky/` and `.githooks/` do, and the start takes such a path without a question after a clean end.
@@ -1463,6 +1468,9 @@ const hooksDirProtected = (project: Project): string[] => {
   return DEFAULT_PROTECTED.includes(dir) ? [] : [dir];
 };
 const protectedPrefixes = (project: Project) => [...DEFAULT_PROTECTED, ...hooksDirProtected(project), ...(project.protectedPaths ?? [])];
+// The top-level `package.json` keys a commit-hook runner reads its commands from (the same config as the rc files
+// above), held when their value differs between the base and the branch.
+const HOOK_RUNNER_KEYS = ["lint-staged", "husky", "simple-git-hooks", "pre-commit"];
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
 
 /**
@@ -1544,18 +1552,22 @@ export const protectedChanges = (project: Project, branch: string) => {
   const base = project.baseBranch;
   const changed = changedPaths(project, branch);
   const hits = protectedAmong(project, changed);
-  // package.json only when an install-time script changed.
+  // package.json only when an install-time script or a hook runner's key changed.
   for (const f of changed.filter((f) => f === "package.json" || f.endsWith("/package.json"))) {
-    const scripts = (ref: string) => {
+    const manifest = (ref: string): Record<string, any> => {
       try {
-        return JSON.parse(sh("git", ["show", `${ref}:${f}`], project.root)).scripts ?? {};
+        const parsed = JSON.parse(sh("git", ["show", `${ref}:${f}`], project.root));
+        return parsed && typeof parsed === "object" ? parsed : {};
       } catch {
         return {};
       }
     };
-    const [a, b] = [scripts(base), scripts(branch)];
-    const moved = INSTALL_SCRIPTS.filter((s) => a[s] !== b[s]);
+    const [a, b] = [manifest(base), manifest(branch)];
+    const [sa, sb] = [a.scripts ?? {}, b.scripts ?? {}];
+    const moved = INSTALL_SCRIPTS.filter((s) => sa[s] !== sb[s]);
     if (moved.length) hits.push(`${f} (scripts: ${moved.join(", ")})`);
+    const runners = HOOK_RUNNER_KEYS.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+    if (runners.length) hits.push(`${f} (${runners.join(", ")})`);
   }
   return hits;
 };
