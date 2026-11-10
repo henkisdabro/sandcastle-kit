@@ -137,6 +137,15 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     // (hc 0.1.19: an ordinary exit is final) - is removed and the view opened afresh by name. Anything else in it is a
     // person's, and keeps the name; this run's view then goes unnamed.
     let nameFree = true;
+    // The name is asked again after the kit tried to end its own terminal: hc's answer on the address says only that
+    // the terminal is gone, and the name is what the new view needs. Still taken, the old terminal is the person's
+    // to close, and the one line names it - printed only here, for a terminal the kit tried to remove, never for one
+    // it leaves alone as a person's.
+    const nameIsFree = (old: string) => {
+      const free = !get(hc, name);
+      if (!free) console.log(`The old status terminal ${old} could not be removed, so this run's status view is unnamed beside it: close it yourself.`);
+      return free;
+    };
     const found = get(hc, name);
     if (found?.state === "live") {
       nameFree = false;
@@ -145,7 +154,7 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
         const wasView = runsStatusView(t);
         if (wasView) {
           hc(["keys", found.address, "ctrl+c", "--json"]);
-          for (let waited = 0; waited < 5000 && !bareShell(foregroundOf(t)) && t?.state !== "finished"; waited += 100) {
+          for (let waited = 0; waited < 5000 && t !== undefined && !bareShell(foregroundOf(t)) && t.state !== "finished"; waited += 100) {
             pause(100);
             t = get(hc, found.address);
           }
@@ -163,15 +172,24 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
             try {
               hc([verb, found.address, "--json"]);
             } catch {
-              /* judged below, by whether it is gone */
+              /* judged below, by whether the name is free */
             }
           }
-          nameFree = !get(hc, found.address);
+          nameFree = nameIsFree(found.address);
+        } else if (!t) {
+          // The terminal vanished during the wait: nothing of the kit's is left to end, and the name may be free.
+          nameFree = !get(hc, name);
         }
       }
     } else if (found) {
-      // Finished: removed, so the name is free for this run's view.
-      hc(["rm", found.address, "--json"]);
+      // Finished: removed, so the name is free for this run's view. An hc that cannot remove it costs the view its
+      // name, never the view.
+      try {
+        hc(["rm", found.address, "--json"]);
+      } catch {
+        /* judged below, by whether the name is free */
+      }
+      nameFree = nameIsFree(found.address);
     }
 
     const labels = [

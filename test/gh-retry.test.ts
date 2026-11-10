@@ -60,6 +60,21 @@ test("a ticket read that gets a 502 twice and then succeeds is read on the third
   assert.deepEqual(f.log(), ["gh issue view 7", "sleep 15", "gh issue view 7", "sleep 45", "gh issue view 7"]);
 });
 
+test("a failed try's error body never reaches the output: only the try that succeeded is printed", () => {
+  const f = fakes(['1 {"message":"Server Error"}|HTTP 502: Bad Gateway (https://api.example.com/repos/o/r/issues/7/comments)', "0 [1,2]|"]);
+  const r = run(f, `sh '${join(KIT, "container/gh-retry.sh")}' api repos/o/r/issues/7/comments`);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "[1,2]");
+});
+
+test("a wait that would end past GH_RETRY_UNTIL is not taken, and the last error is given at once", () => {
+  const f = fakes(["1 |HTTP 503: Service Unavailable (https://api.example.com/graphql)"]);
+  const r = run(f, `GH_RETRY_UNTIL=$(($(date +%s) + 20)) sh '${join(KIT, "container/gh-retry.sh")}' issue view 7`);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /HTTP 503/);
+  assert.deepEqual(f.log(), ["gh issue view 7", "sleep 15", "gh issue view 7"]);
+});
+
 test("a ticket read that gets a 404 fails at once, with one call, no wait and gh's own words", () => {
   const f = fakes(["1 |GraphQL: Could not resolve to an issue or pull request with the number of 999. (repository.issue)"]);
   const r = run(f, `sh '${join(KIT, "container/gh-retry.sh")}' issue view 999`);
@@ -76,18 +91,28 @@ test("a ticket read that times out every time gives up after three tries with th
   assert.equal(f.log().filter((l) => l.startsWith("gh ")).length, 3);
 });
 
-test("the prompt's ticket and comments reads go through the retry, and a 404 in them still fails at once", () => {
+test("the prompt's ticket read goes through the retry, and a 404 in it still fails at once", () => {
   const project = { root: tmpdir(), name: "t", baseBranch: "main", label: "ready-for-agent", tracker: fakeTracker() } as unknown as Project;
   const { words } = makeTracker(project);
-  for (const [word, args] of [[words.TICKET_VIEW, "issue view 5"], [words.COMMENTS_VIEW, "issue view 5 --comments"]] as const) {
-    const f = fakes(["1 |HTTP 503: Service Unavailable", "0 body|"]);
-    const r = run(f, viewCommand(word, "5"));
-    assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(f.log(), [`gh ${args}`, "sleep 15", `gh ${args}`]);
-    const g = fakes(["1 |HTTP 404: Not Found"]);
-    assert.equal(run(g, viewCommand(word, "5")).status, 1);
-    assert.deepEqual(g.log(), [`gh ${args}`]);
-  }
+  const f = fakes(["1 |HTTP 503: Service Unavailable", "0 body|"]);
+  const r = run(f, viewCommand(words.TICKET_VIEW, "5"));
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(f.log(), ["gh issue view 5", "sleep 15", "gh issue view 5"]);
+  const g = fakes(["1 |HTTP 404: Not Found"]);
+  assert.equal(run(g, viewCommand(words.TICKET_VIEW, "5")).status, 1);
+  assert.deepEqual(g.log(), ["gh issue view 5"]);
+});
+
+// The comments view reads through the retry too (container/comments-view.sh); its successful output is test/comments-view.test.ts's.
+test("the prompt's comments read goes through the retry, and a 404 in it still fails at once", () => {
+  const project = { root: tmpdir(), name: "t", baseBranch: "main", label: "ready-for-agent", tracker: fakeTracker() } as unknown as Project;
+  const { words } = makeTracker(project);
+  const ticket = "gh api repos/{owner}/{repo}/issues/5 --jq .user.login // \"\"";
+  const f = fakes(["1 |HTTP 503: Service Unavailable", "1 |HTTP 404: Not Found"]);
+  const r = run(f, viewCommand(words.COMMENTS_VIEW, "5"));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /HTTP 404/);
+  assert.deepEqual(f.log(), [ticket, "sleep 15", ticket]);
 });
 
 const expansionError = () => Object.assign(new Error("Command `sh /etc/claude-code/gh-retry.sh issue view 5` exited with code 1: HTTP 502: Bad Gateway"), { name: "(FiberFailure) PromptError" });

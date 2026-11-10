@@ -193,7 +193,7 @@ flowchart LR
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews the tests and the code. A `model:` label changes one ticket's implementer; `CROSS_REVIEW=1` adds Codex. |
 | 🗂️ | **Your tracker** | GitHub Issues or Markdown ticket files, with blockers from GitHub, Linear or ticket files. |
 | 🛬 | **Landing you control** | Each ticket lands as it goes green while the others run; a conflict gets one more try. `preview`, `land` and `requeue` between runs. |
-| 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off, the shared `.git` fingerprinted, risky branches held for a person. |
+| 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off, the shared `.git` fingerprinted, risky branches held for a person. On a public repo, only owners', members', collaborators' and the ticket author's comments reach an agent's prompt. |
 | ⚖️ | **Machine-wide limits** | Several projects' runs share the machine's sandbox and gate slots without starving each other. |
 | 📺 | **A live status view** | `sandcastle status`: every ticket and where it is, which gate is running, when landing should start. |
 | 🖥️ | **Best in [Herdr](https://herdr.dev)** | The status view and the run in the sidebar, in Herdr TUI and in the Herdr app. |

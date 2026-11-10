@@ -52,7 +52,7 @@ import { startClock, type StartClock } from "./start-clock.ts";
 import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { memoryLine, poolWarningsNow, sandboxMemory } from "./size.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, type Ticket, type Tracker } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, trackerTokenUser, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
@@ -65,7 +65,7 @@ import { sandboxOpener } from "./land.ts";
 import {
   carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
-import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine } from "./ledger.ts";
+import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine, trustOf } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
@@ -1155,9 +1155,9 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
  * person's comment since its review gets the full review all the same (the pipeline's `lateComment`), so it costs a
  * whole ticket and is priced as one to review. The comments are those the queue read, which the pipeline falls back to.
  */
-export const carriedKindAtStart = (root: string, base: string, issue: Pick<Issue, "id" | "comments">): "carried" | "unreviewed" | undefined => {
+export const carriedKindAtStart = (root: string, base: string, issue: Pick<Issue, "id" | "comments" | "author" | "commentBy">, tokenUser: string | null = null): "carried" | "unreviewed" | undefined => {
   const kind = carriedKind(root, base, issue.id);
-  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments).length > 0 ? "unreviewed" : kind;
+  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments, trustOf(issue, tokenUser)).length > 0 ? "unreviewed" : kind;
 };
 
 /**
@@ -1816,12 +1816,18 @@ export const createPipeline = (ctx: PipelineContext) => {
     reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
 
   /** The ticket's comments now; undefined when the tracker cannot be read (a head record then keeps its last count, which at worst sends a carried branch to a full review it did not need). */
-  const ticketComments = async (id: string): Promise<string[] | undefined> => {
+  const ticketThread = async (id: string): Promise<Ticket | undefined> => {
     try {
-      return (await readTicketState(tracker, id)).comments;
+      return await readTicketState(tracker, id);
     } catch {
       return undefined;
     }
+  };
+  const ticketComments = async (id: string): Promise<string[] | undefined> => (await ticketThread(id))?.comments;
+  /** A person's comments on the ticket past the count its head record kept, by accounts that may be trusted (`personCommentsSince`). */
+  const personCommentsOn = async (issue: Issue): Promise<string[]> => {
+    const read = (await ticketThread(issue.id)) ?? issue;
+    return personCommentsSince(read.comments ?? [], readHeads(project.root)[issue.id]?.comments, trustOf(read, trackerTokenUser(tracker, project)));
   };
 
   // A later run skips work a branch already passed (see recordHead). A dry run's
@@ -2223,7 +2229,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // after any merge resolution, in place of the narrow one or none at all.
       const lateComment =
         greenHead !== undefined &&
-        personCommentsSince((await ticketComments(issue.id)) ?? issue.comments ?? [], readHeads(project.root)[issue.id]?.comments).length > 0;
+        (await personCommentsOn(issue)).length > 0;
       // A tip past the head is merge commits only (landOnlyHead): a resolution a hold left
       // on the branch was never reviewed, unless a narrow review has since recorded the tip.
       const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch], project.root) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch], project.root);
@@ -3064,6 +3070,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   clock.step("queue read");
   const tracker = makeTracker(project);
   const ref = tracker.ref;
+  // Read once, here, so a token the account of which cannot be told is said at the start (`tokenUserOf`).
+  trackerTokenUser(tracker, project);
   const named = namedTicketsFromEnv();
   if (named.note) console.log(named.note);
   const queued: Issue[] = named.list ? namedTickets(tracker, named.list) : tracker.queued();
@@ -3237,7 +3245,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   clock.step("carried branches");
   // Carried branches, read before any agent touches them: a land-only or narrowly reviewed one is dearer than a fresh ticket's landing,
   // so the estimate and the timings say so; one that gets a full review is priced as a fresh ticket (`carriedKindAtStart`).
-  const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i)] as const));
+  const carriedKinds = new Map(candidates.map((i) => [i.id, carriedKindAtStart(project.root, project.baseBranch, i, trackerTokenUser(tracker, project))] as const));
   const carriedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "carried").map((i) => i.id));
   const unreviewedAtStart = new Set(candidates.filter((i) => carriedKinds.get(i.id) === "unreviewed").map((i) => i.id));
   // A remainder: re-run for what an earlier "part of" merge left, so its work is mostly on the base already and it costs less than a fresh ticket.
