@@ -7,7 +7,7 @@
 // and the release of dependants (`createDependants`).
 
 import type { UsagePaused } from "../mod/hooks/run-record.ts";
-import { OperatorError, promptExpansionLine, sameExpansionFailure } from "./errors.ts";
+import { OperatorError, promptExpansionLine, sameExpansionFailure, SetupFailed } from "./errors.ts";
 import type { Landed } from "./landing.ts";
 
 export type Queue<T> = {
@@ -555,7 +555,8 @@ export const createLanding = <G extends Green>(
 };
 
 /** What a ticket's first attempt collided with, at landing or in its pipeline: its second attempt carries it. */
-export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[]; seen?: true; found?: ConflictFound };
+/** What a requeued ticket's first attempt met: a conflict, a red landing, or a setup step that failed as its sandbox opened (`setup`: `SetupFailed`'s line). */
+export type Again = { kind: "conflict" | "red" | "setup"; with: string[]; gates?: string[]; failing?: string[]; seen?: true; found?: ConflictFound; setup?: string };
 
 /** Where a conflict was found: by the merge check before the ticket's review or before its gates, or when landing it. */
 export type ConflictFound = "review" | "gates" | "landing";
@@ -1039,7 +1040,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const first = new Map<string, Again>();
       // A ticket sent back, until its second attempt begins: if that never begins, the landing or the pipeline's conflict
       // that sent it back is its ending.
-      const sentBack = new Map<string, { green: G; landed: Landed } | { outcome: O; conflict: Conflict }>();
+      const sentBack = new Map<string, { green: G; landed: Landed } | { outcome: O; conflict: Conflict } | { error: unknown }>();
       // The files a ticket sent back after a conflict collided on: its second attempt waits for the green branches that touch them.
       const conflicted = new Map<string, string[]>();
       // The tickets whose conflict the rule would have sent back, had the run not stopped starting tickets (`sendBack`).
@@ -1337,8 +1338,22 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         // Where it was found: a pipeline's conflict says which check (`Conflict.found`), a landing's is the landing.
         const found = "conflict" in back ? back.conflict.found : "landing";
         const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }), ...(met.seen && { seen: true as const }) } : { kind: "conflict", with: met.with, ...(found && { found }) };
-        first.set(t.id, again);
         if (met.kind === "conflict") conflicted.set(t.id, met.files);
+        push(t, again, back);
+        return true;
+      };
+      /**
+       * The requeue-once rule for a setup step that failed as the ticket's sandbox opened (`SetupFailed`): the attempt is
+       * lost, and the ticket is sent back once, as after a first conflict - a registry or network hiccup passes on the second
+       * try. A second failure, or a ticket already sent back, ends it as crashed.
+       */
+      const sendBackSetup = (t: T, error: SetupFailed): boolean => {
+        if (pipelines.closed || first.has(t.id) || stop.startsNothing) return false;
+        push(t, { kind: "setup", with: [], setup: error.message }, { error });
+        return true;
+      };
+      const push = (t: T, again: Again, back: { green: G; landed: Landed } | { outcome: O; conflict: Conflict } | { error: unknown }) => {
+        first.set(t.id, again);
         sentBack.set(t.id, back);
         tell({ kind: "requeued", id: t.id, again });
         inPipeline++;
@@ -1346,7 +1361,6 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         requeuedAt.set(t.id, { at: clock(), pausedMs: pausedMs + (pausedSince !== undefined ? clock() - pauseBegan : 0) });
         pipelines.push({ ticket: t, rank: REQUEUED });
         demand();
-        return true;
       };
       const requeue = (g: G, landed: Landed): boolean => (landed.kind === "conflict" || landed.kind === "red") && sendBack(g.issue, landed, { green: g, landed });
 
@@ -1378,17 +1392,22 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
         },
       });
-      // The tickets that crashed expanding their prompt, by the failure: the same one for SETUP_CRASHES tickets is the
-      // setup's. The stop holds before the second ticket's ending is told, so nothing starts in between.
+      // The tickets that crashed expanding their prompt, or whose `setup` step failed as their sandbox opened (counted at
+      // the first failure, before its requeue), by the failure: the same one for SETUP_CRASHES tickets is the setup's -
+      // a run on a cached green base, or one whose registry went down, would otherwise open two sandboxes per ticket for
+      // nothing. The stop holds before the second ticket's ending is told, so nothing starts in between.
       const setupCrashes: { line: string; ids: Set<string> }[] = [];
       const noteSetupCrash = (id: string, error: unknown) => {
-        const line = promptExpansionLine(error);
+        const line = promptExpansionLine(error) ?? (error instanceof SetupFailed ? error.message : undefined);
         if (line === undefined || stop.causes.some((c) => c.kind === "setup problem")) return;
         const same = setupCrashes.find((c) => sameExpansionFailure(c.line, line)) ?? (setupCrashes.push({ line, ids: new Set() }), setupCrashes.at(-1)!);
         same.ids.add(id);
         if (same.ids.size < SETUP_CRASHES) return;
         stop.add({ kind: "setup problem", line });
         tell({ kind: "setup problem", line });
+      };
+      const forgetSetupCrash = (id: string) => {
+        for (const c of setupCrashes) c.ids.delete(id);
       };
       const last = () => stop.startsNothing || (pipelines.size - retaking === 0 && !waits.waitsForFlight && !hold?.size);
 
@@ -1398,6 +1417,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         sentBack.delete(t.id);
         if (!back) return end(t.id, { kind: "not begun", why });
         const done = attempts.get(t.id) ?? 1;
+        if ("error" in back) return end(t.id, { kind: "crashed", error: back.error, attempts: done });
         if ("conflict" in back) return end(t.id, { kind: "conflict", ...back, attempts: done, unstarted: true, ...(why.kind === "withdrawn" && { withdrawn: why.reason }) });
         const landed: Landed = why.kind === "withdrawn" ? { kind: "withdrawn", reason: why.reason } : back.landed;
         // `unstarted` only says more than `attempts: 1` does once a third attempt, or later, is the one that never began.
@@ -1617,6 +1637,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           }
           sentBack.delete(t.id);
           attempts.set(t.id, n);
+          // Past its open this time: a setup failure of an earlier attempt was a blip the requeue was for, not the setup's.
+          if (!(r.kind === "crashed" && r.error instanceof SetupFailed)) forgetSetupCrash(t.id);
           switch (r.kind) {
             case "green":
               pushed++;
@@ -1642,6 +1664,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               const limit = r.causes?.find((c) => c.kind === "plan limit" && c.ticket === t.id);
               if (limit) return await end(t.id, { kind: "not begun", why: limit, cutShort: true });
               noteSetupCrash(t.id, r.error);
+              if (r.error instanceof SetupFailed && sendBackSetup(t, r.error)) return;
               return await end(t.id, { kind: "crashed", error: r.error, attempts: n });
             }
             case "stopped":

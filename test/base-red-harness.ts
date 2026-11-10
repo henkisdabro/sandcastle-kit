@@ -67,6 +67,7 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
   const toldRed: string[][] = [];
   const lines: string[] = [];
   const gates = new Map<string, GateRun[]>();
+  const kernel = { oom: 0, kills: 0 };
   const agents: Record<string, (id: string, worktree: string) => string | void> = {
     impl: (id, wt) => commit(wt, `src/ticket-${id}.ts`, `${id}\n`),
   };
@@ -77,6 +78,8 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
     return {
       worktreePath: path,
       exec: async (cmd: string) => {
+        // The cgroup's OOM counts (`oomKills`, src/sandbox.ts), from `kernel`: an agent the test kills raises them.
+        if (cmd.includes("memory.events")) return { exitCode: 0, stdout: `oom ${kernel.oom}\noom_kill ${kernel.kills}\n`, stderr: "" };
         if (!cmd.startsWith("git ")) return { exitCode: 127, stdout: "", stderr: "not in the fake sandbox" };
         const r = spawnSync("sh", ["-c", cmd], { cwd: path, encoding: "utf8" });
         return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
@@ -149,5 +152,5 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
       console.log = log;
     }
   };
-  return { root, agents, repairs, baseRuns, toldRed, lines, attempt };
+  return { root, agents, repairs, baseRuns, toldRed, lines, attempt, kernel };
 };

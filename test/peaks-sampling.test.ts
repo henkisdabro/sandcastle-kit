@@ -53,6 +53,8 @@ const kernel = (stat = true) => {
     if (cmd.includes("memory.peak")) return { exitCode: 0, stdout: `${k.peak * MIB}\n`, stderr: "" };
     // No PSI in this fake kernel, memory or CPU: a read of it must not be taken for the gate command (see test/memory-pressure.test.ts).
     if (cmd.includes("memory.pressure") || cmd.includes("cpu.pressure")) return { exitCode: 1, stdout: "", stderr: "No such file" };
+    // The OOM count a gate pass reads (src/sandbox.ts `oomKills`): none killed.
+    if (cmd.includes("memory.events")) return { exitCode: 0, stdout: "oom 0\noom_kill 0\n", stderr: "" };
     if (cmd.includes("memory.stat")) {
       k.reads++;
       return k.stat ? { exitCode: 0, stdout: `file 999999999\nanon ${k.anon * MIB}\nkernel 4096\n`, stderr: "" } : { exitCode: 1, stdout: "", stderr: "No such file" };

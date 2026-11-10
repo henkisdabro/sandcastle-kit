@@ -143,7 +143,8 @@ test("a docker info that fails is an OperatorError telling the person to start t
 const NOW = Date.parse("2026-05-10T00:00:00Z");
 type Figures = { peakMib: number; anonMib?: number; agentMib?: number; agentAnonMib?: number };
 // `sampled: 2` is the mark of a line whose anon figures were read only while a phase ran (src/peaks.ts); size counts no anon figure without it.
-const ran = (f: Figures) => [{ ts: "2026-05-09T00:00:00.000Z", project: "abc123", run: "r1", sampled: 2, ...f }];
+// Ten sandboxes alike: a figure counts from `MIN_SAMPLES` (10) samples of a project.
+const ran = (f: Figures) => Array.from({ length: 10 }, () => ({ ts: "2026-05-09T00:00:00.000Z", project: "abc123", run: "r1", sampled: 2, ...f }));
 const measuredOn = (cpus: number, gib: number, f: Figures | undefined, over: Partial<Readers> = {}) =>
   reading(orbstack(cpus, gib), { peaks: () => (f ? ran(f) : []), now: () => NOW, projectId: () => "abc123", ...over });
 
@@ -160,7 +161,7 @@ test("memory.peak alone prices the agent baseline at the gate figure, says so, a
   // Gate 2000 MiB -> 2200 MiB = 2.15 GiB; floor(10 GiB / 2.15 GiB) = 4.
   const readers = measuredOn(8, 12, { peakMib: 2000 });
   const out = text(sizeLines(readers, {}, {}));
-  assert.match(out, /Gate figure: 1\.95 GiB, cgroup `memory\.peak` \(highest of 1 sample\), which includes page cache[^\n]*plus 10% is 2\.15 GiB\./);
+  assert.match(out, /Gate figure: 1\.95 GiB, cgroup `memory\.peak` \(90th of 10 samples; highest [\d.]+ GiB\), which includes page cache[^\n]*plus 10% is 2\.15 GiB\./);
   assert.match(out, /Agent baseline: no agent baseline measured yet, priced at the gate figure \(2\.15 GiB\)\./);
   assert.match(out, /Measured: the last 1 measured run of this project/);
   assert.match(out, /maxSandboxes: 4 {2}\(memory: floor\(\(12 GiB - 2 GiB\) \/ 2\.15 GiB\) = 4; CPUs allow 8\)/);
@@ -177,7 +178,7 @@ test("memory.peak with an agent baseline prices the gates and the rest apart, na
   assert.deepEqual([rec.gates, rec.sandboxes, rec.gateFrom, rec.baselineFrom], [2, 7, "peak", "agent-peak"]);
   const out = text(sizeLines(measuredOn(12, 16, { peakMib: 4000, agentMib: 1000 }), {}, {}));
   assert.match(out, /Gate figure: 3\.91 GiB, cgroup `memory\.peak`[^\n]*plus 10% is 4\.3 GiB\./);
-  assert.match(out, /Agent baseline: 0\.98 GiB, `memory\.peak` read before the first gate pass \(highest of 1 sample\); plus 10% is 1\.07 GiB\./);
+  assert.match(out, /Agent baseline: 0\.98 GiB, `memory\.peak` read before the first gate pass \(90th of 10 samples; highest [\d.]+ GiB\); plus 10% is 1\.07 GiB\./);
   assert.match(out, /maxSandboxes: 7 {2}\(memory: 2 gates at 4\.3 GiB \+ floor\(\(16 GiB - 2 GiB - 2 x 4\.3 GiB\) \/ 1\.07 GiB\) at 1\.07 GiB = 7; CPUs allow 12\)/);
   assert.match(out, /maxGates: 2 {2}\(CPUs: floor\(12 \/ 6\) = 2\)/);
   assert.match(out, /fits 7 sandboxes, so maxSandboxes is 7 and maxGates 2\./);
@@ -193,8 +194,8 @@ test("anon figures on a 13.7 GiB, 12-CPU VM recommend 2 gates and at least 4 san
   assert.ok(rec.sandboxes >= 4, `sandboxes ${rec.sandboxes}`);
   assert.equal(rec.sandboxes, 9, "2 gates + floor((11.7 - 5.5) / 0.88) = 7 more");
   const out = text(sizeLines(measuredOn(12, 13.7, f), {}, {}));
-  assert.match(out, /Gate figure: 2\.5 GiB, the anonymous memory \(no page cache\) read during gates \(highest of 1 sample\); plus 10% is 2\.75 GiB\./);
-  assert.match(out, /Agent baseline: 0\.8 GiB, the anonymous memory read during agent passes \(highest of 1 sample\); plus 10% is 0\.88 GiB\./);
+  assert.match(out, /Gate figure: 2\.5 GiB, the anonymous memory \(no page cache\) read during gates \(90th of 10 samples; highest [\d.]+ GiB\); plus 10% is 2\.75 GiB\./);
+  assert.match(out, /Agent baseline: 0\.8 GiB, the anonymous memory read during agent passes \(90th of 10 samples; highest [\d.]+ GiB\); plus 10% is 0\.88 GiB\./);
   const readers = measuredOn(12, 13.7, f);
   assert.deepEqual(poolWarnings(readers, {}, {}), [], "the default 6 and 2: 5.5 + 4 x 0.88 GiB fits");
   assert.deepEqual(poolWarnings(readers, {}, { maxSandboxes: 9, maxGates: 2 }), [], "the recommendation itself fits");

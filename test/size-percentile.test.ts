@@ -47,30 +47,43 @@ test("one outlier among 34 agent samples does not price the agent baseline, and 
   assert.match(out, /Agent baseline: 2\.5 GiB, the anonymous memory read during agent passes \(90th of 34 samples; highest 5\.1 GiB\); plus 10% is 2\.75 GiB\./);
 });
 
-test("with four samples the highest is used, and size says so", () => {
-  const peaks = samples(4, 5222);
-  assert.equal(measuredPeak(peaks, NOW)?.agentAnonMib, 5222);
-  assert.match(sizeLines(reading(peaks), {}, {}).join("\n"), /Agent baseline: 5\.1 GiB, the anonymous memory read during agent passes \(highest of 4 samples\)/);
+test("under ten samples a figure does not count: one outlier among seven no longer sets the pool", () => {
+  // Nearest rank over fewer than 10 samples is the maximum: the 7.2 GiB pass among seven priced a pool of one sandbox.
+  assert.equal(measuredPeak(samples(7, 7228), NOW), undefined, "seven lines are too few for the project's figures at all");
+  const few = sizeLines({ ...reading(samples(7, 7228)), projectId: () => "abc123" }, {}, {}).join("\n");
+  assert.match(few, /^Assumed, not measured \(no project has the 10 samples a measured figure needs yet: 7 of the 10 samples at most\): /m);
+  assert.match(few, /^This project \(abc123\) has fewer than 10 samples measured in the last 30 days/m);
+  assert.doesNotMatch(few, /no run has been sampled yet/);
+  // Nineteen sandboxes, seven of which ran an agent pass, one of them the outlier: the gate figures count, the agent's do not.
+  const peaks = [...samples(12).map((l) => ({ ...l, agentMib: undefined, agentAnonMib: undefined })), ...samples(7, 7228)];
+  const m = measuredPeak(peaks, NOW)!;
+  assert.equal(m.anonMib, 2560);
+  assert.equal(m.agentAnonMib, undefined);
+  assert.equal(m.agentMib, undefined);
+  const rec = recommend(14 * GIB, 12, peaks, NOW);
+  assert.deepEqual([rec.baselineFrom, rec.baselineGib], ["gate", 2816 / 1024], "the baseline falls back to the gate figure, not the outlier");
+  assert.match(sizeLines(reading(peaks), {}, {}).join("\n"), /Agent baseline: no agent baseline measured yet, priced at the gate figure \(2\.75 GiB\)\./);
 });
 
-test("five samples are enough for a percentile, which is the nearest rank", () => {
-  // ceil(90 x 5 / 100) = 5: the fifth of five is the highest. Ten samples: the ninth.
-  assert.equal(measuredPeak(samples(5, 5222), NOW)?.agentAnonMib, 5222);
+test("ten samples are the least for a percentile, which is the nearest rank", () => {
+  // ceil(90 x 10 / 100) = 9: the ninth of ten, so one outlier is left out; two of ten above it still price at the highest.
   assert.equal(measuredPeak(samples(10, 5222), NOW)?.agentAnonMib, 2560);
   const two = [...samples(8), sandbox(5222, 8), sandbox(5222, 9)];
   assert.equal(measuredPeak(two, NOW)?.agentAnonMib, 5222, "two of ten above the 90th still price at the highest");
 });
 
 test("a sandbox at rest is not a sample", () => {
-  // Nine real samples and one at rest (1 MiB): the rest does not pull the percentile down or count.
-  const peaks = [...samples(9), sandbox(1, 9)];
-  assert.deepEqual(measuredPeak(peaks, NOW)?.figures.agentAnon, { mib: 2560, samples: 9, highest: 2560 });
+  // Ten real samples and one at rest (1 MiB): the rest does not pull the percentile down or count.
+  const peaks = [...samples(10), sandbox(1, 10)];
+  assert.deepEqual(measuredPeak(peaks, NOW)?.figures.agentAnon, { mib: 2560, samples: 10, highest: 2560 });
+  // Nine real ones and the one at rest are too few.
+  assert.equal(measuredPeak([...samples(9), sandbox(1, 9)], NOW)?.figures.agentAnon, undefined);
 });
 
 test("the pool warning is not set by the outlier: a pool the usual samples fit does not warn", () => {
   // 14 GiB - 2 GiB = 12 GiB usable. 2 gates at 2.75 + 2 x 2.75 = 11 GiB fits; at the outlier's 5.61 GiB it would need 16.8 GiB.
   const peaks = samples(34, 5222);
   assert.deepEqual(poolWarnings(reading(peaks), {}, { maxSandboxes: 4, maxGates: 2 }), []);
-  // The highest alone, as before, would warn.
-  assert.equal(poolWarnings(reading(samples(4, 5222)), {}, { maxSandboxes: 4, maxGates: 2 }).length, 1);
+  // Ten samples with the outlier among them, priced at the 90th, do not warn either.
+  assert.deepEqual(poolWarnings(reading(samples(10, 5222)), {}, { maxSandboxes: 4, maxGates: 2 }), []);
 });

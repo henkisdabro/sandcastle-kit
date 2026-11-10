@@ -176,7 +176,7 @@ import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError, wasReported } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
-import { realReaders, sizeLines } from "./size.ts";
+import { memoryLine, realReaders, sandboxMemory, sizeLines } from "./size.ts";
 
 /** The run record's end-of-run verify, or undefined when there is no readable record. */
 const recordedVerify = (root: string): Pick<Facts, "verify"> | undefined => {
@@ -191,9 +191,17 @@ const recordedVerify = (root: string): Pick<Facts, "verify"> | undefined => {
  * The project as the sandbox of `sandcastle gates` or `sandcastle land` sees it: both open gate-only
  * sandboxes, so `cpus` is the gate share a run's landing and base gates get (`sandboxCpus`), cut to the VM's CPUs.
  * Outside a run nothing divides by a concurrency. Read when first needed: `docker info` answers once per sandbox.
+ * `memory` is the limit a run would give (`sandboxMemory`), said in one line.
  */
 
-const gateOnly = (project: Project): Project => ({ ...project, cpus: sandboxCpus(project, "gate", { concurrency: 1, maxGates: limit("gates") }, readDockerInfo) });
+const gateOnly = (project: Project): Project => {
+  // One `docker info` for both limits, and none when neither needs it.
+  let read: { info: string | undefined } | undefined;
+  const info = () => (read ??= { info: readDockerInfo() }).info;
+  const memory = sandboxMemory(project, info);
+  console.log(memoryLine(memory));
+  return { ...project, cpus: sandboxCpus(project, "gate", { concurrency: 1, maxGates: limit("gates") }, info), memory: memory.bytes ?? false };
+};
 
 const [command = "help", ...args] = process.argv.slice(2);
 // Every command the help names, and the internal hook. Checked before the repository is, so a
@@ -407,12 +415,14 @@ try {
         process.env.TICKETS = late.join(",");
         return true;
       };
+      // The no-PSI line is the run's, said once across its turns.
+      const psi = { told: false };
       for (let turn = 1; ; turn++) {
         // The last turn's verify was red, likely load: this turn, a re-run or a follow-on, gates the base before any agent starts.
         const gateBase = mustGateBase(lastFacts);
         if (gateBase) console.log(`The merged ${project.baseBranch} was red, likely load - this turn gates it again before any agent starts.`);
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}), psi }))) {
           drain.cause ??= "no ticket could start";
           break;
         }

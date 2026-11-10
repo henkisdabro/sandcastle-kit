@@ -44,20 +44,25 @@ test("a kept agent or Codex skill adds no tool", () => {
   assert.deepEqual(toolsFor(["agent:reviewer", "codex-skill:verify"]), BASE_TOOLS);
 });
 
-test("--tools goes just before the closing -p - and nothing else changes", () => {
+// Sandcastle 0.14.0's command ends in " -p -"; its later releases drop that tail (upstream 7fdca8c6). Both shapes take the flag.
+const withoutTail = (command: string) => command.slice(0, -" -p -".length);
+
+test("--tools goes right after --output-format stream-json and nothing else changes, with or without the closing -p -", () => {
   for (const resume of [undefined, "session-1"]) {
-    const { command } = built(resume);
-    const out = withTools(command, BASE_TOOLS);
-    assert.equal(out, `${command.slice(0, -" -p -".length)} --tools '${BASE}' -p -`);
-    assert.ok(out.endsWith(` --tools '${BASE}' -p -`));
-    assert.equal(out.replace(` --tools '${BASE}'`, ""), command);
+    for (const command of [built(resume).command, withoutTail(built(resume).command)]) {
+      const out = withTools(command, BASE_TOOLS);
+      assert.ok(out.includes(` --output-format stream-json --tools '${BASE}' `), out);
+      assert.equal(out.replace(` --tools '${BASE}'`, ""), command);
+    }
   }
-  assert.match(withTools(built("session-1").command, BASE_TOOLS), /--resume 'session-1' --tools /);
+  assert.equal(withTools("claude --print --output-format stream-json", BASE_TOOLS), `claude --print --output-format stream-json --tools '${BASE}'`);
 });
 
 test("a claude command of another shape is refused", () => {
   assert.throws(() => withTools("claude --print --model m", BASE_TOOLS), /no longer has the shape.*src\/agents\.ts/);
-  assert.throws(() => withTools("codex exec -p -", BASE_TOOLS), /no longer has the shape.*src\/agents\.ts/);
+  assert.throws(() => withTools("codex exec --output-format stream-json -p -", BASE_TOOLS), /no longer has the shape.*src\/agents\.ts/);
+  assert.throws(() => withTools("claude --print --output-format stream-json -p - --extra", BASE_TOOLS), /no longer has the shape.*src\/agents\.ts/);
+  assert.throws(() => withTools("claude --print --output-format stream-jsonl -p -", BASE_TOOLS), /no longer has the shape/);
 });
 
 test("the implementer's pass runs with the allow-list and auto memory off", () => {

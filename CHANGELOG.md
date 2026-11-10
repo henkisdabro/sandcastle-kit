@@ -9,6 +9,111 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Built on Sandcastle 0.14.0, whose sandboxes cannot write their repo's git config or hooks.**
+  `.git/config`, `.git/hooks` and `.git/info` are read-only in a sandbox, so `git config` without
+  `--global`, and a hook installer in `setup` or a `prepare` / `postinstall` script it runs
+  (`husky`, `pre-commit install`, `lefthook install`, `git lfs install --local`), fails or installs
+  nothing there. Install hooks on the host only and drop those steps (`/sandcastle update` checks
+  `setup` and those scripts, then compares `sandcastle gates`' `git hooks:` line).
+- **`autoCompactWindow` takes effect for the first time.** It never reached an agent before; a
+  project that set it gets the window it asked for from this release. Auto memory is now really off
+  in sandboxes too.
+- **The base is gated once more** at each project's first run or `sandcastle gates`: the green-base
+  record now carries the Sandcastle version, so the old record does not count.
+- **Sandboxes have no raw sockets.** Every container starts without the `NET_RAW` capability, so a
+  setup step or a test that opens a raw socket now fails with `Operation not permitted` (`ping` and
+  `traceroute` may, where they cannot fall back to an unprivileged socket). `sandcastle gates`
+  shows it. The other capabilities stay: Sandcastle itself needs some, as root, to create a file
+  mount's parent directory.
+- **Sandboxes get a memory limit once a project is measured.** A project with no `memory` in its
+  config and at least 10 recorded gate samples now runs each sandbox at 1.5 x its measured
+  anonymous memory (at least 2 GiB), swap included, where before none had a limit; a gate or agent
+  pass the kernel kills at it is red with `out of memory` named. `memory: false` in
+  `.sandcastle/config.ts` opts out, `memory: "8g"` sets the figure. `sandcastle gates` prints the
+  limit (`Sandbox memory: ...`); `/sandcastle update` checks it.
+- Update the kit with `pnpm install` after the pull, as always: `sandcastle doctor` now fails
+  "kit dependencies installed" when the installed Sandcastle is not the pinned, patched one.
+
+- **A failed `setup` step now stops the run.** It used to be ignored, and the agents worked in a
+  half-set-up sandbox. Run `sandcastle gates`: a step that fails shows as a red `setup` gate, with
+  the step, its exit status and its last output. Fix it before the next run (`/sandcastle update`
+  checks it). A run whose base check is skipped on a green record from before stops starting
+  tickets once two tickets' setup has failed the same way.
+- **herdr-core 0.1.19.** `sandcastle doctor` now warns on an `hc` older than 0.1.19, the version
+  the kit's herdr-core view was checked against: `hc update` (or the Herdr app's update) brings it
+  up to date. Terminals opened before the update keep the old behaviour until recreated: a
+  `sandcastle run --detach` started in one still ends when it closes.
+
+### Added
+
+- **A per-sandbox memory limit (`memory`).** Bytes or `"6g"`, `false` for none; by default 1.5 x
+  the project's measured anonymous memory once it has 10 samples. Set with `docker update` after
+  the open, for a ticket's sandbox and a gate-only one alike, so one suite that balloons is killed
+  inside its own sandbox rather than pushing every sandbox on the VM into its OOM killer. A gate or
+  agent pass killed for memory says so instead of a bare exit 137, in the gates log and in the
+  ticket's note, and says whose it was: the sandbox's own limit (raise `memory`) or the VM running
+  out (run fewer sandboxes).
+- **A run says once when the sandboxes' kernel has no PSI** (OrbStack's has none), so empty memory
+  pressure figures are not read as calm.
+
+### Fixed
+
+- **`sandcastle size` is not set by one outlier.** A figure now needs 10 samples of one project
+  before it counts (the 90th percentile of fewer was their highest: one 7.2 GiB pass among seven
+  set a pool of one sandbox for every project); a figure short of them falls back to the next, and
+  a project that ran one sandbox a run reaches 10 from older runs. Run inside another project,
+  `size` shows that project's own figure beside the one that set the pool.
+- **Auto memory is really off in sandboxes, and `autoCompactWindow` takes effect.** The agent's
+  environment (`CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`) never reached a
+  pass on Sandcastle 0.12.0; on 0.14.0 it is exported before each Claude command. A key the
+  personal `.env` sets that the agent's environment also sets is left out of the container's, where
+  Sandcastle would refuse every pass.
+- **An agent log's last line is the real context size.** `Context window: Nk` (or `Nk / Mk` when
+  the model's limit is known) is now the last call's input, the size the pass ended at; the kit no
+  longer renames it to `Tokens processed (all turns)`.
+- **`sandcastle doctor` checks the kit's patch to Sandcastle is applied.** "kit dependencies
+  installed" fails, naming what is wrong, when the installed `@ai-hero/sandcastle` is not the pinned
+  version or runs without the kit's patch (installed with `npm`, or pulled with no `pnpm install`).
+
+### Changed
+
+- **Built on Sandcastle 0.14.0** (from 0.12.0), with the kit's patch remade for it. The CPU limit
+  of a ticket's gates and the stop before a sandbox closes address the container by the name
+  Sandcastle gives it (then any other container on the same worktree), and every container starts
+  without `NET_RAW`.
+- **A failed `setup` step is named, never silent.** Each step's exit status is recorded in the
+  sandbox and checked once it opens, a `set -e` inside a step included. At the base gates a failure
+  is a red `setup` gate, which stops the run; for a ticket it costs the attempt, and the ticket is
+  tried once more in the run, then ends as crashed with the step and its last output line in its
+  note. The same step failing for two tickets stops the run starting tickets, as a failed prompt
+  expansion does, with `sandcastle gates` as the next step.
+- **An agent's own error keeps its cause.** A ticket that crashed with `claude-code reported an
+  error` (or `codex reported an error`) now carries the cause from the next line in its note, and
+  `docs/troubleshooting.md` has a row for it.
+- **The base gates warn about commit hooks the sandbox does not run.** When the host has
+  `pre-commit` or `commit-msg` hooks and the sandbox finds none - a hook installer such as husky in
+  `setup` installs nothing there, as a sandbox cannot write its `.git/config` or `.git/hooks` - the
+  base check prints a WARNING with the cause and the fix: install the hooks on the host only, and
+  drop the installer from `setup`.
+- **Ready for the next Sandcastle releases.** The `--tools` and `--json-schema` flags go right after
+  `--output-format stream-json` in Claude's command, so a command without the closing ` -p -` takes
+  them too, and a new test reads the installed Sandcastle for what the kit relies on, so a bump
+  fails there by name where behaviour moved.
+- **The green-base record carries the Sandcastle version.** A base proved green on one version is
+  proved again once on the next, since a new Sandcastle may mount, or make read-only, what a setup
+  writes.
+- **An empty `.git/hooks` counts as no hooks directory** in the `.git` check and the start record,
+  so the empty directory a sandbox's start creates in a repository with none no longer reads as
+  tampering, and `sandcastle clean` names a leftover sandbox by its worktree.
+- **A detached run outlives its herdr-core terminal.** From hc 0.1.19, `sandcastle run --detach`
+  started in a herdr-core terminal keeps running when that terminal closes; the docs say so.
+- **A status terminal left finished is reopened by name.** On hc 0.1.19 an ordinary exit is final
+  in a `--keep` terminal. A status terminal that ends finished when the next run stops its view is
+  now removed and opened afresh under the same name, as one found finished already was, rather
+  than waited on for 5 s.
+
 ## [0.21.0] - 2026-11-10
 
 ### Upgrading

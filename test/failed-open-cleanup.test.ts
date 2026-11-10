@@ -58,10 +58,10 @@ esac
   const lines = (file: string) => readFileSync(join(state, file), "utf8").split("\n").filter(Boolean);
   return {
     bin,
-    /** A running container `id` that mounts `source`, as Sandcastle starts one. */
-    start: (id: string, source: string) => {
+    /** A running container `id` that mounts `sources`, as Sandcastle starts one. */
+    start: (id: string, ...sources: string[]) => {
       writeFileSync(join(state, "containers"), `${lines("containers").concat(id).join("\n")}\n`);
-      writeFileSync(join(state, "mounts", id), `${source}\n/etc/claude-code\n`);
+      writeFileSync(join(state, "mounts", id), `${[...sources, "/etc/claude-code"].join("\n")}\n`);
     },
     running: () => lines("containers"),
     removed: () => lines("removed"),
@@ -194,6 +194,18 @@ test("sandcastle clean's reap stops a running container of the base gates' workt
   assert.deepEqual(cleaned.worktrees, [gates]);
   assert.ok(!existsSync(gates));
   assert.equal(git("branch", "--list", "sandcastle/base-gates-3"), "");
+});
+
+// Sandcastle 0.13 on mounts the worktree's `.git` file read-only on its own, and lists it before the worktree: the
+// reap names the worktree, not that file.
+test("sandcastle clean's reap names the worktree when its .git file's mount comes first", async () => {
+  const { root, project } = repo();
+  const docker = fakeDocker();
+  const worktree = join(root, ".sandcastle/worktrees/agent-issue-5");
+  docker.start("mine", join(worktree, ".git"), join(root, ".git/hooks"), worktree);
+  const { lines } = await quietly(() => withPath(docker.bin, () => reapOrphans(project)));
+  assert.deepEqual(lines, ["Stopped a sandbox a killed run left working: .sandcastle/worktrees/agent-issue-5"]);
+  assert.deepEqual(docker.removed(), ["mine"]);
 });
 
 test("every place the kit opens a sandbox goes through openOrAbandon", () => {

@@ -181,6 +181,18 @@ const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet
   return found;
 };
 
+/**
+ * The hooks directory as a tree (`treeFiles`), with an empty one read as absent: Sandcastle (0.13 on) creates
+ * `<common>/hooks` on the host at every sandbox start, to mount it read-only, and in a repository that had none the
+ * new empty directory would otherwise stop the run at its first sandbox. An empty directory runs nothing; a file or a
+ * directory under it is still an entry.
+ */
+const hooksTree = (dir: string, hashOf: (f: string) => string, modes?: Record<string, string>): Record<string, string> => {
+  const top = join(dir, "hooks");
+  const found = treeFiles(top, hashOf, undefined, modes);
+  return Object.keys(found).length === 1 && found[top] === "directory" ? {} : found;
+};
+
 const commonDir = (root: string) => sh("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
 
 /** A ref's tip, or "" when it does not exist: a deleted ref is something to report, not a raw git error. */
@@ -232,7 +244,7 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   for (const f of paths) files[f] = hashOf(f);
   // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
   // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
-  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf, undefined, modes));
+  Object.assign(files, hooksTree(dir, hashOf, modes));
   Object.assign(files, moduleFiles(join(dir, "modules"), hashOf, modes));
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
@@ -462,9 +474,10 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
 // Every key that runs a program, loads more config or decides where and how git connects. All of
 // `filter.*` (its `required` decides whether a failing filter stops git), every key `pinHostGitConfig`
 // pins (a value planted in a killed run would be pinned as the run's own, not refused), the other drivers
-// and commands, every `include` key; what a host `git fetch` reads (Sandcastle fetches in a kept worktree
-// it reuses): a remote's URLs, programs and proxy, URL rewrites, credentials, the protocols allowed, the
-// proxies and the CAs an HTTPS fetch trusts; the signature checks, which run `gpg.program`; and every
+// and commands, every `include` key; what a host `git fetch` reads (a person's own next one; Sandcastle's
+// reuse of a kept worktree fetched too, before the kit's patch): a remote's URLs, programs and proxy, URL
+// rewrites, credentials, the protocols allowed, the proxies and the CAs an HTTPS fetch trusts; the signature
+// checks, which run `gpg.program`; and every
 // `extensions.*`; and what runs on a person's own later command (`alias.*`, which a repo-local alias overrides the
 // user's with, and `MORE_PROGRAM_KEYS`). Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
 // them, and they run nothing.
@@ -506,7 +519,7 @@ const programState = (project: Project): ProgramState => {
   const files: Record<string, string> = {};
   const modes: Record<string, string> = {};
   const found: Record<string, string> = {};
-  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf, undefined, found), ...moduleFiles(join(dir, "modules"), hashOf, found) })) files[relative(dir, path)] = hash;
+  for (const [path, hash] of Object.entries({ ...hooksTree(dir, hashOf, found), ...moduleFiles(join(dir, "modules"), hashOf, found) })) files[relative(dir, path)] = hash;
   for (const [path, bits] of Object.entries(found)) modes[relative(dir, path)] = bits;
   const attributes = join(dir, "info", "attributes");
   return {
@@ -1235,13 +1248,13 @@ export const worktreeRefusal = (project: Project) => (path: string): string | un
  * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
  * drivers configured at the start) or in config a changed record names would run there. The container is stopped
  * first (`stopSandboxContainer`), so nothing the sandbox left running writes after the check; one Docker cannot stop,
- * or gives no answer about in time (30 s; the stop's grace plus 30 s), fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. On a failure the container is removed
+ * or gives no answer about in time (30 s; the stop's grace plus 30 s), fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. `sandboxId`, the container's name when the handle has one, is the container stopped. On a failure the container is removed
  * here, without that close - the caller must not call it - the worktree is left as it stands for a person, and the
  * error is thrown.
  */
-export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown): Promise<void> => {
+export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown, sandboxId?: string): Promise<void> => {
   try {
-    const [running] = await stopSandboxContainer(worktree).catch((e) => {
+    const [running] = await stopSandboxContainer(worktree, sandboxId).catch((e) => {
       if (!(e instanceof DockerAnswerError)) throw e;
       const name = clean(basename(worktree));
       const said = clean(e.message).slice(0, 200);

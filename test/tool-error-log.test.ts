@@ -1,16 +1,16 @@
-// The readable agent log shows a failed tool result as one `! ...` line, and calls the library's
-// "Context window" line what it is. Temp dirs only; no Docker, no model calls, no network.
+// The readable agent log shows a failed tool result as one `! ...` line. Temp dirs only; no Docker, no
+// model calls, no network.
 //
 //   pnpm test:file test/tool-error-log.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { agentLog, agentLogging, rawLog, relabelContextWindow, toolFailureLine } from "../src/run.ts";
+import { agentLog, agentLogging, rawLog, toolFailureLine } from "../src/run.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-tool-error-log-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -54,14 +54,4 @@ test("agentLogging puts the failure line in the readable log and the raw line in
   assert.match(readFileSync(log, "utf8"), /^! exit 1: boom$/m);
   assert.equal((readFileSync(log, "utf8").match(/^!/gm) ?? []).length, 1);
   assert.ok(readFileSync(rawLog(log), "utf8").includes(bad));
-});
-
-test("relabelContextWindow renames the library's line and leaves everything else", () => {
-  const file = join(TMP, "agent.log");
-  writeFileSync(file, "Run complete\nContext window: 8549k\nthe agent said: Context window: 1k\nContext window: 12k\n");
-  relabelContextWindow(file);
-  assert.equal(readFileSync(file, "utf8"), "Run complete\nTokens processed (all turns): 8549k\nthe agent said: Context window: 1k\nTokens processed (all turns): 12k\n");
-  relabelContextWindow(file);
-  assert.match(readFileSync(file, "utf8"), /^Tokens processed \(all turns\): 8549k$/m);
-  relabelContextWindow(join(TMP, "missing.log"));
 });

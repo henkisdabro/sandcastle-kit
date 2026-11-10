@@ -101,8 +101,14 @@ shows the same thing:
   outright.
 - ♻️ **The same view, run after run.** The status terminal stays when the run ends, showing how it
   ended, and the next run of the project reuses it by name wherever you moved it - while it shows
-  the status view or a bare shell; a terminal running your own command keeps it, and the run's view
-  opens beside you instead.
+  the status view or a bare shell; a view you quit (with `q`) is opened afresh beside you, under
+  the same name; a terminal running your own command keeps it, and the run's view opens beside you
+  instead.
+- 🛰️ **A detached run outlives its terminal.** From hc 0.1.19, `sandcastle run --detach` started in
+  a herdr-core terminal keeps running when that terminal closes (an older hc ended it with the
+  terminal).
+  A terminal opened before the update to 0.1.19 keeps the old behaviour until it is recreated.
+  `sandcastle doctor` warns on an hc older than 0.1.19.
 
 What Herdr TUI's plugin does has no herdr-core counterpart yet: no tab bar line or ticket card
 (a Ctrl-click on a ticket opens nothing; on a terminal address it peeks, as above), and no status

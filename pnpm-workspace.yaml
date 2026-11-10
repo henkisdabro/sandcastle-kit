@@ -5,4 +5,4 @@ allowBuilds:
 # does not answer fails every open. The patch skips that refresh. Remove it once upstream has an option
 # to skip the origin refresh. See issue #711 of this repository.
 patchedDependencies:
-  '@ai-hero/sandcastle@0.12.0': patches/@ai-hero__sandcastle@0.12.0.patch
+  '@ai-hero/sandcastle@0.14.0': patches/@ai-hero__sandcastle@0.14.0.patch

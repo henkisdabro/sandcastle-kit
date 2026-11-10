@@ -104,6 +104,13 @@ export type ProjectConfig = {
    */
   cpus?: number | false;
   /**
+   * The memory each sandbox container may use (`docker update --memory`, swap included), bytes or a
+   * string such as `"6g"` or `"512m"`, at least `MIN_MEMORY`. Unset: a figure above the project's
+   * measured anonymous memory (`memoryLimit`, src/size.ts) once it has enough samples, else none.
+   * `false`: no limit.
+   */
+  memory?: number | string | false;
+  /**
    * Inside Herdr, whether a run opens a pane per sandbox: `"none"` (default) leaves the run's tab
    * with the status view alone and reports the run as one agent on it, `"all"` adds a pane per
    * concurrent sandbox. `SANDBOX_PANES` overrides it for one run.
@@ -225,9 +232,11 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow">> &
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "memory" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow">> &
   Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow"> & {
     root: string;
+    /** `memory` in bytes, or `false` for no limit; unset, the run resolves the default (`memoryLimit`, src/size.ts). */
+    memory?: number | false;
     tracker: Resolved;
     /** The keys (dotted, such as `implement.model`) that `.sandcastle/config.local.json` set; empty without the file. */
     localKeys?: string[];
@@ -263,7 +272,7 @@ export const hostPnpmStore = (root: string): string | undefined => {
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "usagePause", "loadPause", "keepWarm", "autoCompactWindow", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "memory", "herdr", "autonomy", "usagePause", "loadPause", "keepWarm", "autoCompactWindow", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "changelog", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -284,6 +293,21 @@ const KIT_REPOS = ["sandcastle-base", "sandcastle-agents"];
 export const kitOwnName = (name: string): boolean => KIT_REPOS.includes(projectRepo({ name }));
 
 const isStrings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
+// docker refuses a memory limit under 6 MiB, so no sandbox would start.
+export const MIN_MEMORY = 6 * 2 ** 20;
+const UNITS: Record<string, number> = { "": 1, b: 1, k: 2 ** 10, m: 2 ** 20, g: 2 ** 30, t: 2 ** 40 };
+
+/** A `memory` setting in bytes: a whole number of bytes, or docker's own form (`"6g"`, `"512m"`, `"1.5g"`, any case, an optional `b` or `ib`); undefined when it is neither or under `MIN_MEMORY`. */
+export const memoryBytes = (v: unknown): number | undefined => {
+  let bytes: number;
+  if (typeof v === "number") bytes = Number.isInteger(v) ? v : NaN;
+  else if (typeof v === "string") {
+    const m = /^\s*(\d+(?:\.\d+)?)\s*([kmgt]?)(?:i?b)?\s*$/i.exec(v);
+    bytes = m ? Math.floor(Number(m[1]) * UNITS[m[2].toLowerCase()]) : NaN;
+  } else bytes = NaN;
+  return Number.isFinite(bytes) && bytes >= MIN_MEMORY ? bytes : undefined;
+};
+
 const isCount = (v: unknown, min: number) => typeof v === "number" && Number.isInteger(v) && v >= min;
 
 /** A refusal that names the file it is about. */
@@ -306,6 +330,9 @@ const checkSettingTypes = (config: ProjectConfig, refuse: (what: string) => neve
   if (config.cpus !== undefined && config.cpus !== false && !(typeof config.cpus === "number" && Number.isFinite(config.cpus) && config.cpus >= 0.01)) {
     // docker's own range is 0.01 up to the VM's CPUs: below it `docker run --cpus` is refused, and no sandbox starts.
     refuse(`\`cpus\` must be a number of 0.01 or more (CPUs per sandbox) or false (no limit), not ${JSON.stringify(config.cpus)}.`);
+  }
+  if (config.memory !== undefined && config.memory !== false && memoryBytes(config.memory) === undefined) {
+    refuse(`\`memory\` must be bytes or a size such as "6g" or "512m" (at least ${MIN_MEMORY / 2 ** 20} MiB, the least docker takes), or false (no limit), not ${JSON.stringify(config.memory)}.`);
   }
   if (config.keepWarm !== undefined && typeof config.keepWarm !== "boolean") refuse(`\`keepWarm\` must be true or false, not ${JSON.stringify(config.keepWarm)}.`);
   if (config.autoCompactWindow !== undefined && !(isCount(config.autoCompactWindow, AUTO_COMPACT_MIN) && config.autoCompactWindow <= AUTO_COMPACT_MAX)) {
@@ -370,7 +397,7 @@ const checkShape = (config: ProjectConfig) => {
 // The run settings a clone may override without touching the committed config. Not `gates`, `setup`,
 // `mounts`, `generated` and the rest: they change what a landed branch is checked against, and two
 // clones of one repo would land against different gates.
-const LOCAL_KEYS = ["autonomy", "concurrency", "cpus", "herdr", "usagePause", "keepWarm", "autoCompactWindow", "implement", "review", "repair"];
+const LOCAL_KEYS = ["autonomy", "concurrency", "cpus", "memory", "herdr", "usagePause", "keepWarm", "autoCompactWindow", "implement", "review", "repair"];
 
 /** The nested types `checkShape` does not check in `config.ts` (its own validation is not made stricter), checked for the local file. */
 const checkLocalNested = (local: Record<string, unknown>, refuse: (what: string) => never) => {
@@ -558,6 +585,8 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     repair: {},
     hookTests: [],
     ...config,
+    // In bytes from here on: the string form is the config's alone.
+    memory: config.memory === undefined || config.memory === false ? config.memory : memoryBytes(config.memory),
     mounts,
     setup,
     // Defaults to [] when unset; a leading ./ is stripped so a path compares equal to git's.

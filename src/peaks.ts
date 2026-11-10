@@ -302,6 +302,22 @@ export const samplePeak = async (sandbox: Exec): Promise<number | undefined> => 
   return largest.get(sandbox);
 };
 
+// Told once, the first time a sandbox shows its kernel has no PSI; set by a run's start (`onNoPsi`), and spent when called.
+let noPsi: (() => void) | undefined;
+
+/**
+ * `say` is called once, the first time a sampled sandbox answers its memory reading but has no PSI file (OrbStack's kernel,
+ * one built without PSI, or booted with `psi=0`): the memory pressure the run's summary and `size` show is then never
+ * recorded, and a reader should know the column is blind rather than calm. `undefined` clears it. Once per `run`.
+ */
+export const onNoPsi = (say: (() => void) | undefined, run: { told: boolean } = { told: false }) => {
+  // `run` is the run's own across its turns (`TurnOptions.psi`): a line told in one turn is not told again in the next.
+  noPsi = !say || run.told ? undefined : () => {
+    run.told = true;
+    say();
+  };
+};
+
 /**
  * Runs `fn`, a gate or an agent pass, reading the sandbox's anonymous memory once as it starts and every 10 s
  * while it runs. The first read is what gives a pass shorter than 10 s a reading taken during it: it is issued
@@ -328,6 +344,12 @@ export const sampling = async <T>(sandbox: Exec, phase: Phase, fn: () => Promise
     };
     return Promise.all([readAnonMib(sandbox), readPressure(sandbox), readCpuPressure(sandbox), machine()]).then(([mib, pressure, cpuSome, cpuMachine]) => {
       reading = false;
+      // The sandbox answered `memory.stat` but has no `memory.pressure`: the kernel has no PSI, and every pressure figure stays empty.
+      if (mib !== undefined && pressure === undefined && noPsi) {
+        const say = noPsi;
+        noPsi = undefined;
+        say();
+      }
       if (!ended || late) {
         noteAnon(sandbox, phase, mib);
         notePressure(sandbox, pressure, pass);

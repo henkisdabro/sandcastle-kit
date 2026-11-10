@@ -8,6 +8,7 @@ export default {
   // label: "ready-for-agent",
   // concurrency: 4,
   // cpus: 2,                               // per sandbox; unset shares the VM's CPUs out, false lifts the limit
+  // memory: "6g",                          // per sandbox, swap included; unset is 1.5 x the measured need once known, false lifts it
   // land: "merge",                         // or "squash": one commit per ticket on the base branch
   // autonomy: 0,                           // 1 asks to re-run conflicted and unblocked tickets; 2 or 3 re-run them
   // autonomy: "drain",                     // runs turns until the queue is drained or a stop condition holds (20 at most)

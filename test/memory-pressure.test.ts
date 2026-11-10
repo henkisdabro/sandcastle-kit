@@ -89,11 +89,14 @@ test("a gate pass carries the pressure read while it ran, and the sandbox's peak
 
 const peakLine = (over: Partial<ReturnType<typeof readPeaks>[number]> = {}) => ({ ts: "2026-05-09T10:00:00Z", project: "p1", run: "r1", peakMib: 3000, sampled: 2, anonMib: 900, agentAnonMib: 500, ...over });
 
+// Ten sandboxes alike: a figure counts from `MIN_SAMPLES` (10) samples of a project.
+const ten = <T,>(l: T): T[] => Array.from({ length: 10 }, () => l);
+
 test("measuredPeak keeps the highest pressure of the project's recent runs", () => {
-  const m = measuredPeak([peakLine({ pressureSome: 3, pressureFull: 0.5 }), peakLine({ run: "r2", pressureSome: 9, pressureFull: 1.5 }), peakLine({ run: "r3" })], NOW);
+  const m = measuredPeak([peakLine({ pressureSome: 3, pressureFull: 0.5 }), peakLine({ run: "r2", pressureSome: 9, pressureFull: 1.5 }), ...ten(peakLine({ run: "r3" }))], NOW);
   assert.equal(m?.pressureSome, 9);
   assert.equal(m?.pressureFull, 1.5);
-  assert.ok(!("pressureFull" in measuredPeak([peakLine()], NOW)!));
+  assert.ok(!("pressureFull" in measuredPeak(ten(peakLine()), NOW)!));
 });
 
 const readers = (peaks: ReturnType<typeof readPeaks>): Readers => ({
@@ -111,17 +114,17 @@ const readers = (peaks: ReturnType<typeof readPeaks>): Readers => ({
 const sizeText = (peaks: ReturnType<typeof readPeaks>) => sizeLines(readers(peaks), {}, {}).join("\n");
 
 test("size shows the highest pressure, and says full pressure at the threshold is a short VM and leaves the recommendation alone", () => {
-  const calm = sizeText([peakLine({ pressureSome: 4.5, pressureFull: 0.75 })]);
+  const calm = sizeText(ten(peakLine({ pressureSome: 4.5, pressureFull: 0.75 })));
   assert.match(calm, /Memory pressure \(PSI `avg10`.*\): some 4\.5%, full 0\.75%\.$/m);
   assert.doesNotMatch(calm, /short of memory/);
-  const short = sizeText([peakLine({ pressureSome: 40, pressureFull: PRESSURE_WARN_FULL })]);
+  const short = sizeText(ten(peakLine({ pressureSome: 40, pressureFull: PRESSURE_WARN_FULL })));
   assert.match(short, /some 40%, full 5%\. Full pressure at 5% or more .* short of memory at that pool size\. The limits below are not yet lowered for it/);
   const recommended = (text: string) => text.split("\n").filter((l) => /^  max(Sandboxes|Gates): \d+/.test(l));
   assert.deepEqual(recommended(short), recommended(calm));
 });
 
 test("size says so when no run recorded any pressure", () => {
-  assert.match(sizeText([peakLine()]), /^Memory pressure: none recorded in those runs/m);
+  assert.match(sizeText(ten(peakLine())), /^Memory pressure: none recorded in those runs/m);
 });
 
 test("pressureFromTimings keeps the highest of the run's gate lines and names the pass of the highest full", () => {

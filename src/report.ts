@@ -26,7 +26,7 @@ import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
 import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf, withOpenList } from "./tracker.ts";
-import { githubServerError, OperatorError, sameExpansionFailure } from "./errors.ts";
+import { githubServerError, isSetupLine, OperatorError, sameExpansionFailure } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
 import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunEstimate, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -1360,7 +1360,7 @@ export const render = (f: Facts, plain = false): string => {
     // Where the conflict was found is in the line (`requeuedLine`); an older run record has none, and says none.
     const found = line.match(/^requeued after conflict (before review|before gates|at landing)/)?.[1];
     const where = found === "at landing" ? " at landing" : found ? ` found ${found.replace("before ", "before its ")}` : "";
-    const why = line.startsWith("requeued after conflict") ? `sent back after a conflict${where}` : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : "sent back at landing";
+    const why = line.startsWith("requeued after conflict") ? `sent back after a conflict${where}` : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : line.startsWith("requeued after setup failed") ? "sent back after its setup failed" : "sent back at landing";
     sentBack.set(why, [...(sentBack.get(why) ?? []), id]);
   }
   if (sentBack.size) done.push(`Landed on a second attempt: ${[...sentBack].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);
@@ -1581,7 +1581,13 @@ export const render = (f: Facts, plain = false): string => {
     const status = githubServerError(f.setupProblem);
     const again = `\`sandcastle run\` again for ${list([...setupCrashed, ...skipped])} - the tickets themselves are fine.`;
     // GitHub's own failure: the tokens are fine, so `doctor --verify` would send the person to check the wrong thing.
-    next.push(status ? `GitHub failed (HTTP ${status}, above): check githubstatus.com, and once it has recovered, ${again}` : `Fix the setup problem (above): run \`sandcastle doctor --verify\`, put right what it names, then ${again}`);
+    next.push(
+      status
+        ? `GitHub failed (HTTP ${status}, above): check githubstatus.com, and once it has recovered, ${again}`
+        : isSetupLine(f.setupProblem)
+          ? `Fix the failing \`setup\` step (above), check it with \`sandcastle gates\`, then ${again}`
+          : `Fix the setup problem (above): run \`sandcastle doctor --verify\`, put right what it names, then ${again}`,
+    );
   }
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)) && !setupCrashed.includes(id));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators

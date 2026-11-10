@@ -31,27 +31,27 @@ import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { terminalHost } from "./terminal-host.ts";
 import { registerRun } from "./live-runs.ts";
-import { agentBaseline, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
+import { agentBaseline, onNoPsi, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { startClock, type StartClock } from "./start-clock.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
-import { poolWarningsNow } from "./size.ts";
+import { memoryLine, poolWarningsNow, sandboxMemory } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
@@ -1518,7 +1518,8 @@ export const ticketTime = (tookMs: number | undefined, waitedMs = 0, landingMs?:
 };
 
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
-export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close">;
+// `sandboxId`: the container's name (Sandcastle 0.14.0 on), which the CPU limit and the stop before a close address it by.
+export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close" | "sandboxId">;
 
 /**
  * What one ticket's pipeline works through, as `LandContext` is what a landing does: its sandbox
@@ -2000,6 +2001,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       for (;;) {
         const logFrom = logSize(opts.logging);
         if (opts.logging?.type === "file" && typeof opts.logging.path === "string") passStarts.set(basename(opts.logging.path), logFrom);
+        // An agent killed for memory ends like any killed process: the cgroup's counts say which it was, and whose limit.
+        const oomBefore = await oomKills(sandbox);
         try {
           // REPORT_SCHEMA=1: the agent's capture of the report, ended as the pass returns or throws.
           const capture = passReport(opts.agent);
@@ -2010,13 +2013,21 @@ export const createPipeline = (ctx: PipelineContext) => {
               const said = saidOf(r.stdout ?? "", facts);
               for (const f of said.followups) ctx.followUps?.push({ ...f, from: issue.id, phase });
               return Object.assign(r, { said });
-            })
-            .finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+            });
+          // The kernel kills the largest process, usually a test the agent started, not the agent: the pass goes on, and the
+          // agent saw only `Killed`.
+          const passOom = oomNote(oomBefore, await oomKills(sandbox), project.memory);
+          if (passOom) console.log(`${ref(issue.id)}: during the ${phase} pass, ${passOom}.`);
           return parkedInStep > parkedBefore ? Object.assign(r, { waitMs: parkedInStep - parkedBefore }) : r;
         } catch (error) {
           const facts = passReport(opts.agent)?.read();
           if (facts) ctx.reportTimings?.set(issue.id, reportTiming(facts, agentFailure(error)));
           logExpansionFailure(opts.logging, error);
+          const oom = oomNote(oomBefore, await oomKills(sandbox), project.memory);
+          if (oom) {
+            console.log(`${ref(issue.id)}: the ${phase} pass failed, ${oom}.`);
+            withOom(error, oom);
+          }
           // The cross-review is a second opinion that never stopped a run, so its limit is not waited out either.
           // Without a juncture there is nothing to park at, and a pass run again at once would only fail again.
           const parks = parkCount;
@@ -2060,7 +2071,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     // returned.
     const closeSandbox = async (when: string, check: () => unknown) => {
       await settleAfter(
-        () => checkBeforeClose(project, sandbox.worktreePath, when, check),
+        () => checkBeforeClose(project, sandbox.worktreePath, when, check, sandbox.sandboxId),
         (error) => {
           removed = true;
           if (!tampered.has(issue.id)) tampered.set(issue.id, error);
@@ -2993,11 +3004,15 @@ export const burndown = async (project: Project, turn?: TurnOptions): Promise<bo
     // The run's one load pause outlives the turn; the turn's hold and its record's listener do not, a throw included.
     setLoadHold(undefined);
     turn?.loadPause?.listen(undefined);
+    // Never said after the turn: a later turn of the run sets it again, unless it was said (`TurnOptions.psi`).
+    onNoPsi(undefined);
   }
 };
 
 /** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
-type TurnOptions = { settings: ResolvedSettings; turn: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
+// `psi`: the run's own, across its turns: whether the no-PSI line was said.
+type PsiState = { told: boolean };
+type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
 
 const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   // The first turn takes the clock `sandcastle run` started; a later turn counts only its own steps.
@@ -3200,9 +3215,15 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
   const gateCpus = sandboxCpus(project, "gate", pool, () => info);
   console.log(cpusLine(project, ticketCpus, gateCpus));
+  // One limit for both kinds of sandbox: a gate runs in a ticket's sandbox too, so the gate's figure sets both.
+  const memory = sandboxMemory(project, () => info);
+  const memoryBytes: number | false = memory.bytes ?? false;
+  console.log(memoryLine(memory));
+  // Said at the first reading, as no sandbox is open yet: early in the run, with the base gates.
+  onNoPsi(() => console.log("Memory pressure: the sandboxes' kernel has no PSI (no /sys/fs/cgroup/memory.pressure), so none is recorded this run; the closing summary and `sandcastle size` show none, which is not the same as no pressure."), turn?.psi);
   // The project as the gate-only sandboxes see it; `project` from here is a ticket's.
-  const gateProject = { ...project, cpus: gateCpus };
-  project = { ...project, cpus: ticketCpus };
+  const gateProject = { ...project, cpus: gateCpus, memory: memoryBytes };
+  project = { ...project, cpus: ticketCpus, memory: memoryBytes };
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
@@ -3841,7 +3862,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     testRedGate: TEST_RED_GATE,
     prompts,
     overrides,
-    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }), host.exclusive),
+    // A setup step that failed throws `SetupFailed` inside the open, so the open's clean-up removes what it made: the attempt
+    // is lost, and the scheduler sends the ticket back once (src/schedule.ts).
+    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }).then((s) => assertSetup(s, project.setup, branch)).then((s) => limitMemory(s, project.memory)), host.exclusive),
     gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>
@@ -4286,7 +4309,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     if (gated.failures.length) {
       // The last lines are often an assertion dump and the package manager's exit: the failing tests' names come first.
       if (verifyRed.tests.length) console.log(`\n--- verify failing tests: ${verifyRed.tests.join(", ")}${verifyRed.more ? ", and more" : ""}`);
-      for (const f of gated.failures) console.log(`\n--- verify ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
+      for (const f of gated.failures) console.log(`\n--- verify ${f.name} (${exitWords(f)}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
       console.log(`Full output: ${VERIFY_LOG}`);
     }
   }

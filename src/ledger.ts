@@ -20,7 +20,7 @@ import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { agentFailure } from "./agents.ts";
 import { remainderNote } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
-import { githubServerError, promptExpansionLine } from "./errors.ts";
+import { githubServerError, isSetupLine, promptExpansionLine, SetupFailed } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine, unretriedLine } from "./landing.ts";
@@ -446,14 +446,24 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       return describePipeline(e.outcome, c);
     case "conflict":
       return describeConflict(e, c);
-    case "crashed":
+    case "crashed": {
+      // The land port threw (`green`), or the pipeline did: the pipeline's error is read as an agent's failure is
+      // (no `(FiberFailure) PromptError:` prefix, cut at a word), and a failed prompt expansion keeps its stderr.
+      const note = e.green ? errorLine(e.error) : (promptExpansionLine(e.error) ?? agentFailure(e.error));
+      // A requeued ticket whose second attempt never began (the first one's error), or whose setup failed again: the
+      // requeue line, which the status view puts before the note, would only say the note twice.
+      const unstarted = c.requeued !== undefined && e.attempts === 1;
+      const again = !e.green && e.error instanceof SetupFailed && e.attempts > 1 && c.requeued?.startsWith("requeued after setup failed") === true;
       return {
-        // The land port threw (`green`), or the pipeline did: the pipeline's error is read as an agent's failure is
-        // (no `(FiberFailure) PromptError:` prefix, cut at a word), and a failed prompt expansion keeps its stderr.
-        record: { state: "crashed", note: e.green ? errorLine(e.error) : (promptExpansionLine(e.error) ?? agentFailure(e.error)) },
+        record: {
+          state: "crashed",
+          note: again ? note.replace(/^setup failed:/, "setup failed again after a requeue:") : note,
+          ...((unstarted || again) && { requeued: null }),
+        },
         outcome: { kind: "crashed", text: "crashed" },
         tracker: comment(notLandedComment(c.report, undefined)),
       };
+    }
     case "stopped":
       // Green before the base moved, or green when its own `.git` check failed: finished, and
       // landing on a later run - not "ready", which says this run lands it.
@@ -666,6 +676,7 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
  * GitHub's failure, not the setup's: the tokens are fine, so it names the status and githubstatus.com instead.
  */
 export const setupProblemWords = (line: string): string => {
+  if (isSetupLine(line)) return `a setup problem, not the tickets': the project's \`setup\` failed alike in their sandboxes - ${line}. Fix that step (or the Dockerfile), then \`sandcastle gates\` to check`;
   const status = githubServerError(line);
   return status
     ? `GitHub failed (HTTP ${status}), not the tickets' or the setup: their prompts could not be expanded - ${line}. Check githubstatus.com`

@@ -112,7 +112,8 @@ const reading = (peaks: ReturnType<typeof ran>, over: Partial<Readers> = {}, inf
 });
 const text = (lines: string[]) => lines.join("\n");
 type Figures = { peakMib: number; anonMib?: number; agentMib?: number; agentAnonMib?: number; sampled?: number };
-const ran = (f: Figures, run = "r1", ts = "2026-05-09T00:00:00.000Z") => [{ ts, project: "abc123", run, ...f }];
+// Ten sandboxes of one run alike: a figure counts from `MIN_SAMPLES` (10) samples of a project.
+const ran = (f: Figures, run = "r1", ts = "2026-05-09T00:00:00.000Z") => Array.from({ length: 10 }, () => ({ ts, project: "abc123", run, ...f }));
 // A number below zero in the output: a space, a bracket or a colon before the minus (a path may hold "-1").
 const NEGATIVE = /(^|[\s(:=])-\d/m;
 
@@ -145,10 +146,10 @@ test("a run's marked lines count their anon figures while the unmarked lines bef
     runs: 2,
     anonMib: 2560,
     agentAnonMib: 820,
-    figures: { peak: { mib: 5300, samples: 2, highest: 5300 }, anon: { mib: 2560, samples: 1, highest: 2560 }, agentAnon: { mib: 820, samples: 1, highest: 820 } },
+    figures: { peak: { mib: 5300, samples: 20, highest: 5300 }, anon: { mib: 2560, samples: 10, highest: 2560 }, agentAnon: { mib: 820, samples: 10, highest: 820 } },
   });
   // An unmarked line's anon is not read as a larger figure than a marked one's, nor as the only one.
-  assert.deepEqual(measuredPeak([{ ...peaks[0], anonMib: 9000, agentAnonMib: 3000 }, peaks[1]], NOW)?.anonMib, 2560);
+  assert.deepEqual(measuredPeak([...peaks.slice(0, 10).map((l) => ({ ...l, anonMib: 9000, agentAnonMib: 3000 })), ...peaks.slice(10)], NOW)?.anonMib, 2560);
 });
 
 test("a line whose sampling version is newer than this one still counts", () => {
@@ -176,7 +177,7 @@ test("a project whose peak is under the floor is not measured: size keeps the as
   const peaks = ran({ peakMib: 200, anonMib: 150, sampled: 2 });
   assert.equal(measuredPeak(peaks, NOW), undefined);
   const out = text(sizeLines(reading(peaks), {}, {}));
-  assert.match(out, /Assumed, not measured \(no run has been sampled yet\)/);
+  assert.match(out, /Assumed, not measured \(no run has been sampled yet\)/, "a sandbox at rest is no sample");
   assert.deepEqual([recommend(13.7 * GIB, 12, peaks, NOW).gateFrom], ["assumed"]);
 });
 

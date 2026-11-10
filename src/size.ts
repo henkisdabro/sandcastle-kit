@@ -11,7 +11,7 @@ import { OperatorError } from "./errors.ts";
 import { type PeakLine, PRESSURE_WARN_FULL, projectId, readPeaks, SAMPLED } from "./peaks.ts";
 import { poolLimit } from "./pool.ts";
 import { readDockerInfo } from "./runtime.ts";
-import { machineSettings, USER_CONFIG } from "./sandbox.ts";
+import { machineSettings, memoryText, USER_CONFIG } from "./sandbox.ts";
 
 const GIB = 2 ** 30;
 
@@ -116,8 +116,8 @@ const WHERE: Record<Exclude<Runtime, "native">, string> = {
 const gib = (bytes: number) => `${(Math.round((bytes / GIB) * 10) / 10).toString()} GiB`;
 
 /**
- * One figure the peaks give: `mib`, what is priced, the `samples` it was taken from (one per sandbox's line) and the
- * `highest` of them. `mib` is `highest` below `MIN_PERCENTILE_SAMPLES` samples, else the `PERCENTILE`th of them.
+ * One figure the peaks give: `mib`, what is priced (the `PERCENTILE`th of the samples), the `samples` it was taken from (one
+ * per sandbox's line) and the `highest` of them.
  */
 export type Figure = { mib: number; samples: number; highest: number };
 
@@ -125,7 +125,7 @@ export type Figure = { mib: number; samples: number; highest: number };
  * What the peaks say: the heaviest project's figures over its runs, the project and the runs they rest
  * on. `peakMib` is the whole-life `memory.peak`, `anonMib` the anonymous memory read while a gate ran,
  * `agentMib` the `memory.peak` read before the first gate and `agentAnonMib` the anonymous memory read
- * while an agent pass ran; each optional one is absent when no run recorded it. `figures` says what each
+ * while an agent pass ran; each optional one is absent when no run recorded `MIN_SAMPLES` of it. `figures` says what each
  * rests on: how many samples, and the highest of them. `pressureSome` and `pressureFull` are the highest memory
  * pressure (`avg10`, percent) any sandbox of those runs read; absent when none was above 0 or recorded. Shown, never priced.
  */
@@ -143,33 +143,24 @@ export type Measured = {
 
 /**
  * Priced at a high percentile of the samples, not their maximum: one agent pass that peaked at twice the
- * rest priced every later pool at that pass, though the turn that recorded it ran without a fault. Under
- * `MIN_PERCENTILE_SAMPLES` samples a percentile is the maximum anyway, and the maximum is what is used.
+ * rest priced every later pool at that pass, though the turn that recorded it ran without a fault. Nearest
+ * rank over fewer than 10 samples is the maximum itself, so a figure needs `MIN_SAMPLES` before it counts:
+ * one 7.2 GiB sample among seven set a pool of one sandbox for every project on a machine.
  */
 export const PERCENTILE = 90;
-export const MIN_PERCENTILE_SAMPLES = 5;
+export const MIN_SAMPLES = 10;
 
 // Nearest rank, in integers: 90 x 10 / 100 is exactly 9, where 0.9 x 10 would round up to 10.
 const figureOf = (samples: number[]): Figure | undefined => {
   const sorted = samples.filter((v) => v >= MIN_MEASURED_MIB).sort((a, b) => a - b);
-  if (!sorted.length) return undefined;
-  const highest = sorted[sorted.length - 1];
-  const mib = sorted.length < MIN_PERCENTILE_SAMPLES ? highest : sorted[Math.ceil((PERCENTILE * sorted.length) / 100) - 1];
-  return { mib, samples: sorted.length, highest };
+  if (sorted.length < MIN_SAMPLES) return undefined;
+  return { mib: sorted[Math.ceil((PERCENTILE * sorted.length) / 100) - 1], samples: sorted.length, highest: sorted[sorted.length - 1] };
 };
 
-/**
- * The heaviest project's figures: each project's last `RECENT_RUNS` measured runs (a run is the peaks
- * sharing a `run`, as old as its newest line), each figure the `PERCENTILE`th of that project's samples
- * in them (`figureOf`; every sandbox's line is one sample), then the project with the highest `peakMib`
- * of those whose newest measured run is within `FRESH_DAYS` of `now`. Undefined with nothing measured,
- * in which case the caller keeps the assumed figure. A sample under `MIN_MEASURED_MIB` is not measured and is
- * left out: a project whose `peakMib` has none is left out, and any other figure with none is left off
- * (a gate with no anonymous figure is priced from `peakMib`). The anonymous figures of a line not marked
- * `sampled` are left out too: it may hold the sandbox at rest, and nothing on it says.
- */
-export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefined => {
-  type Run = { at: number; lines: PeakLine[] };
+type Run = { at: number; lines: PeakLine[] };
+
+// Each project's runs, a run being the peaks that share a `run`, as old as its newest line.
+const runsByProject = (peaks: PeakLine[]): Map<string, Run[]> => {
   const byProject = new Map<string, Map<string, Run>>();
   for (const l of peaks) {
     const runs = byProject.get(l.project) ?? new Map<string, Run>();
@@ -179,37 +170,146 @@ export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefin
     runs.set(l.run, run);
     byProject.set(l.project, runs);
   }
+  return new Map([...byProject].map(([p, runs]) => [p, [...runs.values()].sort((a, b) => b.at - a.at)]));
+};
+
+/**
+ * One project's figures, from its last `RECENT_RUNS` runs and older ones while they hold fewer than `MIN_SAMPLES` lines (a
+ * project that opens one sandbox a run still reaches the minimum); undefined when its newest run is older than `FRESH_DAYS`
+ * or its `peakMib` has too few samples. The anonymous figures of a line not marked `sampled` are left out: it may hold the
+ * sandbox at rest, and nothing on it says.
+ */
+// `count`: how many samples a run holds of the figure the window is for (every line, by default).
+const recentRuns = (runs: Run[], now: number, count: (r: Run) => number = (r) => r.lines.length): Run[] => {
+  if (!runs.length || runs[0].at < now - FRESH_DAYS * 86_400_000) return [];
+  const recent: Run[] = [];
+  let samples = 0;
+  for (const r of runs) {
+    if (recent.length >= RECENT_RUNS && samples >= MIN_SAMPLES) break;
+    recent.push(r);
+    samples += count(r);
+  }
+  return recent;
+};
+
+// A line's sampled anonymous gate and agent figures, each only where it counts (marked `sampled`, and a sandbox not at rest).
+const anonOf = (l: PeakLine, key: "anonMib" | "agentAnonMib") => ((l.sampled ?? 0) >= SAMPLED && (l[key] ?? 0) >= MIN_MEASURED_MIB ? [l[key]!] : []);
+
+const projectFigures = (project: string, runs: Run[], now: number): (Measured & { at: number }) | undefined => {
+  const recent = recentRuns(runs, now);
+  if (!recent.length) return undefined;
+  const lines = recent.flatMap((r) => r.lines);
+  const read = lines.filter((l) => (l.sampled ?? 0) >= SAMPLED);
+  const peak = figureOf(lines.map((l) => l.peakMib));
+  if (!peak) return undefined;
+  const anon = figureOf(read.flatMap((l) => (l.anonMib === undefined ? [] : [l.anonMib])));
+  const agent = figureOf(lines.flatMap((l) => (l.agentMib === undefined ? [] : [l.agentMib])));
+  const agentAnon = figureOf(read.flatMap((l) => (l.agentAnonMib === undefined ? [] : [l.agentAnonMib])));
+  const highest = (key: "pressureSome" | "pressureFull") => Math.max(0, ...lines.map((l) => l[key] ?? 0));
+  const [some, full] = [highest("pressureSome"), highest("pressureFull")];
+  return {
+    peakMib: peak.mib,
+    project,
+    runs: recent.length,
+    ...(anon ? { anonMib: anon.mib } : {}),
+    ...(agent ? { agentMib: agent.mib } : {}),
+    ...(agentAnon ? { agentAnonMib: agentAnon.mib } : {}),
+    ...(some ? { pressureSome: some } : {}),
+    ...(full ? { pressureFull: full } : {}),
+    figures: { peak, ...(anon ? { anon } : {}), ...(agent ? { agent } : {}), ...(agentAnon ? { agentAnon } : {}) },
+    at: runs[0].at,
+  };
+};
+
+/**
+ * The heaviest project's figures: each project's own (`projectFigures`, every figure the `PERCENTILE`th of that project's
+ * samples), then the project with the highest `peakMib`. Undefined with nothing measured, in which case the caller keeps the
+ * assumed figure. A sample under `MIN_MEASURED_MIB` is not measured and is left out; a figure with fewer than
+ * `MIN_SAMPLES` is left off (a gate with no anonymous figure is priced from `peakMib`), and a project whose `peakMib` has
+ * fewer is left out.
+ */
+export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefined => {
   let best: (Measured & { at: number }) | undefined;
-  for (const [project, runs] of byProject) {
-    const recent = [...runs.values()].sort((a, b) => b.at - a.at).slice(0, RECENT_RUNS);
-    if (!recent.length || recent[0].at < now - FRESH_DAYS * 86_400_000) continue;
-    const lines = recent.flatMap((r) => r.lines);
-    const read = lines.filter((l) => (l.sampled ?? 0) >= SAMPLED);
-    const peak = figureOf(lines.map((l) => l.peakMib));
-    if (!peak) continue;
-    if (!best || peak.mib > best.peakMib || (peak.mib === best.peakMib && recent[0].at > best.at)) {
-      const anon = figureOf(read.flatMap((l) => (l.anonMib === undefined ? [] : [l.anonMib])));
-      const agent = figureOf(lines.flatMap((l) => (l.agentMib === undefined ? [] : [l.agentMib])));
-      const agentAnon = figureOf(read.flatMap((l) => (l.agentAnonMib === undefined ? [] : [l.agentAnonMib])));
-      const highest = (key: "pressureSome" | "pressureFull") => Math.max(0, ...lines.map((l) => l[key] ?? 0));
-      const [some, full] = [highest("pressureSome"), highest("pressureFull")];
-      best = {
-        peakMib: peak.mib,
-        project,
-        runs: recent.length,
-        ...(anon ? { anonMib: anon.mib } : {}),
-        ...(agent ? { agentMib: agent.mib } : {}),
-        ...(agentAnon ? { agentAnonMib: agentAnon.mib } : {}),
-        ...(some ? { pressureSome: some } : {}),
-        ...(full ? { pressureFull: full } : {}),
-        figures: { peak, ...(anon ? { anon } : {}), ...(agent ? { agent } : {}), ...(agentAnon ? { agentAnon } : {}) },
-        at: recent[0].at,
-      };
-    }
+  for (const [project, runs] of runsByProject(peaks)) {
+    const m = projectFigures(project, runs, now);
+    if (m && (!best || m.peakMib > best.peakMib || (m.peakMib === best.peakMib && m.at > best.at))) best = m;
   }
   if (!best) return undefined;
   const { at: _at, ...measured } = best;
   return measured;
+};
+
+/** One project's figures, as `measuredPeak` takes them; undefined when it has too few samples or none fresh. */
+export const projectMeasured = (peaks: PeakLine[], project: string, now: number): Measured | undefined => {
+  const m = projectFigures(project, runsByProject(peaks).get(project) ?? [], now);
+  if (!m) return undefined;
+  const { at: _at, ...measured } = m;
+  return measured;
+};
+
+// The default limit: this much above the project's measured anonymous memory, and never under the floor. The anonymous
+// figure is read every 10 s, so a spike between two reads is missed; the headroom covers it, and page cache, which the
+// kernel reclaims before it kills, needs none.
+export const MEMORY_HEADROOM = 1.5;
+export const MEMORY_FLOOR_GIB = 2;
+const MEMORY_STEP = 256 * 2 ** 20;
+
+/**
+ * The `memory` a project's sandboxes get. A number in the config is the limit and `false` none; unset, the limit is
+ * `MEMORY_HEADROOM` x the higher of the project's gate and agent anonymous figures (each the `PERCENTILE`th of at least
+ * `MIN_SAMPLES` samples: the agent's only when it has them), at least `MEMORY_FLOOR_GIB`, rounded up to 256 MiB, and never
+ * above the VM's memory (`vm`, bytes, when known). With too few gate samples there is no limit, and `samples` says how many
+ * there are. `from` says which applies.
+ */
+export type MemoryLimit = { bytes?: number; from: "config" | "off" | "measured" | "unmeasured"; samples?: number; anonMib?: number; capped?: boolean };
+export const memoryLimit = (setting: number | false | undefined, peaks: PeakLine[], project: string, now: number, vm?: number): MemoryLimit => {
+  const cap = (b: number) => (vm && vm > 0 && b > vm ? { bytes: vm, capped: true } : { bytes: b });
+  if (setting === false) return { from: "off" };
+  if (typeof setting === "number") return { ...cap(setting), from: "config" };
+  // Its own window: runs back until it holds `MIN_SAMPLES` gate figures, so lines with none (a ticket that failed before
+  // its first gate) do not leave it short while older runs have more.
+  const lines = recentRuns(runsByProject(peaks).get(project) ?? [], now, (r) => r.lines.flatMap((l) => anonOf(l, "anonMib")).length).flatMap((r) => r.lines);
+  const gate = figureOf(lines.flatMap((l) => anonOf(l, "anonMib")));
+  if (!gate) return { from: "unmeasured", samples: lines.flatMap((l) => anonOf(l, "anonMib")).length };
+  const anonMib = Math.max(gate.mib, figureOf(lines.flatMap((l) => anonOf(l, "agentAnonMib")))?.mib ?? 0);
+  const bytes = Math.max(MEMORY_FLOOR_GIB * GIB, Math.ceil((anonMib * MEMORY_HEADROOM * 2 ** 20) / MEMORY_STEP) * MEMORY_STEP);
+  return { ...cap(bytes), from: "measured", anonMib };
+};
+
+/**
+ * `memoryLimit` for this machine: the project's setting, the machine-wide peaks file and the VM's memory from `info` (the
+ * start's one `docker info` reading; an unreadable one caps nothing). A peaks file that cannot be read measures nothing.
+ */
+export const sandboxMemory = (project: { root: string; memory?: number | false }, info: () => string | undefined, peaks: () => PeakLine[] = () => readPeaks(), now = Date.now()): MemoryLimit => {
+  // `docker info` only caps a limit: with none to cap it is not read (it can take up to 10 s).
+  let vm: number | undefined;
+  try {
+    vm = project.memory === false ? undefined : Number((JSON.parse(info() ?? "{}") as { MemTotal?: unknown }).MemTotal) || undefined;
+  } catch {
+    vm = undefined;
+  }
+  let lines: PeakLine[] = [];
+  try {
+    lines = project.memory === undefined ? peaks() : [];
+  } catch {
+    lines = [];
+  }
+  return memoryLimit(project.memory, lines, projectId(project.root), now, vm);
+};
+
+/** The run's start line for `memoryLimit`'s answer. */
+export const memoryLine = (limit: MemoryLimit): string => {
+  const capped = limit.capped ? ", the VM's whole memory" : "";
+  switch (limit.from) {
+    case "off":
+      return "Sandbox memory: no limit (memory: false)";
+    case "config":
+      return `Sandbox memory: ${memoryText(limit.bytes!)} each (memory in the project config${capped})`;
+    case "measured":
+      return `Sandbox memory: ${memoryText(limit.bytes!)} each (${MEMORY_HEADROOM} x the ${gib2(limit.anonMib! / 1024)} GiB of anonymous memory measured${capped}; memory in the project config sets it)`;
+    default:
+      return `Sandbox memory: no limit (${limit.samples ?? 0} of the ${MIN_SAMPLES} gate samples a measured limit needs; memory in the project config sets one)`;
+  }
 };
 
 /** Where a priced figure came from: the gate's and the agent baseline's sources, or the assumed one. */
@@ -331,13 +431,19 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
   const peaks = readers.peaks?.() ?? [];
   const rec = recommend(memory, cpus, peaks, readers.now?.() ?? Date.now());
   const m = rec.measured;
+  // The project the command runs in, when another one set the figures: its own, so a reader sees which drove the pool.
+  const ownFigures = (): string[] => {
+    const here = readers.projectId?.();
+    if (!here || here === m?.project) return [];
+    const own = projectMeasured(peaks, here, readers.now?.() ?? Date.now());
+    if (!own) return [`This project (${here}) has fewer than ${MIN_SAMPLES} samples measured in the last ${FRESH_DAYS} days, so its figures do not count yet.`];
+    const gate = own.anonMib ? `${gib2(own.anonMib / 1024)} GiB anonymous memory during gates` : `${gib2(own.peakMib / 1024)} GiB \`memory.peak\``;
+    return [`This project (${here}): ${gate}, from ${own.figures[own.anonMib ? "anon" : "peak"]!.samples} samples of its last ${own.runs} measured run${own.runs === 1 ? "" : "s"}.`];
+  };
   if (m) {
-    const where = m.project === readers.projectId?.() ? "this project" : `project ${m.project}`;
+    const where = m.project === readers.projectId?.() ? "this project" : `project ${m.project} (a hash of its root; \`sandcastle size\` in that project says "this project")`;
     const plus = `plus ${Math.round((MARGIN - 1) * 100)}%`;
-    const from = (f: Figure) =>
-      f.samples < MIN_PERCENTILE_SAMPLES
-        ? `highest of ${f.samples} sample${f.samples === 1 ? "" : "s"}`
-        : `${PERCENTILE}th of ${f.samples} samples; highest ${gib2(f.highest / 1024)} GiB`;
+    const from = (f: Figure) => `${PERCENTILE}th of ${f.samples} samples; highest ${gib2(f.highest / 1024)} GiB`;
     const gate =
       rec.gateFrom === "anon"
         ? `Gate figure: ${gib2(m.anonMib! / 1024)} GiB, the anonymous memory (no page cache) read during gates (${from(m.figures.anon!)}); ${plus} is ${gib2(rec.gateGib)} GiB. (Their cgroup \`memory.peak\`, page cache included, was ${gib2(m.peakMib / 1024)} GiB.)`
@@ -357,7 +463,8 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
             ? ` Full pressure at ${PRESSURE_WARN_FULL}% or more means every task in a sandbox stalled on memory at once: this VM was short of memory at that pool size. The limits below are not yet lowered for it; lower maxSandboxes or maxGates, or give the VM more memory.`
             : "");
     lines.push(
-      `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where}, the heaviest of any project in the last ${FRESH_DAYS} days.`,
+      `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where}, the heaviest of any project in the last ${FRESH_DAYS} days (each figure needs ${MIN_SAMPLES} samples of one project before it counts).`,
+      ...ownFigures(),
       gate,
       baseline,
       pressure,
@@ -365,7 +472,10 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
       `Assumed, not measured: ${HEADROOM_GIB} GiB headroom, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`,
     );
   } else {
-    lines.push(`Assumed, not measured (no run has been sampled yet): ${HEADROOM_GIB} GiB headroom, ${PER_SANDBOX_GIB} GiB per sandbox, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`);
+    // Runs were sampled but no project has enough of them: say how far the nearest is, not that nothing was sampled.
+    const most = Math.max(0, ...[...runsByProject(peaks).values()].map((runs) => recentRuns(runs, readers.now?.() ?? Date.now()).flatMap((r) => r.lines).filter((l) => l.peakMib >= MIN_MEASURED_MIB).length));
+    const why = most ? `no project has the ${MIN_SAMPLES} samples a measured figure needs yet: ${Math.min(most, MIN_SAMPLES - 1)} of the ${MIN_SAMPLES} samples at most` : "no run has been sampled yet";
+    lines.push(`Assumed, not measured (${why}): ${HEADROOM_GIB} GiB headroom, ${PER_SANDBOX_GIB} GiB per sandbox, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`, ...(most ? ownFigures() : []));
   }
   lines.push("");
   const now = { sandboxes: current("sandboxes", env, machine), gates: current("gates", env, machine) };

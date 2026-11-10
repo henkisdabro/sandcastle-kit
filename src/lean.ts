@@ -20,9 +20,9 @@
 // kept hook can run in the image before any sandbox starts.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, posix, relative } from "node:path";
+import { join, posix, relative, resolve } from "node:path";
 import { IMPL_MODEL, toolsFor } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { dockerRunTimeout } from "./errors.ts";
@@ -428,6 +428,31 @@ export const hooksPathOutside = (root: string): string | undefined => {
   const absolute = value.startsWith("/") || value.startsWith("~") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
   const climbs = posix.normalize(value.replaceAll("\\", "/")).split("/")[0] === "..";
   return absolute || climbs ? value : undefined;
+};
+
+/**
+ * The commit hooks the git-hook probe looks for (`GIT_HOOK_PROBE`, src/gates.ts) that the host has, executable: in the
+ * project's own `core.hooksPath` when it names one inside the project, else in `.git/hooks`. Read from the files and
+ * the local config, never through `git rev-parse --git-path`, which the kit's own `core.hooksPath=/dev/null` (set in
+ * the environment for the host's git) would answer.
+ */
+export const hostHooks = (root: string, names: readonly string[]): string[] => {
+  const value = localHooksPath(root);
+  if (value && hooksPathOutside(root)) return [];
+  let dir: string;
+  try {
+    dir = value ? join(root, value) : join(resolve(root, sh("git", ["rev-parse", "--git-common-dir"], root)), "hooks");
+  } catch {
+    return [];
+  }
+  return names.filter((name) => {
+    try {
+      accessSync(join(dir, name), constants.X_OK);
+      return statSync(join(dir, name)).isFile();
+    } catch {
+      return false;
+    }
+  });
 };
 
 /**

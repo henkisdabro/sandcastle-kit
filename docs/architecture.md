@@ -259,7 +259,9 @@ gates uncached even under `SKIP_BASE_GATES=1`, so a base that is really red stop
 `redBaseExit` still reads the last turn's facts (`test/verify-load-drain.test.ts`).
 The verify is **proof that the merged base is green in a clean gate-only sandbox**, not a clean
 re-gate on purpose: the green-base record (`.sandcastle/.run/base-gates.json`) holds the commit, the
-key (commit, image, plan and config), `by`, whose gates proved it (`#427` for a landing,
+key (commit, image, plan, config and the installed Sandcastle version, so a bump of the engine,
+which may mount or make read-only what a setup writes, proves the base once again), `by`, whose
+gates proved it (`#427` for a landing,
 `the base check`, `verify`) and `kind`, where they ran (`ProofKind`, `src/gates.ts`):
 `landing-sandbox` (a merge gated in its landing sandbox), `base` (the base check), `verify` (an
 earlier verify) or `ticket-sandbox` (a fast-forward of the tree the ticket's own gates passed on, in
@@ -367,8 +369,9 @@ run at half the gate share with one gates slot: `runGates` (`src/gates.ts`) take
 slot's lease, `withContainerCpus` (`src/sandbox.ts`) raises the container to the gate share with
 `docker update --cpus` and puts it back to the ticket share when the lease ends - after a red, a
 throw or a timeout too, the in-slot re-runs inside the one raise.
-The container's id is the sandbox's own `hostname` (the kit holds no name for it), taken only when it
-reads as a container id: an agent can put its own `hostname` on the sandbox's PATH.
+The container is the one Sandcastle's handle names (`sandboxId`, from 0.14.0: `sandcastle-<uuid>`,
+given on the host, taken only in that shape); a handle with none falls back to the sandbox's own
+`/proc/sys/kernel/hostname`, taken only when it reads as a container id.
 Nothing is raised when `cpus: false` leaves no limit, or when the gate share is no larger than the
 ticket's (a numeric `cpus`, or `maxGates` above the concurrency).
 A failed read or update says one line and leaves the limit as it was; it never fails the gate.
@@ -697,6 +700,29 @@ state.
   back with no next attempt, it ends on that conflict as a landing does on its own
   (`test/pipeline-conflict-before-landing.test.ts`, `test/ledger-conflict-before-landing.test.ts`).
   The ticket is told before it is pushed back; a second collision is final.
+  A setup step that failed as the ticket's sandbox opened is the third cause (`sendBackSetup`):
+  the kit's setup hook (`setupHook`, `src/sandbox.ts`) records each step's exit status and always
+  exits 0 - Sandcastle ignores a ready hook's status up to 0.14.0 and rejects the open on it after -
+  and the open port reads the record (`assertSetup`), throwing `SetupFailed` inside
+  `openOrAbandon`, which removes what the open made.
+  The attempt crashes; the scheduler sends a ticket that was not sent back before once more (`Again`
+  of kind `setup`, its line `requeued after setup failed: ...`), and a second failure ends it as
+  `crashed`, the note `setup failed again after a requeue: ...` (the step and its last output line,
+  colour codes and `\r` progress taken out) and the requeue line cleared.
+  That requeue is the ticket's one: a first conflict or red at landing after it is final, as the
+  ticket asks for one requeue, not one per cause.
+  Each failure also counts toward the `setup problem` stop below, at the first failure: the same
+  step failing on `SETUP_CRASHES` tickets stops the run starting tickets (a ticket whose later
+  attempt got past its open is forgotten there, so blips the requeue absorbed never add up to a
+  stop), which a base check skipped on a cached green record (or `SKIP_BASE_GATES=1`) would
+  otherwise leave to cost two opens per ticket.
+  Each step runs in a subshell of its own, as the `&&` chain before it did, its status taken after it
+  so a `set -e` inside it holds.
+  A step with a shell syntax error breaks the whole hook before it records anything, which reads as
+  "did not finish" with every step named; after upstream eb8c793b that hook's own exit status
+  rejects the open instead, Sandcastle's error rather than a red `setup` gate.
+  At the base gates (`gateBase`) the same record is a red `setup` gate: no gate, hook test or
+  git-hook probe runs (`test/setup-failure.test.ts`).
   A red one is not gated in full again when the requeue's merge joins the base tip and branch head
   that gate ran on (`repairFromRed`, `src/landing.ts`): the landing already re-ran its red gate in its slot (`rerun`), so
   no gate runs and the repair starts from the re-run's output; only a landing port that ran no re-run leaves the red gate
@@ -1129,9 +1155,11 @@ never a shell string.
 Code session the mod sends its end prompt to.
 The status terminal is `--keep` and runs `env SANDCASTLE_CORE_VIEW=<instance> <kit>/bin/sandcastle
 status`; the next run finds it by name and reuses it while it runs the status view (stopped with
-`hc keys <t> ctrl+c`, which leaves a `--keep` terminal its shell) or a bare shell, typing the
-command with every word quoted; a person's program in it keeps the name, and the new view opens
-unnamed.
+`hc keys <t> ctrl+c`) or a bare shell, typing the command with every word quoted; a person's
+program in it keeps the name, and the new view opens unnamed.
+A `--keep` terminal gives a shell only for a program lost to a signal, which the view is on Ctrl-C;
+an ordinary exit is final (hc 0.1.19), so a view that exits instead leaves the terminal `finished`,
+which the reuse path removes (`hc rm`) and opens afresh by name.
 Slots (unless `SANDCASTLE_HERDR_VIEW=0`) are `--rm --parent <status>`, running `sandcastle slot N
 --instance <id>`; their numbers are not reused within a run, and each slot's state is
 `.sandcastle/logs/core-slot-N.json`, its log link `herdr-pane-N.log` as on Herdr TUI.
@@ -1491,7 +1519,7 @@ A change to the base or an agent branch since that reading stops the open too, a
 check. `test/guard-before-open.test.ts` plants a smudge filter and its attribute between two opens
 at each site and holds that the second open never happens and the filter never runs.
 
-**`@ai-hero/sandcastle` is a patched dependency** (`patches/@ai-hero__sandcastle@0.12.0.patch`,
+**`@ai-hero/sandcastle` is a patched dependency** (`patches/@ai-hero__sandcastle@0.14.0.patch`,
 `patchedDependencies` in `pnpm-workspace.yaml`): the kit adds each ticket's worktree itself, under
 the host-git mutex, so Sandcastle's `create` always takes its reuse path, which unpatched ends in
 `fastForwardFromOrigin` - a host `git fetch origin <branch>` and an `--ff-only` merge outside the
@@ -1518,13 +1546,48 @@ does for the origin refresh; `test/sandbox-open-serialised.test.ts` drives the k
 The patch also raises `PROMPT_EXPANSION_TIMEOUT_MS` from 30 s to 120 s, so `gh-retry.sh`'s waits can
 ride out a GitHub 5xx that lasts a minute; `test/gh-retry.test.ts` holds the constant above the
 script's waits.
+On 0.14.0 the first change replaces the else arm of a ternary in `create`
+(`dirty ? warn : fastForwardFromOrigin(...)` becomes `dirty ? warn : Effect_exports.void`); upstream's
+unreleased reshaping of `createSandbox` moves the `pruneStale` hunk again on the next bump.
+`sandcastle doctor` checks the patch is applied (`kit dependencies installed`).
+
+**Capabilities.** Every sandbox container starts without `NET_RAW` (`capDrop: ["NET_RAW"]` in
+`dockerOptions`, `src/sandbox.ts`): no raw or packet sockets, so nothing in a sandbox can spoof
+packets or play ARP tricks on the runtime's network.
+Not every capability: the agent and the gates run as a plain user with no `sudo`, but Sandcastle's
+docker provider itself runs `mkdir -p "$dir" && chown <uid> "$dir"` as root (`docker exec --user
+0:0`) for the parent directory of each file mount under the sandbox home - the Codex auth file
+under `CROSS_REVIEW=1`, or a project's own file mount such as `~/.config/gh/hosts.yml` - and that
+needs `CHOWN` and `DAC_OVERRIDE`: with `ALL` dropped every such open failed with
+`Failed to create parent directory`.
+`test/sandbox-cap-drop.test.ts` holds the list and reads that root exec in the installed `dist`, so
+a release that drops it says `ALL` may be tried again.
+A project whose setup or gates need a raw socket fails there with `Operation not permitted`
+(`ping` and `traceroute` may, where they cannot fall back to an unprivileged ICMP socket).
+
+**What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
+control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at
+each start, hence an empty `hooks/` reading as absent, above), the worktree's `.git` file and its
+record's `commondir` - and runs its own host git with the repository's filters, drivers, hooks and
+remote helpers turned off, `GIT_DIR` pinned, `PATH` entries inside the repo dropped and transports
+restricted, refusing (`Refusing to run git on the host`) a worktree whose `.git` file does not lead
+to the project's.
+It trusts command-scope config, so the kit's pins (`GIT_CONFIG_*`) survive.
+None of it replaces the kit's guard: a host-side rewrite of `.git/config` by rename may detach the
+read-only mount in a live container, the rest of `.git` (refs, objects, `modules/`, the person's own
+worktree records) stays writable, and the kit's own host git runs outside Sandcastle's hardening.
+The fingerprint, the start record, the branch backup and the worktree-record checks stay as they are.
+What the read-only files cost a project: a setup step that installs hooks or writes repo config
+fails or installs nothing (`hooksMissingWarning`, `src/gates.ts`, warns at the base check).
 
 **Before every sandbox closes** (`checkBeforeClose`): Sandcastle's close stops the container, then
 runs `git status` on the host in the sandbox's worktree with the run's environment (and
 `git worktree remove` from the project), so a filter planted in the shared `.git/config` - the pins
 hold only the drivers configured at the start - would run there.
 Each close is preceded by a stop of the sandbox's container (`stopSandboxContainer`,
-`src/sandbox.ts`: found by its mount of the worktree, as `reapOrphans` finds one; `docker stop` with
+`src/sandbox.ts`: first the container the handle names (`sandboxId`), its mount of the worktree
+still checked, then any other running sandbox container that mounts the worktree, as `reapOrphans`
+finds one - one an earlier open of a kept worktree left when its removal failed; `docker stop` with
 a 3 s grace before Docker's kill, which the base image's `STOPSIGNAL SIGKILL` never waits for), so
 nothing the sandbox left running there - an agent's background job, a server a gate started - writes
 `.git` after the check: such a process can watch the worktree's lock, which the kit removes just
@@ -1583,7 +1646,8 @@ A landing whose merge failed on an `index.lock` looks again after a few short wa
 same re-check, no merge abort), so a lock that stays stops the landings once and does not cost each
 later ticket a sandbox and a gate run (`test/landing-sandbox-lock.test.ts`).
 What is left, `sandcastle clean` removes: `reapOrphans` stops a running container of any worktree
-under the project's `.sandcastle/worktrees/`, not only `agent-issue-*`.
+under the project's `.sandcastle/worktrees/`, not only `agent-issue-*`, and names it by the
+worktree's own mount, not the read-only mount of its `.git` file that Sandcastle lists first.
 Its `docker ps`, `inspect` and `rm`, and those of `removeExitedSandboxes`, have the same 30 s limit
 (`dockerOrStop`): a daemon that gives no answer stops the run's start or `clean` with an
 `OperatorError` naming the call, since a container the kit could not ask about may still be running
@@ -1634,7 +1698,11 @@ opened, since a blocking read would hang the whole run.
   and `hooks/*` and `modules/*`: fingerprinted (each regular file's content hash in `files`, and its
   executable bits as a separate field, `modes`, beside it: `chmod +x` on a disabled hook with the
   same content enables it, and the hash alone does not see that; a mode-only difference is named
-  `(executable bit)` in the stop; `test/guard-hook-mode.test.ts`), and compared before every sandbox
+  `(executable bit)` in the stop; `test/guard-hook-mode.test.ts`; an empty `hooks/` reads as absent,
+  in the fingerprint and the start record alike (`hooksTree`): Sandcastle creates `hooks/` and
+  `info/` on the host at every sandbox start to mount them read-only, and in a repository that had
+  none the new directory stopped the run at its first sandbox, `test/guard-empty-hooks-root.test.ts`),
+  and compared before every sandbox
   opens, before every sandbox closes, before each landing and before each host write; the
   command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
   `core.hooksPath` and `core.fsmonitor` by environment.
@@ -1992,11 +2060,15 @@ run's start time: no path or name is written (`test/peaks.test.ts` holds it), an
 that share `run`.
 Everything is best effort: a missing file, a failed or 10-second-late read or an unwritable cache
 records nothing and never fails a pass. `measuredPeak(peaks, now)` is the rule, pure: each project's
-figures over its last 5 runs (`RECENT_RUNS`), each the 90th percentile (`PERCENTILE`, nearest rank)
-of the samples (every line is one; `figureOf`), or the highest below 5 samples
-(`MIN_PERCENTILE_SAMPLES`) - so one outlier pass does not price every later pool - with `figures`
-carrying each one's sample count and highest, which `size` prints beside it, from the project with
-the highest peak of those whose newest run is within 30 days (`FRESH_DAYS`); it leaves out the two
+figures (`projectFigures`) over its last 5 runs (`RECENT_RUNS`, and older ones while those hold
+fewer than `MIN_SAMPLES` lines: `recentRuns`), each the 90th percentile (`PERCENTILE`, nearest rank)
+of the samples (every line is one; `figureOf`), and none with fewer than 10 (`MIN_SAMPLES`: nearest
+rank over fewer is their highest, so one outlier among seven priced every pool on the machine) -
+with `figures` carrying each one's sample count and highest, which `size` prints beside it, from the
+project with the highest peak of those whose newest run is within 30 days (`FRESH_DAYS`); a figure
+short of samples is left off and falls back as one never recorded does, and a project whose
+`peakMib` is short is left out; `size` run in another project adds that one's own figure
+(`projectMeasured`). It leaves out the two
 anon figures of a line without `sampled` (`SAMPLED`, 2: the readings below are taken only while a
 phase runs - an older line may hold the sandbox at rest, about 1 MiB, with nothing on it to say so,
 and its `peakMib` still counts), and any figure under `MIN_MEASURED_MIB` (256 MiB, the same sandbox
@@ -2052,6 +2124,46 @@ Both warn at `PRESSURE_WARN_FULL` (5% `full`); nothing prices a pool from it (th
 decision on #382: per sandbox, warn only).
 An `avg10` reaches back 10 s, so a phase's first read can carry the end of the one before.
 `test/memory-pressure.test.ts` holds it.
+A kernel with no PSI (OrbStack's) has no `memory.pressure` file, so every pressure figure stays empty:
+`onNoPsi(say, run)`, set by `burndown()` at each turn's start and cleared as the turn ends, calls `say` the
+first time a sampled sandbox answers `memory.stat` but not `memory.pressure`, and marks `run.told`: `run` is
+the autonomy loop's (`TurnOptions.psi`, made once in `src/cli.ts`), so a run of several turns prints one
+`Memory pressure: the sandboxes' kernel has no PSI ...` line in all.
+
+**The memory limit** (`memoryLimit` and `sandboxMemory` in `src/size.ts`, `limitMemory`, `oomKills`
+and `oomNote` in `src/sandbox.ts`): a project's `memory` (bytes after `loadProject`, which turns
+`"6g"` into them through `memoryBytes`; `false` none) is the limit, cut to the VM's `MemTotal`;
+unset, `memoryLimit` gives `MEMORY_HEADROOM` (1.5) x the higher of the project's own `anonMib` and
+`agentAnonMib` figures (over a window of its own: `recentRuns` counting gate samples rather than lines,
+so lines with no gate figure do not leave it short; the agent's only when it has `MIN_SAMPLES`), at least
+`MEMORY_FLOOR_GIB` (2), rounded up to 256 MiB, and none with fewer than `MIN_SAMPLES` gate samples
+(the anon figure is read every 10 s, so the headroom covers a spike between reads; page cache needs
+none, as the kernel reclaims it before it kills).
+`burndown()` resolves it once, beside the CPU limit, from the start's `docker info` reading, prints
+`memoryLine` and puts the bytes on both the ticket's and the gate-only `project`; `sandcastle gates`
+and `land` do the same in `gateOnly` (`src/cli.ts`), which reads `docker info` once for both limits
+(`sandboxMemory` reads it only to cap a limit, so not at all with `memory: false`).
+Each open (`createSandbox` in the pipeline's `open`, `gateBase`, `landInSandbox`) is followed by
+`limitMemory`: `docker update --memory <b> --memory-swap <b>` on the container `containerOf` names
+(`sandboxId`, else the kernel's hostname file, as `withContainerCpus` does), after the ready hooks,
+since Sandcastle's Docker provider takes no memory option; a kernel that refuses `--memory-swap` (no
+swap accounting) gets `--memory` alone and one line saying so, and a failed update says one line and
+the sandbox runs unlimited.
+An OOM kill is a SIGKILL like any other (exit 137), so `memory.events` is read through the sandbox's
+`exec` (`oomKills`): `oom_kill` counts the container's processes killed by any OOM killer, the VM's
+included, and `oom` rises only when the container reached its own `memory.max`. `oomNote` words a rise
+in `oom_kill` as the sandbox's limit when `oom` rose too (raise `memory`), else as the VM's (fewer
+sandboxes, or a larger VM: never a higher limit).
+The counts are read as a gate pass starts and after every gate, the baseline moving on each time, so a
+kill is told only to the gate it happened in; a red gate carries the words as `Failure.oom`
+(`exitWords`: the gates log's `RED (...)` line, the console's and the failure log's `(exit ...)`, and
+a `[sandcastle]` line at the end of its output, where the repair prompt and the console's tail see it).
+Around an agent pass they are read before it and after it: a pass that throws gets the words on its
+error's first line (`withOom`), which is the line `agentFailure` keeps for the ticket's note, and a
+pass that returned with a kill under it (a test the agent started, the largest process) gets one
+console line.
+A `setup` step runs before the limit applies, so one that balloons is neither held nor named.
+`test/sandbox-memory.test.ts` and `test/pipeline-oom.test.ts` hold it.
 
 **CPU pressure** is read in the same `sampling` loop (the first read as a pass starts, then every
 10 s, with the same `ended` and `late` rules), as two figures. The judged one is machine-wide and read
@@ -2854,15 +2966,22 @@ They are reported only: not plan items, so `hide`, `write` and the plan file nev
 
 The managed settings do not choose the pass's tools.
 Each Claude pass gets its allow-list in `claude()` (`src/agents.ts`): `withTools` inserts
-`--tools '<list>'` before the closing ` -p -` of Sandcastle's command and throws when the command no
-longer starts with `claude ` and ends with ` -p -`, so a Sandcastle update cannot run passes without
-the cut (an unknown name in `--tools` is ignored silently by Claude Code). `toolsFor(lean.keep)` is
-`BASE_TOOLS` (Bash, Read, Edit, Write, TaskStop), plus Skill for a kept `skill:` or `command:` and
-ToolSearch for a kept `mcp:`, then the name of each kept `tool:<Name>`, once (`loadProject` refuses
-one that `src/claude-tools.ts` does not list, or that the managed settings deny); `configureTools`
-sets it from `loadProject`, as `configureModels` sets the models. `claude()` also sets
-`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the agent's environment
-(`test/claude-tools-allow-list.test.ts`).
+`--tools '<list>'` right after `--output-format stream-json` in Sandcastle's command (as `withSchema`
+puts `--json-schema`), which both its shapes carry - 0.14.0's ends in ` -p -`, a later one drops
+that tail - and throws when the command no longer starts with `claude `, has no
+`--output-format stream-json`, or has a ` -p -` that is not its end, so a Sandcastle update cannot
+run passes without the cut (an unknown name in `--tools` is ignored silently by Claude Code).
+`toolsFor(lean.keep)` is `BASE_TOOLS` (Bash, Read, Edit, Write, TaskStop), plus Skill for a kept
+`skill:` or `command:` and ToolSearch for a kept `mcp:`, then the name of each kept `tool:<Name>`,
+once (`loadProject` refuses one that `src/claude-tools.ts` does not list, or that the managed
+settings deny); `configureTools` sets it from `loadProject`, as `configureModels` sets the models.
+`claude()` also gives the agent its own environment (`claudeEnv`: `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
+and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` when `autoCompactWindow` is set), which Sandcastle puts on each
+pass's command as `export KEY='value'; ` before it (`withAgentEnv`, from 0.14.0: 0.12.0 dropped it,
+so auto memory stayed on); the container's environment is the sandbox's alone.
+Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnv`
+(`src/sandbox.ts`) leaves the agent's keys out, a person's `.env` naming one included: the exported
+value would win anyway (`test/agent-env.test.ts`, `test/claude-tools-allow-list.test.ts`).
 The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does
 not govern, and `git-guard.sh` is unchanged.
 

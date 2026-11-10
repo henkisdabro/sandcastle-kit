@@ -15,10 +15,10 @@ import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
-import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
+import { type Hook, hooksPathLines, hooksPathOutside, hostHooks } from "./lean.ts";
 import { type MachineCpu, type PassReadings, cpuFields, cpuHigh, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
-import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, sh, withContainerCpus } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, forgetFork, limitMemory, oomKills, oomNote, sandboxConfig, sandcastleVersion, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -32,7 +32,11 @@ export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolea
 // are then the first full run's (so the repair's stop rule, the fix board and the red-on-base check compare a full run
 // with a full run), and `rerun` holds the command the targeted run ran and its own failing tests (unset when its output
 // may have been cut). Flake judging and the landing's readers read those tests, not the first run's (`wholeTests`).
-export type Failure = { name: string; command: string; exitCode: number; output: string; tests?: string[]; rerun?: { command: string; tests?: string[] } };
+// `oom`: the sandbox's memory limit killed a process while the gate ran (`oomNote`), said wherever the exit status is.
+export type Failure = { name: string; command: string; exitCode: number; output: string; tests?: string[]; rerun?: { command: string; tests?: string[] }; oom?: string };
+
+/** A red gate's exit as the gate lines say it: `exit 137, out of memory: ...` when the sandbox's limit killed a process in it. */
+export const exitWords = (f: Pick<Failure, "exitCode" | "oom">) => `exit ${f.exitCode}${f.oom ? `, ${f.oom}` : ""}`;
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `loadHeldMs`: how long the run held this pass for the machine's CPU pressure (`LOAD_PAUSE`, src/load-pause.ts) before it asked for
@@ -186,7 +190,7 @@ export const setLoadHold = (hold: LoadHold | undefined) => {
 // `from` names the gate to start at, the first by default: a red gate's re-run (`PipelineContext.regate`) goes on
 // from the red one, in config order, since the gates before it already passed on this tree. The log and the
 // progress keep the configured numbering (`gate 2/3`), and a name that is no gate starts at the first.
-export const runGates = async (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim): Promise<GateRun> => {
+export const runGates = async (project: Project, sandbox: Parameters<typeof execGate>[0] & { sandboxId?: string }, label: string, all = false, progress: GateProgress = {}, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim): Promise<GateRun> => {
   // Held for the machine's CPU pressure before the pass asks for its gates slot, so the hold is no part of the slot wait.
   let held = false;
   const heldSince = Date.now();
@@ -209,6 +213,9 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const failures: Failure[] = [];
     const before = await dirtyPaths(sandbox);
     const head = await headOf(sandbox);
+    // A gate killed for memory exits 137 like any SIGKILL: the cgroup's counts say which it was, read after each gate so a
+    // kill is told only to the gate it happened in.
+    let oomAt = await oomKills(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     const pressure: PassReadings = {};
     await sampling(sandbox, "gate", async () => {
@@ -233,20 +240,24 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
           const stderr = stripVTControlCharacters(r.stderr);
           appendFileSync(log, `# stderr of ${g.name} (at most its last 8 MiB):\n${stderr.endsWith("\n") ? stderr : stderr + "\n"}`);
         }
-        if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
+        const oomNow = await oomKills(sandbox);
+        const oom = r.exitCode === 0 ? undefined : oomNote(oomAt, oomNow, project.memory);
+        oomAt = oomNow;
+        if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (${exitWords({ exitCode: r.exitCode, oom })})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
         if (r.exitCode === 0) continue;
         // Without the colour codes a test runner prints into a pipe (vitest does, with no TTY and no TERM): the repair
         // prompt, `failureKey` and `failingTests` read plain text. The gates log is stripped as it is written, too: a
         // `grep "Test Files"` over colour-coded lines misses or garbles them.
-        const whole = stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim();
+        // The OOM line last, where the repair prompt's and the console's tail of the output shows it.
+        const whole = stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr, ...(oom ? [`[sandcastle] ${oom}`] : [])].filter(Boolean).join("\n")).trim();
         // The exec tail reports no drop. Stdout's items are whole lines, so one very long line can evict most of the
         // cap and leave far less than half of it: stdout is cut when the lines `onLine` saw add up to more than came
         // back. Stderr's items are pipe chunks of at most 64 KiB, so after a drop more than half of the cap remains:
         // a stream over half may have been cut, and a test missing from it is not known to be green. (Stdout keeps
         // the half rule too: with no log there is no `onLine` to count by.)
         const mayBeCut = seen > r.stdout.length || r.stdout.length > EXEC_TAIL_CHARS / 2 || r.stderr.length > EXEC_TAIL_CHARS / 2;
-        const failure: Failure = { name: g.name, command, exitCode: r.exitCode, output: clip(whole), ...(mayBeCut ? {} : { tests: failingTests(whole, Infinity) }) };
+        const failure: Failure = { name: g.name, command, exitCode: r.exitCode, output: clip(whole), ...(mayBeCut ? {} : { tests: failingTests(whole, Infinity) }), ...(oom ? { oom } : {}) };
         if (command !== g.command) targetedReds.add(failure);
         failures.push(failure);
         // A timed-out gate may still be running in this container (or Docker
@@ -475,6 +486,24 @@ export const hooksPathWarning = (root: string): string[] => {
   return value ? hooksPathLines(value).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
 };
 
+/**
+ * The base check's lines for commit hooks the host has (`hostHooks`) that the sandbox's probe found none of; none when
+ * there is no such hook. From Sandcastle 0.13.0 a sandbox's `.git/config` and `.git/hooks` are read-only, so an
+ * installer in `setup` (husky 9 exits 0 without setting `core.hooksPath`; `pre-commit install`, `lefthook install`,
+ * `git lfs install --local` fail) installs nothing, and a hooks directory git ignores (husky's `.husky/_`) is not in
+ * the worktree: agent commits then run no hooks, with nothing red. The kit copies no hooks in; it says so.
+ */
+export const hooksMissingWarning = (root: string, g: GitHooks): string[] => {
+  const none = new Set(g.hooks.filter((h) => h.status === "none").map((h) => h.name));
+  const missing = hostHooks(root, [...none]);
+  if (!missing.length) return [];
+  return [
+    `  WARNING: git hook${missing.length > 1 ? "s" : ""} ${missing.join(", ")} run${missing.length > 1 ? "" : "s"} on the host but not in the sandbox: agent commits there run no hooks, and nothing fails to say so.`,
+    "    Cause: a sandbox cannot write its .git/config or .git/hooks, so a hook installer in the project's `setup` (husky, `pre-commit install`, `lefthook install`) installs nothing there, and a hooks directory git ignores (husky's `.husky/_`) is not in the worktree.",
+    "    -> Install the hooks on the host only - in `.git/hooks`, or a tracked directory that `core.hooksPath` names (such as `.githooks`) - and drop the installer from `setup`.",
+  ];
+};
+
 export const gitHooksLine = (g: GitHooks) =>
   g.unchecked !== undefined ? `git hooks: not checked (${g.unchecked})` : `git hooks: ${g.hooks.map((h) => `${h.name}=${h.status}`).join(" ")}`;
 
@@ -503,7 +532,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     // planted since the last check would run on the host. Checked last thing before it, after the wait for a slot; a
     // failure throws with nothing opened.
     await beforeOpen?.(`before opening the ${label} sandbox`);
-    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }), exclusive);
+    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }).then((s) => limitMemory(s, project.memory)), exclusive);
     // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
     // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
     // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
@@ -525,7 +554,11 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // landing after the caller read the tip is in here, and the run is that commit's, not the one asked about.
       const head = (await sandbox.exec("git rev-parse HEAD")).stdout.trim() || undefined;
       // The base and verify gates end a run's wait for them; the mid-run check (`ownSlot` false) is a ticket's, run in its slot.
-      const run: GateRun = withGates ? await runGates(project, sandbox, `${project.name} ${label}`, true, { log }, ownSlot) : { gates: [], failure: undefined, failures: [], waitMs: 0 };
+      // A setup step that failed (`setupFailure`) is a red `setup` gate, and no gate runs on a half-set-up sandbox.
+      const setup = await setupFailure(sandbox, project.setup);
+      const run: GateRun = setup
+        ? { gates: [{ name: "setup", pass: false }], failure: setup, failures: [setup], waitMs: 0 }
+        : withGates ? await runGates(project, sandbox, `${project.name} ${label}`, true, { log }, ownSlot) : { gates: [], failure: undefined, failures: [], waitMs: 0 };
       // Red on the base, whoever asked: a green record of it (a landing's, the verify's) would have the next
       // turn skip the check on a base known to be red - a flaky test passes once and fails the next time.
       if (run.failures.length || run.gates.some((g) => !g.pass)) noteBaseResult(project.root, "", false);
@@ -534,8 +567,10 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
         ...run,
         waitMs: slotWaitMs + (run.waitMs ?? 0),
         head,
-        hookTests: hookTests ? await runHookTests(project.hookTests, hooks, sandbox) : [],
-        gitHooks: hookTests ? await runGitHookProbe(sandbox) : undefined,
+        // Not after a failed setup: a hook that needs what setup installs would fail, and a hook manager setup never
+        // installed would read as `none` and send the person after the wrong cause (`hooksMissingWarning`).
+        hookTests: hookTests && !setup ? await runHookTests(project.hookTests, hooks, sandbox) : [],
+        gitHooks: hookTests && !setup ? await runGitHookProbe(sandbox) : undefined,
       };
     } finally {
       await recordPeak(sandbox, project.root, runId);
@@ -550,7 +585,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // check and the worktree's records made, before it. A failure throws with the container removed, the worktree
       // and its branch left for a person.
       const when = `before closing the ${label} sandbox`;
-      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when)).catch(leftBehind);
+      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when), sandbox.sandboxId).catch(leftBehind);
       unlockWorktree(sandbox.worktreePath);
       await sandbox.close();
       try {
@@ -575,8 +610,11 @@ export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass 
 // reached the network went green unnoticed because only its name and verdict
 // were printed. runGates stops early, so `results` is a prefix of `configured`
 // and the command is found by position.
-export const gateResultLines = (configured: { name: string; command: string }[], results: Gate[]): string[] =>
-  results.map((g, i) => `  ${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}  ${g.name}  $ ${configured[i]?.command ?? ""}`);
+// A failed setup step (`setupFailure`) is a red `setup` result of its own, ahead of every gate: its command is the step's.
+export const gateResultLines = (configured: { name: string; command: string }[], results: Gate[], failure?: Failure): string[] =>
+  results.length === 1 && failure?.name === "setup" && results[0].name === "setup" && !results[0].pass
+    ? [`  FAIL  setup  $ ${failure.command}`]
+    : results.map((g, i) => `  ${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}  ${g.name}  $ ${configured[i]?.command ?? ""}`);
 
 // Where gate time goes, per gate. A slow gate runs on every branch, its
 // repair passes and the base check, so it is the first place to look when
@@ -942,13 +980,15 @@ const gateTimeLine =(gates: Gate[]) =>
   [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${seconds(g.ms!)}`).join(", ");
 
 // A green result holds for as long as nothing it depended on changes: the
-// base commit, the image, and the config that shapes a sandbox.
+// base commit, the image, the config that shapes a sandbox, and the Sandcastle
+// that opens it (a new version may mount, or make read-only, what a gate's setup writes).
 // `commit` is the one a gate ran on, when that is not what the base names now.
-const baseKey = (project: Project, image: string, planFile: string, commit = sh("git", ["rev-parse", project.baseBranch])) =>
+export const baseKey = (project: Project, image: string, planFile: string, commit = sh("git", ["rev-parse", project.baseBranch]), engine = sandcastleVersion()) =>
   createHash("sha256")
     .update(
       JSON.stringify([
         commit,
+        engine,
         image,
         project.gates,
         project.setup,
@@ -1224,7 +1264,7 @@ export const writeGateLog = (log: string, header: string, failures: GateRun["fai
     return false;
   }
   mkdirSync(dirname(log), { recursive: true });
-  writeFileSync(log, `${header}\n\n` + failures.map((f) => `===== ${f.name}: ${f.command} (exit ${f.exitCode})\n${f.output}\n`).join("\n") + extra);
+  writeFileSync(log, `${header}\n\n` + failures.map((f) => `===== ${f.name}: ${f.command} (${exitWords(f)})\n${f.output}\n`).join("\n") + extra);
   return true;
 };
 
@@ -1256,11 +1296,13 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const run = await gateBase(project, image, planFile, "base-gates", true, runId, true, !gatesGreen, check, beforeOpen);
   if (!gatesGreen) {
     console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
-    for (const line of gateResultLines(project.gates, run.gates)) console.log(line);
-    console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
+    for (const line of gateResultLines(project.gates, run.gates, run.failure)) console.log(line);
+    // None for a setup that failed: no gate ran.
+    if (run.gates.some((g) => typeof g.ms === "number")) console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   }
   for (const t of run.hookTests) console.log(`  hook test ${t.pass ? "pass" : "FAIL"}  ${t.name} - ${t.detail}`);
   if (run.gitHooks) console.log(`  ${gitHooksLine(run.gitHooks)}`);
+  for (const line of run.gitHooks ? hooksMissingWarning(project.root, run.gitHooks) : []) console.log(line);
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
@@ -1280,7 +1322,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   // (out of `ms`) and the sandbox's peak and memory pressure.
   if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.loadHeldMs ? { loadHeldMs: run.loadHeldMs } : {}), ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)) };
   for (const f of run.failures) {
-    console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
+    console.log(`\n--- ${f.name} (${exitWords(f)}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
   if (gitHook) {
     console.log(`\nGit hook ${gitHook.name} fails in the sandbox - every agent commit would be refused:\n${gitHook.output.split("\n").slice(-15).join("\n")}`);

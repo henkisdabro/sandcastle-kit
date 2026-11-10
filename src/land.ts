@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
+import { clip, exitWords, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { assertGitUnchanged, checkBeforeClose, dropBackup, type Exclusive, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
@@ -18,11 +18,12 @@ import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { gatesLog, markLog, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, forgetFork, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, limitMemory, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
 
-export type Box = { worktreePath: string; exec: Exec["exec"]; close(): Promise<unknown> };
+// `sandboxId`: the container's name, which the stop before the close addresses it by.
+export type Box = { worktreePath: string; exec: Exec["exec"]; close(): Promise<unknown>; sandboxId?: string };
 export type Opener = (branch: string) => Promise<Box>;
 export type LandResult =
   | { kind: "merged"; commit: string; files: string[]; regen: string[] }
@@ -213,7 +214,7 @@ export const landInSandbox = async (
       // `.git` check and the worktree's records made, before it. A failure throws with the container removed and no
       // close - a stop, whatever the landing's own result or error.
       const when = `after landing ${t.branch} in a sandbox`;
-      await checkBeforeClose(project, box.worktreePath, when, () => assertGitUnchanged(project, before, when));
+      await checkBeforeClose(project, box.worktreePath, when, () => assertGitUnchanged(project, before, when), box.sandboxId);
       await box.close();
     }
     // A container ran with the shared .git mounted: the next host git call must not run what it may have planted.
@@ -261,7 +262,7 @@ export const landInSandbox = async (
 export const sandboxOpener =
   (project: Project, image: string, planFile: string, exclusive?: Exclusive): Opener =>
   async (branch) => {
-    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }), exclusive);
+    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }).then((s) => limitMemory(s, project.memory)), exclusive);
     lockWorktree(s.worktreePath);
     return {
       worktreePath: s.worktreePath,
@@ -404,9 +405,8 @@ export const landTicket = async (
       // The gated landing was checked (`landInSandbox`) before this result came back, so a red landing ends cleanly:
       // the next start must not blame a sandbox for a change made since.
       recordGitConfigEnd(project);
-      const setup = run.failure?.name === "setup" && project.setup.includes(run.failure.command);
-      for (const line of setup ? [`  FAIL  setup  $ ${run.failure!.command}`] : gateResultLines(project.gates, run.gates)) console.log(line);
-      if (run.failure) console.log(`\n--- ${run.failure.name} (exit ${run.failure.exitCode}), last lines:\n${run.failure.output.split("\n").slice(-15).join("\n")}`);
+      for (const line of gateResultLines(project.gates, run.gates, run.failure)) console.log(line);
+      if (run.failure) console.log(`\n--- ${run.failure.name} (${exitWords(run.failure)}), last lines:\n${run.failure.output.split("\n").slice(-15).join("\n")}`);
       throw new OperatorError(
         `Gates red on the merge of ${branch} into ${base}: ${run.failures.map((f) => f.name).join(", ")}. ` +
           `Nothing was merged; the gate output is in .sandcastle/logs/agent-issue-${id}-gates-${id}.log.`,

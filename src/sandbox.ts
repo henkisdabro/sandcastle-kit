@@ -3,14 +3,14 @@
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseEnv } from "node:util";
-import { CROSS_REVIEW } from "./agents.ts";
+import { parseEnv, stripVTControlCharacters } from "node:util";
+import { claudeEnv, CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
-import { nearest, OperatorError } from "./errors.ts";
+import { nearest, OperatorError, SetupFailed } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
 import { commandOf, KIT_CACHE } from "./live-runs.ts";
 import { kitRunning } from "../mod/hooks/run-live.ts";
@@ -19,6 +19,64 @@ import { hideFromGates, KIT_CREDENTIALS, unlockWorktree } from "./worktree-lock.
 import { resolveVersions, type Versions } from "./versions.ts";
 
 export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * The installed `@ai-hero/sandcastle`'s version (`unknown` when it is not installed: doctor says so). What a sandbox
+ * does - its mounts, the agent's environment, what it makes read-only - moves with it, so a base proved green on one
+ * version is proved again on the next (`baseKey`, `src/gates.ts`).
+ */
+export const sandcastleVersion = (kit = KIT): string => {
+  try {
+    return String(JSON.parse(readFileSync(join(kit, "node_modules", "@ai-hero", "sandcastle", "package.json"), "utf8")).version);
+  } catch {
+    return "unknown";
+  }
+};
+
+/**
+ * What is wrong with the installed `@ai-hero/sandcastle` for this kit, one line each (none: it is the pinned version,
+ * patched). `pnpm install` applies the kit's patch (`patchedDependencies`); `npm install`, or a `git pull` with no
+ * install after it, leaves a dependency that runs unpatched - a host fetch from origin on every open (#711), Sandcastle's
+ * own worktree prune outside the host-git mutex, a 30 s limit on a prompt's shell expression (#782) - with nothing
+ * failing until a run does. Each `dist/*.js` is read, since chunk names change with every release; text it cannot find
+ * is a problem named, never a crash.
+ */
+export const sandcastlePatchProblems = (kit = KIT): string[] => {
+  const pkg = join(kit, "node_modules", "@ai-hero", "sandcastle");
+  if (!existsSync(pkg)) return ["@ai-hero/sandcastle is not installed"];
+  const problems: string[] = [];
+  const installed = sandcastleVersion(kit);
+  let pinned = "unknown";
+  try {
+    pinned = String(JSON.parse(readFileSync(join(kit, "package.json"), "utf8")).dependencies?.["@ai-hero/sandcastle"]);
+  } catch {
+    /* named below */
+  }
+  if (installed !== pinned) problems.push(`@ai-hero/sandcastle ${installed} is installed, the kit pins ${pinned}`);
+  let texts: string[] = [];
+  try {
+    const dist = join(pkg, "dist");
+    texts = readdirSync(dist).filter((f) => f.endsWith(".js")).map((f) => readFileSync(join(dist, f), "utf8"));
+  } catch {
+    return [...problems, "its dist cannot be read"];
+  }
+  /** The text of the function `start` begins, up to `end`, in whichever module holds it. */
+  const slice = (start: string, end: string) => {
+    for (const text of texts) {
+      const at = text.indexOf(start);
+      const to = at === -1 ? -1 : text.indexOf(end, at);
+      if (to > at) return text.slice(at, to);
+    }
+    return undefined;
+  };
+  const reuse = slice("var create = (repoDir, opts)", "return { path: normalize(collision.path), branch };");
+  if (reuse === undefined || /fastForwardFromOrigin\s*\(/.test(reuse)) problems.push("the kit's patch is not applied: a sandbox open refreshes its branch from origin (#711)");
+  const open = slice("var createSandbox = async (options) =>", "yield* create(");
+  if (open === undefined || /pruneStale\s*\(/.test(open)) problems.push("the kit's patch is not applied: a sandbox open prunes worktrees outside the kit's lock (#711)");
+  const limit = texts.map((t) => /PROMPT_EXPANSION_TIMEOUT_MS = (\d+(?:e\d+)?);/.exec(t)?.[1]).find(Boolean);
+  if (!(Number(limit) >= 120_000)) problems.push("the kit's patch is not applied: a prompt's shell expression has 30 s, too short for gh-retry.sh (#782)");
+  return problems;
+};
 
 // Everything personal - tokens, machine-wide limits - lives here, never in the
 // kit's own directory, so the kit repo can be public and still in daily use.
@@ -179,7 +237,8 @@ export const reapOrphans = (project: Project, limitMs = DOCKER_ANSWER_MS) => {
   for (const id of ids) {
     try {
       const mounts = dockerOrStop(["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"], limitMs).split("\n");
-      const worktree = mounts.find((m) => prefixes.some((p) => m.startsWith(p)));
+      // Sandcastle (0.13 on) also mounts the worktree's `.git` file read-only, listed first: the worktree is the one named.
+      const worktree = mounts.find((m) => prefixes.some((p) => m.startsWith(p)) && !m.endsWith("/.git"));
       if (!worktree) continue;
       dockerOrStop(["rm", "-f", id], limitMs);
       console.log(`Stopped a sandbox a killed run left working: ${relative(worktree.startsWith(root) ? root : project.root, worktree)}`);
@@ -200,6 +259,10 @@ const spellings = (worktree: string) => {
   }
   return paths;
 };
+
+// A sandbox container's name as Sandcastle's docker provider gives it (`sandcastle-<uuid>`): only such a name reaches a
+// `docker` argument, never a flag or a filter of another shape.
+const CONTAINER_NAME = /^sandcastle-[0-9a-f-]{8,64}$/;
 
 // How long a close's or an open's `docker ps`, `inspect` or `rm` may take before the kit stops waiting, and how long a
 // `docker stop` may take beyond its own grace. A daemon that is busy or hung gives no answer, and a close that waits
@@ -255,11 +318,12 @@ const saidOf = (e: unknown) => {
  * or `inspect` of a listed container: a busy, restarting or hung daemon is not "nothing is running". Only a container
  * Docker says is gone meanwhile is skipped, and a missing `docker` program lists none.
  */
-const runningContainersOf = async (worktree: string): Promise<string[]> => {
+const runningContainersOf = async (worktree: string, sandboxId?: string): Promise<string[]> => {
   const paths = spellings(worktree);
   let ids: string[];
   try {
-    ids = (await dockerAsync(["ps", "-q", "--filter", "name=^sandcastle-"])).split("\n").filter(Boolean);
+    // By its name when the handle gives one (Sandcastle 0.14.0 on): that container alone, still checked for the mount.
+    ids = (await dockerAsync(["ps", "-q", "--filter", sandboxId && CONTAINER_NAME.test(sandboxId) ? `name=^${sandboxId}$` : "name=^sandcastle-"])).split("\n").filter(Boolean);
   } catch (e) {
     // No docker program at all (not installed, or not on this PATH): the kit started no container through it.
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -294,15 +358,22 @@ const STOP_GRACE_SECONDS = 3;
  * gone. Throws a `DockerAnswerError` when Docker cannot say what runs (`runningContainersOf`), which is no answer that
  * nothing does.
  */
-export const stopSandboxContainer = async (worktree: string): Promise<{ id: string; said: string }[]> => {
+export const stopSandboxContainer = async (worktree: string, sandboxId?: string): Promise<{ id: string; said: string }[]> => {
   const refused: { id: string; said: string }[] = [];
-  for (const id of await runningContainersOf(worktree)) {
-    try {
-      await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id], STOP_GRACE_SECONDS * 1000 + DOCKER_ANSWER_MS);
-    } catch (e) {
-      refused.push({ id, said: saidOf(e) });
+  const stop = async (ids: string[]) => {
+    for (const id of ids) {
+      if (refused.some((r) => r.id === id)) continue;
+      try {
+        await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id], STOP_GRACE_SECONDS * 1000 + DOCKER_ANSWER_MS);
+      } catch (e) {
+        refused.push({ id, said: saidOf(e) });
+      }
     }
-  }
+  };
+  // The handle's own container first, by its name; then any other that mounts the worktree - one an earlier open of a
+  // kept worktree left when its removal failed would otherwise keep writing the shared `.git` after the check.
+  if (sandboxId && CONTAINER_NAME.test(sandboxId)) await stop(await runningContainersOf(worktree, sandboxId));
+  await stop(await runningContainersOf(worktree));
   if (!refused.length) return [];
   // One that stopped or went while Docker refused is no longer listed.
   const running = new Set(await runningContainersOf(worktree));
@@ -969,7 +1040,11 @@ export const hostTimeZone = (): string | undefined => {
 // so gates run in the host's zone too, not CI's usual UTC.
 export const sandboxEnv = (project: Project): Record<string, string> => {
   const TZ = hostTimeZone();
-  return withGitMaintenanceOff({ ...credentials(project), ...AGENT_COMMITTER, ...(TZ && { TZ }) });
+  // A key the agent's own env sets (`claudeEnv`) stays out: Sandcastle refuses every pass whose agent and sandbox name
+  // the same key, and the agent's value, exported before its command, would win anyway.
+  const env = credentials(project);
+  for (const key of Object.keys(claudeEnv())) delete env[key];
+  return withGitMaintenanceOff({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) });
 };
 
 // Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a
@@ -1034,6 +1109,100 @@ export const sandboxCpus = (
 };
 
 /**
+ * The sandbox's container, as `docker update` takes it, or "" when it cannot be told. The name from Sandcastle's handle
+ * (0.14.0 on), given on the host: nothing inside the sandbox can change it. A handle with no name: read inside the sandbox,
+ * where an agent can put its own `hostname` on PATH (one that prints another container's id would have the host change that
+ * container's limits): the kernel's own file, by absolute paths, which the agent cannot change without CAP_SYS_ADMIN. Only
+ * a container name or id reaches `docker update`, never a flag.
+ */
+const containerOf = async (sandbox: { sandboxId?: string; exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }): Promise<string> => {
+  if (sandbox.sandboxId && CONTAINER_NAME.test(sandbox.sandboxId)) return sandbox.sandboxId;
+  try {
+    const r = await sandbox.exec("/bin/cat /proc/sys/kernel/hostname");
+    return r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * Limits the sandbox's container to `bytes` of memory, swap included (`--memory-swap` the same figure: no swap above it),
+ * and returns the sandbox. A VM's containers share one ceiling, so one gate or agent suite that balloons pushed every other
+ * sandbox into the VM's OOM killer, which picks a victim the kit did not choose; inside a limit the kernel kills within that
+ * sandbox only, and the gate or pass names it (`oomKills`). Set after the open, as `docker update`: Sandcastle's Docker
+ * provider takes no memory option, so the project's `setup` steps (the ready hook) run before it applies. No `bytes` sets
+ * nothing. A failed update says one line and leaves the sandbox unlimited; it never fails the open.
+ */
+export const limitMemory = async <S extends { sandboxId?: string; exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }>(
+  sandbox: S,
+  bytes: number | false | undefined,
+  say: (line: string) => void = console.log,
+): Promise<S> => {
+  if (!bytes) return sandbox;
+  const id = await containerOf(sandbox);
+  const fail = (e: unknown) => saidOf(e).split("\n")[0];
+  if (!id) {
+    say(`  could not set the sandbox's memory limit to ${memoryText(bytes)}: its container id could not be read; it runs with none`);
+    return sandbox;
+  }
+  try {
+    await dockerAsync(["update", "--memory", String(bytes), "--memory-swap", String(bytes), id]);
+  } catch (e) {
+    // A kernel with no swap accounting refuses `--memory-swap`: the limit alone still holds the sandbox to its share.
+    try {
+      await dockerAsync(["update", "--memory", String(bytes), id]);
+      say(`  the sandbox's swap could not be limited (${fail(e)}): its memory is limited to ${memoryText(bytes)}, its swap is not`);
+    } catch (e2) {
+      say(`  could not set the sandbox's memory limit to ${memoryText(bytes)}: ${fail(e2)}; it runs with none`);
+    }
+  }
+  return sandbox;
+};
+
+/** A memory limit as the kit's lines say it: GiB to one decimal, MiB under 1 GiB (a 256 MiB limit is not "0.3 GiB"). */
+export const memoryText = (bytes: number) => (bytes < 2 ** 30 ? `${Math.round(bytes / 2 ** 20)} MiB` : `${Math.round((bytes / 2 ** 30) * 10) / 10} GiB`);
+
+// The cgroup's memory events, read through the sandbox's own exec, as the peaks are. `oom_kill` counts the processes of the
+// container killed by any OOM killer, the VM's own included; `oom` rises only when the container reached its own
+// `memory.max`. A kill with no rise in `oom` is the VM's: it ran out, and picked this sandbox's process.
+const MEMORY_EVENTS = "/sys/fs/cgroup/memory.events";
+
+/** The sandbox's `oom` and `oom_kill` counts so far (`OomCounts`), or undefined where the kernel gives none (cgroup v1) or the read fails. */
+export type OomCounts = { oom: number; kills: number };
+export const oomKills = async (sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }): Promise<OomCounts | undefined> => {
+  try {
+    const r = await sandbox.exec(`cat ${MEMORY_EVENTS} 2>/dev/null`);
+    const text = r.exitCode === 0 ? String(r.stdout ?? "") : "";
+    const kills = /^oom_kill (\d+)$/m.exec(text);
+    const oom = /^oom (\d+)$/m.exec(text);
+    return kills && oom ? { oom: Number(oom[1]), kills: Number(kills[1]) } : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What a gate or pass says when the kernel killed a process of the sandbox while it ran: undefined when it did not (or
+ * either reading is unknown). The sandbox's own limit, when its `oom` count rose too: raise `memory`. Else the VM's: it ran
+ * out of memory for every sandbox at once, so the advice is fewer at once, never a higher limit.
+ */
+export const oomNote = (before: OomCounts | undefined, after: OomCounts | undefined, bytes: number | false | undefined): string | undefined => {
+  if (!before || !after || after.kills <= before.kills) return undefined;
+  const what = after.kills - before.kills === 1 ? "a process" : `${after.kills - before.kills} processes`;
+  return after.oom > before.oom
+    ? `out of memory: killed ${what} at the sandbox's ${bytes ? `${memoryText(bytes)} ` : ""}limit (\`memory\` in the project config sets it)`
+    : `out of memory: the VM ran out and killed ${what} here (lower maxSandboxes, or give the VM more memory)`;
+};
+
+/** `error` with `oom` on its first line, where the ticket's note (`agentFailure`, which keeps that line only) reads it. */
+export const withOom = (error: unknown, oom: string): unknown => {
+  if (!(error instanceof Error)) return error;
+  const [first, ...rest] = error.message.split("\n");
+  error.message = [`${first.replace(/:\s*$/, "")} - ${oom}`, ...rest].join("\n");
+  return error;
+};
+
+/**
  * Runs `run` with the sandbox's container limited to `cpus.gate`, and puts it back to `cpus.ticket` after, whatever `run`
  * did. A ticket's gates hold a gates slot, so while they run the sandbox is one of at most `maxGates` suites at once and
  * its share is the gate share, not the ticket share it was created with (`docker run --cpus` is fixed at creation).
@@ -1043,7 +1212,7 @@ export const sandboxCpus = (
  * limit as it was; it never fails `run`, and a limit that was not raised is not "put back".
  */
 export const withContainerCpus = async <T>(
-  sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> },
+  sandbox: { sandboxId?: string; exec(cmd: string): Promise<{ exitCode: number; stdout: string }> },
   cpus: { gate: number; ticket: number } | undefined,
   run: () => Promise<T>,
   say: (line: string) => void = console.log,
@@ -1058,16 +1227,7 @@ export const withContainerCpus = async <T>(
       return false;
     }
   };
-  let id = "";
-  try {
-    // Read inside the sandbox, where an agent can put its own `hostname` on PATH (one that prints another container's id
-    // would have the host raise, then "put back", that container's limit): the kernel's own file, by absolute paths,
-    // which the agent cannot change without CAP_SYS_ADMIN. Only a container id reaches `docker update`, never a flag.
-    const r = await sandbox.exec("/bin/cat /proc/sys/kernel/hostname");
-    id = r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
-  } catch {
-    /* said below */
-  }
+  const id = await containerOf(sandbox);
   if (!id) {
     say("  could not read the sandbox's container id: its gates run at the ticket's CPU limit");
     return run();
@@ -1102,8 +1262,76 @@ export const dockerOptions = (project: Project, image: string) => ({
   env: sandboxEnv(project),
   mounts: sandboxMounts(project),
   maxOutputTailChars: EXEC_TAIL_CHARS,
+  // Raw sockets only (spoofed packets, ARP tricks on the runtime's network). Not "ALL": Sandcastle itself runs
+  // `mkdir -p && chown` as root in the container for the parent directory of every file mount under the home (the Codex
+  // auth file with CROSS_REVIEW=1, a project's file mount), which needs CHOWN and DAC_OVERRIDE, so every open failed
+  // (docs/architecture.md, "Capabilities"; test/sandbox-cap-drop.test.ts).
+  capDrop: ["NET_RAW"] as const,
   ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
 });
+
+// Where the setup hook records how it ended, inside the container (each sandbox has its own /tmp).
+const SETUP_STATE = "/tmp/sandcastle-setup";
+
+/**
+ * The ready hook that runs the project's `setup`, in order, and records how it ended: `done`, or `fail <step> <exit>`
+ * with the failing step's output kept. Sandcastle ignores a ready hook's exit status up to 0.14.0, and a later
+ * release (upstream eb8c793b) rejects `createSandbox` on it instead, so the hook always exits 0 and the kit reads the
+ * record itself after the open (`assertSetup`, `setupFailure`): the same outcome on every release. A step that fails
+ * stops the rest, as the `&&` chain before it did. Each step runs in a subshell of its own, as in that chain, so a `cd`
+ * or an `export` in one does not reach the next; it ends on a line of its own so a step's trailing comment cannot eat
+ * it. Its status is taken after it, never on the left of `||`, where POSIX shells ignore a `set -e` the step sets.
+ * A step with a shell syntax error breaks the whole hook before it records anything: that reads as "did not finish".
+ */
+export const setupHook = (setup: readonly string[]) =>
+  [
+    `s=${SETUP_STATE}; rm -f "$s.status" "$s.out"`,
+    ...setup.map((c, i) => `(${c}\n) >"$s.out" 2>&1; r=$?; [ "$r" -eq 0 ] || { echo "fail ${i} $r" >"$s.status"; exit 0; }`),
+    `echo done >"$s.status"`,
+  ].join("\n");
+
+// How much of a failed step's output is kept: the last lines that say why, not an install's whole log.
+const SETUP_TAIL_CHARS = 4000;
+
+/** What `setupFailure` reads, in one exec: the record, then the last output lines. */
+export const SETUP_READ = `cat ${SETUP_STATE}.status 2>/dev/null; echo @@output; tail -n 30 ${SETUP_STATE}.out 2>/dev/null`;
+
+/**
+ * The failed step `setupHook` recorded, from `SETUP_READ`'s output; undefined when it ended `done`. No record at all is a
+ * setup that never finished (the hook was killed, or never ran): exit status -1, every step named.
+ */
+export const parseSetupState = (stdout: string, setup: readonly string[]): SetupFailed["failure"] | undefined => {
+  const at = stdout.indexOf("@@output\n");
+  const status = (at < 0 ? stdout : stdout.slice(0, at)).trim();
+  // A step's colour codes and `\r` progress lines would reach the note, run.json and the status view: each line is
+  // kept as a terminal would show it (after its last `\r`), and the tail clipped.
+  const shown = stripVTControlCharacters(at < 0 ? "" : stdout.slice(at + "@@output\n".length))
+    .split("\n")
+    .map((line) => line.slice(line.replace(/\r+$/, "").lastIndexOf("\r") + 1).replace(/\r+$/, ""))
+    .join("\n")
+    .trim();
+  const output = shown.length > SETUP_TAIL_CHARS ? `[...]${shown.slice(-SETUP_TAIL_CHARS)}` : shown;
+  if (status === "done") return undefined;
+  const m = /^fail (\d+) (\d+)$/.exec(status);
+  if (m && setup[Number(m[1])] !== undefined) return { name: "setup", command: setup[Number(m[1])], exitCode: Number(m[2]), output };
+  return { name: "setup", command: setup.join(" && "), exitCode: -1, output: output || "the setup hook left no record of how it ended" };
+};
+
+/** How the project's setup ended in this sandbox (`setupHook`); undefined when it passed, or when there is none. */
+export const setupFailure = async (sandbox: { exec(command: string): Promise<{ stdout: string }> }, setup: readonly string[]) =>
+  setup.length ? parseSetupState((await sandbox.exec(SETUP_READ)).stdout, setup) : undefined;
+
+/**
+ * The sandbox, once its setup passed; otherwise the failing step and its output's last lines are printed under `label`
+ * and `SetupFailed` is thrown. For a ticket's open, inside `openOrAbandon`, which then removes what the open made.
+ */
+export const assertSetup = async <S extends { exec(command: string): Promise<{ stdout: string }> }>(sandbox: S, setup: readonly string[], label: string): Promise<S> => {
+  const failure = await setupFailure(sandbox, setup);
+  if (!failure) return sandbox;
+  const error = new SetupFailed(failure);
+  console.log(`${label}: ${error.message}${failure.output ? `; last lines:\n${failure.output.split("\n").slice(-15).join("\n")}` : ""}`);
+  throw error;
+};
 
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
 // each fresh worktree before the agent sees it. A numeric `project.cpus` caps each container: a
@@ -1126,8 +1354,7 @@ export const sandboxConfig = (project: Project, image: string, leanPlan: string)
           : []),
         // Sandcastle runs the ready hooks all at once, so setup's steps share one hook to keep their
         // order: pnpmStore's store-dir step raced the install, which then filled a store of its own.
-        // A subshell each, ended on a line of its own so a step's trailing comment cannot eat it.
-        ...(project.setup.length ? [{ command: project.setup.map((c) => `(${c}\n)`).join(" && ") }] : []),
+        ...(project.setup.length ? [{ command: setupHook(project.setup) }] : []),
       ],
     },
   },

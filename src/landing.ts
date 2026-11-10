@@ -960,9 +960,9 @@ export const redSubject = (output: string, tree: string[], read: (file: string) 
 const redWith = (tickets: string[], red?: { seen?: boolean }) => (tickets.length ? `with ${tickets.map(refOf).join(", ")}` : red?.seen ? "as seen on the branch before" : "on the merged tree");
 
 /** "conflicted again with #1, #3 after a requeue", "red again on the merged tree after a requeue (gate test)": what a second conflict or red at landing is held as. */
-export const againLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[]; seen?: boolean }, first: "conflict" | "red" = kind) => {
+export const againLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[]; seen?: boolean }, first: "conflict" | "red" | "setup" = kind) => {
   // "Again" only when the first attempt ended the same way: a conflict after a requeue for a red is no repeat.
-  const after = first === kind ? "after a requeue" : `after a requeue for ${first === "red" ? "a red merge" : "a conflict"}`;
+  const after = first === kind ? "after a requeue" : `after a requeue for ${first === "red" ? "a red merge" : first === "setup" ? "a failed setup" : "a conflict"}`;
   return kind === "conflict"
     ? `conflicted${first === kind ? " again" : ""}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""} ${after}`
     : `red${first === kind ? " again" : ""} ${redWith(tickets, red)} ${after}${redDetail(red)}`;
@@ -971,9 +971,14 @@ export const againLine = (kind: "conflict" | "red", tickets: string[], red?: { g
 /** Where a conflict was found, as a requeue line says it: "requeued after conflict before review with #1". */
 export const FOUND_WORDS: Record<ConflictFound, string> = { review: "before review", gates: "before gates", landing: "at landing" };
 
-/** "requeued after conflict at landing with #1", "requeued after red on the merged tree (gate test; failing a.test.ts)": the second attempt, as the status view and run.json say it. */
-export const requeuedLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[]; seen?: boolean }, found?: ConflictFound) =>
-  kind === "conflict"
+/**
+ * "requeued after conflict at landing with #1", "requeued after red on the merged tree (gate test; failing a.test.ts)",
+ * "requeued after setup failed: `npm ci` exited 1 - ...": the second attempt, as the status view and run.json say it.
+ */
+export const requeuedLine = (kind: "conflict" | "red" | "setup", tickets: string[], red?: { gates?: string[]; failing?: string[]; seen?: boolean; setup?: string }, found?: ConflictFound) =>
+  kind === "setup"
+    ? `requeued after ${red?.setup ?? "setup failed"}`
+    : kind === "conflict"
     ? `requeued after conflict${found ? ` ${FOUND_WORDS[found]}` : ""}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`
     : `requeued after red ${redWith(tickets, red)}${redDetail(red)}`;
 
@@ -1061,7 +1066,7 @@ export const carriedBranch = (landOnly: boolean, requeued: boolean, reviewedOnly
 export const unretriedLine = (c: { files: string[]; with: string[] }) => `${conflictLine(c)}; would have been retried, but the run had stopped starting tickets`;
 
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
-export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>, first: "conflict" | "red" = landed.kind) => {
+export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>, first: "conflict" | "red" | "setup" = landed.kind) => {
   const line = againLine(landed.kind, landed.with, landed.kind === "red" ? landed : undefined, first);
   return landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line;
 };

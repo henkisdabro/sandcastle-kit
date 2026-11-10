@@ -26,6 +26,8 @@ const line = (figures: { peakMib: number; anonMib?: number; agentMib?: number; a
   sampled: 2,
   ...figures,
 });
+// Ten sandboxes alike: a figure counts from `MIN_SAMPLES` (10) samples of a project.
+const ten = <T,>(l: T): T[] => Array.from({ length: 10 }, () => l);
 const reading = (peaks: ReturnType<typeof line>[]): Readers => ({
   // 9.8 GiB VM with 12 CPUs: 7.8 GiB after the 2 GiB headroom.
   dockerInfo: () => JSON.stringify({ NCPU: 12, MemTotal: 9.8 * GIB, OperatingSystem: "OrbStack" }),
@@ -40,8 +42,8 @@ const reading = (peaks: ReturnType<typeof line>[]): Readers => ({
 });
 
 // Gate anon 3000 MiB (3300 with the margin), agent peak 5000 MiB (5500): the agent outweighs the gate.
-const unmarked = [line({ peakMib: 6000, anonMib: 3000, agentMib: 5000 })];
-const marked = [line({ peakMib: 6000, anonMib: 3000, agentMib: 5000, agentAnonMib: 1000 })];
+const unmarked = ten(line({ peakMib: 6000, anonMib: 3000, agentMib: 5000 }));
+const marked = ten(line({ peakMib: 6000, anonMib: 3000, agentMib: 5000, agentAnonMib: 1000 }));
 
 test("an anonymous gate figure beside a memory.peak agent baseline gives no pool warning", () => {
   assert.equal(recommend(9.8 * GIB, 12, unmarked, NOW).baselineFrom, "agent-peak");
@@ -51,7 +53,7 @@ test("an anonymous gate figure beside a memory.peak agent baseline gives no pool
 
 test("size says the memory.peak agent baseline includes page cache, may sit above the gate figure and will switch to anonymous memory", () => {
   const out = sizeLines(reading(unmarked), {}, {}).join("\n");
-  assert.match(out, /Agent baseline: 4\.88 GiB, `memory\.peak` read before the first gate pass \(highest of 1 sample\); plus 10% is 5\.37 GiB\./);
+  assert.match(out, /Agent baseline: 4\.88 GiB, `memory\.peak` read before the first gate pass \(90th of 10 samples; highest [\d.]+ GiB\); plus 10% is 5\.37 GiB\./);
   assert.match(out, /includes page cache/);
   assert.match(out, /agents run the project's test suite themselves, so it may sit above the gate figure/);
   assert.match(out, /switches to anonymous memory once a run records agent samples/);

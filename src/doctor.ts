@@ -20,15 +20,21 @@ import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
 import { poolWarningsNow, sizePointerNow } from "./size.ts";
-import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
+import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, sandcastlePatchProblems, USER_CONFIG } from "./sandbox.ts";
 import { kitRelease, kitVersion, newestRelease, releaseOut, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
 import { runtimeProblemNow } from "./runtime.ts";
 import { resolveVersions, toolsFloorLine } from "./versions.ts";
 
-/** The herdr-core version the kit's view was last checked against (src/osc7501.ts's format, the sub-agent listing). */
-export const HC_VERIFIED = "0.1.17";
+/**
+ * The herdr-core version the kit's view was last checked against (src/osc7501.ts's format, the sub-agent listing, the
+ * status terminal's reuse), and the first whose terminals let a `sandcastle run --detach` outlive them.
+ */
+export const HC_VERIFIED = "0.1.19";
+/** Doctor's warn line for an hc below the floor: why it matters, and the fix. */
+export const hcFloorLine = (hc: string) =>
+  `warn herdr-core ${hc} is older than ${HC_VERIFIED}, the version the kit's view was checked against: an older hc ends a \`sandcastle run --detach\` with the terminal it was started from, and a terminal opened before the update keeps doing so until it is recreated. \`hc update\` (or the Herdr app's update) brings it up to date.`;
 /** Whether `hc --version`'s answer (`hc 0.1.19`) names a version below `floor`; an answer with no version is not. */
 export const olderThan = (answer: string, floor: string) => {
   const found = answer.match(/(\d+)\.(\d+)\.(\d+)/);
@@ -369,7 +375,12 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   // 22.18 is the first Node 22 that strips the kit's TypeScript types by default (src/node-check.mjs).
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
   check(major > 22 || (major === 22 && minor >= 18), `Node ${process.versions.node}`, `Install Node 22.18 or newer (24 LTS recommended): \`nvm install 24\`, \`mise use -g node@24\` or ${mac ? "`brew install node`" : "your distribution's package"}`);
-  check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `\`pnpm -C ${shellQuote(KIT)} install\``);
+  const dependencyProblems = sandcastlePatchProblems();
+  check(
+    dependencyProblems.length === 0,
+    dependencyProblems.length ? `kit dependencies installed: ${dependencyProblems.join("; ")}` : "kit dependencies installed",
+    `\`pnpm -C ${shellQuote(KIT)} install\` (pnpm applies the kit's patch to Sandcastle; npm does not)`,
+  );
   // Not installed and not started need different fixes: "start OrbStack" to someone with no runtime sent them looking for an app they never had.
   const dockerInstalled = run("docker", ["--version"]) !== undefined;
   // The exit status alone: a `--format` field Podman lacks failed there, calling Podman "not running".
@@ -621,7 +632,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   if (host.kind === "core") {
     const hc = run("hc", ["--version"]);
     console.log(`ok   herdr-core${hc ? ` (${hc})` : ""}: opens the status view beside this terminal (terminal ${host.terminal.address})`);
-    if (hc && olderThan(hc, HC_VERIFIED)) console.log(`warn herdr-core ${hc} is older than ${HC_VERIFIED}, the version the kit's view was checked against: \`hc update\` (or the Herdr app's update) brings it up to date.`);
+    if (hc && olderThan(hc, HC_VERIFIED)) console.log(hcFloorLine(hc));
   } else {
     check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
     // Installed but not this terminal's host: a run from here shows nothing in the Herdr app, which surprises.

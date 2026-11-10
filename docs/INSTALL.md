@@ -38,7 +38,8 @@ the same by hand.
 
 **Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) 0.9.3 or later (a tab with the status view,
 opened automatically; a pane per sandbox is opt-in with `herdr: { panes: "all" }`; `sandcastle herdr configure` adds the kit's plugin - see
-[The Herdr plugin](herdr.md#the-herdr-plugin)) or herdr-core (`hc` 0.1.17 or later: the status view as a terminal beside yours - see
+[The Herdr plugin](herdr.md#the-herdr-plugin)) or herdr-core (`hc` 0.1.19 or later: the status view as a terminal beside yours, and a
+`sandcastle run --detach` that outlives the terminal it was started in - see
 [herdr-core](herdr.md#herdr-core)), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
 
 ## 🧙 What `sandcastle setup` does
