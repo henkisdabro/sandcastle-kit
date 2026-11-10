@@ -33,8 +33,8 @@ Sandcastle runs coding agents in sandboxes; this kit uses its Docker ones and tu
 ready-made loop for any repository whose tickets are GitHub Issues or Markdown files in the repo: it
 picks up tickets marked `ready-for-agent`, has one agent implement each ticket and a stronger one
 review it, runs your project's own lint/build/test gates itself (an agent never gets to say "tests
-pass"), merges what is green and closes the ticket. One install serves all your projects; each project adds a
-small config file.
+pass"), merges what is green and closes the ticket. One install serves all your projects; each
+project adds a small config file.
 
 ## 🙋 Who is this for?
 

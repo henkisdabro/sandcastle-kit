@@ -260,7 +260,8 @@ gates uncached even under `SKIP_BASE_GATES=1`, so a base that is really red stop
 The verify is **proof that the merged base is green in a clean gate-only sandbox**, not a clean
 re-gate on purpose: the green-base record (`.sandcastle/.run/base-gates.json`) holds the commit, the
 key (commit, image, plan, config and the installed Sandcastle version, so a bump of the engine,
-which may mount or make read-only what a setup writes, proves the base once again), `by`, whose gates proved it (`#427` for a landing,
+which may mount or make read-only what a setup writes, proves the base once again), `by`, whose
+gates proved it (`#427` for a landing,
 `the base check`, `verify`) and `kind`, where they ran (`ProofKind`, `src/gates.ts`):
 `landing-sandbox` (a merge gated in its landing sandbox), `base` (the base check), `verify` (an
 earlier verify) or `ticket-sandbox` (a fast-forward of the tree the ticket's own gates passed on, in
@@ -1548,12 +1549,18 @@ On 0.14.0 the first change replaces the else arm of a ternary in `create`
 unreleased reshaping of `createSandbox` moves the `pruneStale` hunk again on the next bump.
 `sandcastle doctor` checks the patch is applied (`kit dependencies installed`).
 
-**Capabilities.** Every sandbox container starts with every Linux capability dropped
-(`capDrop: ["ALL"]` in `dockerOptions`, `src/sandbox.ts`): the agent and the gates run as a plain
-user with no `sudo`, so the bounding set only mattered to a setuid binary or an escape, and the
-four test repositories' gates (the kit's dogfood clone, the smoke-test repository, a husky fixture
-and a repository with no `.git/hooks`) were green with none.
-A project whose setup or gates need one (`ping`'s `NET_RAW`, say) fails there with
+**Capabilities.** Every sandbox container starts without `NET_RAW` (`capDrop: ["NET_RAW"]` in
+`dockerOptions`, `src/sandbox.ts`): no raw or packet sockets, so nothing in a sandbox can spoof
+packets or play ARP tricks on the runtime's network.
+Not every capability: the agent and the gates run as a plain user with no `sudo`, but Sandcastle's
+docker provider itself runs `mkdir -p "$dir" && chown <uid> "$dir"` as root (`docker exec --user
+0:0`) for the parent directory of each file mount under the sandbox home - the Codex auth file
+under `CROSS_REVIEW=1`, or a project's own file mount such as `~/.config/gh/hosts.yml` - and that
+needs `CHOWN` and `DAC_OVERRIDE`: with `ALL` dropped every such open failed with
+`Failed to create parent directory`.
+`test/sandbox-cap-drop.test.ts` holds the list and reads that root exec in the installed `dist`, so
+a release that drops it says `ALL` may be tried again.
+A project whose setup or gates need a raw socket (`ping`, `traceroute`) fails there with
 `Operation not permitted`.
 
 **What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
@@ -1576,8 +1583,9 @@ runs `git status` on the host in the sandbox's worktree with the run's environme
 `git worktree remove` from the project), so a filter planted in the shared `.git/config` - the pins
 hold only the drivers configured at the start - would run there.
 Each close is preceded by a stop of the sandbox's container (`stopSandboxContainer`,
-`src/sandbox.ts`: by the name the handle gives (`sandboxId`), whose mount of the worktree is still
-checked, or, for a handle with none, by that mount alone, as `reapOrphans` finds one; `docker stop` with
+`src/sandbox.ts`: first the container the handle names (`sandboxId`), its mount of the worktree
+still checked, then any other running sandbox container that mounts the worktree, as `reapOrphans`
+finds one - one an earlier open of a kept worktree left when its removal failed; `docker stop` with
 a 3 s grace before Docker's kill, which the base image's `STOPSIGNAL SIGKILL` never waits for), so
 nothing the sandbox left running there - an agent's background job, a server a gate started - writes
 `.git` after the check: such a process can watch the worktree's lock, which the kit removes just

@@ -3,8 +3,8 @@
 What an unattended agent can and cannot reach, and what holds a branch for a person.
 
 
-Agents run unattended with permission prompts off, inside Docker, as a plain user with every Linux
-capability dropped. The container is the boundary, and the kit narrows what can cross it:
+Agents run unattended with permission prompts off, inside Docker, as a plain user without raw
+sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows what can cross it:
 
 - 🔑 **Tokens.** Only a fine-grained GitHub token (issues and metadata on chosen repos) enters the
   sandbox. It cannot push, edit workflows or change settings (`sandcastle doctor --verify` checks it
@@ -48,8 +48,9 @@ capability dropped. The container is the boundary, and the kit narrows what can 
   - what your own later git command runs: every `alias.*` (a repo-local alias overrides yours),
     `pager.*`, `difftool.*.cmd`, `mergetool.*.cmd`, `submodule.*.update`, `interactive.diffFilter`,
     `gpg.ssh.defaultKeyCommand`, `core.alternateRefsCommand` and `lfs.*`;
-  - what a `git fetch` reads there (your own next fetch runs it on your machine): `remote.*.url`, `.pushurl`, `.uploadpack`, `.receivepack` and `.proxy`,
-    `url.*.insteadOf` and `.pushInsteadOf`, every `credential.*` and `protocol.*` key, and
+  - what a `git fetch` reads there (your own next fetch runs it on your machine): `remote.*.url`,
+    `.pushurl`, `.uploadpack`, `.receivepack` and `.proxy`, `url.*.insteadOf` and `.pushInsteadOf`,
+    every `credential.*` and `protocol.*` key, and
     `http.proxy`, `http.sslCAInfo` and `http.sslCAPath`, with or without a URL;
   - `merge.verifySignatures` and `log.showSignature`, which run the signing program, and every
     `extensions.*` key;

@@ -360,16 +360,23 @@ const STOP_GRACE_SECONDS = 3;
  */
 export const stopSandboxContainer = async (worktree: string, sandboxId?: string): Promise<{ id: string; said: string }[]> => {
   const refused: { id: string; said: string }[] = [];
-  for (const id of await runningContainersOf(worktree, sandboxId)) {
-    try {
-      await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id], STOP_GRACE_SECONDS * 1000 + DOCKER_ANSWER_MS);
-    } catch (e) {
-      refused.push({ id, said: saidOf(e) });
+  const stop = async (ids: string[]) => {
+    for (const id of ids) {
+      if (refused.some((r) => r.id === id)) continue;
+      try {
+        await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id], STOP_GRACE_SECONDS * 1000 + DOCKER_ANSWER_MS);
+      } catch (e) {
+        refused.push({ id, said: saidOf(e) });
+      }
     }
-  }
+  };
+  // The handle's own container first, by its name; then any other that mounts the worktree - one an earlier open of a
+  // kept worktree left when its removal failed would otherwise keep writing the shared `.git` after the check.
+  if (sandboxId && CONTAINER_NAME.test(sandboxId)) await stop(await runningContainersOf(worktree, sandboxId));
+  await stop(await runningContainersOf(worktree));
   if (!refused.length) return [];
   // One that stopped or went while Docker refused is no longer listed.
-  const running = new Set(await runningContainersOf(worktree, sandboxId));
+  const running = new Set(await runningContainersOf(worktree));
   return refused.filter((r) => running.has(r.id));
 };
 
@@ -1174,9 +1181,11 @@ export const dockerOptions = (project: Project, image: string) => ({
   env: sandboxEnv(project),
   mounts: sandboxMounts(project),
   maxOutputTailChars: EXEC_TAIL_CHARS,
-  // The agent runs as a plain user with no sudo, and no gate of the kit's test projects needed a capability with
-  // every one dropped (docs/architecture.md, "capabilities"): a container escape or a setuid binary gets none either.
-  capDrop: ["ALL"] as const,
+  // Raw sockets only (spoofed packets, ARP tricks on the runtime's network). Not "ALL": Sandcastle itself runs
+  // `mkdir -p && chown` as root in the container for the parent directory of every file mount under the home (the Codex
+  // auth file with CROSS_REVIEW=1, a project's file mount), which needs CHOWN and DAC_OVERRIDE, so every open failed
+  // (docs/architecture.md, "Capabilities"; test/sandbox-cap-drop.test.ts).
+  capDrop: ["NET_RAW"] as const,
   ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
 });
 
