@@ -1161,8 +1161,10 @@ from another terminal wraps the text in `<hc from=...>` tags (hc 0.1.19), which 
 A view that has not given way 5 seconds after the Ctrl-C (hc takes about 2.5 s to hand the terminal its
 shell, longer on a loaded machine) is ended the same way, so a slow recovery never leaves two status
 terminals for one project (`test/herdr-core-slow-recovery.test.ts`).
-A shell hc does not remove keeps the name, and the new view opens unnamed; so does a person's
-program in it.
+After the kill and rm (and when the old terminal vanishes during the wait) the name is asked again with
+`hc get <name>`: free, the view opens under it; still taken, it opens unnamed and one line names the old
+terminal to close - printed only after the kit tried to remove its own terminal and could not, never for a
+person's program in it, which keeps the name without a word (`test/herdr-core-reuse.test.ts`).
 A `--keep` terminal gives a shell only for a program lost to a signal, which the view is on Ctrl-C;
 an ordinary exit is final (hc 0.1.19), so a view that exits instead leaves the terminal `finished`,
 which the reuse path removes (`hc rm`) and opens afresh by name.

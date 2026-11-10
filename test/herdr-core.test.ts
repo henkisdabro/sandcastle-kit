@@ -21,7 +21,7 @@ const bin = join(stub, "bin");
 mkdirSync(bin);
 const log = join(stub, "calls.log");
 // `get T`: answers/get-T.json, else not found. `keys T`: answers/keys-T.json, when there, becomes T's next answer
-// (Ctrl-C turning a view into a shell). `rm T`: T is not found after. `run`: answers/runs/* one at a time, else answers/run.json, else fails;
+// (Ctrl-C turning a view into a shell). `rm T`: T is not found after, by its address or by any name that answers with it. `run`: answers/runs/* one at a time, else answers/run.json, else fails;
 // with answers/name-taken, a named slot (paned or a sub-agent) fails as hc does. Every other verb answers `{}`.
 writeFileSync(
   join(bin, "hc"),
@@ -33,7 +33,7 @@ case "$1" in
        [ -f "$A/get-$2.json" ] && { cat "$A/get-$2.json"; exit 0; }
        echo '{"error":{"kind":"not_found"}}' >&2; exit 3 ;;
   keys) [ -f "$A/keys-$2.json" ] && cp "$A/keys-$2.json" "$A/get-$2.json"; echo '{}' ;;
-  rm) rm -f "$A/get-$2.json"; echo '{}' ;;
+  rm) rm -f "$A/get-$2.json"; grep -l "address\\":\\"$2\\"" "$A"/get-*.json 2>/dev/null | while read -r f; do rm -f "$f"; done; echo '{}' ;;
   run) case " $* " in *" --rm "*" --name "*) [ -f "$A/name-taken" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; } ;; esac
        f=$(ls "$A/runs" 2>/dev/null | head -n 1); [ -n "$f" ] && { cat "$A/runs/$f"; rm "$A/runs/$f"; exit 0; }
        [ -f "$A/run.json" ] && { cat "$A/run.json"; exit 0; }; echo '{"error":{"message":"core not running"}}' >&2; exit 1 ;;
