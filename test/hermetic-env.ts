@@ -26,6 +26,8 @@
 //    the git call that started it, so a before-and-after listing of a fixture repo differs and removing the fixture
 //    can fail with ENOTEMPTY. (Not `gc.auto`: a pair for it would stop `hostGitConfig` adding its own, and hide a
 //    broken `disableHostGitGc` from test/landing-queue.test.ts.)
+//  - `core.excludesFile=/dev/null` too: git reads `~/.config/git/ignore` with no global config at all, so a fixture's
+//    `git add -A` left out a file the developer ignores everywhere (`.claude/settings.local.json`).
 //  - `GIT_ALLOW_PROTOCOL` is `file` unless set: the kit looks up its newest release with `git ls-remote` on its
 //    own `origin` (src/upgrading.ts), which `doctor` and `--version --json` do, and a test must not reach the
 //    network or wait on a remote that does not answer. A local path or `file://` remote still works, and a test of
