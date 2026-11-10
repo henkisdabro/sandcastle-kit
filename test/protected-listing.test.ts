@@ -11,12 +11,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { protectedChanges } from "../src/guard.ts";
+import { largeFiles, protectedChanges } from "../src/guard.ts";
 
 const BRANCH = "agent/issue-1";
 
 // A repo with `base` on main; `change` runs in the checkout on a branch off it and its result is committed.
-const scenario = (base: Record<string, string>, change: (root: string) => void) => {
+const scenario = (base: Record<string, string>, change: (root: string) => void, list: (project: Project, branch: string) => string[] = protectedChanges) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-protected-listing-"));
   const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", ...args], { encoding: "utf8" });
   const write = (name: string, content: string) => {
@@ -31,7 +31,7 @@ const scenario = (base: Record<string, string>, change: (root: string) => void) 
   change(root);
   git("add", "-A");
   git("commit", "-q", "--allow-empty", "-m", "change");
-  return protectedChanges({ root, baseBranch: "main" } as Project, BRANCH);
+  return list({ root, baseBranch: "main" } as Project, BRANCH);
 };
 
 const put = (root: string, name: string, content: string) => {
@@ -57,6 +57,12 @@ test("a branch that moves a hook out of .husky/ is held", () => {
 test("a new workflow with a non-ASCII name is held, named as it is on disk", () => {
   const hits = scenario({}, (root) => put(root, ".github/workflows/déploy.yml", "on: push\n"));
   assert.deepEqual(hits, [".github/workflows/déploy.yml"]);
+});
+
+test("a file over 50 MB with a non-ASCII name is held as large, named as it is on disk", () => {
+  // Zeros: git stores 51 MB of them in a few kilobytes, but the blob's size is what GitHub counts.
+  const hits = scenario({}, (root) => writeFileSync(join(root, "donn\u00e9es.bin"), Buffer.alloc(51 * 1024 * 1024)), largeFiles);
+  assert.deepEqual(hits, ["donn\u00e9es.bin (51 MB)"]);
 });
 
 // One changed file per default entry. A directory entry gets a file in it, "lint-staged.config." a real config name.
