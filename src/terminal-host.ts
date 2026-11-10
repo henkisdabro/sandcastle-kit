@@ -11,7 +11,7 @@ export type TerminalHost = { kind: "core"; terminal: CoreTerminal } | { kind: "h
 export type HostProbe = {
   /** `hc get <id>`: the terminal's address, root pid and labels, or undefined when hc cannot say. */
   core(id: string): CoreTerminal | undefined;
-  /** This process's ancestors' pids, nearest first. */
+  /** This process's pid, then its ancestors' pids, nearest first. */
   ancestors(): number[];
 };
 
@@ -29,6 +29,17 @@ export const detectHost = (env: NodeJS.ProcessEnv, probe: HostProbe): TerminalHo
     if (terminal && probe.ancestors().includes(terminal.pid)) return { kind: "core", terminal };
   }
   return env.HERDR_ENV === "1" ? { kind: "herdr1" } : { kind: "none" };
+};
+
+/** Why `HC_TERMINAL_ID` did not make this process core, in words for the operator; undefined when it is unset or did. */
+export const coreMiss = (env: NodeJS.ProcessEnv = process.env, probe: HostProbe = PROBE): string | undefined => {
+  const id = env.HC_TERMINAL_ID;
+  // A detached child's host was decided by its parent, whose lineage this process no longer shares.
+  if (!id || adopted) return undefined;
+  const terminal = probe.core(id);
+  if (!terminal) return `HC_TERMINAL_ID names ${id}, but \`hc get ${id}\` named no live terminal (is herdr-core running?)`;
+  if (!probe.ancestors().includes(terminal.pid)) return `HC_TERMINAL_ID names ${id}, whose program (pid ${terminal.pid}) is not this process or one of its ancestors: a stale id`;
+  return undefined;
 };
 
 // One answer per id: hc and ps are asked once a process, however often a command asks.
@@ -53,10 +64,14 @@ const hcGet = (id: string): CoreTerminal | undefined => {
   return terminal;
 };
 
-/** One `ps` for the whole table, walked here: a `ps` per generation would cost a spawn each. */
+/**
+ * One `ps` for the whole table, walked here: a `ps` per generation would cost a spawn each. This process
+ * leads the list: `hc run` starts its argv with no shell, and `bin/sandcastle` execs node, so the kit's own
+ * process can be the terminal's root.
+ */
 const psAncestors = (): number[] => {
   if (lineage) return lineage;
-  lineage = [];
+  lineage = [process.pid];
   try {
     const parent = new Map<number, number>();
     for (const line of execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 }).split("\n")) {

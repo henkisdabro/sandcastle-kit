@@ -76,6 +76,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **`sandcastle doctor` checks the kit's patch to Sandcastle is applied.** "kit dependencies
   installed" fails, naming what is wrong, when the installed `@ai-hero/sandcastle` is not the pinned
   version or runs without the kit's patch (installed with `npm`, or pulled with no `pnpm install`).
+- **A run started in a background herdr-core terminal opens its status view.** `hc run` starts its
+  program with no shell, and `bin/sandcastle` execs node, so the kit itself was the terminal's root and
+  the host check, which looked only at its ancestors, said `Not inside Herdr`. When `HC_TERMINAL_ID`
+  is set but the check still fails, the run now says which part failed.
 
 ### Changed
 

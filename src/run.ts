@@ -12,7 +12,7 @@ import { LOCAL_CONFIG_PATH, type Project } from "./config.ts";
 import { assertBaseHasCommit, type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
-import { terminalHost } from "./terminal-host.ts";
+import { coreMiss, terminalHost } from "./terminal-host.ts";
 import { openCoreStatus } from "./herdr-core.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, staleBaseParents } from "./sandbox.ts";
 import { protectedPathsNote } from "./guard.ts";
@@ -1938,7 +1938,8 @@ export const openStatusPane = (project: Project): string | undefined => {
   const host = terminalHost();
   if (host.kind === "core") return openCoreStatus(project.root, host.terminal, { kit: KIT });
   if (host.kind !== "herdr1") {
-    console.log("Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
+    const miss = coreMiss();
+    console.log(miss ? `Not opening a status view: ${miss}. Watch the run with \`sandcastle status\` in another terminal.` : "Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
     return undefined;
   }
   const record = statusPaneRecord(project);
