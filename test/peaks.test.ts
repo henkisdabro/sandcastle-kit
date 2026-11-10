@@ -98,7 +98,8 @@ test("a half-written or foreign line in peaks.jsonl is skipped", () => {
 
 const NOW = Date.parse("2026-06-30T12:00:00Z");
 const at = (daysAgo: number) => new Date(NOW - daysAgo * DAY).toISOString();
-const line = (project: string, daysAgo: number, peakMib: number, run = `run-${project}-${daysAgo}`): PeakLine => ({ ts: at(daysAgo), project, run, peakMib });
+// Ten sandboxes of one run alike: a figure counts from `MIN_SAMPLES` (10) samples of a project.
+const line = (project: string, daysAgo: number, peakMib: number, run = `run-${project}-${daysAgo}`): PeakLine[] => Array.from({ length: 10 }, () => ({ ts: at(daysAgo), project, run, peakMib }));
 
 test("recommend: no data keeps the assumed figure", () => {
   const rec = recommend(8 * GIB, 8, [], NOW);
@@ -109,9 +110,9 @@ test("recommend: no data keeps the assumed figure", () => {
 });
 
 test("recommend: one project's highest peak plus 10%", () => {
-  const peaks = [line("a", 1, 1000), line("a", 2, 1400), line("a", 3, 900)];
+  const peaks = [...line("a", 1, 1000), ...line("a", 2, 1400), ...line("a", 3, 900)];
   const m = measuredPeak(peaks, NOW)!;
-  assert.deepEqual(m, { peakMib: 1400, project: "a", runs: 3, figures: { peak: { mib: 1400, samples: 3, highest: 1400 } } });
+  assert.deepEqual(m, { peakMib: 1400, project: "a", runs: 3, figures: { peak: { mib: 1400, samples: 30, highest: 1400 } } });
   const rec = recommend(10 * GIB, 16, peaks, NOW);
   // floor((10 - 2) / (1540 / 1024)) = floor(5.32) = 5
   assert.equal(rec.byMemory, 5);
@@ -120,20 +121,20 @@ test("recommend: one project's highest peak plus 10%", () => {
 });
 
 test("recommend: a project with no measured run in 30 days is ignored", () => {
-  const stale = [line("old", 31, 6000), line("old", 40, 6000)];
+  const stale = [...line("old", 31, 6000), ...line("old", 40, 6000)];
   assert.equal(measuredPeak(stale, NOW), undefined);
-  const mixed = measuredPeak([...stale, line("fresh", 5, 1000)], NOW)!;
+  const mixed = measuredPeak([...stale, ...line("fresh", 5, 1000)], NOW)!;
   assert.equal(mixed.project, "fresh");
   assert.equal(mixed.peakMib, 1000);
   // Exactly 30 days is still in.
-  assert.equal(measuredPeak([line("edge", 30, 1000)], NOW)?.project, "edge");
+  assert.equal(measuredPeak(line("edge", 30, 1000), NOW)?.project, "edge");
 });
 
 test("recommend: a runaway run older than the last 5 is ignored; one inside them counts", () => {
-  const dropped = measuredPeak([line("a", 20, 9000), ...[1, 2, 3, 4, 5].map((d, i) => line("a", d, 1000 + i * 10))], NOW)!;
+  const dropped = measuredPeak([...line("a", 20, 9000), ...[1, 2, 3, 4, 5].flatMap((d, i) => line("a", d, 1000 + i * 10))], NOW)!;
   assert.equal(dropped.peakMib, 1040, "the sixth-newest run (9000) is out");
   assert.equal(dropped.runs, 5);
-  const inside = measuredPeak([line("a", 20, 9000), ...[1, 2, 3, 4].map((d) => line("a", d, 1000))], NOW)!;
+  const inside = measuredPeak([...line("a", 20, 9000), ...[1, 2, 3, 4].flatMap((d) => line("a", d, 1000))], NOW)!;
   assert.equal(inside.peakMib, 9000, "five runs are the last 5, the old one among them");
   assert.equal(inside.runs, 5);
 });
@@ -144,14 +145,14 @@ test("recommend: a run is its sandboxes' lines together, and counts once", () =>
     { ts: at(1), project: "a", run: "r1", peakMib: 1200 },
     { ts: at(1), project: "a", run: "r1", peakMib: 700 },
     { ts: at(2), project: "a", run: "r0", peakMib: 600 },
-  ];
+  ].flatMap((l) => Array.from({ length: 10 }, () => l));
   const m = measuredPeak(peaks, NOW)!;
   assert.equal(m.runs, 2);
   assert.equal(m.peakMib, 1200);
 });
 
 test("recommend: of several projects the highest wins, and names itself", () => {
-  const peaks = [line("a", 1, 1000), line("b", 2, 2200), line("c", 3, 1500), line("old", 45, 8000)];
+  const peaks = [...line("a", 1, 1000), ...line("b", 2, 2200), ...line("c", 3, 1500), ...line("old", 45, 8000)];
   const m = measuredPeak(peaks, NOW)!;
   assert.deepEqual([m.project, m.peakMib, m.runs, recommend(16 * GIB, 8, peaks, NOW).gateGib * 1024], ["b", 2200, 1, 2420]);
 });
@@ -171,12 +172,13 @@ const reading = (over: Record<string, unknown> = {}) => ({
 });
 
 test("size with measured peaks prints the measured line and sizes by it", () => {
-  const peaks = [line("a", 1, 1400), line("a", 2, 1000), line("b", 3, 300)];
+  const peaks = [...line("a", 1, 1400), ...line("a", 2, 1000), ...line("b", 3, 300)];
   const out = sizeLines(reading({ peaks: () => peaks, now: () => NOW, projectId: () => "b" }), {}, {}).join("\n");
-  assert.match(out, /Measured: the last 2 measured runs of project a, the heaviest of any project in the last 30 days\./);
+  assert.match(out, /Measured: the last 2 measured runs of project a \(a hash of its root[^)]*\), the heaviest of any project in the last 30 days \(each figure needs 10 samples of one project before it counts\)\./);
   assert.match(out, /Gate figure: 1\.37 GiB, cgroup `memory\.peak`[^\n]*plus 10% is 1\.5 GiB\./);
   assert.match(out, /memory fits 6 sandboxes, so maxSandboxes is 6 and maxGates 1\./);
   assert.match(out, /Assumed, not measured: 2 GiB headroom, 6 CPUs per gate/);
+  assert.match(out, /^This project \(b\): 0\.29 GiB `memory\.peak`, from 10 samples of its last 1 measured run\.$/m, "the project it runs in shows its own figure beside the one that set the pool");
   assert.ok(!out.includes("no run has been sampled yet"));
   assert.match(out, /maxSandboxes: 6 {2}\(memory: floor\(\(12 GiB - 2 GiB\) \/ 1\.5 GiB\) = 6; CPUs allow 8\)/);
   const mine = sizeLines(reading({ peaks: () => peaks, now: () => NOW, projectId: () => "a" }), {}, {}).join("\n");

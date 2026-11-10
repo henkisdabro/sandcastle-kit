@@ -27,6 +27,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `traceroute` may, where they cannot fall back to an unprivileged socket). `sandcastle gates`
   shows it. The other capabilities stay: Sandcastle itself needs some, as root, to create a file
   mount's parent directory.
+- **Sandboxes get a memory limit once a project is measured.** A project with no `memory` in its
+  config and at least 10 recorded gate samples now runs each sandbox at 1.5 x its measured
+  anonymous memory (at least 2 GiB), swap included, where before none had a limit; a gate or agent
+  pass the kernel kills at it is red with `out of memory` named. `memory: false` in
+  `.sandcastle/config.ts` opts out, `memory: "8g"` sets the figure. `sandcastle gates` prints the
+  limit (`Sandbox memory: ...`); `/sandcastle update` checks it.
 - Update the kit with `pnpm install` after the pull, as always: `sandcastle doctor` now fails
   "kit dependencies installed" when the installed Sandcastle is not the pinned, patched one.
 
@@ -36,8 +42,23 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   checks it). A run whose base check is skipped on a green record from before stops starting
   tickets once two tickets' setup has failed the same way.
 
+### Added
+
+- **A per-sandbox memory limit (`memory`).** Bytes or `"6g"`, `false` for none; by default 1.5 x
+  the project's measured anonymous memory once it has 10 samples. Set with `docker update` after
+  the open, for a ticket's sandbox and a gate-only one alike, so one suite that balloons is killed
+  inside its own sandbox rather than pushing every sandbox on the VM into its OOM killer. A gate or
+  agent pass killed at the limit says `exit 137, out of memory: ...` instead of a bare exit 137.
+- **A run says once when the sandboxes' kernel has no PSI** (OrbStack's has none), so empty memory
+  pressure figures are not read as calm.
+
 ### Fixed
 
+- **`sandcastle size` is not set by one outlier.** A figure now needs 10 samples of one project
+  before it counts (the 90th percentile of fewer was their highest: one 7.2 GiB pass among seven
+  set a pool of one sandbox for every project); a figure short of them falls back to the next, and
+  a project that ran one sandbox a run reaches 10 from older runs. Run inside another project,
+  `size` shows that project's own figure beside the one that set the pool.
 - **Auto memory is really off in sandboxes, and `autoCompactWindow` takes effect.** The agent's
   environment (`CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`) never reached a
   pass on Sandcastle 0.12.0; on 0.14.0 it is exported before each Claude command. A key the

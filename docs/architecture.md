@@ -2058,11 +2058,15 @@ run's start time: no path or name is written (`test/peaks.test.ts` holds it), an
 that share `run`.
 Everything is best effort: a missing file, a failed or 10-second-late read or an unwritable cache
 records nothing and never fails a pass. `measuredPeak(peaks, now)` is the rule, pure: each project's
-figures over its last 5 runs (`RECENT_RUNS`), each the 90th percentile (`PERCENTILE`, nearest rank)
-of the samples (every line is one; `figureOf`), or the highest below 5 samples
-(`MIN_PERCENTILE_SAMPLES`) - so one outlier pass does not price every later pool - with `figures`
-carrying each one's sample count and highest, which `size` prints beside it, from the project with
-the highest peak of those whose newest run is within 30 days (`FRESH_DAYS`); it leaves out the two
+figures (`projectFigures`) over its last 5 runs (`RECENT_RUNS`, and older ones while those hold
+fewer than `MIN_SAMPLES` lines: `recentRuns`), each the 90th percentile (`PERCENTILE`, nearest rank)
+of the samples (every line is one; `figureOf`), and none with fewer than 10 (`MIN_SAMPLES`: nearest
+rank over fewer is their highest, so one outlier among seven priced every pool on the machine) -
+with `figures` carrying each one's sample count and highest, which `size` prints beside it, from the
+project with the highest peak of those whose newest run is within 30 days (`FRESH_DAYS`); a figure
+short of samples is left off and falls back as one never recorded does, and a project whose
+`peakMib` is short is left out; `size` run in another project adds that one's own figure
+(`projectMeasured`). It leaves out the two
 anon figures of a line without `sampled` (`SAMPLED`, 2: the readings below are taken only while a
 phase runs - an older line may hold the sandbox at rest, about 1 MiB, with nothing on it to say so,
 and its `peakMib` still counts), and any figure under `MIN_MEASURED_MIB` (256 MiB, the same sandbox
@@ -2118,6 +2122,34 @@ Both warn at `PRESSURE_WARN_FULL` (5% `full`); nothing prices a pool from it (th
 decision on #382: per sandbox, warn only).
 An `avg10` reaches back 10 s, so a phase's first read can carry the end of the one before.
 `test/memory-pressure.test.ts` holds it.
+A kernel with no PSI (OrbStack's) has no `memory.pressure` file, so every pressure figure stays empty:
+`onNoPsi(say)`, set by `burndown()` at its start and cleared as the turn ends, is called once, the first
+time a sampled sandbox answers `memory.stat` but not `memory.pressure`, and the run prints one
+`Memory pressure: the sandboxes' kernel has no PSI ...` line.
+
+**The memory limit** (`memoryLimit` and `sandboxMemory` in `src/size.ts`, `limitMemory`, `oomKills`
+and `oomNote` in `src/sandbox.ts`): a project's `memory` (bytes after `loadProject`, which turns
+`"6g"` into them through `memoryBytes`; `false` none) is the limit, cut to the VM's `MemTotal`;
+unset, `memoryLimit` gives `MEMORY_HEADROOM` (1.5) x the higher of the project's own `anonMib` and
+`agentAnonMib` figures (`projectFigures`, the agent's only when it has `MIN_SAMPLES`), at least
+`MEMORY_FLOOR_GIB` (2), rounded up to 256 MiB, and none with fewer than `MIN_SAMPLES` gate samples
+(the anon figure is read every 10 s, so the headroom covers a spike between reads; page cache needs
+none, as the kernel reclaims it before it kills).
+`burndown()` resolves it once, beside the CPU limit, from the start's `docker info` reading, prints
+`memoryLine` and puts the bytes on both the ticket's and the gate-only `project`; `sandcastle gates`
+and `land` do the same in `gateOnly` (`src/cli.ts`).
+Each open (`createSandbox` in the pipeline's `open`, `gateBase`, `landInSandbox`) is followed by
+`limitMemory`: `docker update --memory <b> --memory-swap <b>` on the container `containerOf` names
+(`sandboxId`, else the kernel's hostname file, as `withContainerCpus` does), after the ready hooks,
+since Sandcastle's Docker provider takes no memory option; a failed update says one line and the
+sandbox runs unlimited.
+An OOM kill is a SIGKILL like any other (exit 137), so `memory.events`' `oom_kill` count (hierarchical,
+any OOM killer's) is read through the sandbox's `exec` as a gate pass starts and after a red gate, and
+before an agent pass and after it throws: a rise is `oomNote`'s words, which a red gate carries as
+`Failure.oom` (`exitWords`: the gates log's `RED (...)` line, the console's and the failure log's
+`(exit ...)`, and a `[sandcastle]` line at the end of its output, where the repair prompt and the
+console's tail see it), and which a failed agent pass prints and appends to its error.
+`test/sandbox-memory.test.ts` holds it.
 
 **CPU pressure** is read in the same `sampling` loop (the first read as a pass starts, then every
 10 s, with the same `ended` and `late` rules), as two figures. The judged one is machine-wide and read

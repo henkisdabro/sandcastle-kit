@@ -1109,6 +1109,71 @@ export const sandboxCpus = (
 };
 
 /**
+ * The sandbox's container, as `docker update` takes it, or "" when it cannot be told. The name from Sandcastle's handle
+ * (0.14.0 on), given on the host: nothing inside the sandbox can change it. A handle with no name: read inside the sandbox,
+ * where an agent can put its own `hostname` on PATH (one that prints another container's id would have the host change that
+ * container's limits): the kernel's own file, by absolute paths, which the agent cannot change without CAP_SYS_ADMIN. Only
+ * a container name or id reaches `docker update`, never a flag.
+ */
+const containerOf = async (sandbox: { sandboxId?: string; exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }): Promise<string> => {
+  if (sandbox.sandboxId && CONTAINER_NAME.test(sandbox.sandboxId)) return sandbox.sandboxId;
+  try {
+    const r = await sandbox.exec("/bin/cat /proc/sys/kernel/hostname");
+    return r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * Limits the sandbox's container to `bytes` of memory, swap included (`--memory-swap` the same figure: no swap above it),
+ * and returns the sandbox. A VM's containers share one ceiling, so one gate or agent suite that balloons pushed every other
+ * sandbox into the VM's OOM killer, which picks a victim the kit did not choose; inside a limit the kernel kills within that
+ * sandbox only, and the gate or pass names it (`oomKills`). Set after the open, as `docker update`: Sandcastle's Docker
+ * provider takes no memory option, so the project's `setup` steps (the ready hook) run before it applies. No `bytes` sets
+ * nothing. A failed update says one line and leaves the sandbox unlimited; it never fails the open.
+ */
+export const limitMemory = async <S extends { sandboxId?: string; exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }>(
+  sandbox: S,
+  bytes: number | false | undefined,
+  say: (line: string) => void = console.log,
+): Promise<S> => {
+  if (!bytes) return sandbox;
+  const id = await containerOf(sandbox);
+  try {
+    if (!id) throw new Error("its container id could not be read");
+    await dockerAsync(["update", "--memory", String(bytes), "--memory-swap", String(bytes), id]);
+  } catch (e) {
+    say(`  could not set the sandbox's memory limit to ${memoryText(bytes)}: ${saidOf(e).split("\n")[0]}; it runs with none`);
+  }
+  return sandbox;
+};
+
+/** A memory limit as the kit's lines say it: GiB to one decimal, MiB under 1 GiB (a 256 MiB limit is not "0.3 GiB"). */
+export const memoryText = (bytes: number) => (bytes < 2 ** 30 ? `${Math.round(bytes / 2 ** 20)} MiB` : `${Math.round((bytes / 2 ** 30) * 10) / 10} GiB`);
+
+// The cgroup's count of processes the kernel killed at its memory limit (`memory.events`, hierarchical: every process in
+// the container counts). Read through the sandbox's own exec, as the peaks are.
+const MEMORY_EVENTS = "/sys/fs/cgroup/memory.events";
+
+/** The sandbox's `oom_kill` count so far, or undefined where the kernel gives none (cgroup v1) or the read fails. */
+export const oomKills = async (sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }): Promise<number | undefined> => {
+  try {
+    const r = await sandbox.exec(`cat ${MEMORY_EVENTS} 2>/dev/null`);
+    const m = r.exitCode === 0 ? /^oom_kill (\d+)$/m.exec(String(r.stdout ?? "")) : null;
+    return m ? Number(m[1]) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** What a gate or pass failure says when the sandbox's limit killed a process during it: undefined when it did not (or either count is unknown). */
+export const oomNote = (before: number | undefined, after: number | undefined, bytes: number | false | undefined): string | undefined =>
+  before === undefined || after === undefined || after <= before
+    ? undefined
+    : `out of memory: the kernel killed ${after - before === 1 ? "a process" : `${after - before} processes`} at the sandbox's memory limit${bytes ? ` (${memoryText(bytes)}; \`memory\` in the project config sets it)` : " (the VM's)"}`;
+
+/**
  * Runs `run` with the sandbox's container limited to `cpus.gate`, and puts it back to `cpus.ticket` after, whatever `run`
  * did. A ticket's gates hold a gates slot, so while they run the sandbox is one of at most `maxGates` suites at once and
  * its share is the gate share, not the ticket share it was created with (`docker run --cpus` is fixed at creation).
@@ -1133,20 +1198,7 @@ export const withContainerCpus = async <T>(
       return false;
     }
   };
-  // The container's name from Sandcastle's handle (0.14.0 on), given on the host: nothing inside the sandbox can change it.
-  let id = sandbox.sandboxId && CONTAINER_NAME.test(sandbox.sandboxId) ? sandbox.sandboxId : "";
-  if (!id) {
-    try {
-      // A handle with no name: read inside the sandbox, where an agent can put its own `hostname` on PATH (one that
-      // prints another container's id would have the host raise, then "put back", that container's limit): the
-      // kernel's own file, by absolute paths, which the agent cannot change without CAP_SYS_ADMIN. Only a container id
-      // reaches `docker update`, never a flag.
-      const r = await sandbox.exec("/bin/cat /proc/sys/kernel/hostname");
-      id = r.exitCode === 0 && /^[0-9a-f]{12,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : "";
-    } catch {
-      /* said below */
-    }
-  }
+  const id = await containerOf(sandbox);
   if (!id) {
     say("  could not read the sandbox's container id: its gates run at the ticket's CPU limit");
     return run();

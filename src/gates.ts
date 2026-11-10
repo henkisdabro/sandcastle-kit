@@ -18,7 +18,7 @@ import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, G
 import { type Hook, hooksPathLines, hooksPathOutside, hostHooks } from "./lean.ts";
 import { type MachineCpu, type PassReadings, cpuFields, cpuHigh, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
-import { EXEC_TAIL_CHARS, forgetFork, sandboxConfig, sandcastleVersion, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
+import { EXEC_TAIL_CHARS, forgetFork, limitMemory, oomKills, oomNote, sandboxConfig, sandcastleVersion, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
@@ -32,7 +32,11 @@ export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolea
 // are then the first full run's (so the repair's stop rule, the fix board and the red-on-base check compare a full run
 // with a full run), and `rerun` holds the command the targeted run ran and its own failing tests (unset when its output
 // may have been cut). Flake judging and the landing's readers read those tests, not the first run's (`wholeTests`).
-export type Failure = { name: string; command: string; exitCode: number; output: string; tests?: string[]; rerun?: { command: string; tests?: string[] } };
+// `oom`: the sandbox's memory limit killed a process while the gate ran (`oomNote`), said wherever the exit status is.
+export type Failure = { name: string; command: string; exitCode: number; output: string; tests?: string[]; rerun?: { command: string; tests?: string[] }; oom?: string };
+
+/** A red gate's exit as the gate lines say it: `exit 137, out of memory: ...` when the sandbox's limit killed a process in it. */
+export const exitWords = (f: Pick<Failure, "exitCode" | "oom">) => `exit ${f.exitCode}${f.oom ? `, ${f.oom}` : ""}`;
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `loadHeldMs`: how long the run held this pass for the machine's CPU pressure (`LOAD_PAUSE`, src/load-pause.ts) before it asked for
@@ -209,6 +213,8 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const failures: Failure[] = [];
     const before = await dirtyPaths(sandbox);
     const head = await headOf(sandbox);
+    // A gate killed at the memory limit exits 137 like any SIGKILL: the cgroup's count says which it was.
+    const oomBefore = await oomKills(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     const pressure: PassReadings = {};
     await sampling(sandbox, "gate", async () => {
@@ -233,20 +239,22 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
           const stderr = stripVTControlCharacters(r.stderr);
           appendFileSync(log, `# stderr of ${g.name} (at most its last 8 MiB):\n${stderr.endsWith("\n") ? stderr : stderr + "\n"}`);
         }
-        if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
+        const oom = r.exitCode === 0 ? undefined : oomNote(oomBefore, await oomKills(sandbox), project.memory);
+        if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (${exitWords({ exitCode: r.exitCode, oom })})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
         if (r.exitCode === 0) continue;
         // Without the colour codes a test runner prints into a pipe (vitest does, with no TTY and no TERM): the repair
         // prompt, `failureKey` and `failingTests` read plain text. The gates log is stripped as it is written, too: a
         // `grep "Test Files"` over colour-coded lines misses or garbles them.
-        const whole = stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim();
+        // The OOM line last, where the repair prompt's and the console's tail of the output shows it.
+        const whole = stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr, ...(oom ? [`[sandcastle] ${oom}`] : [])].filter(Boolean).join("\n")).trim();
         // The exec tail reports no drop. Stdout's items are whole lines, so one very long line can evict most of the
         // cap and leave far less than half of it: stdout is cut when the lines `onLine` saw add up to more than came
         // back. Stderr's items are pipe chunks of at most 64 KiB, so after a drop more than half of the cap remains:
         // a stream over half may have been cut, and a test missing from it is not known to be green. (Stdout keeps
         // the half rule too: with no log there is no `onLine` to count by.)
         const mayBeCut = seen > r.stdout.length || r.stdout.length > EXEC_TAIL_CHARS / 2 || r.stderr.length > EXEC_TAIL_CHARS / 2;
-        const failure: Failure = { name: g.name, command, exitCode: r.exitCode, output: clip(whole), ...(mayBeCut ? {} : { tests: failingTests(whole, Infinity) }) };
+        const failure: Failure = { name: g.name, command, exitCode: r.exitCode, output: clip(whole), ...(mayBeCut ? {} : { tests: failingTests(whole, Infinity) }), ...(oom ? { oom } : {}) };
         if (command !== g.command) targetedReds.add(failure);
         failures.push(failure);
         // A timed-out gate may still be running in this container (or Docker
@@ -521,7 +529,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     // planted since the last check would run on the host. Checked last thing before it, after the wait for a slot; a
     // failure throws with nothing opened.
     await beforeOpen?.(`before opening the ${label} sandbox`);
-    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }), exclusive);
+    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }).then((s) => limitMemory(s, project.memory)), exclusive);
     // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
     // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
     // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
@@ -1253,7 +1261,7 @@ export const writeGateLog = (log: string, header: string, failures: GateRun["fai
     return false;
   }
   mkdirSync(dirname(log), { recursive: true });
-  writeFileSync(log, `${header}\n\n` + failures.map((f) => `===== ${f.name}: ${f.command} (exit ${f.exitCode})\n${f.output}\n`).join("\n") + extra);
+  writeFileSync(log, `${header}\n\n` + failures.map((f) => `===== ${f.name}: ${f.command} (${exitWords(f)})\n${f.output}\n`).join("\n") + extra);
   return true;
 };
 
@@ -1311,7 +1319,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   // (out of `ms`) and the sandbox's peak and memory pressure.
   if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.loadHeldMs ? { loadHeldMs: run.loadHeldMs } : {}), ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)), ...cpuFields(cpuOf(run)) };
   for (const f of run.failures) {
-    console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
+    console.log(`\n--- ${f.name} (${exitWords(f)}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
   if (gitHook) {
     console.log(`\nGit hook ${gitHook.name} fails in the sandbox - every agent commit would be refused:\n${gitHook.output.split("\n").slice(-15).join("\n")}`);

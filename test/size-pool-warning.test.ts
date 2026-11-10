@@ -30,6 +30,8 @@ const peak = (peakMib: number, anonMib?: number, agentAnonMib?: number) => ({
   ...(anonMib ? { anonMib } : {}),
   ...(agentAnonMib ? { agentAnonMib } : {}),
 });
+// Ten sandboxes alike: a figure counts from `MIN_SAMPLES` (10) samples of a project.
+const ten = <T,>(l: T): T[] => Array.from({ length: 10 }, () => l);
 const reading = (over: Partial<Readers> = {}): Readers => ({
   // 9.8 GiB VM with 12 CPUs: 7.8 GiB (7987.2 MiB) after the 2 GiB headroom.
   dockerInfo: () => JSON.stringify({ NCPU: 12, MemTotal: 9.8 * GIB, OperatingSystem: "OrbStack" }),
@@ -43,9 +45,9 @@ const reading = (over: Partial<Readers> = {}): Readers => ({
   ...over,
 });
 // Gate anon 3000 MiB, x1.1 = 3300 MiB, and no agent baseline: every sandbox at 3300 MiB, so 2 fit (6600 MiB).
-const measured = { peaks: () => [peak(5253, 3000)] };
+const measured = { peaks: () => ten(peak(5253, 3000)) };
 // The same gate with an agent baseline of 500 MiB (550 with the margin): 2 gates + floor(1387.2 / 550) = 4.
-const withAgent = { peaks: () => [peak(5253, 3000, 500)] };
+const withAgent = { peaks: () => ten(peak(5253, 3000, 500)) };
 
 test("the default 6 and 2 priced at the gate's anon figure warn, naming what they need, what the VM has and the key", () => {
   const lines = poolWarnings(reading(measured), {}, {});
@@ -83,8 +85,8 @@ test("a limit from the environment says to change the variable, not config.json"
 
 test("a recommendation from the assumed figures or from memory.peak alone does not warn", () => {
   assert.deepEqual(poolWarnings(reading(), {}, {}), [], "no peaks at all");
-  assert.deepEqual(poolWarnings(reading({ peaks: () => [peak(5253)] }), {}, {}), [], "memory.peak counts page cache: no anon figure, no warning");
-  assert.deepEqual(poolWarnings(reading({ peaks: () => [{ ...peak(5253, 3000), ts: "2026-01-01T00:00:00.000Z" }] }), {}, {}), [], "peaks older than 30 days are not measured");
+  assert.deepEqual(poolWarnings(reading({ peaks: () => ten(peak(5253)) }), {}, {}), [], "memory.peak counts page cache: no anon figure, no warning");
+  assert.deepEqual(poolWarnings(reading({ peaks: () => ten({ ...peak(5253, 3000), ts: "2026-01-01T00:00:00.000Z" }) }), {}, {}), [], "peaks older than 30 days are not measured");
 });
 
 test("an unreadable runtime gives no warning and no error", () => {
@@ -93,11 +95,11 @@ test("an unreadable runtime gives no warning and no error", () => {
 });
 
 test("size says memory.peak includes page cache, and prices the gate from the anonymous figure when recorded", () => {
-  const without = sizeLines(reading({ peaks: () => [peak(5253)] }), {}, {}).join("\n");
-  assert.match(without, /Gate figure: 5\.13 GiB, cgroup `memory\.peak` \(highest of 1 sample\), which includes page cache/);
+  const without = sizeLines(reading({ peaks: () => ten(peak(5253)) }), {}, {}).join("\n");
+  assert.match(without, /Gate figure: 5\.13 GiB, cgroup `memory\.peak` \(90th of 10 samples; highest [\d.]+ GiB\), which includes page cache/);
   assert.match(without, /no pool warning is given until one is/);
   const withAnon = sizeLines(reading(measured), {}, {}).join("\n");
-  assert.match(withAnon, /Gate figure: 2\.93 GiB, the anonymous memory \(no page cache\) read during gates \(highest of 1 sample\); plus 10% is 3\.22 GiB\. \(Their cgroup `memory\.peak`, page cache included, was 5\.13 GiB\.\)/);
+  assert.match(withAnon, /Gate figure: 2\.93 GiB, the anonymous memory \(no page cache\) read during gates \(90th of 10 samples; highest [\d.]+ GiB\); plus 10% is 3\.22 GiB\. \(Their cgroup `memory\.peak`, page cache included, was 5\.13 GiB\.\)/);
 });
 
 test("memory.stat's anon figure read while a gate pass runs is recorded beside memory.peak", async () => {

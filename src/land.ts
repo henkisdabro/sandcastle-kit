@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
+import { clip, exitWords, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { assertGitUnchanged, checkBeforeClose, dropBackup, type Exclusive, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
@@ -18,7 +18,7 @@ import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { gatesLog, markLog, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, forgetFork, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, forgetFork, limitMemory, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
 
@@ -262,7 +262,7 @@ export const landInSandbox = async (
 export const sandboxOpener =
   (project: Project, image: string, planFile: string, exclusive?: Exclusive): Opener =>
   async (branch) => {
-    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }), exclusive);
+    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }).then((s) => limitMemory(s, project.memory)), exclusive);
     lockWorktree(s.worktreePath);
     return {
       worktreePath: s.worktreePath,
@@ -406,7 +406,7 @@ export const landTicket = async (
       // the next start must not blame a sandbox for a change made since.
       recordGitConfigEnd(project);
       for (const line of gateResultLines(project.gates, run.gates, run.failure)) console.log(line);
-      if (run.failure) console.log(`\n--- ${run.failure.name} (exit ${run.failure.exitCode}), last lines:\n${run.failure.output.split("\n").slice(-15).join("\n")}`);
+      if (run.failure) console.log(`\n--- ${run.failure.name} (${exitWords(run.failure)}), last lines:\n${run.failure.output.split("\n").slice(-15).join("\n")}`);
       throw new OperatorError(
         `Gates red on the merge of ${branch} into ${base}: ${run.failures.map((f) => f.name).join(", ")}. ` +
           `Nothing was merged; the gate output is in .sandcastle/logs/agent-issue-${id}-gates-${id}.log.`,

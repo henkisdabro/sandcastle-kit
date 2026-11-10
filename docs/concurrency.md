@@ -12,6 +12,13 @@ CPU-heavy part, and running too many at once produces false test failures. Chang
 own sandbox, so each sandbox also gets a CPU limit (the project's `cpus`, by default the VM's CPUs
 divided by the run's concurrency for a ticket's sandbox, and by `maxGates` for a gate-only one: a
 landing, the base and verify gates, `sandcastle gates` and `sandcastle land`).
+Each sandbox gets a **memory limit** too, swap included (the project's `memory`, by default 1.5 x
+its measured anonymous memory once it has 10 samples, else none; see
+[Configuration](configuration.md)).
+A Docker Desktop or OrbStack VM is one ceiling for every sandbox on it: without a limit, one suite
+that balloons pushes the others into the VM's OOM killer, which picks its victim across all of them.
+Inside a limit the kernel kills inside that sandbox only, and the gate or pass says so
+(`exit 137, out of memory: ...`) rather than a bare exit 137.
 
 The limit is `docker run --cpus`: a CPU time quota in the container's cgroup, not a set of pinned
 cores, so some CPU counts inside a sandbox still show every CPU of the VM. Node 24's
@@ -132,7 +139,9 @@ Memory pressure is read in the same 10-second loop: the sandbox's own cgroup `me
 (PSI), `some` and `full` `avg10` (the percent of the last 10 seconds its tasks stalled on memory,
 `full` being all of them at once).
 The highest goes onto each gate pass's `timings.jsonl` line (`pressureSome`, `pressureFull`) and
-onto the sandbox's `peaks.jsonl` line, where it was above 0; a kernel with no PSI records nothing.
+onto the sandbox's `peaks.jsonl` line, where it was above 0; a kernel with no PSI records nothing,
+and a run says so once, at the first reading (`Memory pressure: the sandboxes' kernel has no PSI
+...`): OrbStack's kernel is one, so there the pressure figures stay empty, which is not calm.
 `size` shows the highest of the runs it rests on and, at 5% `full` or more, says the VM was short of
 memory at that pool size; a run's closing summary has a `Memory pressure` line under the same
 condition.
@@ -172,16 +181,23 @@ A machine that gives no reading (see above) never holds.
 The wait is its own figure in the gates log (`# held Ns for machine load`) and the timings
 (`loadHeldMs`), apart from the gates slot wait.
 `size` takes the project whose peak figure (priced as below) is highest over its last 5 measured
-runs, of the projects measured in the last 30 days, and prices each figure at the 90th percentile of
-that project's samples over those runs (every sandbox's line is one sample; with fewer than 5
-samples the highest is used), plus 10%: one pass that peaked far above the rest would otherwise set
-every later pool, so the highest is shown beside the figure (`90th of 34 samples; highest 5.1 GiB`)
-and not priced.
+runs (and older ones while those hold fewer than 10 samples), of the projects measured in the last
+30 days, and prices each figure at the 90th percentile of that project's samples over those runs
+(every sandbox's line is one sample), plus 10%: one pass that peaked far above the rest would
+otherwise set every later pool, so the highest is shown beside the figure (`90th of 34 samples;
+highest 5.1 GiB`) and not priced.
+A figure needs 10 samples of one project before it counts: the nearest-rank 90th percentile of
+fewer is their highest, and one outlier among seven once set a pool of one sandbox for every
+project.
+A figure short of them falls back as one never recorded does (the anonymous gate figure to the peak,
+the agent's to `agentMib`, then to the gate figure), and a project with fewer than 10 peak samples
+does not count at all.
 The gate figure is `anonMib` when any of the runs recorded it, else the peak; the agent baseline is
 `agentAnonMib` when the gate figure is `anonMib` and a run recorded it, else `agentMib`, else the
 gate figure ("no agent baseline measured yet").
 It prints each figure with where it came from, the project (`this project` when you run it inside
-it, else the hash), the runs it rests on and the resulting limits.
+it, else the hash), the runs it rests on and the resulting limits; run inside another project, it
+adds that project's own gate figure, or that it has too few samples yet.
 Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
 keeps the assumed one.
 The peak counts page cache the kernel has not yet reclaimed, so it is on the high side, which suits
