@@ -22,7 +22,7 @@ mkdirSync(bin);
 const log = join(stub, "calls.log");
 // `get T`: answers/get-T.json, else not found. `keys T`: answers/keys-T.json, when there, becomes T's next answer
 // (Ctrl-C turning a view into a shell). `run`: answers/runs/* one at a time, else answers/run.json, else fails;
-// with answers/name-taken, a named slot fails as hc does. Every other verb answers `{}`.
+// with answers/name-taken, a named slot (paned or a sub-agent) fails as hc does. Every other verb answers `{}`.
 writeFileSync(
   join(bin, "hc"),
   `#!/bin/sh
@@ -33,7 +33,7 @@ case "$1" in
        [ -f "$A/get-$2.json" ] && { cat "$A/get-$2.json"; exit 0; }
        echo '{"error":{"kind":"not_found"}}' >&2; exit 3 ;;
   keys) [ -f "$A/keys-$2.json" ] && cp "$A/keys-$2.json" "$A/get-$2.json"; echo '{}' ;;
-  run) case " $* " in *" --name sc-"*"-slot-"*) [ -f "$A/name-taken" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; } ;; esac
+  run) case " $* " in *" --rm "*" --name "*) [ -f "$A/name-taken" ] && { echo '{"error":{"kind":"name_taken"}}' >&2; exit 1; } ;; esac
        f=$(ls "$A/runs" 2>/dev/null | head -n 1); [ -n "$f" ] && { cat "$A/runs/$f"; rm "$A/runs/$f"; exit 0; }
        [ -f "$A/run.json" ] && { cat "$A/run.json"; exit 0; }; echo '{"error":{"message":"core not running"}}' >&2; exit 1 ;;
   *) echo '{}' ;;
@@ -43,7 +43,7 @@ esac
 chmodSync(join(bin, "hc"), 0o755);
 Object.assign(process.env, { PATH: `${bin}${delimiter}${process.env.PATH}`, HC_TERMINAL_ID: "t-mine" });
 
-const { coreRecords, coreViewRecord, openCoreStatus, openCoreView, projectKey, readCoreView, readSlotState, runRecords, slotAddresses, slotLink, slotName, slotStateFile, statusName, teardown, askingInCore } =
+const { coreRecords, coreViewRecord, openCoreStatus, openCoreView, projectKey, readCoreView, readSlotState, runRecords, slotAddresses, slotLink, slotName, slotStateFile, statusName, teardown, ticketName, askingInCore } =
   await import("../src/herdr-core.ts");
 const { askingInPane, openSandboxView, viewRecord } = await import("../src/herdr.ts");
 const { openStatusPane } = await import("../src/run.ts");
@@ -292,28 +292,68 @@ test("the status view names a live run's slot terminals by ticket and address, a
   }
 });
 
-test("in a core terminal, slots only with panes \"all\" and the view on", () => {
-  const root = project();
-  const p = { root, name: "shop", herdr: {} } as unknown as Project;
-  reset(addresses("t7", "t8"));
-  const view = openSandboxView(p, 2, (id) => `#${id}`, undefined, "all");
-  assert.equal(view.status, "t7");
-  view.claim("12", "a");
-  assert.equal(calls().filter((c) => c[0] === "run").length, 2);
-
-  for (const [mode, env] of [["none", undefined], ["all", "0"]] as const) {
-    const other = project();
+test("in a core terminal: panes \"all\" puts a slot in the caller's tab, \"none\" makes it a sub-agent, the view off opens none", () => {
+  const p = { name: "shop", herdr: {} } as unknown as Project;
+  const slotRun = (mode: "all" | "none") => {
+    const root = project();
     reset(addresses("t7", "t8"));
-    process.env.SANDCASTLE_HERDR_VIEW = env;
-    try {
-      const off = openSandboxView({ ...p, root: other } as Project, 2, (id) => `#${id}`, undefined, mode);
-      off.claim("12", "a");
-      assert.equal(off.status, undefined, "the caller opens the status view");
-      assert.deepEqual(calls(), [], `${mode}, SANDCASTLE_HERDR_VIEW=${env}: no slot`);
-    } finally {
-      delete process.env.SANDCASTLE_HERDR_VIEW;
-    }
+    const view = openSandboxView({ ...p, root } as Project, 2, (id) => `#${id}`, undefined, mode);
+    assert.equal(view.status, "t7");
+    view.claim("12", "a");
+    const runs = calls().filter((c) => c[0] === "run");
+    assert.equal(runs.length, 2, `${mode}: the status terminal and one slot`);
+    return { root, slot: runs[1] };
+  };
+  const paned = slotRun("all");
+  assert.ok(paned.slot.includes("herdr.tab=tb1") && paned.slot.includes(slotName(paned.root, 0)));
+  const sub = slotRun("none");
+  assert.ok(!sub.slot.some((w) => w.startsWith("herdr.")), "no herdr.* label: the app gives it no pane");
+  assert.equal(sub.slot[sub.slot.indexOf("--parent") + 1], "t7", "listed under the run's agent");
+  assert.equal(sub.slot[sub.slot.indexOf("--name") + 1], ticketName(sub.root, "12"));
+
+  const other = project();
+  reset(addresses("t7", "t8"));
+  process.env.SANDCASTLE_HERDR_VIEW = "0";
+  try {
+    const off = openSandboxView({ ...p, root: other } as Project, 2, (id) => `#${id}`, undefined, "all");
+    off.claim("12", "a");
+    assert.equal(off.status, undefined, "the caller opens the status view");
+    assert.deepEqual(calls(), [], "SANDCASTLE_HERDR_VIEW=0: no slot");
+  } finally {
+    delete process.env.SANDCASTLE_HERDR_VIEW;
   }
+});
+
+test("a sub-agent slot is named after its ticket, so the next ticket gets a terminal of its own", () => {
+  const root = project();
+  reset(addresses("t7", "t8", "t9"));
+  const view = openCoreView(root, CALLER, { kit: KIT, instance: "i1", panes: 1, slots: true, paned: false, ref: (id) => `#${id}` });
+  view.claim("12", "Add cart");
+  view.finish("12", "green");
+  view.claim("14", "Fix it");
+  const after = calls().filter((c) => c[0] !== "get");
+  const runs = after.filter((c) => c[0] === "run");
+  assert.equal(runs.length, 3);
+  assert.equal(runs[2][runs[2].indexOf("--name") + 1], ticketName(root, "14"));
+  assert.equal(runs[2].at(-3), "0", "the same slot: its log link and state file");
+  assert.deepEqual(after.slice(after.indexOf(runs[1]) + 1, after.indexOf(runs[2])), [["kill", "t8", "--json"], ["rm", "t8", "--json"]], "the last ticket's terminal ends first");
+  assert.deepEqual(readCoreView(root)?.slots, ["t9"]);
+  assert.deepEqual(readSlotState(slotStateFile(root, 0)), { address: "t9", issue: "14", ref: "#14", title: "Fix it", phase: "setup", state: "working" });
+
+  // A failed start leaves no address on record and the run goes on without slots.
+  reset();
+  view.finish("14", "green");
+  quietly(() => view.claim("15", "Next"));
+  assert.deepEqual(readCoreView(root)?.slots, []);
+});
+
+test("a ticket's terminal name: project and ticket, within hc's names", () => {
+  const root = join(project(), "My Shop.app");
+  mkdirSync(root);
+  assert.equal(ticketName(root, "12"), "my-shop-app-12");
+  assert.equal(ticketName(root, "0007-Add CSV export, now"), "my-shop-app-0007-add-csv-export");
+  for (const issue of ["12", "x".repeat(80), "!!!", "PROJ-1234"]) assert.match(ticketName(root, issue), /^[a-z0-9_-]{1,32}$/);
+  assert.equal(ticketName(join(project(), "日本"), "12"), "12", "a project name with nothing hc allows: the ticket alone");
 });
 
 test("in a core terminal, openStatusPane opens the core view; openSandboxView retires a Herdr TUI record and drives no herdr", () => {
@@ -322,7 +362,13 @@ test("in a core terminal, openStatusPane opens the core view; openSandboxView re
   writeFileSync(viewRecord(root), JSON.stringify({ tab: "w1:t2", adopted: false, status: "w1:t2-1", panes: [] }));
   reset({ "run.json": { address: "t7" } });
   const p = { root, name: "shop", herdr: {} } as unknown as Project;
-  const view = openSandboxView(p, 2, (id) => `#${id}`, undefined, "none");
+  process.env.SANDCASTLE_HERDR_VIEW = "0";
+  let view;
+  try {
+    view = openSandboxView(p, 2, (id) => `#${id}`, undefined, "none");
+  } finally {
+    delete process.env.SANDCASTLE_HERDR_VIEW;
+  }
   assert.equal(view.status, undefined);
   assert.equal(JSON.parse(readFileSync(viewRecord(root), "utf8")).reported, true);
   assert.equal(tabAwaitsReport(root), false);

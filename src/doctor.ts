@@ -27,6 +27,17 @@ import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
 import { runtimeProblemNow } from "./runtime.ts";
 import { resolveVersions, toolsFloorLine } from "./versions.ts";
 
+/** The herdr-core version the kit's view was last checked against (src/osc7501.ts's format, the sub-agent listing). */
+export const HC_VERIFIED = "0.1.17";
+/** Whether `hc --version`'s answer (`hc 0.1.19`) names a version below `floor`; an answer with no version is not. */
+export const olderThan = (answer: string, floor: string) => {
+  const found = answer.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!found) return false;
+  const want = floor.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if (Number(found[i + 1]) !== want[i]) return Number(found[i + 1]) < want[i];
+  return false;
+};
+
 export const run = (cmd: string, args: string[], cwd?: string, timeout?: number) => {
   try {
     return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd, timeout }).trim();
@@ -610,7 +621,13 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   if (host.kind === "core") {
     const hc = run("hc", ["--version"]);
     console.log(`ok   herdr-core${hc ? ` (${hc})` : ""}: opens the status view beside this terminal (terminal ${host.terminal.address})`);
-  } else check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
+    if (hc && olderThan(hc, HC_VERIFIED)) console.log(`warn herdr-core ${hc} is older than ${HC_VERIFIED}, the version the kit's view was checked against: \`hc update\` (or the Herdr app's update) brings it up to date.`);
+  } else {
+    check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
+    // Installed but not this terminal's host: a run from here shows nothing in the Herdr app, which surprises.
+    // `--version` only prints: it never starts a core.
+    if (host.kind === "none" && run("hc", ["--version"])) console.log("info herdr-core is installed, but this terminal is not one of its own: start a run from a terminal in the Herdr app to see it there.");
+  }
   // The Herdr TUI plugin is checked wherever Herdr TUI is installed, not only from one of its tabs: setup from a
   // herdr-core terminal or a plain terminal offers it too. Outside a Herdr TUI tab it is information, since nothing in
   // this terminal needs it. `herdr plugin list` reads Herdr's own files, so a stopped server answers too.

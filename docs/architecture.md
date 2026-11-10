@@ -1132,9 +1132,15 @@ status`; the next run finds it by name and reuses it while it runs the status vi
 `hc keys <t> ctrl+c`, which leaves a `--keep` terminal its shell) or a bare shell, typing the
 command with every word quoted; a person's program in it keeps the name, and the new view opens
 unnamed.
-Slots (`herdr.panes: "all"` and not `SANDCASTLE_HERDR_VIEW=0`) are `--rm --parent <status>`,
-running `sandcastle slot N --instance <id>`; their numbers are not reused within a run, and each
-slot's state is `.sandcastle/logs/core-slot-N.json`, its log link `herdr-pane-N.log` as on Herdr TUI.
+Slots (unless `SANDCASTLE_HERDR_VIEW=0`) are `--rm --parent <status>`, running `sandcastle slot N
+--instance <id>`; their numbers are not reused within a run, and each slot's state is
+`.sandcastle/logs/core-slot-N.json`, its log link `herdr-pane-N.log` as on Herdr TUI.
+With `herdr.panes: "all"` a slot carries the caller's `herdr.space` and `herdr.tab` labels, so the
+app gives it a pane in that tab, and it is named `sc-<key>-slot-N` and reused ticket after ticket.
+Otherwise it carries neither, so the app gives it no pane and lists it as the status terminal's
+sub-agent; that list shows a terminal with no pane by its name alone (never its title or record),
+so it is named `<project>-<ticket>` (`ticketName`), and a free slot's terminal is ended and a new
+one started for the next ticket. A taken name, in either case, starts the terminal unnamed.
 Teardown at exit kills and removes the slots this instance's record holds, never by label: a
 successor that took the lock as this run exited (the lock's exit handler runs first) owns what it
 started.

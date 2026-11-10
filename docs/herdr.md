@@ -5,9 +5,8 @@ What a run lays out in Herdr TUI and in the Herdr app (herdr-core), and the Herd
 
 sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https://herdr.dev), the
 terminal multiplexer for coding agents.
-Both of its engines work: Herdr TUI (the `herdr` multiplexer, and its panes in Herdr UI) as
-described here, and herdr-core (`hc`, the server under the Herdr app and Herdr UI) as in
-[herdr-core](#herdr-core) below.
+Both of its engines work: Herdr TUI (the `herdr` multiplexer) as described here, and herdr-core
+(`hc`, the server under the Herdr app) as in [herdr-core](#herdr-core) below.
 Start `sandcastle run` in a Herdr TUI pane and the run lays out its own view:
 
 - 🗂️ **A tab of its own.** A run you start by hand, in a terminal that is the only pane of its
@@ -85,29 +84,34 @@ The run never moves your focus: it works in the background until you switch to i
 Started in a herdr-core terminal, by hand or with `--detach`, the run opens its status view as a
 core terminal split into that tab, and prints `Status view: terminal <id>`.
 It never adopts the tab or opens one.
-The kit talks to herdr-core alone (`hc`), so Herdr UI and the official Herdr app show the same
-thing:
+The kit talks to herdr-core alone (`hc`), so the Herdr app, and any other client of herdr-core,
+shows the same thing:
 
 - 🚦 **The run in the sidebar.** The status terminal reports the run as an agent: *working* while it
   goes, *blocked* while a ticket needs you, during the run or after it (the app raises its own
   needs-you alert), else *done* at the end (*error* when the run ended early), with the merged share
   of the run as its progress and the run line as its title.
-- 🧱 **A terminal per sandbox, if you want them.** `herdr: { panes: "all" }` (or
-  `SANDBOX_PANES=all`) opens one terminal per concurrent sandbox, nested under the status view,
-  following its ticket's log and titled with its ticket and step; the status view's note lists
-  them (`terminals: #12 t8`). Each ends with its sandbox, and on its own within seconds of a run
-  killed outright.
+- 🧱 **A terminal per sandbox.** Each running sandbox gets a terminal of its own, following its
+  ticket's log and reporting its ticket and step. By default it is a sub-agent of the status view
+  with no pane: the Herdr app lists it under the run's agent, named after the project and ticket
+  (`shop-12`), and a click on it there peeks at it, as does a Ctrl-click (Cmd-click on macOS) on
+  its address in the status view's note (`terminals: #12 t8`). `herdr: { panes: "all" }` (or
+  `SANDBOX_PANES=all`) gives each one a pane beside the status view instead, titled with its
+  ticket and step. Each ends with its sandbox, and on its own within seconds of a run killed
+  outright.
 - ♻️ **The same view, run after run.** The status terminal stays when the run ends, showing how it
   ended, and the next run of the project reuses it by name wherever you moved it - while it shows
   the status view or a bare shell; a terminal running your own command keeps it, and the run's view
   opens beside you instead.
 
-What Herdr TUI's plugin does has no herdr-core counterpart yet: no tab bar line, ticket card or
-Ctrl-click links, and no status view brought back after a restart of the core (the status terminal
-comes back as a shell, and the next run reuses it; `sandcastle status` there shows the run
+What Herdr TUI's plugin does has no herdr-core counterpart yet: no tab bar line or ticket card
+(a Ctrl-click on a ticket opens nothing; on a terminal address it peeks, as above), and no status
+view brought back after a restart of the core (the status terminal comes back as a shell, and the next run reuses it; `sandcastle status` there shows the run
 meanwhile).
 `sandcastle herdr ...` in a herdr-core terminal says so.
 `SANDCASTLE_HERDR_VIEW=0` opens no sandbox terminals; the status view still opens.
+The app shows a run only when it starts in one of the app's terminals: started from Terminal.app
+or another terminal outside the app, a run opens no view there (`sandcastle doctor` says so).
 
 A command counts as running in herdr-core only when the terminal `HC_TERMINAL_ID` names is one of
 its own ancestors, so a stale variable a Herdr TUI server or a core started from the other inherited
