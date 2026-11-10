@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-10
+
 ### Upgrading
 
 - **In the Herdr app, a run's sandboxes now show by default.** A run started in a herdr-core
