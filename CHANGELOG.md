@@ -21,9 +21,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A detached run outlives its herdr-core terminal.** From hc 0.1.19, `sandcastle run --detach`
   started in a herdr-core terminal keeps running when that terminal closes; the docs say so.
 - **A status terminal left finished is reopened by name.** On hc 0.1.19 an ordinary exit is final
-  in a `--keep` terminal: a status view quit with `q` leaves it finished, with no shell to reuse.
-  The next run now removes it and opens its view afresh under the same name, instead of waiting
-  for a shell.
+  in a `--keep` terminal. A status terminal that ends finished when the next run stops its view is
+  now removed and opened afresh under the same name, as one found finished already was, rather
+  than waited on for 5 s.
 
 ## [0.21.0] - 2026-11-10
 
