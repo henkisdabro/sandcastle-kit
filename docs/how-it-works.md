@@ -21,7 +21,7 @@ What the kit adds to Sandcastle, feature by feature, and the path one run takes.
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](safety.md#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
-| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view (in herdr-core, a terminal beside yours; the next run reuses that view wherever you put it), and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](herdr.md#-works-best-in-herdr). |
+| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view (in herdr-core, a terminal beside yours, which the next run replaces with its own under the same name), and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](herdr.md#-works-best-in-herdr). |
 | 🔭 | **A Claude Code mod** | Optional: the session that started the run shows it above the prompt, says when a ticket needs you, and is told when the run ends - see [The Claude Code mod](claude-mod.md#-the-claude-code-mod). |
 | 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, ticket triage, starting and closing runs, and updating. |
 

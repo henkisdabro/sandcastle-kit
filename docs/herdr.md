@@ -100,10 +100,10 @@ shows the same thing:
   ticket and step. Each ends with its sandbox, and on its own within seconds of a run killed
   outright.
 - ♻️ **The same view, run after run.** The status terminal stays when the run ends, showing how it
-  ended, and the next run of the project reuses it by name wherever you moved it - while it shows
-  the status view or a bare shell; a view you quit (with `q`) is opened afresh beside you, under
-  the same name; a terminal running your own command keeps it, and the run's view opens beside you
-  instead.
+  ended, and the next run of the project finds it by name: while it shows the status view, a bare
+  shell or a view you quit (with `q`), it is replaced by a fresh view beside you, under the same
+  name; a terminal running your own command keeps it, and the run's view opens beside you
+  instead, unnamed.
 - 🛰️ **A detached run outlives its terminal.** From hc 0.1.19, `sandcastle run --detach` started in
   a herdr-core terminal keeps running when that terminal closes (an older hc ended it with the
   terminal).
@@ -112,7 +112,7 @@ shows the same thing:
 
 What Herdr TUI's plugin does has no herdr-core counterpart yet: no tab bar line or ticket card
 (a Ctrl-click on a ticket opens nothing; on a terminal address it peeks, as above), and no status
-view brought back after a restart of the core (the status terminal comes back as a shell, and the next run reuses it; `sandcastle status` there shows the run
+view brought back after a restart of the core (the status terminal comes back as a shell, and the next run replaces it; `sandcastle status` there shows the run
 meanwhile).
 `sandcastle herdr ...` in a herdr-core terminal says so.
 `SANDCASTLE_HERDR_VIEW=0` opens no sandbox terminals; the status view still opens.
