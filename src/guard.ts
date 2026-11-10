@@ -1527,9 +1527,22 @@ export const protectedPlanLines = (project: Project, tickets: { id: string; body
     return paths.length ? [`${ref(t.id)} will be held for a person to merge (${paths.join(", ")})`] : [];
   });
 
+/**
+ * The paths a branch changes since it left `base`, as git holds them: `--no-renames` lists a rename as the delete of
+ * its source and the add of its target (the default pairs them and names only the target, so a protected file moved
+ * away goes unseen), and `-z` with `core.quotePath=false` returns a non-ASCII name raw, not as a quoted octal escape
+ * that no prefix test matches. `filter` is git's `--diff-filter`.
+ */
+const changedPaths = (project: Project, branch: string, filter?: string): string[] =>
+  sh(
+    "git",
+    ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", ...(filter ? [`--diff-filter=${filter}`] : []), `${project.baseBranch}...${branch}`],
+    project.root,
+  ).split("\0").filter(Boolean);
+
 export const protectedChanges = (project: Project, branch: string) => {
   const base = project.baseBranch;
-  const changed = sh("git", ["diff", "--name-only", `${base}...${branch}`], project.root).split("\n").filter(Boolean);
+  const changed = changedPaths(project, branch);
   const hits = protectedAmong(project, changed);
   // package.json only when an install-time script changed.
   for (const f of changed.filter((f) => f === "package.json" || f.endsWith("/package.json"))) {
@@ -1551,9 +1564,7 @@ export const protectedChanges = (project: Project, branch: string) => {
 // stays in the history for good. A branch that adds or grows one is held like a protected path.
 const LARGE_BYTES = 50 * 1024 * 1024;
 export const largeFiles = (project: Project, branch: string): string[] =>
-  sh("git", ["diff", "--name-only", "--diff-filter=AM", `${project.baseBranch}...${branch}`], project.root)
-    .split("\n")
-    .filter(Boolean)
+  changedPaths(project, branch, "AM")
     .flatMap((f) => {
       const bytes = Number(sh("git", ["cat-file", "-s", `${branch}:${f}`], project.root));
       return bytes > LARGE_BYTES ? [`${f} (${Math.round(bytes / 1024 / 1024)} MB)`] : [];
