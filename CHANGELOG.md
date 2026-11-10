@@ -48,7 +48,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   the project's measured anonymous memory once it has 10 samples. Set with `docker update` after
   the open, for a ticket's sandbox and a gate-only one alike, so one suite that balloons is killed
   inside its own sandbox rather than pushing every sandbox on the VM into its OOM killer. A gate or
-  agent pass killed at the limit says `exit 137, out of memory: ...` instead of a bare exit 137.
+  agent pass killed for memory says so instead of a bare exit 137, in the gates log and in the
+  ticket's note, and says whose it was: the sandbox's own limit (raise `memory`) or the VM running
+  out (run fewer sandboxes).
 - **A run says once when the sandboxes' kernel has no PSI** (OrbStack's has none), so empty memory
   pressure figures are not read as calm.
 

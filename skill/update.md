@@ -214,10 +214,12 @@ Declining is not skipping: every step still runs its check, and only the asking 
        WARNING names it. Nothing found and no WARNING: nothing to do.
    22. **Sandbox memory limit.** Run `sandcastle gates` and read its `Sandbox memory:` line. A
        limit measured from the project's runs (`1.5 x the ... measured`) or set by `memory` in
-       `.sandcastle/config.ts` is kept unless a gate goes red with `out of memory: the kernel killed
-       a process at the sandbox's memory limit`: then propose raising `memory` (`"8g"`, within the
-       VM `sandcastle size` reports) or, if the suite leaks, fixing the suite; `memory: false` lifts
-       the limit. `no limit (N of the 10 gate samples ...)` and a green gates run: nothing to do.
+       `.sandcastle/config.ts` is kept unless a gate goes red with `out of memory: killed a process
+       at the sandbox's ... limit`: then propose raising `memory` (`"8g"`, within the VM `sandcastle
+       size` reports) or, if the suite leaks, fixing the suite; `memory: false` lifts the limit. A
+       red `out of memory: the VM ran out` is the VM's, not the limit's: propose a lower
+       `maxSandboxes` (from `sandcastle size`), never a higher `memory`. `no limit (N of the 10
+       gate samples ...)` and a green gates run: nothing to do.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

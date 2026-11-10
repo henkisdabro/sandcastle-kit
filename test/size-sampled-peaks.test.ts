@@ -177,7 +177,7 @@ test("a project whose peak is under the floor is not measured: size keeps the as
   const peaks = ran({ peakMib: 200, anonMib: 150, sampled: 2 });
   assert.equal(measuredPeak(peaks, NOW), undefined);
   const out = text(sizeLines(reading(peaks), {}, {}));
-  assert.match(out, /Assumed, not measured \(no run has been sampled yet\)/);
+  assert.match(out, /Assumed, not measured \(no run has been sampled yet\)/, "a sandbox at rest is no sample");
   assert.deepEqual([recommend(13.7 * GIB, 12, peaks, NOW).gateFrom], ["assumed"]);
 });
 

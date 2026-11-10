@@ -49,7 +49,7 @@ import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeS
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { startClock, type StartClock } from "./start-clock.ts";
-import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { memoryLine, poolWarningsNow, sandboxMemory } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, type Ticket, type Tracker } from "./tracker.ts";
@@ -2001,7 +2001,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       for (;;) {
         const logFrom = logSize(opts.logging);
         if (opts.logging?.type === "file" && typeof opts.logging.path === "string") passStarts.set(basename(opts.logging.path), logFrom);
-        // An agent killed at the sandbox's memory limit ends like any killed process: the cgroup's count says which it was.
+        // An agent killed for memory ends like any killed process: the cgroup's counts say which it was, and whose limit.
         const oomBefore = await oomKills(sandbox);
         try {
           // REPORT_SCHEMA=1: the agent's capture of the report, ended as the pass returns or throws.
@@ -2014,6 +2014,10 @@ export const createPipeline = (ctx: PipelineContext) => {
               for (const f of said.followups) ctx.followUps?.push({ ...f, from: issue.id, phase });
               return Object.assign(r, { said });
             });
+          // The kernel kills the largest process, usually a test the agent started, not the agent: the pass goes on, and the
+          // agent saw only `Killed`.
+          const passOom = oomNote(oomBefore, await oomKills(sandbox), project.memory);
+          if (passOom) console.log(`${ref(issue.id)}: during the ${phase} pass, ${passOom}.`);
           return parkedInStep > parkedBefore ? Object.assign(r, { waitMs: parkedInStep - parkedBefore }) : r;
         } catch (error) {
           const facts = passReport(opts.agent)?.read();
@@ -2022,7 +2026,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           const oom = oomNote(oomBefore, await oomKills(sandbox), project.memory);
           if (oom) {
             console.log(`${ref(issue.id)}: the ${phase} pass failed, ${oom}.`);
-            if (error instanceof Error) error.message = `${error.message} (${oom})`;
+            withOom(error, oom);
           }
           // The cross-review is a second opinion that never stopped a run, so its limit is not waited out either.
           // Without a juncture there is nothing to park at, and a pass run again at once would only fail again.
@@ -3000,13 +3004,15 @@ export const burndown = async (project: Project, turn?: TurnOptions): Promise<bo
     // The run's one load pause outlives the turn; the turn's hold and its record's listener do not, a throw included.
     setLoadHold(undefined);
     turn?.loadPause?.listen(undefined);
-    // Said once a turn at most, and never after it: a later turn sets its own.
+    // Never said after the turn: a later turn of the run sets it again, unless it was said (`TurnOptions.psi`).
     onNoPsi(undefined);
   }
 };
 
 /** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
-type TurnOptions = { settings: ResolvedSettings; turn: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
+// `psi`: the run's own, across its turns: whether the no-PSI line was said.
+type PsiState = { told: boolean };
+type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
 
 const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   // The first turn takes the clock `sandcastle run` started; a later turn counts only its own steps.
@@ -3214,7 +3220,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const memoryBytes: number | false = memory.bytes ?? false;
   console.log(memoryLine(memory));
   // Said at the first reading, as no sandbox is open yet: early in the run, with the base gates.
-  onNoPsi(() => console.log("Memory pressure: the sandboxes' kernel has no PSI (no /sys/fs/cgroup/memory.pressure), so none is recorded this run; the closing summary and `sandcastle size` show none, which is not the same as none measured."));
+  onNoPsi(() => console.log("Memory pressure: the sandboxes' kernel has no PSI (no /sys/fs/cgroup/memory.pressure), so none is recorded this run; the closing summary and `sandcastle size` show none, which is not the same as no pressure."), turn?.psi);
   // The project as the gate-only sandboxes see it; `project` from here is a ticket's.
   const gateProject = { ...project, cpus: gateCpus, memory: memoryBytes };
   project = { ...project, cpus: ticketCpus, memory: memoryBytes };

@@ -1140,11 +1140,21 @@ export const limitMemory = async <S extends { sandboxId?: string; exec(cmd: stri
 ): Promise<S> => {
   if (!bytes) return sandbox;
   const id = await containerOf(sandbox);
+  const fail = (e: unknown) => saidOf(e).split("\n")[0];
+  if (!id) {
+    say(`  could not set the sandbox's memory limit to ${memoryText(bytes)}: its container id could not be read; it runs with none`);
+    return sandbox;
+  }
   try {
-    if (!id) throw new Error("its container id could not be read");
     await dockerAsync(["update", "--memory", String(bytes), "--memory-swap", String(bytes), id]);
   } catch (e) {
-    say(`  could not set the sandbox's memory limit to ${memoryText(bytes)}: ${saidOf(e).split("\n")[0]}; it runs with none`);
+    // A kernel with no swap accounting refuses `--memory-swap`: the limit alone still holds the sandbox to its share.
+    try {
+      await dockerAsync(["update", "--memory", String(bytes), id]);
+      say(`  the sandbox's swap could not be limited (${fail(e)}): its memory is limited to ${memoryText(bytes)}, its swap is not`);
+    } catch (e2) {
+      say(`  could not set the sandbox's memory limit to ${memoryText(bytes)}: ${fail(e2)}; it runs with none`);
+    }
   }
   return sandbox;
 };
@@ -1152,26 +1162,45 @@ export const limitMemory = async <S extends { sandboxId?: string; exec(cmd: stri
 /** A memory limit as the kit's lines say it: GiB to one decimal, MiB under 1 GiB (a 256 MiB limit is not "0.3 GiB"). */
 export const memoryText = (bytes: number) => (bytes < 2 ** 30 ? `${Math.round(bytes / 2 ** 20)} MiB` : `${Math.round((bytes / 2 ** 30) * 10) / 10} GiB`);
 
-// The cgroup's count of processes the kernel killed at its memory limit (`memory.events`, hierarchical: every process in
-// the container counts). Read through the sandbox's own exec, as the peaks are.
+// The cgroup's memory events, read through the sandbox's own exec, as the peaks are. `oom_kill` counts the processes of the
+// container killed by any OOM killer, the VM's own included; `oom` rises only when the container reached its own
+// `memory.max`. A kill with no rise in `oom` is the VM's: it ran out, and picked this sandbox's process.
 const MEMORY_EVENTS = "/sys/fs/cgroup/memory.events";
 
-/** The sandbox's `oom_kill` count so far, or undefined where the kernel gives none (cgroup v1) or the read fails. */
-export const oomKills = async (sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }): Promise<number | undefined> => {
+/** The sandbox's `oom` and `oom_kill` counts so far (`OomCounts`), or undefined where the kernel gives none (cgroup v1) or the read fails. */
+export type OomCounts = { oom: number; kills: number };
+export const oomKills = async (sandbox: { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> }): Promise<OomCounts | undefined> => {
   try {
     const r = await sandbox.exec(`cat ${MEMORY_EVENTS} 2>/dev/null`);
-    const m = r.exitCode === 0 ? /^oom_kill (\d+)$/m.exec(String(r.stdout ?? "")) : null;
-    return m ? Number(m[1]) : undefined;
+    const text = r.exitCode === 0 ? String(r.stdout ?? "") : "";
+    const kills = /^oom_kill (\d+)$/m.exec(text);
+    const oom = /^oom (\d+)$/m.exec(text);
+    return kills && oom ? { oom: Number(oom[1]), kills: Number(kills[1]) } : undefined;
   } catch {
     return undefined;
   }
 };
 
-/** What a gate or pass failure says when the sandbox's limit killed a process during it: undefined when it did not (or either count is unknown). */
-export const oomNote = (before: number | undefined, after: number | undefined, bytes: number | false | undefined): string | undefined =>
-  before === undefined || after === undefined || after <= before
-    ? undefined
-    : `out of memory: the kernel killed ${after - before === 1 ? "a process" : `${after - before} processes`} at the sandbox's memory limit${bytes ? ` (${memoryText(bytes)}; \`memory\` in the project config sets it)` : " (the VM's)"}`;
+/**
+ * What a gate or pass says when the kernel killed a process of the sandbox while it ran: undefined when it did not (or
+ * either reading is unknown). The sandbox's own limit, when its `oom` count rose too: raise `memory`. Else the VM's: it ran
+ * out of memory for every sandbox at once, so the advice is fewer at once, never a higher limit.
+ */
+export const oomNote = (before: OomCounts | undefined, after: OomCounts | undefined, bytes: number | false | undefined): string | undefined => {
+  if (!before || !after || after.kills <= before.kills) return undefined;
+  const what = after.kills - before.kills === 1 ? "a process" : `${after.kills - before.kills} processes`;
+  return after.oom > before.oom
+    ? `out of memory: killed ${what} at the sandbox's ${bytes ? `${memoryText(bytes)} ` : ""}limit (\`memory\` in the project config sets it)`
+    : `out of memory: the VM ran out and killed ${what} here (lower maxSandboxes, or give the VM more memory)`;
+};
+
+/** `error` with `oom` on its first line, where the ticket's note (`agentFailure`, which keeps that line only) reads it. */
+export const withOom = (error: unknown, oom: string): unknown => {
+  if (!(error instanceof Error)) return error;
+  const [first, ...rest] = error.message.split("\n");
+  error.message = [`${first.replace(/:\s*$/, "")} - ${oom}`, ...rest].join("\n");
+  return error;
+};
 
 /**
  * Runs `run` with the sandbox's container limited to `cpus.gate`, and puts it back to `cpus.ticket` after, whatever `run`

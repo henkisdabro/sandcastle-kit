@@ -213,8 +213,9 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const failures: Failure[] = [];
     const before = await dirtyPaths(sandbox);
     const head = await headOf(sandbox);
-    // A gate killed at the memory limit exits 137 like any SIGKILL: the cgroup's count says which it was.
-    const oomBefore = await oomKills(sandbox);
+    // A gate killed for memory exits 137 like any SIGKILL: the cgroup's counts say which it was, read after each gate so a
+    // kill is told only to the gate it happened in.
+    let oomAt = await oomKills(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     const pressure: PassReadings = {};
     await sampling(sandbox, "gate", async () => {
@@ -239,7 +240,9 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
           const stderr = stripVTControlCharacters(r.stderr);
           appendFileSync(log, `# stderr of ${g.name} (at most its last 8 MiB):\n${stderr.endsWith("\n") ? stderr : stderr + "\n"}`);
         }
-        const oom = r.exitCode === 0 ? undefined : oomNote(oomBefore, await oomKills(sandbox), project.memory);
+        const oomNow = await oomKills(sandbox);
+        const oom = r.exitCode === 0 ? undefined : oomNote(oomAt, oomNow, project.memory);
+        oomAt = oomNow;
         if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (${exitWords({ exitCode: r.exitCode, oom })})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
         if (r.exitCode === 0) continue;

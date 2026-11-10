@@ -179,15 +179,21 @@ const runsByProject = (peaks: PeakLine[]): Map<string, Run[]> => {
  * or its `peakMib` has too few samples. The anonymous figures of a line not marked `sampled` are left out: it may hold the
  * sandbox at rest, and nothing on it says.
  */
-const recentRuns = (runs: Run[], now: number): Run[] => {
+// `count`: how many samples a run holds of the figure the window is for (every line, by default).
+const recentRuns = (runs: Run[], now: number, count: (r: Run) => number = (r) => r.lines.length): Run[] => {
   if (!runs.length || runs[0].at < now - FRESH_DAYS * 86_400_000) return [];
   const recent: Run[] = [];
+  let samples = 0;
   for (const r of runs) {
-    if (recent.length >= RECENT_RUNS && recent.reduce((n, x) => n + x.lines.length, 0) >= MIN_SAMPLES) break;
+    if (recent.length >= RECENT_RUNS && samples >= MIN_SAMPLES) break;
     recent.push(r);
+    samples += count(r);
   }
   return recent;
 };
+
+// A line's sampled anonymous gate and agent figures, each only where it counts (marked `sampled`, and a sandbox not at rest).
+const anonOf = (l: PeakLine, key: "anonMib" | "agentAnonMib") => ((l.sampled ?? 0) >= SAMPLED && (l[key] ?? 0) >= MIN_MEASURED_MIB ? [l[key]!] : []);
 
 const projectFigures = (project: string, runs: Run[], now: number): (Measured & { at: number }) | undefined => {
   const recent = recentRuns(runs, now);
@@ -260,14 +266,12 @@ export const memoryLimit = (setting: number | false | undefined, peaks: PeakLine
   const cap = (b: number) => (vm && vm > 0 && b > vm ? { bytes: vm, capped: true } : { bytes: b });
   if (setting === false) return { from: "off" };
   if (typeof setting === "number") return { ...cap(setting), from: "config" };
-  const runs = runsByProject(peaks).get(project) ?? [];
-  const m = projectFigures(project, runs, now);
-  if (!m?.anonMib) {
-    // What a reader can count towards: the project's sampled gate readings over the runs a figure would take.
-    const samples = recentRuns(runs, now).flatMap((r) => r.lines).filter((l) => (l.sampled ?? 0) >= SAMPLED && (l.anonMib ?? 0) >= MIN_MEASURED_MIB).length;
-    return { from: "unmeasured", samples };
-  }
-  const anonMib = Math.max(m.anonMib, m.agentAnonMib ?? 0);
+  // Its own window: runs back until it holds `MIN_SAMPLES` gate figures, so lines with none (a ticket that failed before
+  // its first gate) do not leave it short while older runs have more.
+  const lines = recentRuns(runsByProject(peaks).get(project) ?? [], now, (r) => r.lines.flatMap((l) => anonOf(l, "anonMib")).length).flatMap((r) => r.lines);
+  const gate = figureOf(lines.flatMap((l) => anonOf(l, "anonMib")));
+  if (!gate) return { from: "unmeasured", samples: lines.flatMap((l) => anonOf(l, "anonMib")).length };
+  const anonMib = Math.max(gate.mib, figureOf(lines.flatMap((l) => anonOf(l, "agentAnonMib")))?.mib ?? 0);
   const bytes = Math.max(MEMORY_FLOOR_GIB * GIB, Math.ceil((anonMib * MEMORY_HEADROOM * 2 ** 20) / MEMORY_STEP) * MEMORY_STEP);
   return { ...cap(bytes), from: "measured", anonMib };
 };
@@ -277,9 +281,10 @@ export const memoryLimit = (setting: number | false | undefined, peaks: PeakLine
  * start's one `docker info` reading; an unreadable one caps nothing). A peaks file that cannot be read measures nothing.
  */
 export const sandboxMemory = (project: { root: string; memory?: number | false }, info: () => string | undefined, peaks: () => PeakLine[] = () => readPeaks(), now = Date.now()): MemoryLimit => {
+  // `docker info` only caps a limit: with none to cap it is not read (it can take up to 10 s).
   let vm: number | undefined;
   try {
-    vm = Number((JSON.parse(info() ?? "{}") as { MemTotal?: unknown }).MemTotal) || undefined;
+    vm = project.memory === false ? undefined : Number((JSON.parse(info() ?? "{}") as { MemTotal?: unknown }).MemTotal) || undefined;
   } catch {
     vm = undefined;
   }
@@ -467,7 +472,10 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
       `Assumed, not measured: ${HEADROOM_GIB} GiB headroom, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`,
     );
   } else {
-    lines.push(`Assumed, not measured (no run has been sampled yet): ${HEADROOM_GIB} GiB headroom, ${PER_SANDBOX_GIB} GiB per sandbox, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`);
+    // Runs were sampled but no project has enough of them: say how far the nearest is, not that nothing was sampled.
+    const most = Math.max(0, ...[...runsByProject(peaks).values()].map((runs) => recentRuns(runs, readers.now?.() ?? Date.now()).flatMap((r) => r.lines).filter((l) => l.peakMib >= MIN_MEASURED_MIB).length));
+    const why = most ? `no project has the ${MIN_SAMPLES} samples a measured figure needs yet: ${Math.min(most, MIN_SAMPLES - 1)} of the ${MIN_SAMPLES} samples at most` : "no run has been sampled yet";
+    lines.push(`Assumed, not measured (${why}): ${HEADROOM_GIB} GiB headroom, ${PER_SANDBOX_GIB} GiB per sandbox, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`, ...(most ? ownFigures() : []));
   }
   lines.push("");
   const now = { sandboxes: current("sandboxes", env, machine), gates: current("gates", env, machine) };

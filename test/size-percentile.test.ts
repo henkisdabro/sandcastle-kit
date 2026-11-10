@@ -50,6 +50,10 @@ test("one outlier among 34 agent samples does not price the agent baseline, and 
 test("under ten samples a figure does not count: one outlier among seven no longer sets the pool", () => {
   // Nearest rank over fewer than 10 samples is the maximum: the 7.2 GiB pass among seven priced a pool of one sandbox.
   assert.equal(measuredPeak(samples(7, 7228), NOW), undefined, "seven lines are too few for the project's figures at all");
+  const few = sizeLines({ ...reading(samples(7, 7228)), projectId: () => "abc123" }, {}, {}).join("\n");
+  assert.match(few, /^Assumed, not measured \(no project has the 10 samples a measured figure needs yet: 7 of the 10 samples at most\): /m);
+  assert.match(few, /^This project \(abc123\) has fewer than 10 samples measured in the last 30 days/m);
+  assert.doesNotMatch(few, /no run has been sampled yet/);
   // Nineteen sandboxes, seven of which ran an agent pass, one of them the outlier: the gate figures count, the agent's do not.
   const peaks = [...samples(12).map((l) => ({ ...l, agentMib: undefined, agentAnonMib: undefined })), ...samples(7, 7228)];
   const m = measuredPeak(peaks, NOW)!;

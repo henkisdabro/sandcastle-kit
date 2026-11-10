@@ -308,10 +308,14 @@ let noPsi: (() => void) | undefined;
 /**
  * `say` is called once, the first time a sampled sandbox answers its memory reading but has no PSI file (OrbStack's kernel,
  * one built without PSI, or booted with `psi=0`): the memory pressure the run's summary and `size` show is then never
- * recorded, and a reader should know the column is blind rather than calm. `undefined` clears it.
+ * recorded, and a reader should know the column is blind rather than calm. `undefined` clears it. Once per `run`.
  */
-export const onNoPsi = (say: (() => void) | undefined) => {
-  noPsi = say;
+export const onNoPsi = (say: (() => void) | undefined, run: { told: boolean } = { told: false }) => {
+  // `run` is the run's own across its turns (`TurnOptions.psi`): a line told in one turn is not told again in the next.
+  noPsi = !say || run.told ? undefined : () => {
+    run.told = true;
+    say();
+  };
 };
 
 /**

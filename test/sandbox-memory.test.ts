@@ -17,7 +17,8 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { loadProject, memoryBytes } = await import("../src/config.ts");
 const { OperatorError } = await import("../src/errors.ts");
-const { limitMemory, oomKills, oomNote } = await import("../src/sandbox.ts");
+const { limitMemory, oomKills, oomNote, withOom } = await import("../src/sandbox.ts");
+const { agentFailure } = await import("../src/agents.ts");
 const { MIN_SAMPLES, memoryLimit, memoryLine, sandboxMemory } = await import("../src/size.ts");
 const { exitWords, runGates } = await import("../src/gates.ts");
 const { onNoPsi, projectId, sampling } = await import("../src/peaks.ts");
@@ -30,7 +31,8 @@ const GIB = 2 ** 30;
 const NOW = Date.parse("2026-05-10T00:00:00Z");
 
 const calls = join(tmp, "calls");
-writeFileSync(join(tmp, "docker"), `#!/bin/sh\necho "docker $*" >> '${calls}'\n[ -n "$FAKE_DOCKER_FAIL" ] && echo "no such container" >&2 && exit 1\nexit 0\n`);
+// FAKE_SWAP_FAIL: a kernel with no swap accounting, which refuses `--memory-swap` alone.
+writeFileSync(join(tmp, "docker"), `#!/bin/sh\necho "docker $*" >> '${calls}'\n[ -n "$FAKE_DOCKER_FAIL" ] && echo "no such container" >&2 && exit 1\ncase "$*" in *--memory-swap*) [ -n "$FAKE_SWAP_FAIL" ] && echo "Your kernel does not support swap limit capabilities" >&2 && exit 1;; esac\nexit 0\n`);
 chmodSync(join(tmp, "docker"), 0o755);
 process.env.PATH = [tmp, process.env.PATH ?? ""].join(delimiter);
 const seen = () => {
@@ -96,6 +98,17 @@ test("unset, under ten gate samples there is no limit, and the start line counts
   assert.deepEqual(memoryLimit(undefined, sandboxes(20, 3000, 3500, "other"), "p1", NOW), { from: "unmeasured", samples: 0 }, "another project's samples are not this one's");
 });
 
+test("the default's window reaches back for gate samples, not lines: lines with no gate figure do not leave it short", () => {
+  // Two sandboxes a run, `withGate` of them with a gate figure (the other's ticket failed before its first gate).
+  const run = (i: number, withGate: number) =>
+    Array.from({ length: 2 }, (_, j) => ({ ts: `2026-05-0${9 - i}T00:00:00.000Z`, project: "p1", run: `r${i}`, peakMib: 3000, sampled: 2, ...(j < withGate ? { anonMib: 3000 } : {}) }));
+  // Five runs of two lines each, 9 gate samples among them (10 lines): a window by lines stops there, at 9 of 10.
+  const recent = [run(0, 2), run(1, 2), run(2, 2), run(3, 2), run(4, 1)].flat();
+  const older = run(5, 2);
+  assert.deepEqual(memoryLimit(undefined, recent, "p1", NOW), { from: "unmeasured", samples: 9 });
+  assert.deepEqual(memoryLimit(undefined, [...recent, ...older], "p1", NOW), { bytes: 4608 * MIB, from: "measured", anonMib: 3000 });
+});
+
 test("a number is the limit, cut to the VM, and false is none", () => {
   assert.equal(memoryLine(memoryLimit(6 * GIB, [], "p1", NOW, 16 * GIB)), "Sandbox memory: 6 GiB each (memory in the project config)");
   assert.equal(memoryLine(memoryLimit(16 * GIB, [], "p1", NOW, 9.8 * GIB)), "Sandbox memory: 9.8 GiB each (memory in the project config, the VM's whole memory)");
@@ -138,47 +151,94 @@ test("a failed update says one line and the sandbox opens with none", async () =
   assert.match(lines[0], /could not set the sandbox's memory limit to 2 GiB: .*; it runs with none/);
 });
 
+test("a kernel that refuses the swap limit still gets the memory limit, and says so", async () => {
+  writeFileSync(calls, "");
+  process.env.FAKE_SWAP_FAIL = "1";
+  const lines: string[] = [];
+  try {
+    await limitMemory({ sandboxId: "sandcastle-0123abcd", exec: async () => ({ exitCode: 0, stdout: "" }) }, 2 * GIB, (l) => lines.push(l));
+  } finally {
+    delete process.env.FAKE_SWAP_FAIL;
+  }
+  assert.deepEqual(seen(), [`docker update --memory ${2 * GIB} --memory-swap ${2 * GIB} sandcastle-0123abcd`, `docker update --memory ${2 * GIB} sandcastle-0123abcd`]);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /the sandbox's swap could not be limited \(.*swap limit.*\): its memory is limited to 2 GiB, its swap is not/);
+});
+
 // ---- an OOM kill, named ----
 
-/** A sandbox whose gate allocates past its limit: the gate exits 137 and the cgroup's `oom_kill` goes up by one. */
-const ballooning = () => {
-  const k = { oomKill: 0 };
+/**
+ * A sandbox whose kernel's `memory.events` answers from `k`, and whose gates (`run-tests`, `typecheck`) do what `k.gates`
+ * says in turn: `own` is killed at the sandbox's own limit (`oom` and `oom_kill` rise), `vm` by the VM's killer (`oom_kill`
+ * alone), `red` fails an assertion, `green` passes.
+ */
+const kernel = (gates: ("own" | "vm" | "red" | "green")[]) => {
+  const k = { oom: 0, kills: 0 };
   return {
     k,
     box: {
       exec: async (cmd: string) => {
-        if (cmd.includes("memory.events")) return { exitCode: 0, stdout: `low 0\nhigh 0\nmax 3\noom 1\noom_kill ${k.oomKill}\noom_group_kill 0\n`, stderr: "" };
-        if (!cmd.includes("run-tests")) return { exitCode: 0, stdout: "", stderr: "" };
-        k.oomKill++;
-        return { exitCode: 137, stdout: "running tests", stderr: "Killed" };
+        if (cmd.includes("memory.events")) return { exitCode: 0, stdout: `low 0\nhigh 0\nmax ${k.oom * 3}\noom ${k.oom}\noom_kill ${k.kills}\noom_group_kill 0\n`, stderr: "" };
+        if (!/run-tests|typecheck/.test(cmd)) return { exitCode: 0, stdout: "", stderr: "" };
+        const how = gates.shift();
+        if (how === "own") k.oom++;
+        if (how === "own" || how === "vm") {
+          k.kills++;
+          return { exitCode: 137, stdout: "running tests", stderr: "Killed" };
+        }
+        return how === "red" ? { exitCode: 1, stdout: "1 failed: expected 2, got 3", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
       },
     },
   };
 };
+const gated = (names: string[], memory?: number) => ({ name: "fixture", root: tmp, ...(memory ? { memory } : {}), gates: names.map((name) => ({ name, command: name === "typecheck" ? "typecheck" : "run-tests" })) }) as Parameters<typeof runGates>[0];
+const OWN = "out of memory: killed a process at the sandbox's 2 GiB limit (`memory` in the project config sets it)";
+const VM = "out of memory: the VM ran out and killed a process here (lower maxSandboxes, or give the VM more memory)";
 
 test("a gate killed at the sandbox's limit is red with the cause named, in its failure, its output and its log", async () => {
   const log = join(tmp, "gates.log");
   writeFileSync(log, "");
-  const { box } = ballooning();
-  const project = { name: "fixture", root: tmp, memory: 2 * GIB, gates: [{ name: "test", command: "run-tests" }] } as Parameters<typeof runGates>[0];
-  const run = await runGates(project, box, "gates", false, { log });
-  const oom = "out of memory: the kernel killed a process at the sandbox's memory limit (2 GiB; `memory` in the project config sets it)";
-  assert.equal(run.failure?.oom, oom);
+  const run = await runGates(gated(["test"], 2 * GIB), kernel(["own"]).box, "gates", false, { log });
+  assert.equal(run.failure?.oom, OWN);
   assert.equal(run.failure?.exitCode, 137);
-  assert.ok(run.failure?.output.endsWith(`[sandcastle] ${oom}`), run.failure?.output);
-  assert.equal(exitWords(run.failure!), `exit 137, ${oom}`);
-  assert.match(readFileSync(log, "utf8"), /# test RED \(exit 137, out of memory: the kernel killed a process at the sandbox's memory limit/);
+  assert.ok(run.failure?.output.endsWith(`[sandcastle] ${OWN}`), run.failure?.output);
+  assert.equal(exitWords(run.failure!), `exit 137, ${OWN}`);
+  assert.ok(readFileSync(log, "utf8").includes(`# test RED (exit 137, ${OWN})`));
+});
+
+test("a kill under the sandbox's own limit is the VM's, and says to run fewer sandboxes, not to raise memory", async () => {
+  const run = await runGates(gated(["test"], 2 * GIB), kernel(["vm"]).box, "gates");
+  assert.equal(run.failure?.oom, VM);
+  assert.doesNotMatch(VM, /`memory`/);
+  // With no limit at all, every kill is the VM's.
+  assert.equal((await runGates(gated(["test"]), kernel(["vm"]).box, "gates")).failure?.oom, VM);
+});
+
+test("a kill is told only to the gate it happened in: a later plain red in the same pass is a plain exit", async () => {
+  const run = await runGates(gated(["typecheck", "test"], 2 * GIB), kernel(["own", "red"]).box, "gates", true);
+  assert.deepEqual(run.failures.map((f) => [f.name, f.exitCode, f.oom]), [["typecheck", 137, OWN], ["test", 1, undefined]]);
+  assert.doesNotMatch(run.failures[1].output, /out of memory/);
+  // A kill in a green gate (a worker the runner restarted) is not told to the red one after it either.
+  const after = await runGates(gated(["typecheck", "test"], 2 * GIB), kernel(["green", "red"]).box, "gates", true);
+  assert.equal(after.failures[0].oom, undefined);
 });
 
 test("a red gate with no kill, or a kernel with no memory.events, is a plain exit", async () => {
-  const project = { name: "fixture", root: tmp, gates: [{ name: "test", command: "run-tests" }] } as Parameters<typeof runGates>[0];
-  const plain = await runGates(project, { exec: async (cmd: string) => (cmd.includes("run-tests") ? { exitCode: 137, stdout: "", stderr: "Killed" } : { exitCode: 1, stdout: "", stderr: "" }) }, "gates");
+  const plain = await runGates(gated(["test"]), { exec: async (cmd: string) => (cmd.includes("run-tests") ? { exitCode: 137, stdout: "", stderr: "Killed" } : { exitCode: 1, stdout: "", stderr: "" }) }, "gates");
   assert.equal(plain.failure?.oom, undefined);
   assert.equal(exitWords(plain.failure!), "exit 137");
-  assert.equal(oomNote(2, 2, 2 * GIB), undefined);
-  assert.equal(oomNote(undefined, 3, 2 * GIB), undefined);
-  assert.equal(oomNote(0, 2, false), "out of memory: the kernel killed 2 processes at the sandbox's memory limit (the VM's)");
+  assert.equal(oomNote({ oom: 1, kills: 2 }, { oom: 1, kills: 2 }, 2 * GIB), undefined);
+  assert.equal(oomNote(undefined, { oom: 1, kills: 3 }, 2 * GIB), undefined);
+  assert.equal(oomNote({ oom: 0, kills: 0 }, { oom: 1, kills: 2 }, false), "out of memory: killed 2 processes at the sandbox's limit (`memory` in the project config sets it)");
   assert.equal(await oomKills({ exec: async () => ({ exitCode: 1, stdout: "" }) }), undefined);
+  assert.equal(await oomKills({ exec: async () => ({ exitCode: 0, stdout: "oom_kill 1\n" }) }), undefined, "a file with no oom line is not read as one");
+});
+
+test("an agent error carries the words on its first line, which the ticket's note keeps", () => {
+  const e = withOom(new Error("claude-code agent failed:\nexited with code 137: Killed"), VM) as Error;
+  assert.equal(e.message.split("\n")[0], `claude-code agent failed - ${VM}`);
+  assert.equal(agentFailure(e), `claude-code agent failed - ${VM}`);
+  assert.equal(withOom("not an error", VM), "not an error");
 });
 
 // ---- no PSI ----
@@ -192,13 +252,22 @@ test("a sandbox whose kernel has no PSI is said once, and a kernel with it says 
       return { exitCode: 1, stdout: "" };
     },
   });
-  onNoPsi(() => said.push("no psi"));
+  // The run's state across its turns: each turn sets the line again, and a turn after the one that said it does not.
+  const run = { told: false };
+  const tell = () => void said.push("no psi");
+  onNoPsi(tell, run);
   try {
     await sampling(box(true), "gate", async () => "done");
     assert.deepEqual(said, []);
     await sampling(box(false), "gate", async () => "done");
     await sampling(box(false), "agent", async () => "done");
     assert.deepEqual(said, ["no psi"]);
+    onNoPsi(tell, run);
+    await sampling(box(false), "gate", async () => "done");
+    assert.deepEqual(said, ["no psi"], "a second turn of the same run says nothing");
+    onNoPsi(tell, { told: false });
+    await sampling(box(false), "gate", async () => "done");
+    assert.deepEqual(said, ["no psi", "no psi"], "another run says it again");
   } finally {
     onNoPsi(undefined);
   }

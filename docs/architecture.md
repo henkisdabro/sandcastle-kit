@@ -2123,33 +2123,45 @@ decision on #382: per sandbox, warn only).
 An `avg10` reaches back 10 s, so a phase's first read can carry the end of the one before.
 `test/memory-pressure.test.ts` holds it.
 A kernel with no PSI (OrbStack's) has no `memory.pressure` file, so every pressure figure stays empty:
-`onNoPsi(say)`, set by `burndown()` at its start and cleared as the turn ends, is called once, the first
-time a sampled sandbox answers `memory.stat` but not `memory.pressure`, and the run prints one
-`Memory pressure: the sandboxes' kernel has no PSI ...` line.
+`onNoPsi(say, run)`, set by `burndown()` at each turn's start and cleared as the turn ends, calls `say` the
+first time a sampled sandbox answers `memory.stat` but not `memory.pressure`, and marks `run.told`: `run` is
+the autonomy loop's (`TurnOptions.psi`, made once in `src/cli.ts`), so a run of several turns prints one
+`Memory pressure: the sandboxes' kernel has no PSI ...` line in all.
 
 **The memory limit** (`memoryLimit` and `sandboxMemory` in `src/size.ts`, `limitMemory`, `oomKills`
 and `oomNote` in `src/sandbox.ts`): a project's `memory` (bytes after `loadProject`, which turns
 `"6g"` into them through `memoryBytes`; `false` none) is the limit, cut to the VM's `MemTotal`;
 unset, `memoryLimit` gives `MEMORY_HEADROOM` (1.5) x the higher of the project's own `anonMib` and
-`agentAnonMib` figures (`projectFigures`, the agent's only when it has `MIN_SAMPLES`), at least
+`agentAnonMib` figures (over a window of its own: `recentRuns` counting gate samples rather than lines,
+so lines with no gate figure do not leave it short; the agent's only when it has `MIN_SAMPLES`), at least
 `MEMORY_FLOOR_GIB` (2), rounded up to 256 MiB, and none with fewer than `MIN_SAMPLES` gate samples
 (the anon figure is read every 10 s, so the headroom covers a spike between reads; page cache needs
 none, as the kernel reclaims it before it kills).
 `burndown()` resolves it once, beside the CPU limit, from the start's `docker info` reading, prints
 `memoryLine` and puts the bytes on both the ticket's and the gate-only `project`; `sandcastle gates`
-and `land` do the same in `gateOnly` (`src/cli.ts`).
+and `land` do the same in `gateOnly` (`src/cli.ts`), which reads `docker info` once for both limits
+(`sandboxMemory` reads it only to cap a limit, so not at all with `memory: false`).
 Each open (`createSandbox` in the pipeline's `open`, `gateBase`, `landInSandbox`) is followed by
 `limitMemory`: `docker update --memory <b> --memory-swap <b>` on the container `containerOf` names
 (`sandboxId`, else the kernel's hostname file, as `withContainerCpus` does), after the ready hooks,
-since Sandcastle's Docker provider takes no memory option; a failed update says one line and the
-sandbox runs unlimited.
-An OOM kill is a SIGKILL like any other (exit 137), so `memory.events`' `oom_kill` count (hierarchical,
-any OOM killer's) is read through the sandbox's `exec` as a gate pass starts and after a red gate, and
-before an agent pass and after it throws: a rise is `oomNote`'s words, which a red gate carries as
-`Failure.oom` (`exitWords`: the gates log's `RED (...)` line, the console's and the failure log's
-`(exit ...)`, and a `[sandcastle]` line at the end of its output, where the repair prompt and the
-console's tail see it), and which a failed agent pass prints and appends to its error.
-`test/sandbox-memory.test.ts` holds it.
+since Sandcastle's Docker provider takes no memory option; a kernel that refuses `--memory-swap` (no
+swap accounting) gets `--memory` alone and one line saying so, and a failed update says one line and
+the sandbox runs unlimited.
+An OOM kill is a SIGKILL like any other (exit 137), so `memory.events` is read through the sandbox's
+`exec` (`oomKills`): `oom_kill` counts the container's processes killed by any OOM killer, the VM's
+included, and `oom` rises only when the container reached its own `memory.max`. `oomNote` words a rise
+in `oom_kill` as the sandbox's limit when `oom` rose too (raise `memory`), else as the VM's (fewer
+sandboxes, or a larger VM: never a higher limit).
+The counts are read as a gate pass starts and after every gate, the baseline moving on each time, so a
+kill is told only to the gate it happened in; a red gate carries the words as `Failure.oom`
+(`exitWords`: the gates log's `RED (...)` line, the console's and the failure log's `(exit ...)`, and
+a `[sandcastle]` line at the end of its output, where the repair prompt and the console's tail see it).
+Around an agent pass they are read before it and after it: a pass that throws gets the words on its
+error's first line (`withOom`), which is the line `agentFailure` keeps for the ticket's note, and a
+pass that returned with a kill under it (a test the agent started, the largest process) gets one
+console line.
+A `setup` step runs before the limit applies, so one that balloons is neither held nor named.
+`test/sandbox-memory.test.ts` and `test/pipeline-oom.test.ts` hold it.
 
 **CPU pressure** is read in the same `sampling` loop (the first read as a pass starts, then every
 10 s, with the same `ended` and `late` rules), as two figures. The judged one is machine-wide and read
