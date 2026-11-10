@@ -7,7 +7,9 @@ const base = process.argv[2];
 if (!base) throw new Error('Use: node scripts/changelog-check.mjs <base-ref>');
 
 // What reaches a user's machine or a sandbox. Tests, docs, the site and CI change nothing a user runs.
-const shipped = /^(bin|src|prompts|skill|container|docker|herdr|mod|templates)\/|^status\.sh$/;
+// The kit runs from a clone after `pnpm install`, so the manifest (its Node floor and the pinned
+// Sandcastle), the lockfile, pnpm's settings and the Sandcastle patch change what users run too.
+const shipped = /^(bin|src|prompts|skill|container|docker|herdr|mod|templates|patches)\/|^(status\.sh|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/;
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
 const from = git('merge-base', base, 'HEAD').trim();

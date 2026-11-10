@@ -115,9 +115,10 @@
 //   clean [--all] [--accept-git-config]
 //                    remove exited sandbox containers, the kit's dangling images, leftover
 //                    sandbox worktrees and finished agent branches, drop the backup copy
-//                    of a branch that is gone or merged, and list unmerged ones;
-//                    --all deletes those too, without asking; a worktree a sandbox
-//                    tampered with is left, named, and the exit code is 1
+//                    of a merged branch, and list unmerged ones;
+//                    --all deletes those too, without asking, and drops the copy of a
+//                    branch deleted by hand; a worktree a sandbox tampered with is left,
+//                    named, and the exit code is 1
 //   --version [--json]
 //                    the kit version: the release, and in a clone past it, the commit;
 //                    --json prints the facts the Claude Code mod's idle mark reads (the

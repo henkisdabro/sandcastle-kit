@@ -32,6 +32,13 @@ test("every npm install -g clears the npm cache in the same RUN", () => {
   for (const run of installs) assert.match(run, /npm install -g .*&& npm cache clean --force/, run);
 });
 
+test("no RUN pipes a download into a shell: sh -c has no pipefail, so a failed download builds and caches an empty layer", () => {
+  for (const run of [...runs, ...agentRuns]) assert.doesNotMatch(run, /\b(curl|wget)\b[^&;]*\|\s*(ba)?sh\b/, run);
+  const claude = agentRuns.find((l) => /claude\.ai\/install/.test(l));
+  assert.ok(claude, "expected the Claude Code install");
+  assert.match(claude, /&& "\$HOME\/\.local\/bin\/claude" --version$/, "the step checks what it installed");
+});
+
 test("the base installs neither agent, so a release leaves its tag and every project layer's alone", () => {
   assert.ok(!runs.some((l) => /@openai\/codex|claude\.ai\/install|npm install -g/.test(l)), "the base installs an agent");
   assert.ok(!instructions.some((l) => /^ARG (CODEX|CLAUDE_CODE)_VERSION/.test(l)), "the base takes an agent version");

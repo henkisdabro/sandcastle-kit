@@ -35,6 +35,19 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   Code mod, troubleshooting, how a run works). The kit's own messages, templates and skill point
   there.
 
+### Fixed
+
+- **A failed Claude Code download no longer builds an image without it.** The agents image piped
+  the installer into bash, so a download that failed ran an empty script and cached a layer with no
+  `claude`; it now downloads to a file and checks `claude --version` in the same step.
+- **`/sandcastle update` reads a missing update record cleanly.** On a project's first update the
+  skill's `cat` of `.sandcastle/.run/kit-updated` exited 1 and read as a failed step.
+- **The docs say when a deleted branch's backup copy goes.** The copy of an unmerged branch
+  deleted by hand is kept until `sandcastle clean --all`, as the code always did; the safety docs
+  and `clean`'s help said the next run or a plain `clean` dropped it.
+- **The changelog check counts dependencies.** `package.json`, the lockfile, `pnpm-workspace.yaml`
+  and `patches/` now need a line under Unreleased, like the code they change.
+
 ## [0.20.0] - 2026-11-03
 
 ### Upgrading

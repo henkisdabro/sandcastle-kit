@@ -158,8 +158,10 @@ and the kit narrows what can cross it:
   A base that was deleted or moved stops it with the exact `git update-ref` that puts it back, and a
   sandbox's worktree record rewritten to a container path (`git worktree repair`) is named.
   A branch the kit deletes itself, a landed one, is never restored.
-  The copy of a branch you deleted or merged by hand is dropped at the next run's start (or by
+  The copy of a branch you merged by hand is dropped at the next run's start (or by
   `sandcastle clean`), so the backup does not grow.
+  The copy of an unmerged branch you deleted by hand is kept, so the work can still be restored,
+  until `sandcastle clean --all`.
 - 🚧 **Git guard.** A Claude Code managed hook (`container/`, mounted read-only at
   `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `stash`
   (its list is shared by every worktree), `push`, `reflog expire`, `worktree prune`, `repair` and

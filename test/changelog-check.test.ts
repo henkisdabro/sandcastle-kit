@@ -52,6 +52,16 @@ test("a changelog edit to a released section alone does not count", (t) => {
   assert.equal(r.check().status, 1);
 });
 
+test("the manifest, lockfile, pnpm settings and the Sandcastle patch are shipped: a dependency bump needs a line", (t) => {
+  for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches/@ai-hero__sandcastle@0.14.0.patch"]) {
+    const r = repo(t);
+    r.commit({ [path]: "x\n" });
+    const result = r.check();
+    assert.equal(result.status, 1, path);
+    assert.ok(result.stderr.includes(path), result.stderr);
+  }
+});
+
 test("a change to tests, docs or CI alone needs no line", (t) => {
   const r = repo(t);
   r.commit({ "test/a.test.ts": "t\n", "docs/a.md": "d\n", ".github/workflows/a.yml": "w\n" });
