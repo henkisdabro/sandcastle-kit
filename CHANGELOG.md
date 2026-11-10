@@ -23,9 +23,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The base is gated once more** at each project's first run or `sandcastle gates`: the green-base
   record now carries the Sandcastle version, so the old record does not count.
 - **Sandboxes have no raw sockets.** Every container starts without the `NET_RAW` capability, so a
-  setup step or a test that opens one (`ping`, `traceroute`) now fails with `Operation not
-  permitted`. `sandcastle gates` shows it. The other capabilities stay: Sandcastle itself needs
-  some, as root, to create a file mount's parent directory.
+  setup step or a test that opens a raw socket now fails with `Operation not permitted` (`ping` and
+  `traceroute` may, where they cannot fall back to an unprivileged socket). `sandcastle gates`
+  shows it. The other capabilities stay: Sandcastle itself needs some, as root, to create a file
+  mount's parent directory.
 - Update the kit with `pnpm install` after the pull, as always: `sandcastle doctor` now fails
   "kit dependencies installed" when the installed Sandcastle is not the pinned, patched one.
 
@@ -43,8 +44,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   personal `.env` sets that the agent's environment also sets is left out of the container's, where
   Sandcastle would refuse every pass.
 - **An agent log's last line is the real context size.** `Context window: Nk` (or `Nk / Mk` when
-  the model's limit is known) is now the last call's input, the size the pass ended at; the kit no longer renames it to
-  `Tokens processed (all turns)`.
+  the model's limit is known) is now the last call's input, the size the pass ended at; the kit no
+  longer renames it to `Tokens processed (all turns)`.
 - **`sandcastle doctor` checks the kit's patch to Sandcastle is applied.** "kit dependencies
   installed" fails, naming what is wrong, when the installed `@ai-hero/sandcastle` is not the pinned
   version or runs without the kit's patch (installed with `npm`, or pulled with no `pnpm install`).

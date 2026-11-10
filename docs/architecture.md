@@ -1560,8 +1560,8 @@ needs `CHOWN` and `DAC_OVERRIDE`: with `ALL` dropped every such open failed with
 `Failed to create parent directory`.
 `test/sandbox-cap-drop.test.ts` holds the list and reads that root exec in the installed `dist`, so
 a release that drops it says `ALL` may be tried again.
-A project whose setup or gates need a raw socket (`ping`, `traceroute`) fails there with
-`Operation not permitted`.
+A project whose setup or gates need a raw socket fails there with `Operation not permitted`
+(`ping` and `traceroute` may, where they cannot fall back to an unprivileged ICMP socket).
 
 **What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
 control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at
