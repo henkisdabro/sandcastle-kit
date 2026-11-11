@@ -43,12 +43,13 @@ test("agentFailure: codex's turn.failed keeps its cause", async () => {
   assert.equal(agentFailure(new Error("AgentError: codex reported an error:\n")), "codex reported an error");
 });
 
-test("agentFailure: no other line is joined - not after an exit code, and never JSON", async () => {
+test("agentFailure: a plain-text line after an exit code is joined, JSON never is", async () => {
   const { agentFailure } = await import("../src/agents.ts");
   // With stderr empty, Sandcastle's exit-code error carries the stream's last lines: the note stays the first line.
+  // Stderr (plain text) after the exit code is the cause, and is joined.
   const exited = new Error('(FiberFailure) AgentError: claude-code exited with code 1:\n{"type":"result","subtype":"error_during_execution","is_error":true}');
   assert.equal(agentFailure(exited), "claude-code exited with code 1");
-  assert.equal(agentFailure(new Error("AgentError: codex exited with code 2:\nsome text")), "codex exited with code 2");
+  assert.equal(agentFailure(new Error("AgentError: codex exited with code 2:\nsome text")), "codex exited with code 2: some text");
   assert.equal(agentFailure(new Error('AgentError: claude-code reported an error:\n{"type":"result"}')), "claude-code reported an error");
   assert.equal(agentFailure(new Error("AgentError: claude-code reported an error:\n[1, 2]")), "claude-code reported an error");
 });

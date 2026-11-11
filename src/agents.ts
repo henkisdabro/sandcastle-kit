@@ -28,6 +28,7 @@ import { claudeCode, codex } from "@ai-hero/sandcastle";
 import type { ProjectConfig } from "./config.ts";
 import { cutAtWord, OperatorError, promptExpansionLine } from "./errors.ts";
 import { shq } from "./generated.ts";
+import { redact } from "./worktree-lock.ts";
 import { CODEX_RATE_LIMITS_READOUT } from "./usage.ts";
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -562,16 +563,19 @@ export const implAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.e
  * the first line alone hid the cause, the whole thing broke the run pane's line mid-JSON. From Sandcastle 0.13.0 an
  * error the agent reported in its stream (claude's `result` with `is_error`, codex's `turn.failed`) is
  * "<agent> reported an error:" with the cause as plain text on the next line, which is kept: the crashed note said
- * nothing without it. Cut at a word, not mid-word.
+ * nothing without it. So is the first plain-text line after "exited with code N:" (the process's stderr; JSON is not).
+ * Redacted, then cut at a word, not mid-word.
  */
 export const agentFailure = (error: unknown) => {
-  const text = (error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
+  // Redacted before anything is cut, so a credential the kit registered cannot survive as the part of it a cut left.
+  const text = redact(error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
   const [line, ...rest] = text.split("\n");
   const first = line.replace(/:\s*$/, "");
   const code = text.match(/\[[\w-]+:([a-z_]+)\]/)?.[1];
   if (code) return cutAtWord(`${first} - ${code.replace(/_/g, " ")}`);
-  // Only after "reported an error:": "exited with code 1:" is followed by the stream's own JSON when stderr was empty.
-  const next = /reported an error:\s*$/.test(line) ? rest.find((l) => l.trim())?.trim() : undefined;
+  // After "exited with code N:" the rest is the process's stderr, or (stderr empty) the stream's own JSON: only a
+  // plain-text line is kept, so the note says why `claude` died (a bad key, an unknown model) when it said so.
+  const next = /(reported an error|exited with code \d+):\s*$/.test(line) ? rest.find((l) => l.trim())?.trim() : undefined;
   const cause = next && !/^[[{]/.test(next) ? next : undefined;
   return cutAtWord(cause ? `${first}: ${cause}` : first);
 };
