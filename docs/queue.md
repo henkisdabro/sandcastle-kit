@@ -139,6 +139,8 @@ A tracker is where tickets live. The kit ships two:
    triage roles - the queue (`ready-for-agent`), the hold (`ready-for-human`), agents' follow-ups
    (`needs-triage`) and, for ticket files, `wontfix` as a done status.
    A repo that renamed a label needs no setting; without the file the kit uses Matt's names.
+   The hold label also takes a queued outsider's ticket whose author edited it, or commented,
+   after the queue label went on (`docs/safety.md`): `sandcastle requeue <n>` accepts the change.
    GitLab and "other" trackers are noticed and reported by `sandcastle doctor`; the kit falls back
    to GitHub.
 3. GitHub.
