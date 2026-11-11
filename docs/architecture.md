@@ -3254,12 +3254,19 @@ hour cost about 1.3x the input price against one cold re-write at about 1.25x - 
 `cache 5m · not warmed (a cold restart costs less)`; a main-thread turn after a miss clears it
 (`afterTurn`: one more try at 55 minutes), and a second miss in a run turns the refresh off for it.
 No plan windows (an API key, a gateway) assume nothing: the first refresh's measured read decides.
+A run is a process, not a turn: every autonomy turn of one `sandcastle run` writes a record with a new
+`startedAt` and the same `pid`, so `followRun` keys the run on `pid` (`pid:<n>`; a record with no
+pid keeps `start:<startedAt>`, one run per `startedAt`). A later turn of the same pid (the record's
+`settings.turn` above 1) carries the misses, the last refresh and the floor over; another pid, or a
+record of turn 1 with a new `startedAt` (a reused pid), starts them over. The floor is `Warmth.since`,
+the `startedAt` of the run's first turn that the mod saw, never the current record's: a later turn
+starting does not restart the 55 minutes.
 `settle` records a refresh, and a fork that is not answered (`api-error`, `aborted`) is a miss.
 The band's row is `cache refresh in 12m`, and after a refresh `cache refresh in 55m · last 157k` (what the refresh read); "warm" is not said, since the refresh keeps it so.
 In `register.tsx` a `$.clock.every(60_000)` tick runs while `round` finds a live run this session
 started, followed, or (recording no session) closes; it reads `$.session.usage()`, calls
 `$.model.fork` when `refresh` is set, keeps `Warmth` in `$.state` (`sandcastle.warmth`, which a
-reload keeps and module variables do not; a different run's `startedAt` starts its misses over),
+reload keeps and module variables do not; a different run - another `pid` - starts its misses over, a later turn of the same one does not),
 logs an unanswered fork with `$.ui.log` and draws the row in the `AbovePrompt` band
 (`sandcastle.warm`): `band()` puts it at the end of the title row while it fits there (the tokens go
 first), else on a row of its own lined up with the text beside the castle - flush under the castle it

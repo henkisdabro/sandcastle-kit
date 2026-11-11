@@ -30,15 +30,18 @@ const world = (on: Parameters<TestBody>[1], opts: { alive?: boolean; keepWarm?: 
     rateLimits: [{ kind: "five_hour", percentUsed: 30, resetsAt: "2026-10-10T12:00:00.000Z" }] as { kind: string; percentUsed: number; resetsAt: string }[],
     logs: [] as string[],
     store: new Map<string, unknown>(),
+    /** The run record the mod reads: a later turn of the same process is a new `startedAt` and `turn`. */
+    turn: { startedAt: T0, turn: 1 },
   };
-  const record = JSON.stringify({
-    orchestrator: "demo",
-    pid: 42,
-    session: "session-1",
-    startedAt: new Date(T0).toISOString(),
-    settings: opts.keepWarm === undefined ? {} : { keepWarm: opts.keepWarm },
-    tickets: { 1: { state: "implementing" } },
-  });
+  const record = () =>
+    JSON.stringify({
+      orchestrator: "demo",
+      pid: 42,
+      session: "session-1",
+      startedAt: new Date(w.turn.startedAt).toISOString(),
+      settings: { ...(opts.keepWarm === undefined ? {} : { keepWarm: opts.keepWarm }), turn: w.turn.turn },
+      tickets: { 1: { state: "implementing" } },
+    });
   on("session.start", () => ({ cwd: "/work" }));
   on("classic.SessionStart", () => ({}));
   on("session.root", () => ({ value: "/work" }));
@@ -51,7 +54,7 @@ const world = (on: Parameters<TestBody>[1], opts: { alive?: boolean; keepWarm?: 
   });
   on("fs.exists", () => ({ value: true }));
   on("fs.stat", () => ({ value: { kind: "file", size: 1, mtimeMs: 0, isLink: false } }));
-  on("fs.read", () => ({ value: record }));
+  on("fs.read", () => ({ value: record() }));
   on("process.run", ($, e) => ({ value: { exitCode: e.argv[0] === "ps" && opts.alive === false ? 1 : 0, stdout: e.argv[0] === "ps" ? "node /kit/src/cli.ts run" : "", ...RESULT } }));
   on("command.register", ($, e) => ({ value: { command: e.name } }));
   on("store.get", ($, e) => ({ value: w.store.get(e.key) }));
@@ -176,4 +179,23 @@ test("a fork that is not answered is logged and counted as a miss", HOURS, async
   expect(w.logs[0]).toContain("api-error");
   await w.clock.advance(60 * MIN);
   expect(w.forks.length).toBe(1);
+});
+
+test("a later turn of the same run does not put the refresh out, and keeps the misses", HOURS, async ($, on) => {
+  const w = world(on);
+  w.answers = [MISS];
+  await begin($, w);
+  await w.clock.advance(56 * MIN);
+  expect(w.forks.length).toBe(1);
+  // Turn 2 of the same process: a new startedAt, the same pid. A turn of the main thread earns one more try.
+  w.turn = { startedAt: T0 + 58 * MIN, turn: 2 };
+  await $.turn.complete({ ...ENDED, answer: "back" });
+  await w.clock.advance(56 * MIN);
+  expect(w.forks.length).toBe(2);
+  // The second miss of the run turns the refresh off, though the record changed in between.
+  w.turn = { startedAt: T0 + 120 * MIN, turn: 3 };
+  await $.turn.complete({ ...ENDED, answer: "back again" });
+  await w.clock.advance(60 * MIN);
+  expect(w.forks.length).toBe(2);
+  expect(await rowNow($)).toBeUndefined();
 });
