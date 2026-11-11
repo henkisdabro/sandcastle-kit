@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { red } from "./api-key.ts";
-import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
+import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen, turnsEndLine } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
@@ -172,6 +172,8 @@ export type Facts = {
   baseRed?: string[];
   /** The run record's `mergeUnchecked`: a host merge check that could not run - for objects a partial clone lacks, or a conflict resolution's stray check on a git older than 2.38 or a failed git call. */
   mergeUnchecked?: string;
+  /** The run record's `drain`: how a run of several turns ended (a drain's stop, or a later turn that could not start). */
+  drain?: DrainEnd;
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
   /** The Claude plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
@@ -695,6 +697,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
     mergeUnchecked: typeof run.mergeUnchecked === "string" ? run.mergeUnchecked : undefined,
+    drain: drainOf(run.drain),
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
     usage: earlier ? undefined : readPlanUsages(run.usage).find((u) => u.provider === "claude"),
     codexUsage: earlier ? undefined : readPlanUsages(run.usage).find((u) => u.provider === "codex"),
@@ -1215,6 +1218,13 @@ const flakyLines = (f: Facts): string[] => {
 };
 
 /** The closing summary as Markdown-ish text, every section present. */
+// The record's `drain`, or none when any part of it has the wrong type (a file in a repository).
+const drainOf = (d: unknown): DrainEnd | undefined => {
+  if (!d || typeof d !== "object") return undefined;
+  const { turns, landed, cause } = d as Record<string, unknown>;
+  return Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause ? { turns: turns as number, landed: landed as number, cause } : undefined;
+};
+
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
   const { ids, merged, notClosed, partly, closed, partlyRerun, ungated, byHand, held, uncommitted, followUps, filingFailed, toTriage } = o;
@@ -1298,6 +1308,8 @@ export const render = (f: Facts, plain = false): string => {
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : f.tokensNote === "unknown" ? " - tokens unknown" : ""}${f.tokensNote === "incomplete" ? " (incomplete)" : ""}`,
+    // How the run's turns ended, right under the headline: the run's exit says nothing of it at 0 (a later turn the checkout refused).
+    ...(f.drain ? [turnsEndLine(f.settings?.autonomy, f.drain)] : []),
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
       : f.verify === undefined || f.verify === null

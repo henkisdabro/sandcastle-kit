@@ -379,6 +379,12 @@ export type RunRecord = {
   baseRed?: string[];
   /** Why a host merge check could not run this turn (`mergeCheckGap`): objects a partial clone lacks (`noteMissingObjects`), or a conflict resolution's stray check on a git older than 2.38 or a failed git call. The closing summary says so, since those checks read the merge as clean or let the resolution go on unchecked. */
   mergeUnchecked?: string;
+  /**
+   * How a run of several turns ended, on the last turn's record (`recordDrain`, written once the loop ends): at `drain`,
+   * whatever stopped it; at levels 1 to 3, only a later turn that could not start (`cause`: `turn 2 could not start: ...`).
+   * `turns` is the turns that ran and `landed` what they merged. The closing summary's Run section shows it.
+   */
+  drain?: { turns: number; landed: number; cause: string };
   /** Out-of-scope problems agents named in `<followup>` lines, recorded as each arrives: `id` is the ticket filed for triage, absent until it is filed (and for good in a dry run, or when filing `failed`, which a run that stopped on a `.git` change sets without trying). */
   followUps?: { title: string; from: string; phase: string; id?: string; failed?: string }[];
   /**
