@@ -210,8 +210,8 @@ This continues SKILL.md: run its "Before every action" first.
    their steps under Next step and in the headline's counts (a ticket a later turn ran again shows
    only its latest ending). A turn the loop goes on from says so in one line instead of its steps.
    The earlier turns' other lines (what they merged, the `Autonomy level` lines) are in the run's
-   output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
-   `Drain: <N> turns, <landed> landed, stopped because <cause>`; at `2`, `3` and `drain`, a line for each ticket
+   output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end (and in
+   the summary's Run section) is `Drain: <N> turns, <landed> landed, stopped because <cause>`; at `2`, `3` and `drain`, a line for each ticket
    queued after the run started that no turn took (a follow-on turn takes the unblocked ones when the run would
    end, once at `2` and `3`): quote the cause and name those tickets in the hand-back. A later turn the checkout
    refused (`turn 2 could not start: the working tree is dirty (<files>)`, or the wrong branch, or git's
