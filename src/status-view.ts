@@ -3,12 +3,16 @@
 // rows (src/status-rows.ts) and its frame (src/status-render.ts) - in a single write.
 //
 //   status-view.ts [interval] [all|collapse]
+//   status-view.ts --json
 //
 // `0`, or any interval with no terminal on stdout (and no STATUS_FRAMES), is one frame and out: every source read
 // once, each within its deadline; exit 0, or 1 when the project has no `.sandcastle`, (the exit code `sandcastle status` hands on). Any other
 // interval is the live view on the alternate screen, until q or Esc in the Herdr popup (0), Ctrl-C or INT (130, and
 // the quit mark), TERM (130) or HUP (129). STATUS_FRAMES ends it after that many frames drawn once every source has
 // answered, for the tests.
+//
+// `--json`, anywhere in the arguments, is one reading printed as the rows' own JSON (`ticketRows`, src/status-rows.ts)
+// and nothing else: no frame, no colour, no live view, and an interval or `all` beside it is ignored.
 //
 // The live view never waits on a source to draw. The collectors (src/status-snapshot.ts) refresh the sources in the
 // background, on the interval, and a reading that changes is painted at once; a paint draws the snapshot as it
@@ -329,7 +333,16 @@ const main = async (): Promise<number | undefined> => {
     process.stderr.write(`status: ${resolve(env.SANDCASTLE_PROJECT || process.cwd(), ".sandcastle")}: No such file or directory\n`);
     return 1;
   }
-  const [interval = "10", show] = process.argv.slice(2);
+  const argv = process.argv.slice(2);
+  if (argv.includes("--json")) {
+    // One reading with no terminal, as `status 0` into a pipe: no links unless SANDCASTLE_LINKS says so.
+    const snapshot = await readSnapshot(dir, { env, terminal: false });
+    // The shape is `Table` exactly as `ticketRows` returns it - { rows, counts, partly, later }, nothing added, renamed
+    // or wrapped. Other views (an app mod, #866) read that type, so a change to `Row` is a change to this output.
+    process.stdout.write(JSON.stringify(ticketRows(snapshot)) + "\n");
+    return 0;
+  }
+  const [interval = "10", show] = argv;
   const terminal = isatty(1);
   // Nobody watches a refreshing view whose output is not a terminal, and a pipe or an agent's tool would wait on it
   // until killed: with no terminal any interval prints once, as 0 does. STATUS_FRAMES keeps the loop for the tests.

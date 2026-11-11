@@ -3,7 +3,8 @@
 This continues SKILL.md: run its "Before every action" first.
 
 `sandcastle status 0` prints a snapshot; `sandcastle status` refreshes every 10 s (run it in a
-separate pane or terminal). For a run that has ended, `sandcastle report` prints its closing
+separate pane or terminal). `sandcastle status --json` prints one reading's ticket rows as JSON, for a
+program, not for reading. For a run that has ended, `sandcastle report` prints its closing
 summary: hand it back as run.md's "Close the run" step says. Done when the user has the snapshot
 and, for every row that needs them, its cause read from the log.
 
