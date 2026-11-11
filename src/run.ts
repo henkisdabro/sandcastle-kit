@@ -1584,8 +1584,10 @@ export type BranchHead = {
   gap?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
-  /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`commentCount`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
+  /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`seenComments`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
   comments?: number;
+  /** The latest creation time among those comments, when the tracker gives times (GitHub): a comment created after it is unseen even when a deleted one moved the count back (`personCommentsSince`). Absent for a ticket file and in a record from before it. */
+  commentsAt?: string;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -1602,7 +1604,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
