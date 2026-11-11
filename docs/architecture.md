@@ -176,7 +176,8 @@ After those runs, a ticket gate red that is **load-made** (`loadMade`, `src/gate
 every one a test timeout by `onlyTimeouts`, none with exit 124, and the pass's own machine-wide
 `cpuMachineMean` at or above `CPU_PRESSURE_HIGH`, `cpuHigh`; the last run of a `rerunOf` chain is the one
 judged, and the sandbox cgroup's figure never is) gets no repair pass and one more gate run instead,
-from the red gate on (`ctx.regate` with that gate's name, the gates that passed before it spliced in front of the run's, as the flake re-run does; with `ctx.regate` unset, one full `gate` call),
+from the red gate on (`ctx.regate` with that gate's name, the gates that passed before it spliced in
+front of the run's, as the flake re-run does; with `ctx.regate` unset, one full `gate` call),
 once per attempt and never inside the repair loop, when repair is on and the red is not the forced one.
 Green goes on as green with no re-review; red and load-made again ends the ticket `gate-failed` with
 `loadRed: true` (the ledger's note says to run it again when the machine is quiet); red and not
