@@ -555,7 +555,12 @@ const clean = (v: string) => v.replace(/^[`"'*]+|[`"'*]+$/g, "").trim();
  * here.
  */
 export const headerOf = (text: string) => {
-  const lines = text.split("\n");
+  // A BOM before the title and a CRLF file are the same ticket as without them: the BOM would hide the
+  // front matter's `---`, and a trailing `\r` fails `META`. `eol` and `bom` let a write put both back.
+  const bom = text.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const body = text.slice(bom.length);
+  const eol = /^[^\n]*\r\n/.test(body) ? "\r\n" : "\n";
+  const lines = body.split(/\r?\n/);
   const meta = new Map<string, { value: string; index: number }>();
   let i = 0;
   if (lines[0] === "---") {
@@ -577,18 +582,18 @@ export const headerOf = (text: string) => {
     if (!m || lines[i].startsWith("#")) break;
     meta.set(m[1].toLowerCase(), { value: clean(m[2]), index: i });
   }
-  return { lines, meta, title };
+  return { lines, meta, title, eol, bom };
 };
 
 export const statusOf = (text: string) => headerOf(text).meta.get("status")?.value.toLowerCase();
 
 const withStatus = (text: string, value: string) => {
-  const { lines, meta, title } = headerOf(text);
+  const { lines, meta, title, eol, bom } = headerOf(text);
   const at = meta.get("status");
   if (at) lines[at.index] = lines[at.index].replace(/(:\**[ \t]*).*$/, `$1${value}`);
   else if (title >= 0) lines.splice(title + 1, 0, "", `Status: ${value}`, ...(lines[title + 1]?.trim() ? [""] : []));
   else lines.unshift(`Status: ${value}`, "");
-  return lines.join("\n");
+  return bom + lines.join(eol);
 };
 
 export type FileTicket = { id: string; path: string; feature: string; number: string; text: string; status?: string; blockedBy: string[] };
@@ -647,17 +652,23 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
   };
   const toTicket = (t: FileTicket): Ticket => ({
     id: t.id,
-    title: t.text.match(/^#\s+(.+)$/m)?.[1] ?? t.path,
+    title: t.text.replace(/^\uFEFF/, "").match(/^#[ \t]+(.+?)[ \t]*\r?$/m)?.[1] ?? t.path,
     ...split(t.text),
     status: t.status,
   });
-  const isDone = (t: FileTicket) => !!t.status && done.includes(t.status);
+  // `statusOf` lowercases what it reads, so the configured words are compared lowercased too; `done[0]`
+  // is written as configured.
+  const doneWords = done.map((d) => d.toLowerCase());
+  const queueWord = project.label.toLowerCase();
+  const isDone = (t: FileTicket) => !!t.status && doneWords.includes(t.status);
   const write = (t: FileTicket, status: string | undefined, comment?: string) => {
     let text = readFileSync(join(root, t.path), "utf8");
     if (status) text = withStatus(text, status);
     if (comment === undefined) return writeFileSync(join(root, t.path), text);
     const heading = /^## Comments\b/m.test(text) ? "" : "\n## Comments\n";
-    writeFileSync(join(root, t.path), `${text.trimEnd()}\n${heading}\n### ${new Date().toISOString().slice(0, 10)} - sandcastle\n\n${comment.trim()}\n`);
+    const out = `${text.trimEnd()}\n${heading}\n### ${new Date().toISOString().slice(0, 10)} - sandcastle\n\n${comment.trim()}\n`;
+    // A CRLF ticket stays CRLF throughout, the appended comment included.
+    writeFileSync(join(root, t.path), headerOf(text).eol === "\r\n" ? out.replace(/\r?\n/g, "\r\n") : out);
   };
   // Whoever last touched the ticket, by git: the mtime of a checkout says nothing.
   const lastCommitAt = (path: string) => {
@@ -668,7 +679,7 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
     kind: "files",
     agentsWrite: false,
     ref: (id) => id,
-    queued: () => scan().filter((t) => t.status === project.label).map((t) => ({ ...toTicket(t), updated: lastCommitAt(t.path) })),
+    queued: () => scan().filter((t) => t.status === queueWord).map((t) => ({ ...toTicket(t), updated: lastCommitAt(t.path) })),
     open: () => scan().filter((t) => !isDone(t)).map(toTicket),
     get: (id) => {
       const t = find(id);
@@ -800,7 +811,7 @@ export const requeueTicketWithEffect = (tracker: Tracker, label: string, args: s
   const ref = tracker.ref(id);
   if (!t.open) throw new OperatorError(`${ref} is closed. Reopen it first if it needs more work.`);
   const text = note && `Note for the next run, from \`sandcastle requeue\`:\n\n${note}`;
-  if (t.status === label && !t.held) {
+  if (t.status?.toLowerCase() === label.toLowerCase() && !t.held) {
     if (!text) return { message: `${ref} is still in the queue; nothing to change. Add --note "..." to leave the next run a note.`, relabelled: false };
     tracker.comment(id, text);
     return { message: `${ref} is still in the queue; added your note.`, relabelled: false };

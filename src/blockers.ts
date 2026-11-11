@@ -240,7 +240,7 @@ const whyKey = (tracker: Tracker, b: Blocker, queued?: Set<string>): string | un
   b.state !== "open" || !(b.kind === "ticket" || (b.kind === "github" && tracker.kind === "github")) || queued?.has(b.id) ? undefined : `${b.kind}:${b.id}`;
 
 const whyFrom = (project: Project, b: Blocker, t: TicketState, queued?: Set<string>): Why | undefined =>
-  t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? (mergedPartly(project.root, project.baseBranch, b.id) ? "merged-partly" : "merged-by-hand") : "held") : (queued ? true : t.status !== project.label) ? "unqueued" : undefined;
+  t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? (mergedPartly(project.root, project.baseBranch, b.id) ? "merged-partly" : "merged-by-hand") : "held") : (queued ? true : t.status?.toLowerCase() !== project.label.toLowerCase()) ? "unqueued" : undefined;
 
 // On GitHub a declared blocker is a native "blocked by" edge: an issue gh reads the state of, closed
 // as not planned included. One the body names too is one blocker.
