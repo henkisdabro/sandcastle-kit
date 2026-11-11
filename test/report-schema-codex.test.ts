@@ -308,38 +308,30 @@ const refusedPass = async (agent: Awaited<ReturnType<typeof crossAgent>>) => {
 };
 
 test("a Codex agent fed the recorded refusal gives a timings entry failed: invalid_json_schema, and a cross-review line that names it", async () => {
-  const agent = await crossAgent(on);
+  // The pass runs on the agent crossReview builds, and the timings entry is read from that agent's capture, as `pass` does.
+  let given: Awaited<ReturnType<typeof crossAgent>> | undefined;
   let thrown: unknown;
   const { result, lines } = await quietly(() =>
-    on.crossReview("#12", async () => {
+    on.crossReview("#12", async (agent) => {
+      given = agent as Awaited<ReturnType<typeof crossAgent>>;
       try {
-        return await refusedPass(agent);
+        return await refusedPass(given);
       } catch (error) {
         thrown = error;
         throw error;
       }
     }),
   );
-  // crossReview built its own agent; the timings entry is read from the one the pass was given, as `pass` does.
   assert.equal(result, undefined);
   assert.ok(thrown, "the library throws for a failed turn, as it does for the pass");
-  assert.match(lines.filter((l) => l.includes("cross-review"))[0], /^#12: gpt-6-astra cross-review failed with REPORT_SCHEMA=1 \(.*\); continuing without it - if Codex refused the report schema/);
-
-  const given = await crossAgent(on);
-  await quietly(() => refusedPass(given).catch(() => {}));
+  assert.match(lines.filter((l) => l.includes("cross-review"))[0], /^#12: gpt-6-astra cross-review failed with REPORT_SCHEMA=1 \(invalid_json_schema\); continuing without it - if Codex refused the report schema, every cross-review fails while the switch is on\.$/);
+  assert.ok(given);
   const facts = passReport(given)?.read();
   assert.ok(facts);
   const timing = reportTiming(facts, agentFailure(thrown));
   assert.equal(timing.came, "missing");
   assert.equal(timing.missing, "failed: invalid_json_schema");
   assert.ok(!("tries" in timing));
-});
-
-test("a refused schema reaches the cross-review's own line as invalid_json_schema", async () => {
-  // crossReview reads the reason from the agent it built, so the run callback must use that agent.
-  const { result, lines } = await quietly(() => on.crossReview("#12", (agent) => refusedPass(agent as Awaited<ReturnType<typeof crossAgent>>)));
-  assert.equal(result, undefined);
-  assert.match(lines.filter((l) => l.includes("cross-review"))[0], /cross-review failed with REPORT_SCHEMA=1 \(invalid_json_schema\); continuing without it/);
 });
 
 // ---- the call sites (burndown() needs Docker)

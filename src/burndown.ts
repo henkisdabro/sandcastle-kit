@@ -1606,7 +1606,7 @@ export type PipelineContext = {
   followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[]; namedByOthers?(from: string): NamedFollowUp[] };
   /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`runTicketsView`). None, and it is shown none. */
   tickets?: readonly { id: string; title: string }[];
-  /** With REPORT_SCHEMA=1: where a Claude pass leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
+  /** With REPORT_SCHEMA=1: where a pass (Claude, or the Codex cross-review) leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
   reportTimings?: Map<string, ReportTiming>;
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
@@ -3421,7 +3421,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
   const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
-  // With REPORT_SCHEMA=1: whether the last Claude pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
+  // With REPORT_SCHEMA=1: whether the last agent pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
   const reportTimings = new Map<string, ReportTiming>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();

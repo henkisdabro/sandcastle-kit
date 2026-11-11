@@ -59,7 +59,7 @@ export const CROSS_REVIEW_MODEL = process.env.CROSS_REVIEW_MODEL ?? "gpt-6-astra
 const CROSS_REVIEW_EFFORT = CROSS.on ? CROSS.effort : "high";
 
 /**
- * REPORT_SCHEMA=1: Claude passes also return a schema-validated report (`container/report.schema.json`), which a pass's
+ * REPORT_SCHEMA=1: Claude passes and the Codex cross-review also return a schema-validated report (`container/report.schema.json`), which a pass's
  * readers prefer to the own-line tags. Off, a run is what it was before: the same command, the same readers, no timings field.
  */
 export const REPORT_SCHEMA = process.env.REPORT_SCHEMA === "1";
