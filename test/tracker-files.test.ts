@@ -19,7 +19,8 @@ const { headerOf, makeTracker, readTicket, requeueTicketWithEffect, statusOf } =
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
-const BOM = "﻿";
+// Written as an escape: an editor that strips an invisible BOM would leave these tests passing on nothing.
+const BOM = "\uFEFF";
 const ticketPath = (n: string, name = "a") => `.scratch/cart/issues/${n}-${name}.md`;
 
 // A fresh repo with the given tickets committed, and the files tracker over it.
