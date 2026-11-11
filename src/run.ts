@@ -18,6 +18,7 @@ import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, st
 import { protectedPathsNote } from "./guard.ts";
 import { CheckoutRefusal, OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
+import { redact } from "./worktree-lock.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
 import type { Settled } from "./usage.ts";
@@ -479,6 +480,33 @@ export const logExpansionFailure = (logging: LoggingOption | undefined, error: u
   if (line === undefined || logging?.type !== "file" || typeof logging.path !== "string") return;
   try {
     appendFileSync(logging.path, `! error: ${line}\n`);
+  } catch {
+    // A full disk must not hide the crash itself.
+  }
+};
+
+/** The most lines of an agent process's output `logAgentExit` keeps: the end of it is where the cause is. */
+const AGENT_EXIT_LINES = 40;
+
+/**
+ * What a pass whose agent process exited non-zero leaves at the end of its readable log, which otherwise stops at
+ * "Agent started": `! error: <agent> exited with code N`, then the process's output (Sandcastle's error message, the
+ * stderr after its first line), redacted, indented two spaces, the last 40 non-empty lines with a cut line before
+ * them. Nothing for any other error and for a pass with no file log. Called after `passHitLimit` has read the log, so
+ * an agent's own usage-limit line is never pushed out of the lines that check reads.
+ */
+export const logAgentExit = (logging: LoggingOption | undefined, error: unknown): void => {
+  // A prompt expansion's "Command `...` exited with code N:" (empty stderr) is `logExpansionFailure`'s line, not twice.
+  if (logging?.type !== "file" || typeof logging.path !== "string" || promptExpansionLine(error) !== undefined) return;
+  const text = (error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
+  const [first, ...rest] = text.split("\n");
+  if (!/exited with code \d+:\s*$/.test(first)) return;
+  const detail = rest.map((l) => redact(l).trimEnd()).filter((l) => l.trim());
+  const kept = detail.slice(-AGENT_EXIT_LINES);
+  const cut = detail.length - kept.length;
+  const lines = [`! error: ${first.replace(/:\s*$/, "")}`, ...(cut ? [`  [... ${cut} lines cut ...]`] : []), ...kept.map((l) => `  ${l}`)];
+  try {
+    appendFileSync(logging.path, lines.join("\n") + "\n");
   } catch {
     // A full disk must not hide the crash itself.
   }

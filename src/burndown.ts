@@ -42,7 +42,7 @@ import { agentBaseline, onNoPsi, cpuFields, cpuOf, peakOf, pressureFields, press
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logAgentExit, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
@@ -2089,6 +2089,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           }
           // The time parked before the error is no work of the ticket's either.
           if (parkedInStep > parkedBefore) waited.set(issue.id, (waited.get(issue.id) ?? 0) + parkedInStep - parkedBefore);
+          // After `passHitLimit` has read the log: the crash detail must not push an agent's own limit line out of its tail.
+          logAgentExit(opts.logging, error);
           throw error;
         }
       }
