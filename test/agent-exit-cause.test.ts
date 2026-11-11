@@ -26,11 +26,16 @@ test("the crashed note stays the first line when the detail is only stream JSON"
   assert.equal(agentFailure(exited('{"type":"system"}\n{"type":"result","is_error":true}')), "claude-code exited with code 1");
 });
 
+test("the note skips stream JSON to the first plain-text line after it", () => {
+  assert.equal(agentFailure(exited('{"type":"system"}\n\n[1, 2]\nError: model not found')), "claude-code exited with code 1: Error: model not found");
+});
+
 test("a registered secret never reaches the note or the log, near the cut too", () => {
   hideFromGates([SECRET]);
   assert.equal(agentFailure(exited(`bad key ${SECRET}`)), "claude-code exited with code 1: bad key <redacted>");
   // Starting near character 150 of the joined text: redacting before the cut leaves no part of it.
-  const padded = exited(`${"word ".repeat(26)}${SECRET} tail`);
+  const padded = exited(`${"word ".repeat(23)}${SECRET} tail`);
+  assert.equal("claude-code exited with code 1: ".length + "word ".repeat(23).length, 147);
   const note = agentFailure(padded);
   assert.ok(!note.includes("sk-ant"), note);
   assert.ok(!note.includes("0123456789"), note);
@@ -82,6 +87,9 @@ test("nothing is written for another error, an expansion failure or a log that i
   logAgentExit(file, new Error("(FiberFailure) AgentError: claude-code reported an error:\nAPI Error: 529"));
   logAgentExit(file, new Error("claude-code exited with code 1:"));
   logAgentExit(file, new Error("Prompt expansion failed: gh: HTTP 502"));
+  // An expansion whose command wrote its stderr on the next line ends like an agent's exit: `logExpansionFailure`'s.
+  logAgentExit(file, new Error("(FiberFailure) PromptError: Command `gh auth status` exited with code 1:\nYou are not logged in"));
+  logAgentExit(file, Object.assign(new Error("Command `gh issue view 1` exited with code 1: "), { name: "(FiberFailure) PromptError" }));
   logAgentExit({ type: "stdout" }, exited("detail"));
   logAgentExit(undefined, exited("detail"));
   logAgentExit({ type: "file", path: join(tmpdir(), "no-such-dir-agent-exit", "x.log") }, exited("detail"));

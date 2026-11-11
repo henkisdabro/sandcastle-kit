@@ -575,7 +575,10 @@ export const agentFailure = (error: unknown) => {
   if (code) return cutAtWord(`${first} - ${code.replace(/_/g, " ")}`);
   // After "exited with code N:" the rest is the process's stderr, or (stderr empty) the stream's own JSON: only a
   // plain-text line is kept, so the note says why `claude` died (a bad key, an unknown model) when it said so.
-  const next = /(reported an error|exited with code \d+):\s*$/.test(line) ? rest.find((l) => l.trim())?.trim() : undefined;
+  // The first line that is not JSON: Sandcastle's stdout fallback can end in a plain-text line after the stream's own.
+  const next = /reported an error:\s*$/.test(line)
+    ? rest.find((l) => l.trim())?.trim()
+    : /exited with code \d+:\s*$/.test(line) ? rest.map((l) => l.trim()).find((l) => l && !/^[[{]/.test(l)) : undefined;
   const cause = next && !/^[[{]/.test(next) ? next : undefined;
   return cutAtWord(cause ? `${first}: ${cause}` : first);
 };

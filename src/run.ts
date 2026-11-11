@@ -496,7 +496,8 @@ const AGENT_EXIT_LINES = 40;
  * an agent's own usage-limit line is never pushed out of the lines that check reads.
  */
 export const logAgentExit = (logging: LoggingOption | undefined, error: unknown): void => {
-  if (logging?.type !== "file" || typeof logging.path !== "string") return;
+  // A prompt expansion's "Command `...` exited with code N:" (empty stderr) is `logExpansionFailure`'s line, not twice.
+  if (logging?.type !== "file" || typeof logging.path !== "string" || promptExpansionLine(error) !== undefined) return;
   const text = (error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
   const [first, ...rest] = text.split("\n");
   if (!/exited with code \d+:\s*$/.test(first)) return;
