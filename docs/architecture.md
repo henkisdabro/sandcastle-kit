@@ -3063,6 +3063,8 @@ names for `GH_TOKEN`, read once per run and `null` after one printed line when i
 
 One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split`
 ...), against temp repos, made-up records and fake sandboxes.
+`pnpm test` runs them heaviest first, in the order `TEST_SHARD=1/1 node test/shard.ts` prints
+(`test/shard.ts`'s `WEIGHTS`; a file with no weight counts one second and comes last, by name).
 Two preloads (`--import`, from `pnpm test`, `test:shard`, `test:file`, `test:related`,
 `test:weights` and `test/run-shards.sh`) shape every test file's process: `test/hermetic-env.ts`
 gives each the same environment - `TMPDIR` the realpath of `os.tmpdir()` (a macOS `/var/...` against
