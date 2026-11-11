@@ -349,7 +349,8 @@ export const codexReportCapture = (now: () => number = Date.now): ReportCapture 
     texts: string;
     resultText?: string;
     accumulated: string;
-    lastMessage?: { text: string; line: number; at: number; silenceMs: number };
+    lastMessage?: { found: ReturnType<typeof reportFrom>; at: number; silenceMs: number };
+    reportLine?: number;
     failed?: string;
     signal?: { line: number; at: number };
     lastLineAt?: number;
@@ -394,30 +395,29 @@ export const codexReportCapture = (now: () => number = Date.now): ReportCapture 
         s.lastLineAt = at;
       }
       // The silence up to and including this message: the figure of the last one is the pass's, as later lines are after the report.
-      if (message !== undefined) s.lastMessage = { text: message, line, at, silenceMs: s.silenceMs };
+      if (message !== undefined) {
+        let found: ReturnType<typeof reportFrom>;
+        try {
+          found = reportFrom(JSON.parse(message));
+        } catch {
+          found = { missing: "not JSON" };
+        }
+        s.lastMessage = { found, at, silenceMs: s.silenceMs };
+        // A later prose message invalidates the final report, but cannot undo a report's arrival.
+        if ("report" in found) s.reportLine = line;
+      }
     },
     finish(at: number = now()) {
       s.endedAt ??= at;
     },
     read(): ReportFacts {
       const output = s.resultText ? s.resultText : s.texts;
-      let found: { report: Report } | { missing: string };
-      if (!s.lastMessage) found = { missing: "no agent message" };
-      else {
-        let value: unknown;
-        let parsed = true;
-        try {
-          value = JSON.parse(s.lastMessage.text);
-        } catch {
-          parsed = false;
-        }
-        found = parsed ? reportFrom(value) : { missing: "not JSON" };
-      }
+      let found = s.lastMessage?.found ?? { missing: "no agent message" };
       if ("missing" in found && s.failed) found = { missing: s.failed };
       const facts: ReportFacts = { ...found, output };
       if (s.signal !== undefined) {
         const last = s.lastMessage;
-        if ("report" in found && last && last.line >= s.signal.line) {
+        if (last && s.reportLine !== undefined && s.reportLine >= s.signal.line) {
           facts.gapMs = last.at - s.signal.at;
           facts.silenceMs = last.silenceMs;
         } else {

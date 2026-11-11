@@ -2938,6 +2938,8 @@ held a `turn.failed`, `failed: <code>` - the `"code":"..."` in its `error.messag
 message's first 80 characters. The signal sits in the report's own `signal` field, so the library's
 `completionSignal` arms on the JSON message. A pass cut off by the grace window (the signal in prose, then a
 silence, and no valid report at or after it) records `cutOff` with its figures running to the pass's end.
+A valid report followed by a final prose message is missing (`not JSON`), but was not cut off:
+its timing figures end at the last message, since the report did arrive after the signal.
 `reportTiming` and `crossReview`'s line prefer the capture's `failed: ...` reason to the thrown error's text, so
 a refused schema reads `failed: invalid_json_schema` on the timings line, and with the switch on `crossReview`
 says the report schema was on and that a refused schema ends every cross-review while it is. In the review loop
