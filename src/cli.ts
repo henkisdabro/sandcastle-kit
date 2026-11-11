@@ -60,6 +60,7 @@
 //                    those with no line apart; read-only, no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
 //                    it fits its pane unless given "all"
+//                    `--json`: the ticket rows of one reading as JSON (`ticketRows`, `src/status-rows.ts`), for other views
 //   build [--force]  build the base and project images
 //   preflight [--api-key]
 //                    one reply from every model, nothing else; asks first, as a run
