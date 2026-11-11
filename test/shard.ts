@@ -4,6 +4,9 @@
 //
 //   TEST_SHARD=2/4 node test/shard.ts
 //
+// `pnpm test` runs the 1/1 shard, which is every file heaviest first: the slow files start while
+// the workers are free and the light ones fill in around them, instead of the glob's alphabet.
+//
 // A file missing from WEIGHTS counts as one second, so a new file is still run, and stale weights
 // only cost balance, never coverage.
 
