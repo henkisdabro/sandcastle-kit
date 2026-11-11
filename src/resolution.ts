@@ -39,11 +39,28 @@ export const PARTIAL_CLONE_GAP =
   "so on an object only the remote has they cannot run, and the merge is not checked; a full clone holds them all";
 
 let gap: string | undefined;
-/** The note a run records when a host merge check could not run for missing objects (`noteMissingObjects`); undefined while none has. */
-export const mergeCheckGap = () => gap;
-/** Forgets the note, so each turn of a multi-turn run (one process, one `burndown()` per turn) records and says it for its own checks only. */
+// This turn's notes of a stray check that could not run (`strayChanges`), each cause once. Kept apart from `said`: the
+// screen line is once per process, but every turn's record and summary must say its own resolutions went unchecked.
+const strayGaps = new Set<string>();
+/** How a stray-check note begins, whatever its cause: an old git or a failed git call. */
+const STRAY_GAP_START = "a conflict resolution was not checked against git's own merge";
+/**
+ * The note a run records when a host merge check could not run this turn: the partial clone's missing objects
+ * (`noteMissingObjects`) first, then each distinct reason a conflict resolution's stray check could not run, joined
+ * with `; `. Undefined while none has. A stray check that cannot run lets the resolution go on (#99), and nothing
+ * after it sees a line it dropped from the base's side, so the run record's `mergeUnchecked` and the summary say so.
+ */
+export const mergeCheckGap = () => {
+  const notes = [...(gap ? [gap] : []), ...strayGaps];
+  return notes.length ? notes.join("; ") : undefined;
+};
+/**
+ * Forgets the notes, so each turn of a multi-turn run (one process, one `burndown()` per turn) records and says them
+ * for its own checks only. The stray check's screen line stays once per process: that flag is left alone.
+ */
 export const resetMergeCheckGap = () => {
   gap = undefined;
+  strayGaps.clear();
 };
 
 /**
@@ -156,12 +173,14 @@ export const mergeTree = (root: string, ours: string, theirs: string): { conflic
  * git's merge carried its changes into (a rename of the branch's). A new file, or one only the
  * branch touched, is left out. Empty when the resolution stayed inside the conflicts and its own
  * files. `undefined` when the check cannot run (git older than 2.38, or a git call failed): it says
- * so once and never throws, so the narrow review remains.
+ * so once per process, keeps the cause for the turn's `mergeCheckGap()`, and never throws, so the narrow review remains.
  */
 export const strayChanges = (root: string, { ours, theirs, resolved, generated = [], gitVersion }: Resolution): string[] | undefined => {
   const unavailable = (why: string) => {
     if (!said) console.log(`conflict resolutions are not checked against git's own merge: ${why}.`);
     said = true;
+    // Recorded on every call, said or not: a later turn prints nothing, yet its own record must carry it.
+    strayGaps.add(`${STRAY_GAP_START}: ${why}`);
     return undefined;
   };
   if (!mergeTreeSupported(root, gitVersion)) return unavailable(`it needs git ${MIN_GIT.join(".")} or newer`);

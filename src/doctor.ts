@@ -35,6 +35,24 @@ export const HC_VERIFIED = "0.1.19";
 /** Doctor's warn line for an hc below the floor: why it matters, and the fix. */
 export const hcFloorLine = (hc: string) =>
   `warn herdr-core ${hc} is older than ${HC_VERIFIED}, the version the kit's view was checked against: an older hc ends a \`sandcastle run --detach\` with the terminal it was started from, and a terminal opened before the update keeps doing so until it is recreated. \`hc update\` (or the Herdr app's update) brings it up to date.`;
+/** The git install hint, for a floor: doctor's git check (2.31) and the stray check's warning (2.38) share it. */
+const gitInstallHint = (floor: string, mac: boolean) =>
+  mac ? `Install git ${floor} or newer: \`xcode-select --install\` or \`brew install git\`.` : `Install git ${floor} or newer: \`sudo apt install git\` or \`sudo dnf install git\`.`;
+
+/**
+ * Doctor's warn line for a git that runs the kit (2.31 or newer) but has no `merge-tree --write-tree` (2.38): a
+ * conflict resolution then goes on unchecked against git's own merge, so one that drops another ticket's landed
+ * lines reaches the review and the gates with nothing to show the loss. `answer` is `git --version`'s output.
+ * Undefined from 2.38 on, and below 2.31, where the git check itself prints the fix.
+ */
+export const gitStrayCheckLine = (answer: string, mac: boolean): string | undefined => {
+  const found = answer.match(/(\d+)\.(\d+)/);
+  if (!found) return undefined;
+  const [major, minor] = [Number(found[1]), Number(found[2])];
+  if (major !== 2 || minor < 31 || minor >= 38) return undefined;
+  return `warn git ${found[0]}: conflict resolutions are not checked against git's own merge below 2.38, so a resolution that drops another ticket's landed lines goes on to the review and the gates unchecked.\n       -> ${gitInstallHint("2.38", mac)}`;
+};
+
 /** Whether `hc --version`'s answer (`hc 0.1.19`) names a version below `floor`; an answer with no version is not. */
 export const olderThan = (answer: string, floor: string) => {
   const found = answer.match(/(\d+)\.(\d+)\.(\d+)/);
@@ -418,9 +436,13 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     !needsGh,
   );
   // Worktree commands the kit relies on need 2.31; an older git failed mid-run, not here.
-  const gitVersion = run("git", ["--version"])?.match(/(\d+)\.(\d+)/);
+  const gitAnswer = run("git", ["--version"]);
+  const gitVersion = gitAnswer?.match(/(\d+)\.(\d+)/);
   const gitOk = !!gitVersion && (Number(gitVersion[1]) > 2 || (Number(gitVersion[1]) === 2 && Number(gitVersion[2]) >= 31));
-  check(gitOk, gitVersion ? `git ${gitVersion[0]} (2.31 or newer)` : "git", mac ? "Install git 2.31 or newer: `xcode-select --install` or `brew install git`." : "Install git 2.31 or newer: `sudo apt install git` or `sudo dnf install git`.");
+  check(gitOk, gitVersion ? `git ${gitVersion[0]} (2.31 or newer)` : "git", gitInstallHint("2.31", mac));
+  // A run on 2.31 to 2.37 works, but its conflict resolutions go unchecked: said here, before any run.
+  const strayCheckLine = gitAnswer === undefined ? undefined : gitStrayCheckLine(gitAnswer, mac);
+  if (strayCheckLine) console.log(strayCheckLine);
   // The operator is the author of the kit's merges and ticket commits. Without an identity git
   // refuses them at landing (after the run has spent its tokens) or signs them with a guessed
   // name and a hostname address.

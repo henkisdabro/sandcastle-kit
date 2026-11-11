@@ -679,7 +679,17 @@ review as `MERGE_STRAYS` (`namedStraysView`, in the `remerge` prompt) and the ga
 (`test/pipeline-named-strays.test.ts`); the full review a person's late comment sends a conflicted
 carried merge to gets them too, in the `review` prompt's `{{KIT_AFTER_REPAIR}}` slot and with its own
 lead-in, since it is shown no combined diff - the cross-review as well
-(`test/carried-late-comment.test.ts`, `test/carried-late-comment-cross.test.ts`)
+(`test/carried-late-comment.test.ts`, `test/carried-late-comment-cross.test.ts`).
+A stray check that cannot run (git older than 2.38, or a git call that failed in a full clone)
+returns `undefined` and the resolution goes on to the review and the gates (fail-open, as decided
+when the check was added); its screen line is said once per process (`said`, never reset), but
+each call also keeps a note for the turn, worded for its cause (`it needs git 2.38 or newer`, or
+`git failed (<first line>)`).
+`mergeCheckGap()` returns the turn's notes - the partial clone's first, then each distinct stray-check
+note, joined with `; ` - so the run record's `mergeUnchecked` and the closing summary's
+`Merge checks:` line carry it on every turn of a drain, and `resetMergeCheckGap()` at the top of a
+turn forgets them all; `sandcastle doctor` warns on git 2.31 to 2.37 (`gitStrayCheckLine`;
+`test/stray-check-unavailable.test.ts`, `test/doctor-git-stray-check.test.ts`)
 
 ## `src/schedule.ts`
 
