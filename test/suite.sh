@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The whole suite, as `pnpm test` runs it: `bash test/suite.sh <the node:test command>`. The status
-# view's scenarios (test/status.test.sh at 80 columns and again at 180, each with its bash32 pass
-# where this repository's image has bash32) run beside the command, not before it. They are hundreds
+# view's scenarios (test/status.test.sh at 80 columns and again at 180; the 80-column pass also renders
+# one scenario under bash32, where this repository's image has it) run beside the command, not before it. They are hundreds
 # of serial node starts on one core: run first, they were about half of every test gate's time, and
 # a burndown runs that gate one after another on its one gates slot. Their output is held in files
 # and printed after the reporter's, so the two never interleave and a `FAIL [` line still reaches

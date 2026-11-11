@@ -8,7 +8,8 @@
 # not yet merged, read as `queued` for over an hour, because the view's rules
 # for earlier runs claimed it.
 #
-#   bash test/status.test.sh
+#   bash test/status.test.sh   # at 80 columns, with one scenario also rendered through status.sh under bash32
+#                              # (where /usr/local/bin/bash32 exists) and the two frames compared
 #   STATUS_BASH=/bin/bash COLS=200 bash test/status.test.sh   # status.sh under macOS's bash 3.2, a wide pane
 #   COLS=180 bash test/status.test.sh   # the wide layout, lanes beside the logo; `pnpm test` runs it too
 set -uo pipefail
@@ -100,6 +101,28 @@ hasnt() { # pattern
   ! grep -qE "$1" "$TMP/frame" || { echo "FAIL [$SCENARIO] a line matches /$1/: $(grep -E "$1" "$TMP/frame" | head -1)"; fails=$((fails+1)); }
 }
 
+# status.sh is a wrapper of a few lines that `exec`s the TypeScript view: one rendered scenario proves it runs
+# under macOS's bash 3.2 (this repository's sandbox image builds it as bash32, .sandcastle/Dockerfile). That this
+# file itself parses under 3.2 is test/host-shell-portability.test.ts's. The scenario is drawn through the bash the
+# file runs under and again through bash32, both under one pinned clock so the two frames are byte-identical
+# (`cmp` and `diff` read the same on macOS and Linux). Not run when STATUS_BASH names a bash (that run is already
+# under it), at another width than 80 (test/suite.sh's 180-column pass skips it, so it runs once per suite) or
+# where bash32 is absent.
+BASH32=/usr/local/bin/bash32
+bash32_applies() { [ -z "${STATUS_BASH:-}" ] && [ "$COLS" = 80 ] && [ -x "$BASH32" ]; }
+bash32_same_frame() { # queue
+  local saved_scenario="$SCENARIO"; SCENARIO="bash32"
+  FAKE_NOW="$now" render "$1"; cp "$TMP/frame" "$TMP/frame-own"
+  FAKE_NOW="$now" STATUS_BASH="$BASH32" render "$1"; cp "$TMP/frame" "$TMP/frame-bash32"
+  if [ ! -s "$TMP/frame-own" ] || ! cmp -s "$TMP/frame-own" "$TMP/frame-bash32"; then
+    echo "FAIL [bash32] status.sh under bash32 drew another frame (own bash, then bash32):"
+    diff "$TMP/frame-own" "$TMP/frame-bash32" | head -20; fails=$((fails+1))
+  else
+    echo "status view: status.sh under bash32 drew the same frame"
+  fi
+  SCENARIO="$saved_scenario"
+}
+
 # A process of the kit as far as status.sh can tell: its command line holds the kit's entry
 # (`src/cli.ts`), which is how a live run is told from a process that took a dead run's pid.
 ( exec -a "node src/cli.ts" sleep 600 ) & LIVE=$!
@@ -136,6 +159,13 @@ cat >"$L/run.json" <<EOF
   } }
 EOF
 render "101 102 103 104 105 106 107 108 109 110 120"
+# STATUS_BASH32_ONLY=1 (test/status-bash32-once.test.ts): the comparison alone, on this first scenario.
+if [ "${STATUS_BASH32_ONLY:-}" = 1 ]; then
+  bash32_applies || { echo "status view: bash32 check skipped (STATUS_BASH set, COLS not 80, or no $BASH32)"; exit 0; }
+  bash32_same_frame "101 102 103 104 105 106 107 108 109 110 120"
+  [ "$fails" -eq 0 ] || { echo "$fails check(s) failed."; exit 1; }
+  exit 0
+fi
 # The first column is headed TICKET (6 characters), not the GitHub word; the widths are sized for it.
 has '^│ +TICKET +│ +STATE +│'
 hasnt 'ISSUE'
@@ -1103,11 +1133,8 @@ count 'week +▓' 1
 hasnt 'codex|other'
 COLS="$COLS_WAS"
 
+# Once per suite, on the last scenario's queue.
+if bash32_applies; then bash32_same_frame "105"; fi
+
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"
-# This repo's sandbox image builds macOS's bash 3.2 as bash32 (.sandcastle/Dockerfile): without
-# this second pass, an agent's gate proved bash 5 only and 3.2 breakage surfaced after landing.
-if [ -z "${STATUS_BASH:-}" ] && [ "${BASH_VERSINFO[0]}" -ge 4 ] && [ -x /usr/local/bin/bash32 ]; then
-  echo "status view again under bash32 (bash 3.2):"
-  STATUS_BASH=/usr/local/bin/bash32 /usr/local/bin/bash32 "$0"; exit $?
-fi
