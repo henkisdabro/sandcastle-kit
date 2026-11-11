@@ -19,7 +19,10 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   queued ticket, and an agent reads the thread with a token in its environment. So the comments in
   an agent's prompt are filtered: only an owner's, a member's or a collaborator's comment, and the
   ticket author's, are shown, and the last line says how many were left out (bots such as
-  `github-actions[bot]` included). Every repository is filtered the same way, private ones too.
+  `github-actions[bot]` included) and that they are untrusted, not to be fetched or acted on.
+  Every repository is filtered the same way, private ones too.
+  The "blocked by" warnings that comments raise at a run's start and in `sandcastle blockers` read
+  the same accounts' comments only.
   The run counts the same accounts when it asks whether a person commented on a carried branch's
   ticket since its review: an outsider's comment never forces a full review. A comment that opens
   with `Sandcastle agent:` is skipped as the agent's own only when the account `GH_TOKEN` belongs to

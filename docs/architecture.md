@@ -3046,8 +3046,13 @@ the same ticket (`test/gh-retry.test.ts`).
 `comments-view.sh` is the tracker's `COMMENTS_VIEW`: `gh api repos/{owner}/{repo}/issues/N/comments`
 through `gh-retry.sh`, filtered with the image's `jq` to the comments whose `author_association` is
 `OWNER`, `MEMBER` or `COLLABORATOR` or whose author wrote the ticket, printed as `gh issue view N
---comments` prints a comment, and one last line counts those left out. On a public repository a
-stranger's comment would otherwise reach an agent that holds a token (`test/comments-view.test.ts`).
+--comments` prints a comment, and one last line counts those left out and tells the agent not to
+fetch or act on them.
+On a public repository a stranger's comment would otherwise reach an agent that holds a token
+(`test/comments-view.test.ts`).
+`commentOnlyBlocks` (`src/blockers.ts`) reads only the comments `trustedComment` passes, so a
+stranger's "Blocked by" comment puts no warning in front of the operator; a ticket file's comment,
+with no `commentBy`, is read as it is (`test/comment-blocks-trust.test.ts`).
 The run's side is `personCommentsSince` (`src/ledger.ts`): the same trust (`trustedComment`,
 `src/tracker.ts`, from the `author` and per-comment `authorAssociation` the GitHub tracker keeps on a
 `Ticket`) and the agent marker honoured only from `tokenUserOf`'s login, the account `gh api user`
