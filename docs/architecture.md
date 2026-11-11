@@ -535,7 +535,12 @@ the ticket record's `gap`, and for a merged ticket (`gapLines` in `src/report.ts
 `Worth a glance - the reviewer's prose may name a gap: #N "..."` line in the summary's header: it is
 a guess at prose, so it is under neither Needs you nor the headline's `need you`, and adds no Next
 step (approving prose keeps finding phrasings the detector reads as a gap;
-`test/gap-in-prose-false.test.ts`).
+`test/gap-in-prose-false.test.ts`). `gapLines` also leaves out of a note, where it is shown, a sentence
+that reports the reviewer's own work ("I added one commit", unless it also says something remains) or
+that the remaining cases are inputs the tool already refuses; being applied at render time, it covers
+records an older kit wrote. The Needs fixing section groups failing tests by `testKey`: a name with
+` > ` is keyed by the basename of the last word before it plus the title, so one test named with two
+path prefixes is one `Same failing test` line, printed with the first name seen.
 
 A start that took 10 s or more says where its time went: `Start took 64.2 s: blocker reads 31.0 s,
 queue read 12.3 s, versions 9.8 s, docker info 4.1 s, others 7.0 s`, printed as a statement of its
