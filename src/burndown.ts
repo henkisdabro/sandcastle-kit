@@ -3067,8 +3067,9 @@ export const burndown = async (project: Project, turn?: TurnOptions): Promise<bo
 
 /** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
 // `psi`: the run's own, across its turns: whether the no-PSI line was said.
+// `runStart`: when the person started the run (ms), the same for every turn: a later turn's own start would let an outsider's edit made during an earlier turn through.
 type PsiState = { told: boolean };
-type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
+type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; runStart?: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
 
 const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   // The first turn takes the clock `sandcastle run` started; a later turn counts only its own steps.
@@ -4035,7 +4036,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     })();
     if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
     // At every pipeline's start and only there (landing asks `withdrawal` alone): an outsider's edit after the label.
-    const outsider = await outsiderEdit(tracker, issue.id, Date.parse(runId));
+    const outsider = await outsiderEdit(tracker, issue.id, turn?.runStart ?? Date.parse(runId));
     if (outsider?.kind === "unread") {
       console.log(`${ref(issue.id)}: ${outsider.why}.`);
       return { kind: "not begun", why: { kind: "withdrawn", reason: outsider.why } };

@@ -16,12 +16,24 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   rest, bots' and integrations' included, are counted in one line. A comment opening with the agent
   marker counts as the agent's own only when the `GH_TOKEN` account wrote it. Queueing an
   outsider's issue trusts its body and that author's later comments, so read it before you label it.
+  An outsider's queued ticket that its author edits or comments on after the label is held for you;
+  read the change, then `sandcastle requeue <n>` accepts it. (#893)
 
 ### Added
 
 - A "Public repositories" note in the safety docs: queued tickets' comments are filtered to
   the repository's owners, members and collaborators and the ticket's author, and queueing an
   outsider's issue trusts its body. (#829)
+- `REPORT_SCHEMA=1` now covers the Codex cross-review too: it passes `--output-schema` and reads
+  the last message as the report. A refused schema is recorded as `failed: invalid_json_schema`
+  and named in the cross-review's log line, never ended silently. (#822)
+- `sandcastle status --json` prints the status view's ticket rows from one reading as JSON
+  (`{ rows, counts, partly, later }`), for other views of a run such as an app mod. (#909)
+- A queued GitHub ticket whose author is not an owner, member or collaborator is held for a person
+  when the author edited the body or commented after the queue label was last added;
+  `sandcastle requeue <n>` accepts the change. (#893)
+- `sandcastle doctor` warns on git 2.31 to 2.37 that conflict resolutions are not checked against
+  git's own merge below 2.38. (#839)
 
 ### Fixed
 
@@ -39,9 +51,48 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   GitHub that does not answer. (#829)
 - A status terminal that vanished while the kit waited for it no longer holds the new view back
   for 5 s. (#892)
+- The Markdown ticket-files tracker compares a ticket's `Status:` with the configured `label` and
+  `done` words without regard to case, and a ticket file with Windows line endings or a UTF-8 BOM
+  keeps its Status, `Blocked by:` and title; a close, hold or requeue leaves both as they were. (#833)
+- A malformed `tracker` or `blockers` in `.sandcastle/config.ts` is refused when the config loads,
+  naming the key. A misspelt tracker silently used GitHub Issues, and a string `blockers.linear`
+  crashed partway through a run. (#834)
+- A conflict resolution that could not be checked against git's own merge (git older than 2.38,
+  or a git call that failed) is named on the `Merge checks:` line of the run record and the closing
+  summary, not in one on-screen line per process. (#839)
+- The Claude Code mod's cache refresh treats every autonomy turn of one `sandcastle run` as one
+  run, so a new turn no longer restarts the 55-minute clock and the session's cache stays warm. (#841)
+- The re-gate after a test-timeout red under high machine load starts from the red gate, not the
+  first, so a slow build or e2e gate ahead of the tests is not run again. (#853)
+- A later autonomy turn that cannot start (a dirty checkout, the wrong branch, git's leftovers)
+  ends the run with the previous turn's exit - 0 on a green merged base - and its cause is in the
+  closing summary's Run section. (#860)
+- The merge command printed for a held branch carries the kit's merge subject, so the push closes
+  the ticket and the kit recognises the hand merge, and Runnable now lists red tickets still
+  queued. (#862)
+- A deleted comment on a GitHub ticket can no longer hide a maintainer's later comment from a
+  carried branch's late-comment check, which now uses comment times, not the comment count. (#894)
+- A herdr-core status view name that looked free but was still taken no longer leaves a run with
+  no status view: the view opens once more unnamed, with a line naming the old one to close. (#895)
+- Agents are told the left-out comments are untrusted and not to fetch them, and a "Blocked by"
+  comment from an outsider no longer warns at a run's start or in `sandcastle blockers`. (#896)
+- A pass whose agent process exits non-zero keeps the cause: the crashed note carries its first
+  error line, and the pass log ends with `! error: ...` and its last 40 lines, credentials
+  redacted. (#900)
+- The closing summary's "Same failing test" line groups one test named with different path
+  prefixes, and "Worth a glance" no longer quotes a reviewer's approving prose. (#910)
+- Codex report timings no longer claim a report was cut off when a later prose message replaced
+  one that arrived. (#822)
+- An outsider's edit to a ticket named on the command line, made during one autonomy turn, is held
+  at a later turn too: every turn measures from the run's start, not its own.
+- An empty `blockers.files.done` is refused when the config loads, as an empty `tracker.done` is:
+  it would count no blocker done and hold every ticket it names for good.
 
 ### Changed
 
+- `pnpm test` starts the test files heaviest first, by `test/shard.ts`'s weights, and the
+  status-render and bash 3.2 status tests draw a sample of widths and one scenario, so the suite
+  ends sooner. (#904, #905, #906)
 - **pnpm 12.18.0, `@types/node` 24.19.2 and oxlint 1.92.0** for the kit's own checks.
 
 ## [0.22.0] - 2026-11-10

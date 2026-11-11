@@ -1276,7 +1276,6 @@ const flakyLines = (f: Facts): string[] => {
   return all.length > 8 ? [...lines, `Likely flaky: and ${all.length - 8} more`] : lines;
 };
 
-/** The closing summary as Markdown-ish text, every section present. */
 // The record's `drain`, or none when any part of it has the wrong type (a file in a repository).
 const drainOf = (d: unknown): DrainEnd | undefined => {
   if (!d || typeof d !== "object") return undefined;
@@ -1284,6 +1283,7 @@ const drainOf = (d: unknown): DrainEnd | undefined => {
   return Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause ? { turns: turns as number, landed: landed as number, cause } : undefined;
 };
 
+/** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
   const { ids, merged, notClosed, partly, closed, partlyRerun, ungated, byHand, held, uncommitted, followUps, filingFailed, toTriage } = o;

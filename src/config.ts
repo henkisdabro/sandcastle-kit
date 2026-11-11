@@ -386,7 +386,10 @@ const checkBlockersShape = (blockers: unknown, refuse: (what: string) => never) 
   refuseUnknown(refuse, Object.keys(f), ["dir", "done"], "blockers.files.");
   // A missing `dir` is allowed: `tokens()` falls back to the tracker's own.
   if (f.dir !== undefined && !isNonEmptyString(f.dir)) refuse(`\`blockers.files.dir\` must be a non-empty string, not ${JSON.stringify(f.dir)}.`);
-  if (f.done !== undefined && !isStrings(f.done)) refuse(`\`blockers.files.done\` must be a list of strings, not ${JSON.stringify(f.done)}.`);
+  // An empty list would never count a blocker done, so every ticket it names would wait for good.
+  if (f.done !== undefined && !(isStrings(f.done) && (f.done as string[]).length > 0 && (f.done as string[]).every(isNonEmptyString))) {
+    refuse(`\`blockers.files.done\` must be a non-empty list of strings, such as ["done"], not ${JSON.stringify(f.done)}.`);
+  }
 };
 
 /** Unknown keys and wrong types, refused with the key and what it takes, before anything runs. */

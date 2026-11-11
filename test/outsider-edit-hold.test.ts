@@ -167,11 +167,16 @@ test("the files tracker never makes the read", async () => {
 
 test("every pipeline start asks, before a slot or an agent, and a landing's own check does not", () => {
   const burndown = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  const asked = burndown.indexOf("await outsiderEdit(tracker, issue.id, Date.parse(runId))");
+  const asked = burndown.indexOf("await outsiderEdit(tracker, issue.id, turn?.runStart ?? Date.parse(runId))");
   const checked = burndown.indexOf("await withdrawal(issue.id)");
   const piped = burndown.indexOf("return await pipeline(issue,");
   assert.ok(checked > 0 && asked > checked && piped > asked, "outsiderEdit follows withdrawal() in the attempt and precedes the pipeline");
   // The held ending is returned in place of the pipeline, for a fresh and a carried ticket alike.
   assert.match(burndown.slice(asked, piped), /outsider\?\.kind === "held"[\s\S]*notes\.push\(\{ issue: issue\.id, kind: "hold", text: outsider\.note \}\)[\s\S]*return heldResolution\(/);
   assert.ok(!readFileSync(new URL("../src/landing.ts", import.meta.url), "utf8").includes("outsiderEdit"));
+});
+
+test("every turn measures the hold from the run's start, not its own", () => {
+  // A later turn's own start would be after an edit the author made during an earlier turn, and let it through.
+  assert.match(readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8"), /const runStart = Date\.now\(\);[\s\S]*await burndown\(project, \{[^\n]*psi, runStart \}\)/);
 });

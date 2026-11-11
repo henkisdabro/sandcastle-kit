@@ -418,6 +418,8 @@ try {
       };
       // The no-PSI line is the run's, said once across its turns.
       const psi = { told: false };
+      // The outsider-edit hold measures from the person's start of the run, not each turn's own.
+      const runStart = Date.now();
       // A later turn the checkout refused: its cause is recorded and said at every level, not at drain alone.
       let refusedTurn = false;
       for (let turn = 1; ; turn++) {
@@ -427,7 +429,7 @@ try {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
         let started: boolean;
         try {
-          started = await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}), psi });
+          started = await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}), psi, runStart });
         } catch (error) {
           // A later turn the checkout refused (another session's edit mid-run, say) ends the run as the turn before it did:
           // the merged base that turn re-gated decides the exit, not the refusal. Turn 1, and every other refusal (the

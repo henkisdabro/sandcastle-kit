@@ -556,6 +556,14 @@ estimate. A detached run prints the line in its child's `.sandcastle/logs/run-ou
 the parent's terminal. A start that returns before the view (empty queue, everything waiting)
 prints none.
 
+**The outsider-edit hold** (`outsiderEdit`, over the tracker's `editedSinceQueued`) is asked once
+per attempt, after `withdrawal` and before a slot or an agent, and never at landing. A GitHub
+ticket whose author is not an owner, member or collaborator is held when the author wrote or
+edited its body, or commented, after the queue label was last added; a ticket that never carried
+the label is measured from the run's start (`TurnOptions.runStart`, the same for every turn, so a
+later turn does not let through an edit made during an earlier one). A read that fails is not a
+hold: the ticket is not started that turn. The files tracker has no outsiders and never holds.
+
 ## `src/landing.ts`
 
 `landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a

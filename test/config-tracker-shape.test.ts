@@ -58,11 +58,13 @@ test('blockers: { linear: "ENG" } is refused naming blockers.linear', async () =
   await refused('blockers: { linear: "ENG" }', /`blockers\.linear` must be a list of strings.*not "ENG"/);
 });
 
-test("blockers.files must be an object with a string dir and a list done; unknown keys are refused", async () => {
+test("blockers.files must be an object with a string dir and a non-empty list done; unknown keys are refused", async () => {
   await refused('blockers: { files: "tasks" }', /`blockers\.files` must be an object/);
   await refused("blockers: { files: { dir: 3 } }", /`blockers\.files\.dir` must be a non-empty string, not 3/);
   await refused('blockers: { files: { dir: "" } }', /`blockers\.files\.dir` must be a non-empty string/);
-  await refused('blockers: { files: { dir: "t", done: "done" } }', /`blockers\.files\.done` must be a list of strings.*not "done"/);
+  await refused('blockers: { files: { dir: "t", done: "done" } }', /`blockers\.files\.done` must be a non-empty list of strings.*not "done"/);
+  // An empty list would count no blocker done, holding every ticket it names for good.
+  await refused('blockers: { files: { dir: "t", done: [] } }', /`blockers\.files\.done` must be a non-empty list of strings/);
   await refused('blockers: { files: { dirr: "t" } }', /unknown key `blockers\.files\.dirr` - did you mean `blockers\.files\.dir`\?/);
 });
 
