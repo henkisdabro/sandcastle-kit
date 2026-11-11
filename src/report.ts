@@ -170,7 +170,7 @@ export type Facts = {
   baseGates?: { gate: string; ok: boolean }[];
   /** Tests found red on the base mid-run (the run record's `baseRed`): no branch was repaired for them. */
   baseRed?: string[];
-  /** The run record's `mergeUnchecked`: a host merge check that could not run for objects a partial clone lacks. */
+  /** The run record's `mergeUnchecked`: a host merge check that could not run - for objects a partial clone lacks, or a conflict resolution's stray check on a git older than 2.38 or a failed git call. */
   mergeUnchecked?: string;
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
