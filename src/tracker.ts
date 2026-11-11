@@ -77,8 +77,10 @@ export const trackerTokenUser = (tracker: Pick<Tracker, "kind">, project: Pick<P
 /** The words every comment an agent posts on a ticket opens with (the GitHub tracker's `words`): the kit's own, to `personCommentsSince`. */
 export const AGENT_COMMENT_MARKER = "Sandcastle agent:";
 
-/** Who wrote one comment, as GitHub says: the login and `authorAssociation` (`OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`...). */
-/** Who wrote a GitHub comment and when (`at`: its `createdAt` as GitHub gives it; a ticket file's comments carry none). */
+/**
+ * Who wrote one comment, as GitHub says: the login and `authorAssociation` (`OWNER`, `MEMBER`, `COLLABORATOR`,
+ * `CONTRIBUTOR`, `NONE`...), and when (`at`: its `createdAt` as GitHub gives it; a ticket file's comments carry none).
+ */
 export type CommentBy = { login?: string; association?: string; at?: string };
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[]; author?: string; commentBy?: CommentBy[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
