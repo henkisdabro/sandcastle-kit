@@ -40,6 +40,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A status terminal that vanished while the kit waited for it no longer holds the new view back
   for 5 s. (#892)
 
+### Changed
+
+- **pnpm 12.18.0, `@types/node` 24.19.2 and oxlint 1.92.0** for the kit's own checks.
+
 ## [0.22.0] - 2026-11-10
 
 ### Upgrading
