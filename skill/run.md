@@ -213,7 +213,10 @@ This continues SKILL.md: run its "Before every action" first.
    output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
    `Drain: <N> turns, <landed> landed, stopped because <cause>`; at `2`, `3` and `drain`, a line for each ticket
    queued after the run started that no turn took (a follow-on turn takes the unblocked ones when the run would
-   end, once at `2` and `3`): quote the cause and name those tickets in the hand-back.
+   end, once at `2` and `3`): quote the cause and name those tickets in the hand-back. A later turn the checkout
+   refused (`turn 2 could not start: the working tree is dirty (<files>)`, or the wrong branch, or git's
+   leftovers) is such a cause, in the summary's Run section at every level: quote it, and say the run exited 0
+   on a green merged base - the files are someone's edit to commit or stash before the next `sandcastle run`.
 
    **A shorter hand-back, when the user asked for one.** If the user has asked for a short or plain
    hand-back - in this conversation, or as a standing preference in their own memory or

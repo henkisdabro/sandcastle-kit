@@ -1,6 +1,22 @@
 // A refusal the operator acts on (a missing config, a red gate, a live run): printed as a message, never a stack trace.
 export class OperatorError extends Error {}
 
+/**
+ * The checkout refused a run's start (`assertCleanBase`): a dirty working tree, a branch that is not the base, or git's
+ * half-done leftovers. A later autonomy turn that meets it ends the run as the turn before it did (`turnRefusedCause`,
+ * `src/autonomy.ts`): another session's edit mid-run is a busy checkout, not a failure of the merged base. `reason` is
+ * the short cause and `files` the paths it names (the dirty files, the leftovers); the message is the full refusal.
+ */
+export class CheckoutRefusal extends OperatorError {
+  readonly reason: string;
+  readonly files: string[];
+  constructor(message: string, reason: string, files: string[] = []) {
+    super(message);
+    this.reason = reason;
+    this.files = files;
+  }
+}
+
 const reported = new WeakSet<object>();
 
 /**

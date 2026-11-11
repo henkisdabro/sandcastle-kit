@@ -327,6 +327,13 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   every autonomy level, so a harness does not read success on a base the summary says not to push.
   The last turn's verify decides it: a drain that went on past a likely-load red verify exits with
   the code of the turn that followed.
+  A later turn the checkout refused to start (a dirty working tree, a branch that is not the base,
+  git's half-done leftovers - another session's edit mid-run, say) ends the run as the turn before it
+  did: **0** on a green merged base, 1 on a red one.
+  Its cause is in the closing summary's Run section (`Drain: ...` at `drain`, `Turn 2 could not
+  start: ...` at the other levels), so `sandcastle report` shows it after the run.
+  Otherwise 1 is a red merged base or a refusal before any turn ran: a refused first turn, and every
+  safety stop (the `.git` guard's `NOT STARTED: the shared .git differs ...`, a bad label) at any turn.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
   live: `No run is live.`
@@ -492,8 +499,13 @@ progress** (the turn landed nothing and released nothing), **the same ticket con
 turns running** (named, read from `.sandcastle/logs/outcomes.json`), **the same ticket left partly
 done in two turns running** (named), **a red merged base** (one judged likely load does not stop it:
 the next turn gates the base first), and **a usage limit or a stopped run**.
+A turn the checkout refuses to start ends it too, with the cause `turn <N> could not start: the
+working tree is dirty (<files>)` (or `not on <base> (found <branch>)`, or `git left something
+half-done (<file>)`).
 A hard cap of 20 turns is the backstop.
-After the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`.
+After the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`, and
+keeps the line in the run record, so the closing summary `sandcastle report` prints shows it in its
+Run section.
 
 A drain takes only what its own turns lead to: every turn after the first takes exactly the previous
 turn's re-runnable tickets, never the whole queue.

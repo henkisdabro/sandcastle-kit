@@ -4,7 +4,7 @@
 import { type ChildProcess, execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
@@ -16,7 +16,7 @@ import { coreMiss, terminalHost } from "./terminal-host.ts";
 import { openCoreStatus } from "./herdr-core.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, staleBaseParents } from "./sandbox.ts";
 import { protectedPathsNote } from "./guard.ts";
-import { OperatorError, promptExpansionLine } from "./errors.ts";
+import { CheckoutRefusal, OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
@@ -255,13 +255,17 @@ const localConfigHint = (root: string, dirty: string[]): string => {
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
 // An OperatorError, so the CLI prints a message: a stack trace read as a kit bug, and
-// without the file list the operator had to run git status to find a stray lockfile.
+// without the file list the operator had to run git status to find a stray lockfile. A CheckoutRefusal
+// (the base with no commit aside, which `assertBaseHasCommit` shares), so a later autonomy turn can tell
+// a busy checkout from a safety stop and end the run as the turn before it did.
 export const assertCleanBase = (project: Project) => {
   // First: a leftover lock or merge makes the files below read as dirty or clean for no reason a person can see.
   const left = gitLeftovers(project.root);
   if (left.length > 0) {
-    throw new OperatorError(
+    throw new CheckoutRefusal(
       `NOT STARTED: git left something half-done in this repo, and every landing would fail on it:\n${left.map((l) => `  ${l.file} (${l.what})`).join("\n")}\n${leftoverSteps(left)}`,
+      "git left something half-done",
+      left.map((l) => relative(project.root, l.file)),
     );
   }
   // Before the dirty files and the branch name: on a branch with no commit git cannot name the branch either.
@@ -277,14 +281,18 @@ export const assertCleanBase = (project: Project) => {
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
     if (dirty.length > 10) shown.push(`  ... and ${dirty.length - 10} more`);
-    throw new OperatorError(
+    throw new CheckoutRefusal(
       `NOT STARTED: the working tree is dirty. The run merges into it - commit or stash first.\n${shown.join("\n")}${localConfigHint(project.root, dirty)}`,
+      "the working tree is dirty",
+      // `git status --porcelain`'s two status letters and a space, then the path.
+      dirty.map((l) => l.slice(3)),
     );
   }
   const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], project.root);
   if (branch !== project.baseBranch) {
-    throw new OperatorError(
+    throw new CheckoutRefusal(
       `NOT STARTED: expected to be on ${project.baseBranch}, found ${branch}. If ${branch} is your base branch, set baseBranch: "${branch}" in .sandcastle/config.ts.`,
+      `not on ${project.baseBranch} (found ${branch})`,
     );
   }
 };
@@ -699,6 +707,14 @@ const keepKilledRecord = (root: string, file: string) => {
 
 let current: ((code: number | undefined) => void) | undefined;
 let exitHooked = false;
+// The open record's own update: what the run writes after its last turn's summary, into the record the exit finishes.
+let currentUpdate: ((fields: RunRecord) => void) | undefined;
+
+/**
+ * Writes how a run of several turns ended (`drain`) into the open record - the last turn's, which the process's exit
+ * finishes from its copy in memory, so a direct write to run.json would be overwritten. None open, or finished: nothing.
+ */
+export const recordDrain = (drain: NonNullable<RunRecord["drain"]>) => currentUpdate?.({ drain });
 
 /**
  * The ticket slots a run could use, averaged over the time its tickets work at full demand: the share moves as other
@@ -785,6 +801,11 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
     }
   };
   current = finish;
+  currentUpdate = (fields) => {
+    if (finished) return;
+    run = { ...run, ...fields };
+    write();
+  };
   if (!exitHooked) {
     exitHooked = true;
     process.on("exit", (code) => current?.(code));
