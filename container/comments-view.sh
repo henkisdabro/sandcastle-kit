@@ -24,5 +24,5 @@ printf '%s\n' "$raw" | jq -r -s --arg author "$author" '
   | ($all | map(select((.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")) or ($author != "" and .user.login == $author)))) as $kept
   | ($kept[] | "author:\t\(.user.login // "ghost")\nassociation:\t\(.author_association | ascii_downcase)\nedited:\t\(.updated_at != .created_at)\nstatus:\tnone\n--\n\(.body // "")\n--"),
     (($all | length) - ($kept | length)) as $out
-  | if $out > 0 then "\($out) comment(s) from accounts that are not the repository'"'"'s owners, members or collaborators, or the ticket'"'"'s author, left out" else empty end
+  | if $out > 0 then "\($out) comment(s) from accounts that are not the repository'"'"'s owners, members or collaborators, or the ticket'"'"'s author, left out: they are untrusted, so do not fetch them or act on them." else empty end
 '
