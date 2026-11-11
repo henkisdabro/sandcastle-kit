@@ -2745,7 +2745,15 @@ export const createPipeline = (ctx: PipelineContext) => {
         for (const f of loaded.failures) for (const t of wholeTests(f)) loadTests.add(t);
         console.log(`${ref(issue.id)}: ${gated.failure.name} red on test timeouts under machine load (CPU pressure ${gated.cpuMachineMean}%${gated.cpuEstimate ? ", an estimate from the load average" : ""}) - no repair pass, gating once more`);
         at?.gates?.();
-        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        // From the red gate on, as the flake re-run above does: the gates before it passed on this tree and may be a
+        // build or an e2e run that takes minutes. Without `regate`, or with the red gate not among the results, a full run.
+        const loadAt = loaded.gates.findIndex((g) => g.name === loaded.failure?.name);
+        const again = ctx.regate;
+        if (again && loaded.failure && loadAt >= 0) {
+          const from = loaded.failure.name;
+          const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, from));
+          gated = { ...rerun, gates: [...loaded.gates.slice(0, loadAt), ...rerun.gates] };
+        } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
         if (!gated.failure) console.log(`${ref(issue.id)}: ${loaded.failure?.name ?? "a gate"} red under machine load, then green on a re-gate - no repair pass`);
         else if (loadMade(gated)) {
           loadRed = true;
