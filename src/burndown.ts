@@ -209,6 +209,28 @@ export const handBack = async (o: Outcome, tracker: Pick<Tracker, "agentsWrite" 
   }
 };
 
+/**
+ * The check beside the tracker's word before a pipeline starts (every pipeline: a carried branch that only lands or
+ * only gets a review, and a second attempt too): a queued GitHub ticket by an author who is no owner, member or
+ * collaborator, which that author wrote or edited after the queue label was last added, is held for a person, who reads
+ * the change and accepts it with `sandcastle requeue` (a new label time). `held`: the note the ticket is held with.
+ * `unread`: the read failed or was given up, so the ticket is not started this turn and stays queued - a GitHub
+ * hiccup must not move tickets to the hold label. A tracker with no such read (ticket files) is never asked.
+ * An edit made after the pipeline starts is not caught: the check is at start only.
+ */
+export const outsiderEdit = async (tracker: Pick<Tracker, "editedSinceQueued">, id: string, runStart: number, limitMs = TRACKER_READ_MS): Promise<{ kind: "held"; why: string; note: string } | { kind: "unread"; why: string } | undefined> => {
+  if (!tracker.editedSinceQueued) return undefined;
+  let change: string | undefined;
+  try {
+    change = await tracker.editedSinceQueued(id, runStart, limitMs);
+  } catch (error) {
+    return { kind: "unread", why: `could not read whether its author edited it after it was queued (${errorLine(error)}); not started this turn, it stays queued` };
+  }
+  if (!change) return undefined;
+  const why = `its author changed it after it was queued (${change})`;
+  return { kind: "held", why, note: `Sandcastle held this: ${why}. Read it, then \`sandcastle requeue ${id}\` to run it.` };
+};
+
 // What an issue's pane and sidebar entry say when its pipeline ends - the
 // status table's words, so the two never disagree.
 const finishWord = (o: Outcome) =>
@@ -4011,6 +4033,12 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       }
     })();
     if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
+    // At every pipeline's start and only there (landing asks `withdrawal` alone): an outsider's edit after the label.
+    const outsider = await outsiderEdit(tracker, issue.id, Date.parse(runId));
+    if (outsider?.kind === "unread") {
+      console.log(`${ref(issue.id)}: ${outsider.why}.`);
+      return { kind: "not begun", why: { kind: "withdrawn", reason: outsider.why } };
+    }
     const parkable = (park?: Park): Park => ({
       suspend: async () => {
         await park?.suspend();
@@ -4024,6 +4052,21 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     });
     const result = await (async () => {
       try {
+        // Held for a person before it takes a slot or runs an agent: the pipeline's ending is the kit's own hold.
+        if (outsider?.kind === "held") {
+          console.log(`${ref(issue.id)}: ${outsider.why} - held for a human.`);
+          notes.push({ issue: issue.id, kind: "hold", text: outsider.note });
+          const branch = `agent/issue-${issue.id}`;
+          // A fresh ticket has no branch yet: no commits to count.
+          const commits = (() => {
+            try {
+              return ownCommits(base, branch, project.root);
+            } catch {
+              return 0;
+            }
+          })();
+          return heldResolution(issue.id, branch, outsider.why, { commits, reviewCommits: 0, gates: [] });
+        }
         // A pause gives the slot back and waits; the ticket then leases its own, in the time parked. Its worker's slot
         // was gone too when the run was paused as the attempt began.
         for (await juncture("start", start); !lease; await juncture("start", start)) await take();

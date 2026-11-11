@@ -132,6 +132,13 @@ export interface Tracker {
    * counts the ticket as blocked, as it does any blocker it cannot read.
    */
   declaredBlockersAsync?(id: string, limitMs?: number): Promise<string[]>;
+  /**
+   * GitHub only (a ticket file has no outside author): one line naming what the ticket's author wrote or edited after
+   * the queue label was last put on it (`body edited <time>`, `comment by <login> <time>`), when the author is not an
+   * owner, member or collaborator; undefined when nothing counts. A ticket never labelled is measured from `runStart`
+   * (ms), when the person named it. A read that fails or is given up at `limitMs` (`TRACKER_READ_MS`) throws.
+   */
+  editedSinceQueued?(id: string, runStart: number, limitMs?: number): Promise<string | undefined>;
   /** Whether a ticket id is closed, for a blocker on this same tracker. */
   isClosed(id: string): boolean | undefined;
   /** What a dry run tells agents not to touch. */
@@ -467,6 +474,47 @@ const github = (project: Project): Tracker => {
       } catch {
         return true;
       }
+    },
+    // What the ticket's author wrote or edited after the queue label last went on: the maintainer's decision on #829's
+    // remaining gap. The author's own writing only: a maintainer's edit of an outsider's text (its `editor` is not the
+    // author) never holds. One GraphQL call; the newest 100 labelled events and comments, the newest 20 edits of each.
+    editedSinceQueued: async (id, runStart, limitMs = TRACKER_READ_MS) => {
+      const edits = "userContentEdits(last: 20) { nodes { editedAt editor { login } } }";
+      const query =
+        "query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { issue(number: $number) { " +
+        `author { login } authorAssociation lastEditedAt ${edits} ` +
+        "timelineItems(itemTypes: [LABELED_EVENT], last: 100) { nodes { ... on LabeledEvent { createdAt label { name } } } } " +
+        `comments(last: 100) { nodes { author { login } createdAt lastEditedAt ${edits} } } } } }`;
+      const out = await ghAsync(["api", "graphql", "-f", `query=${query}`, "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${id}`], limitMs);
+      type Edits = { nodes?: ({ editedAt?: string; editor?: { login?: string } | null } | null)[] | null };
+      type Issue = {
+        author?: { login?: string } | null;
+        authorAssociation?: string;
+        userContentEdits?: Edits | null;
+        timelineItems?: { nodes?: ({ createdAt?: string; label?: { name?: string } } | null)[] | null } | null;
+        comments?: { nodes?: ({ author?: { login?: string } | null; createdAt?: string; lastEditedAt?: string; userContentEdits?: Edits | null } | null)[] | null } | null;
+      };
+      const issue = (JSON.parse(out) as { data?: { repository?: { issue?: Issue | null } | null } }).data?.repository?.issue;
+      if (!issue) throw new OperatorError(`gh api graphql failed: no issue ${id} in the answer`);
+      if (["OWNER", "MEMBER", "COLLABORATOR"].includes((issue.authorAssociation ?? "").toUpperCase())) return undefined;
+      const author = (issue.author?.login ?? "").toLowerCase();
+      if (!author) return undefined;
+      const queue = project.label.toLowerCase();
+      const labelled = (issue.timelineItems?.nodes ?? []).flatMap((n) => (n?.createdAt && n.label?.name?.toLowerCase() === queue ? [Date.parse(n.createdAt)] : []));
+      const since = labelled.length ? Math.max(...labelled) : runStart;
+      const after = (t?: string) => !!t && Date.parse(t) > since;
+      // The newest edit the author made after `since`; an edit by anyone else, or by an account GitHub no longer shows, does not count.
+      const editedByAuthor = (e?: Edits | null) =>
+        (e?.nodes ?? []).flatMap((n) => (n?.editedAt && after(n.editedAt) && (n.editor?.login ?? "").toLowerCase() === author ? [n.editedAt] : [])).sort().pop();
+      const at = (t: string) => t.replace(/:\d\d(\.\d+)?Z$/, "Z");
+      const body = editedByAuthor(issue.userContentEdits);
+      if (body) return `body edited ${at(body)}`;
+      for (const c of [...(issue.comments?.nodes ?? [])].reverse()) {
+        if (!c || (c.author?.login ?? "").toLowerCase() !== author) continue;
+        const when = after(c.createdAt) ? c.createdAt : editedByAuthor(c.userContentEdits);
+        if (when) return `comment by ${c.author?.login} ${at(when)}`;
+      }
+      return undefined;
     },
     // GitHub's native "blocked by" edges. A ticket neither the list nor `get` has read is asked for.
     declaredBlockers: (id) => {
