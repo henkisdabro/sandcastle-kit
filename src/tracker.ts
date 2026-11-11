@@ -77,8 +77,11 @@ export const trackerTokenUser = (tracker: Pick<Tracker, "kind">, project: Pick<P
 /** The words every comment an agent posts on a ticket opens with (the GitHub tracker's `words`): the kit's own, to `personCommentsSince`. */
 export const AGENT_COMMENT_MARKER = "Sandcastle agent:";
 
-/** Who wrote one comment, as GitHub says: the login and `authorAssociation` (`OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`...). */
-export type CommentBy = { login?: string; association?: string };
+/**
+ * Who wrote one comment, as GitHub says: the login and `authorAssociation` (`OWNER`, `MEMBER`, `COLLABORATOR`,
+ * `CONTRIBUTOR`, `NONE`...), and when (`at`: its `createdAt` as GitHub gives it; a ticket file's comments carry none).
+ */
+export type CommentBy = { login?: string; association?: string; at?: string };
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[]; author?: string; commentBy?: CommentBy[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
 
@@ -316,7 +319,8 @@ const github = (project: Project): Tracker => {
   // Who wrote the ticket and each comment, for `trustedComment`: kept beside the text, which every reader of `comments` takes as it is.
   const authors = (i: any): Pick<Ticket, "author" | "commentBy"> => ({
     author: i.author?.login,
-    commentBy: (i.comments ?? []).map((c: { author?: { login?: string }; authorAssociation?: string }) => ({ login: c.author?.login, association: c.authorAssociation })),
+    // `at` only when GitHub gave one, so a comment without a time reads exactly as before.
+    commentBy: (i.comments ?? []).map((c: { author?: { login?: string }; authorAssociation?: string; createdAt?: string }) => ({ login: c.author?.login, association: c.authorAssociation, ...(c.createdAt ? { at: c.createdAt } : {}) })),
   });
   const listFields = (withComments: boolean) => `number,title,body,author,updatedAt,labels${withComments ? ",comments" : ""}`;
   const listArgs = (extra: string[]) => (fields: string) => ["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", fields];

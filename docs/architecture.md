@@ -2669,6 +2669,10 @@ matches the line; `OUTCOME_STATE` in `src/status-rows.ts` is a `Record<OutcomeKi
 A carried branch's head record (`heads.json`) also keeps `comments`: the ticket's comment count,
 read from the tracker just before a full review's pass starts and recorded with its `reviewed` write
 (`fullReview`), and by no other write.
+On GitHub it keeps `commentsAt` beside it, the latest creation time among those comments (`seenComments`):
+a count can move back when a comment is deleted, which would hide a trusted comment posted after it, so
+`personCommentsSince` takes the comments created after `commentsAt` when every comment carries a time.
+A Markdown ticket file, whose comments have none, and a record from before `commentsAt`, keep the count.
 The gates, a repair, the re-review after a repair and the two narrow reviews (after a conflict
 resolution, after a base merge) keep the count the last full review recorded, so a person's comment
 posted during any of them is still past it at the next carry.

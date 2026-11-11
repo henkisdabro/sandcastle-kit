@@ -65,7 +65,7 @@ import { sandboxOpener } from "./land.ts";
 import {
   carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
-import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine, trustOf } from "./ledger.ts";
+import { accountLanding, causeWords, type Context, createLedger, outcomesFile, personCommentsSince, repairWords, seenComments, stoppedLine, trustOf } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
@@ -1198,7 +1198,7 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
  */
 export const carriedKindAtStart = (root: string, base: string, issue: Pick<Issue, "id" | "comments" | "author" | "commentBy">, tokenUser: string | null = null): "carried" | "unreviewed" | undefined => {
   const kind = carriedKind(root, base, issue.id);
-  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments, trustOf(issue, tokenUser)).length > 0 ? "unreviewed" : kind;
+  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments, trustOf(issue, tokenUser), readHeads(root)[issue.id]?.commentsAt).length > 0 ? "unreviewed" : kind;
 };
 
 /**
@@ -1864,17 +1864,16 @@ export const createPipeline = (ctx: PipelineContext) => {
       return undefined;
     }
   };
-  const ticketComments = async (id: string): Promise<string[] | undefined> => (await ticketThread(id))?.comments;
   /** A person's comments on the ticket past the count its head record kept, by accounts that may be trusted (`personCommentsSince`). */
   const personCommentsOn = async (issue: Issue): Promise<string[]> => {
     const read = (await ticketThread(issue.id)) ?? issue;
-    return personCommentsSince(read.comments ?? [], readHeads(project.root)[issue.id]?.comments, trustOf(read, trackerTokenUser(tracker, project)));
+    return personCommentsSince(read.comments ?? [], readHeads(project.root)[issue.id]?.comments, trustOf(read, trackerTokenUser(tracker, project)), readHeads(project.root)[issue.id]?.commentsAt);
   };
 
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number }) => {
+  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }) => {
     if (dryRun) return;
     try {
       // `comments` is given only by the full review, read just before its pass starts (`fullReview`): a person's comment
@@ -2501,7 +2500,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         await juncture("review");
         // The comments the reviewer is about to read. Only this review records the count: the narrow reviews and the
         // re-review after a repair are told to leave the spec alone, so a comment before them is still unread.
-        const seenComments = await ticketComments(issue.id);
+        const seenThread = await ticketThread(issue.id);
         let reviewModel: string | undefined;
         const beforeReview = ownNow();
         const listBefore = ownList();
@@ -2529,7 +2528,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               () => CROSS_REVIEW_MODEL,
             )
           : undefined;
-        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenComments ? { comments: commentCount(seenComments) } : {}) });
+        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenThread ? seenComments(seenThread) : {}) });
         reviewed = true;
         for (const [r, isCross] of [[review, false], [cross, true]] as const) {
           const u = r?.said.ungated;
