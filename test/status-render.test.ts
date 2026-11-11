@@ -1,7 +1,8 @@
-// The status view's layout (#695), drawn by the TypeScript renderer from a built snapshot at each layout breakpoint (and
-// the column either side) and every 10th width from 60 to 330 columns, at several heights: no line wider than the pane, the logo whole, the lanes beside the logo while
-// it and three of them fit (else under it), the rest on one summary line, and the table's columns at set widths
-// with ACTIVITY taking the rest. The renderer is pure, so no process, no Docker, no network.
+// The status view's layout (#695), drawn by the TypeScript renderer from a built snapshot at each layout breakpoint
+// (and the column either side) and every 10th width from 60 to 330 columns, at several heights: no line wider than
+// the pane, the logo whole, the lanes beside the logo while it and three of them fit (else under it), the rest on one
+// summary line, and the table's columns at set widths with ACTIVITY taking the rest. The renderer is pure, so no
+// process, no Docker, no network.
 //
 //   pnpm test:file test/status-render.test.ts
 
