@@ -229,9 +229,9 @@ test("the same red after the pipeline's own re-run goes to the load re-gate, not
   h.agents.impl = implementing("a.txt");
   h.gates.push(loaded(TIMEOUT_A, 70));
   h.regates.push(loaded(TIMEOUT_A, 70));
-  h.gates.push(GREEN_TEST);
+  h.regates.push(green("test"));
   const o = await h.attempt();
-  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "gate"]);
+  assert.deepEqual(h.events, ["impl", "review", "gate", "regate", "regate"]);
   assert.equal(o.status, "green");
 });
 
