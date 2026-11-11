@@ -23,13 +23,13 @@
   "engines": {
     "node": ">=22.18"
   },
-  "packageManager": "pnpm@12.8.2",
+  "packageManager": "pnpm@12.18.0",
   "dependencies": {
     "@ai-hero/sandcastle": "0.14.0"
   },
   "devDependencies": {
-    "@types/node": "^24.19.1",
-    "oxlint": "^1.87.0",
+    "@types/node": "^24.19.2",
+    "oxlint": "^1.92.0",
     "typescript": "^7.0.2"
   }
 }
