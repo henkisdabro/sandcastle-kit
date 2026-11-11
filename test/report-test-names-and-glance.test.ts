@@ -54,9 +54,12 @@ test("different basenames, or different titles in one file, are no Same failing 
 });
 
 test("a ticket failing both forms and another failing one form: one line, each ticket once, no Same file or Start with", () => {
-  for (const order of [["21", "22"], ["22", "21"]]) {
-    const all: Record<string, { state: "red"; failing: string[] }> = { "21": { state: "red", failing: [SHORT, LONG] }, "22": { state: "red", failing: [LONG] } };
-    const tickets = Object.fromEntries(order.map((id) => [id, all[id]])) as RunRecord["tickets"];
+  // Integer-like keys are walked in ascending order whatever the insertion order, so the walk order is set by which
+  // ticket fails both forms (walked first or second), and each form is tried as the other ticket's one form.
+  const cases: [string[], string[]][] = [];
+  for (const both of [[SHORT, LONG], [LONG, SHORT]]) for (const one of [SHORT, LONG]) cases.push([both, [one]], [[one], both]);
+  for (const [first, second] of cases) {
+    const tickets = { "21": { state: "red", failing: first }, "22": { state: "red", failing: second } } as RunRecord["tickets"];
     const out = render(facts({ tickets }));
     assert.equal(lines(out, "Same failing test").length, 1);
     assert.match(lines(out, "Same failing test")[0], / - on #21 #22\. /);
