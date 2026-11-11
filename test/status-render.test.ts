@@ -1,5 +1,5 @@
-// The status view's layout (#695), drawn by the TypeScript renderer from a built snapshot at every width from 60 to
-// 330 columns and several heights: no line wider than the pane, the logo whole, the lanes beside the logo while
+// The status view's layout (#695), drawn by the TypeScript renderer from a built snapshot at each layout breakpoint (and
+// the column either side) and every 10th width from 60 to 330 columns, at several heights: no line wider than the pane, the logo whole, the lanes beside the logo while
 // it and three of them fit (else under it), the rest on one summary line, and the table's columns at set widths
 // with ACTIVITY taking the rest. The renderer is pure, so no process, no Docker, no network.
 //
@@ -86,7 +86,19 @@ const SNAPSHOT: Snapshot = {
 const draw = (cols: number, rows = 400, { snapshot = SNAPSHOT, table = TABLE, showAll = false } = {}): string[] =>
   renderFrame(snapshot, table, { cols, rows, showAll, colours: palette(false, false) }).replace(/\n$/, "").split("\n");
 
-const WIDTHS = Array.from({ length: 330 - 60 + 1 }, (_, i) => 60 + i);
+// The layout only changes at known widths, so the tests draw each breakpoint, the column either side of it, both ends
+// and every 10th width between. A new breakpoint in `expectedColumns` or `expectedLanes` goes in BREAKPOINTS too (and
+// in the literal list of the check that holds them). 35 and 55 (the lanes under the logo) fall below 60 and are left out;
+// 130 is where the narrower logo lets the lanes sit beside it (the short-pane test).
+const BREAKPOINTS = [73, 77, 92, 106, 120, 80, 113, 130, 132, 165, 209, 210, 211];
+const WIDTHS = [
+  ...new Set([
+    60,
+    330,
+    ...BREAKPOINTS.flatMap((n) => [n - 1, n, n + 1]),
+    ...Array.from({ length: (330 - 60) / 10 + 1 }, (_, i) => 60 + i * 10),
+  ]),
+].sort((a, b) => a - b);
 const LANES = /[┌├┬]─ (RUN|MACHINE|MODELS|SETTINGS|PLAN) ─/g;
 const HAS_LANE = /[┌├┬]─ (RUN|MACHINE|MODELS|SETTINGS|PLAN) ─/;
 
@@ -132,7 +144,19 @@ const expectedLanes = (cols: number) => {
   return { beside: cols >= 132 ? ORDER.slice(0, placed) : [], beneath: cols >= 132 ? [] : ORDER.slice(0, placed), folded: ORDER.slice(placed) };
 };
 
-test("no line is wider than the pane, at every width from 60 to 330 columns and at several heights", () => {
+test("the widths drawn hold each layout breakpoint, the column either side of it, both ends and every 10th width", () => {
+  // Written out literally, not read from BREAKPOINTS: deleting a breakpoint there turns this red.
+  const named = [
+    72, 73, 74, 76, 77, 78, 79, 80, 81, 91, 92, 93, 105, 106, 107, 112, 113, 114, 119, 120, 121, 129, 130, 131, 132, 133, 164,
+    165, 166, 208, 209, 210, 211, 212,
+  ];
+  for (const n of [60, 330, ...named]) assert.ok(WIDTHS.includes(n), `${n} columns is not drawn`);
+  for (let n = 60; n <= 330; n += 10) assert.ok(WIDTHS.includes(n), `${n} columns is not drawn`);
+  assert.deepEqual(WIDTHS, [...new Set(WIDTHS)].sort((a, b) => a - b));
+  assert.ok(WIDTHS.every((n) => n >= 60 && n <= 330));
+});
+
+test("no line is wider than the pane, at every breakpoint and a sample of widths, and at several heights", () => {
   for (const cols of WIDTHS) {
     for (const [rows, showAll] of [[12, false], [24, false], [40, false], [400, false], [24, true]] as const) {
       const frame = draw(cols, rows, { showAll });
@@ -143,7 +167,7 @@ test("no line is wider than the pane, at every width from 60 to 330 columns and 
   }
 });
 
-test("the logo's three rows show whole at every width in a pane tall enough", () => {
+test("the logo's three rows show whole at every breakpoint and a sample of widths in a pane tall enough", () => {
   for (const cols of WIDTHS) {
     const frame = draw(cols).join("\n");
     assert.match(frame, /│ +▄ ▄ ▄ \+ {3}s a n d c a s t l e - k i t {2}· {3}\+ {3}· +│/, `${cols} columns`);
@@ -288,7 +312,7 @@ test("a record with no start time says nothing of when the run started, never 1 
   }
 });
 
-test("the legend's notes are whole at every width from 80 columns", () => {
+test("the legend's notes are whole at every breakpoint and a sample of widths from 80 columns", () => {
   for (const cols of WIDTHS.filter((n) => n >= 80)) {
     const frame = draw(cols, 400, { showAll: true });
     const notes = frame.slice(frame.findLastIndex((l) => /^├[─┴]+┤$/.test(l)) + 1, -1);
