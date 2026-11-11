@@ -132,7 +132,7 @@ test("report: a held ticket merged by hand is done, not needs you, and not told 
 test("report: an unmerged held branch still needs a merge, and a hand-back still needs a reader", async () => {
   const unmerged = render(await factsOf("unmerged"), true);
   assert.match(unmerged, /1 need you/);
-  assert.match(unmerged, /git merge --no-ff agent\/issue-shop-01/);
+  assert.match(unmerged, /git merge --no-ff -m "Merge agent\/issue-shop-01 \(closes shop-01\)" agent\/issue-shop-01/);
   assert.doesNotMatch(unmerged, /merged by hand/);
   const back = render(await factsOf("handed back"), true);
   assert.match(back, /1 need you/);

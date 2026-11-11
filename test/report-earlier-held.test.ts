@@ -48,7 +48,7 @@ test("a branch held in an earlier run says so once, and the next step merges it 
   assert.match(body(out, "## 📤 Local state"), /Agent branches with unmerged work: agent\/issue-7 \(held for a human merge in an earlier run\)/);
   const next = body(out, "## 👉 Next step");
   assert.match(next, /git log -p main\.\.agent\/issue-7/);
-  assert.match(next, /git merge --no-ff agent\/issue-7/);
+  assert.match(next, /git merge --no-ff -m "Merge agent\/issue-7 \(closes #7\)" agent\/issue-7/);
   assert.match(next, /git branch -D agent\/issue-7/);
   assert.doesNotMatch(next, /sandcastle land/);
   assert.match(next, /`sandcastle clean` once the branches above are resolved/);

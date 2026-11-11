@@ -105,7 +105,7 @@ test("the last turn's summary carries what an earlier turn left for a person, ma
   const out = await summary(project(t, turn2(), [turn1(), turn2()]));
   const needs = body(out, "## Needs you");
   assert.match(needs, /^- shop-01 Held work - changes src\/a\.ts - 1 file\(s\) \(turn 1\)$/m);
-  assert.match(needs, /^  review: git log -p main\.\.agent\/issue-shop-01 {3}merge: git merge --no-ff agent\/issue-shop-01$/m);
+  assert.match(needs, /^  review: git log -p main\.\.agent\/issue-shop-01 {3}merge: git merge --no-ff -m "Merge agent\/issue-shop-01 \(closes shop-01\)" agent\/issue-shop-01$/m);
   // The wording for a remainder only a person can do or decide, as a turn's own summary has it.
   assert.match(needs, /^- shop-02 Half done - merged, partly done: the remainder is the maintainer's decision - the ticket is still open; the remainder needs a person .*hold label.* \(turn 1\)$/m);
   assert.match(needs, /^- shop-03 Needs eyes - merged - check by hand: the checkout page has no test \(turn 1\)$/m);

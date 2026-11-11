@@ -447,7 +447,7 @@ test("a branch held for a rewritten base is rebuilt by hand, not merged, in this
   assert.match(needs, /\n {2}review: git log -p --no-merges agent\/issue-1 \^main \^<old main> {3}rebuild: git rebase --onto main <old main> agent\/issue-1 /);
   assert.doesNotMatch(needs, /git merge --no-ff agent\/issue-1\b/);
   // A protected-path hold beside it is merged by hand, as before.
-  assert.match(needs, /- #2 protected - .*\n {2}review: git log -p main\.\.agent\/issue-2 {3}merge: git merge --no-ff agent\/issue-2\n/);
+  assert.match(needs, /- #2 protected - .*\n {2}review: git log -p main\.\.agent\/issue-2 {3}merge: git merge --no-ff -m "Merge agent\/issue-2 \(closes #2\)" agent\/issue-2\n/);
   const next = section(out, "## Next step");
   assert.match(next, /Review and merge the 1 held branch\(es\)/);
   assert.match(next, /Rebuild the 1 held branch\(es\) on the rewritten main \(commands above\), then `sandcastle requeue <ticket>` for a run to review and land it\./);

@@ -22,6 +22,7 @@ import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { CPU_PRESSURE_HIGH, PRESSURE_WARN_FULL } from "./peaks.ts";
 import { PEAK_CONTEXT_WARN, readPlanUsages } from "./usage.ts";
 import { LANDING, LANDING_GATES, rewroteLine } from "./gates.ts";
+import { handMergeCommand } from "./landing.ts";
 import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
 import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
@@ -1025,7 +1026,7 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
       // (`sandcastle land` merges it as partly done and leaves the ticket open).
       const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
       // A held conflict resolution is landed with `sandcastle land`, which gates the merge; a hand merge runs no gate.
-      const how = f.heldResolutions?.includes(id) ? `land: sandcastle land ${id}` : `merge: git merge --no-ff agent/issue-${id}`;
+      const how = f.heldResolutions?.includes(id) ? `land: sandcastle land ${id}` : `merge: ${handMergeCommand(`agent/issue-${id}`, refOf(id), !!t.unmet)}`;
       // Its history holds the old base, which a merge or a plain log would show as the branch's own: only the commits since the fork are its work.
       if (f.heldRewritten?.includes(id)) return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p --no-merges agent/issue-${id} ^${f.base} ^<old ${f.base}>   rebuild: git rebase --onto ${f.base} <old ${f.base}> agent/issue-${id}   (<old ${f.base}> is named above)`];
       return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   ${how}`];
@@ -1482,6 +1483,7 @@ export const render = (f: Facts, plain = false): string => {
     const t = f.tickets[id] ?? {};
     if (t.state === "paused") return `paused${t.note ? ` ${t.note}` : ""} - its branch resumes`;
     if (t.state === "conflict") return "conflicted - its branch resumes";
+    if (t.state === "red") return "red - its branch resumes";
     if (partlyRerun.includes(id)) return "merged partly done - the remainder is still open";
     const overlap = /^waits for (\S+) \(this run\) - next run$/.exec(t.note ?? "");
     if (overlap) {
@@ -1492,7 +1494,8 @@ export const render = (f: Facts, plain = false): string => {
     const on = /^waits for (.*)$/.exec(t.note ?? "")?.[1]?.replace(/\s*\([^)]*\)/g, "").split(",").map((l) => l.trim()).filter(Boolean) ?? [];
     return on.length ? `${on.length === 1 ? "blocker" : "blockers"} ${on.join(", ")} closed` : "blockers closed";
   };
-  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable, ...partlyRerun, ...parked])];
+  // A red ticket keeps its queue label (Next step says "still queued"), so the next run resumes its branch: it is runnable like a conflicted one.
+  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict" || f.tickets[id].state === "red"), ...f.runnable, ...partlyRerun, ...parked])];
   const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     // A ticket cut short is runnable too, and its own line follows: "none" above it would contradict it.
@@ -1646,7 +1649,9 @@ export const render = (f: Facts, plain = false): string => {
   if (heldEarlier.length) {
     const one = heldEarlier.length === 1;
     const b = one ? heldEarlier[0] : "<branch>";
-    next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with \`git merge --no-ff ${b}\`, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
+    // An earlier run's branch has no unmet fact to read, so each merge says `closes`; one command per branch, each with its own ref.
+    const merges = heldEarlier.map((x) => `\`${handMergeCommand(x, refOf(x.replace(/^agent\/issue-/, "")))}\``).join(", ");
+    next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with ${merges}, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
   }
   // A merged ticket's kept worktree (a stray file its agent left, a gate restore that failed) holds the branch the landing could not delete,
   // and no other step reaches it. Only a merged one: `clean` removes every worktree, and the others hold work a run or a person still needs.

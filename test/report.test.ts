@@ -71,13 +71,13 @@ test("a mixed run: every section, the right tickets, a file in common and a next
   assert.match(body(out, "## ✅ Done"), /only on your local main until you push it/);
   assert.match(body(out, "## ✅ Done"), /Nothing to change: #205/);
   assert.match(body(out, "## 🙋 Needs you"), /#206 pre-push check - changes .githooks\/pre-push, .github\/workflows\/ci.yml - 3 file\(s\)/);
-  assert.match(body(out, "## 🙋 Needs you"), /git merge --no-ff agent\/issue-206/);
+  assert.match(body(out, "## 🙋 Needs you"), /git merge --no-ff -m "Merge agent\/issue-206 \(closes #206\)" agent\/issue-206/);
   assert.match(body(out, "## ❌ Needs fixing"), /#203 c - merge conflict: with #204: tests\/test_totals.py/);
   assert.match(body(out, "## ❌ Needs fixing"), /failing: tests\/test_totals.py::test_rounding/);
   // A conflict and a failing test in one file are a place to look, not one cause.
   assert.match(body(out, "## ❌ Needs fixing"), /Same file: tests\/test_totals.py - #201 #203 fail or conflict there/);
   assert.doesNotMatch(out, /Same failing test|Likely one cause/);
-  assert.match(body(out, "## ▶️ Runnable now"), /Runnable now: #203 \(conflicted - its branch resumes\), #209 \(blockers closed\)/);
+  assert.match(body(out, "## ▶️ Runnable now"), /Runnable now: #201 \(red - its branch resumes\), #203 \(conflicted - its branch resumes\), #209 \(blockers closed\)/);
   assert.match(body(out, "## ▶️ Runnable now"), /#210 waits for #206 \(held\)/);
   assert.match(body(out, "## 📤 Local state"), /main is 51 commit\(s\) ahead of origin\/main/);
   assert.match(body(out, "## 📤 Local state"), /Nothing is pushed by Sandcastle/);
