@@ -13,7 +13,7 @@ import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGene
 import { assertGitUnchanged, checkBeforeClose, dropBackup, type Exclusive, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
 import { recordHandLanding } from "./ledger.ts";
-import { mergeSubject } from "./landing.ts";
+import { handMergeCommand, mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
@@ -322,14 +322,16 @@ export const landTicket = async (
   if (sh("git", ["rev-list", "--count", `${base}..${branch}`], project.root) === "0") {
     throw new OperatorError(`Every commit of ${branch} is already on ${base}. Nothing to land.`);
   }
+  // The merge a refusal tells the person to type: the kit's own subject, "part of" where a criterion is recorded unmet (as the landing below words it).
+  const byHand = () => handMergeCommand(branch, ref, !!recordedUnmet(project, id, branch, sh("git", ["rev-parse", branch], project.root)));
   const paths = protectedChanges(project, branch);
   if (paths.length) {
     throw new OperatorError(
-      `${branch} changes how the repo executes (${paths.join(", ")}), which its own gates cannot vouch for. Review it and merge it by hand: \`git log -p ${base}..${branch}\`, then \`git merge --no-ff ${branch}\`.`,
+      `${branch} changes how the repo executes (${paths.join(", ")}), which its own gates cannot vouch for. Review it and merge it by hand: \`git log -p ${base}..${branch}\`, then \`${byHand()}\`.`,
     );
   }
   const large = largeFiles(project, branch);
-  if (large.length) throw new OperatorError(`${branch} ${largeFilesNote(large)}: \`git merge --no-ff ${branch}\`.`);
+  if (large.length) throw new OperatorError(`${branch} ${largeFilesNote(large)}: \`${byHand()}\`.`);
 
   // Counted now: once merged, none of the branch's commits are ahead of the base.
   const commits = ownCommits(base, branch, project.root);

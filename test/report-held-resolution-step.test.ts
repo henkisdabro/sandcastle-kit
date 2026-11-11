@@ -101,7 +101,7 @@ test("an earlier landing hold prints as before, beside a held resolution", () =>
   const out = render(facts({ standing: ["agent/issue-7", "agent/issue-8"], earlierHeld: { "agent/issue-7": RESOLUTION, "agent/issue-8": "needs a human merge" }, heldResolutions: ["7"] }));
   assert.match(section(out, "## 📤 Local state"), /agent\/issue-8 \(held for a human merge in an earlier run\)/);
   const next = section(out, "## 👉 Next step");
-  assert.match(next, /Resolve agent\/issue-8, held for a human merge in an earlier run: review it with `git log -p main\.\.agent\/issue-8` and merge by hand with `git merge --no-ff agent\/issue-8`, or drop it with `git branch -D agent\/issue-8`\./);
+  assert.match(next, /Resolve agent\/issue-8, held for a human merge in an earlier run: review it with `git log -p main\.\.agent\/issue-8` and merge by hand with `git merge --no-ff -m "Merge agent\/issue-8 \(closes #8\)" agent\/issue-8`, or drop it with `git branch -D agent\/issue-8`\./);
   assert.match(next, /`sandcastle land 7`/);
   assert.doesNotMatch(next, /git merge --no-ff agent\/issue-7/);
 });
@@ -122,7 +122,7 @@ test("this run's held resolution lists land:, and a protected-path hold beside i
   const needs = section(out, "## Needs you");
   assert.match(needs, /- #1 stray - .*\n {2}review: git log -p main\.\.agent\/issue-1 {3}land: sandcastle land 1\n/);
   assert.doesNotMatch(needs, /git merge --no-ff agent\/issue-1\b/);
-  assert.match(needs, /- #2 protected - .*\n {2}review: git log -p main\.\.agent\/issue-2 {3}merge: git merge --no-ff agent\/issue-2\n/);
+  assert.match(needs, /- #2 protected - .*\n {2}review: git log -p main\.\.agent\/issue-2 {3}merge: git merge --no-ff -m "Merge agent\/issue-2 \(closes #2\)" agent\/issue-2\n/);
   const next = section(out, "## Next step");
   assert.match(next, /Review and merge the 1 held branch\(es\)/);
   assert.match(next, /Check and land the 1 held conflict resolution\(s\)/);

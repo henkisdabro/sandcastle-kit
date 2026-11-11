@@ -81,6 +81,10 @@ export const touchesOverrun = (root: string, base: string, head: string, body: s
 // "closes" would have the next run find the merge and close it as merged earlier (`mergedEarlier`).
 export const mergeSubject = (branch: string, ticket: string, partly = false) => `Merge ${branch} (${partly ? "part of" : "closes"} ${ticket})`;
 
+// The merge a person types for a held branch. A plain `git merge --no-ff` words the subject "Merge branch '...'", which
+// `mergedEarlier` and the status view do not find and which never closes the ticket on push: the kit's own subject does.
+export const handMergeCommand = (branch: string, ticket: string, partly = false) => `git merge --no-ff -m "${mergeSubject(branch, ticket, partly)}" ${branch}`;
+
 export const mergeBranch = (root: string, branch: string, head: string, ticket: string, mode: "merge" | "squash" = "merge", partly = false) => {
   if (mode === "merge") {
     return sh("git", ["merge", "--no-ff", "--no-verify", "-m", mergeSubject(branch, ticket, partly), head], root, AGENT_COMMITTER);
