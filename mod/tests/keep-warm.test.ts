@@ -199,3 +199,13 @@ test("a later turn of the same run does not put the refresh out, and keeps the m
   expect(w.forks.length).toBe(2);
   expect(await rowNow($)).toBeUndefined();
 });
+
+test("a later turn's record does not move the floor: the refresh comes 55 minutes after the run's first turn", HOURS, async ($, on) => {
+  const w = world(on);
+  await begin($, w);
+  await w.clock.advance(50 * MIN);
+  // Turn 2 of the same process starts with no main-thread turn in between: only the floor decides.
+  w.turn = { startedAt: T0 + 50 * MIN, turn: 2 };
+  await w.clock.advance(6 * MIN);
+  expect(w.forks.length).toBe(1);
+});
