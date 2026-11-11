@@ -16,8 +16,10 @@ export type PlanWindow = { percentUsed: number };
 
 /** What the session remembers across looks; it lives in `$.state`, since a reload restarts module variables. */
 export type Warmth = {
-  /** The run these facts are about (its `startedAt`): another run starts them over, so misses are counted per run. */
+  /** The run these facts are about (`runKey`: its pid, else its `startedAt`): another run starts them over, so misses are counted per run, not per turn. */
   run?: string;
+  /** When the run's first turn started (ms): the floor of the last activity, which a later turn's record does not move. */
+  since?: number;
   /** The last refresh, until a main-thread turn ends after a miss: that turn clears the miss. */
   last?: Refresh;
   /** The refreshes this run that found the cache lapsed. */
@@ -51,6 +53,34 @@ export type KeepWarmVerdict = {
   band?: string;
 };
 
+/** What the run record says about which run it is: the process, when this turn started and which turn it is. */
+export type RunFacts = { pid?: number; startedAt?: string; turn?: number };
+
+/** A run's identity: the process, since each autonomy turn of one `sandcastle run` writes a record with a new `startedAt`; a record with no pid is told apart by its `startedAt`. */
+export const runKey = (run: RunFacts): string | undefined =>
+  run.pid !== undefined ? `pid:${run.pid}` : run.startedAt === undefined ? undefined : `start:${run.startedAt}`;
+
+/**
+ * The facts for the run the record describes. The same process's later turn carries them over (the misses, the last
+ * refresh, the floor), so a run that spans turns keeps one count and one clock; another process, a pid-less record
+ * with another `startedAt`, or a record of turn 1 with a new `startedAt` (a reused pid) starts them over. The turn that
+ * ended last still counts. `since` is the first `startedAt` seen for the run, the floor a reload cannot lose.
+ */
+export const followRun = (kept: Warmth, run: RunFacts): Warmth => {
+  const key = runKey(run);
+  const started = Date.parse(run.startedAt ?? "");
+  const startedAt = Number.isFinite(started) ? started : undefined;
+  const sameProcess = key !== undefined && kept.run === key;
+  const newFirstTurn = run.pid !== undefined && run.turn === 1 && startedAt !== undefined && kept.since !== startedAt;
+  if (sameProcess && !newFirstTurn) return startedAt !== undefined && kept.since === undefined ? { ...kept, since: startedAt } : kept;
+  return {
+    misses: 0,
+    ...(kept.turnEnd === undefined ? {} : { turnEnd: kept.turnEnd }),
+    ...(key === undefined ? {} : { run: key }),
+    ...(startedAt === undefined ? {} : { since: startedAt }),
+  };
+};
+
 /** A refresh whose cache read was under half the context: the cache had lapsed. */
 export const missed = (last: Refresh): boolean => last.cacheRead < last.contextTokens / 2;
 
@@ -81,7 +111,7 @@ export const keepWarm = (input: KeepWarmInput): KeepWarmVerdict => {
   return { refresh: false, mode: "1h", nextAt, band };
 };
 
-/** The most recent thing that kept the cache warm: a main-thread turn, a refresh, or the run's start. */
+/** The most recent thing that kept the cache warm: a main-thread turn, a refresh, or the run's first turn's start (`since`). */
 export const activity = (kept: Warmth, floor?: number): number | undefined => {
   const times = [kept.turnEnd, kept.last?.at, floor].filter((t): t is number => typeof t === "number" && Number.isFinite(t));
   return times.length === 0 ? undefined : Math.max(...times);
@@ -115,10 +145,11 @@ const finite = (v: unknown): v is number => typeof v === "number" && Number.isFi
 /** A stored value as `Warmth`; anything else reads as nothing remembered. */
 export const parseWarmth = (value: unknown): Warmth => {
   if (typeof value !== "object" || value === null) return { misses: 0 };
-  const { run, last, misses, turnEnd } = value as Record<string, unknown>;
+  const { run, since, last, misses, turnEnd } = value as Record<string, unknown>;
   const l = typeof last === "object" && last !== null ? (last as Record<string, unknown>) : undefined;
   return {
     ...(typeof run === "string" ? { run } : {}),
+    ...(finite(since) ? { since } : {}),
     misses: finite(misses) && misses > 0 ? Math.floor(misses) : 0,
     ...(finite(turnEnd) ? { turnEnd } : {}),
     ...(l && finite(l.at) && finite(l.cacheRead) && finite(l.contextTokens) ? { last: { at: l.at, cacheRead: l.cacheRead, contextTokens: l.contextTokens } } : {}),
