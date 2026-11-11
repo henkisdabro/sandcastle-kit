@@ -19,7 +19,8 @@ test("the single shard lists every test file once, the weighted ones first and h
   const order = r.stdout.trim().split("\n");
   assert.deepEqual([...order].sort(), all);
   assert.ok(weights.length > 1, "shard.ts has a WEIGHTS table");
-  const expected = [...weights].sort((a, b) => b.weight - a.weight || a.file.localeCompare(b.file)).map((w) => w.file);
+  // A weight left for a file since removed is skipped by shard.ts, so it is no order to expect here.
+  const expected = weights.filter((w) => all.includes(w.file)).sort((a, b) => b.weight - a.weight || a.file.localeCompare(b.file)).map((w) => w.file);
   assert.deepEqual(order.slice(0, expected.length), expected);
 });
 
