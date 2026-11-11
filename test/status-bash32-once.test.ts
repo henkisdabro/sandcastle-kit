@@ -43,7 +43,7 @@ test("test/suite.sh and AGENTS.md say one scenario is rendered under bash32", ()
 });
 
 test("status.sh under bash32 draws the same frame as under the bash on PATH", { skip: existsSync(BASH32) ? false : `${BASH32} is absent (this repository's sandbox image builds it)` }, () => {
-  const env = { ...process.env, STATUS_BASH32_ONLY: "1" };
+  const env: NodeJS.ProcessEnv = { ...process.env, STATUS_BASH32_ONLY: "1" };
   delete env.STATUS_BASH;
   delete env.COLS;
   const r = spawnSync("bash", [SCRIPT], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], timeout: 110_000 });
