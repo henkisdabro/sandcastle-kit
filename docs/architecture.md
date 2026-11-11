@@ -81,7 +81,8 @@ a follow-up an earlier iteration named is still filed. The tag readers and the r
 rules (`oneLine`, `judgeChangelog`, `readFollowUps`, `unmetNote`). A missing report is a value, never a
 throw (a throw would start a second editing review through `reviewWithFallback`). `reportTiming` turns the
 capture's facts into the `report` field of the step's `timings.jsonl` line (`came`, `missing`, `tries`,
-`turns`, and `gapMs`, `silenceMs` and `cutOff` once the completion signal was seen); `pass` leaves it in
+`turns`, and `gapMs`, `silenceMs` and `cutOff` once the completion signal was seen; a Codex pass has no
+`tries` or `turns`, so its entry leaves them out); `pass` leaves it in
 `PipelineContext.reportTimings` and `timed` takes it, the last pass of a step winning
 (`test/report-said.test.ts`, `test/report-schema.test.ts`). The `<report>`/`<blocked>` hand-back, the
 resolver's `<stray>` lines and the repair pass's `<verdict>` stay tags.
@@ -2925,6 +2926,26 @@ property, with the keywords `type`, `properties`, `required`, `additionalPropert
 the signal, `unmet`, `changelog`, `followups`, `ungated` - and nothing else. Claude Code returns the
 validated object as `structured_output` on the stream's `result` line, which the library's parser drops, so
 `reportCapture` keeps it with the timing of the signal and the result line.
+
+The Codex cross-review takes the same switch and the same file (#822). `codexAgent` appends
+`--output-schema /etc/claude-code/report.schema.json` to the library's `codex exec` command, before the
+kit's rate-limit readout suffix (`withOutputSchema` refuses a command of another shape), and wraps
+`parseStreamLine` in `codexReportCapture`, which has `reportCapture`'s four calls and facts. The report is
+the text of the last `item.completed` `agent_message` (the earlier ones are prose), parsed as JSON and
+checked by `reportFrom`; otherwise `no agent message`, `not JSON`, `invalid: <what>`, or, when the stream
+held a `turn.failed`, `failed: <code>` - the `"code":"..."` in its `error.message`, read from anywhere in it
+(`failed: invalid_json_schema` for a schema the API refuses, which fails before any model turn), else the
+message's first 80 characters. The signal sits in the report's own `signal` field, so the library's
+`completionSignal` arms on the JSON message. A pass cut off by the grace window (the signal in prose, then a
+silence, and no valid report at or after it) records `cutOff` with its figures running to the pass's end.
+A valid report followed by a final prose message is missing (`not JSON`), but was not cut off:
+its timing figures end at the last message, since the report did arrive after the signal.
+`reportTiming` and `crossReview`'s line prefer the capture's `failed: ...` reason to the thrown error's text, so
+a refused schema reads `failed: invalid_json_schema` on the timings line, and with the switch on `crossReview`
+says the report schema was on and that a refused schema ends every cross-review while it is. In the review loop
+`reviewGap` skips `gapOf` for a cross-review whose text parses as JSON: it is not prose. The limit: the
+cross-reviewer's `<report>` hand-back is not in its JSON, so for a tracker where agents do not write it, it is
+not posted (the hand-back forms get their own design). `test/report-schema-codex.test.ts` holds all of it.
 
 The same file carries `permissions.deny` for `Monitor`, `ScheduleWakeup`, `CronCreate`,
 `CronDelete`, `CronList` and `RemoteTrigger` (`test/managed-settings-deny.test.ts`), and for the

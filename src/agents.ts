@@ -59,7 +59,7 @@ export const CROSS_REVIEW_MODEL = process.env.CROSS_REVIEW_MODEL ?? "gpt-6-astra
 const CROSS_REVIEW_EFFORT = CROSS.on ? CROSS.effort : "high";
 
 /**
- * REPORT_SCHEMA=1: Claude passes also return a schema-validated report (`container/report.schema.json`), which a pass's
+ * REPORT_SCHEMA=1: Claude passes and the Codex cross-review also return a schema-validated report (`container/report.schema.json`), which a pass's
  * readers prefer to the own-line tags. Off, a run is what it was before: the same command, the same readers, no timings field.
  */
 export const REPORT_SCHEMA = process.env.REPORT_SCHEMA === "1";
@@ -154,6 +154,22 @@ const reportSchemaJson = () =>
  */
 export const withSchema = (command: string, schema: string): string => withFlag(command, `--json-schema ${shq(schema)}`, "--json-schema flag", "withSchema");
 
+// Where the sandbox has the schema file: `MANAGED_SETTINGS` (src/sandbox.ts, which imports this module) and the file's name;
+// `test/report-schema-codex.test.ts` holds the two together.
+const SANDBOX_REPORT_SCHEMA = "/etc/claude-code/report.schema.json";
+
+/**
+ * The library's codex command with ` --output-schema <file>` appended (before the kit's readout suffix, which `codexAgent` adds
+ * after it). Refuses a command that does not start with `codex exec `, as `withTools` refuses another shape of claude's: a
+ * flag put on a command it does not belong to must never run passes without the report.
+ */
+export const withOutputSchema = (command: string): string => {
+  if (!command.startsWith("codex exec ")) {
+    throw new Error(`Sandcastle's codex command no longer has the shape the --output-schema flag needs (starts with "codex exec "): update withOutputSchema in src/agents.ts. Command: ${command}`);
+  }
+  return `${command} --output-schema ${SANDBOX_REPORT_SCHEMA}`;
+};
+
 /** The completion signal the library looks for by default, and the schema's only value for `signal`. */
 export const COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 
@@ -192,19 +208,22 @@ export const reportFrom = (value: unknown): { report: Report } | { missing: stri
 export type ReportFacts = {
   /** The report, when a valid one came. */
   report?: Report;
-  /** Why none did: `no result line`, `no structured_output`, `retries exhausted` or `invalid: <what>`. */
+  /**
+   * Why none did. Claude: `no result line`, `no structured_output`, `retries exhausted` or `invalid: <what>`. Codex: `no agent message`,
+   * `not JSON`, `invalid: <what>` or, when the stream held a `turn.failed`, `failed: <its error code>`.
+   */
   missing?: string;
   /** The iteration's output by the library's rule: the `result` text, else the `text` events. */
   output: string;
-  /** The `StructuredOutput` tool calls seen. */
-  tries: number;
+  /** The `StructuredOutput` tool calls seen. A Codex pass has no such calls, so it leaves this out. */
+  tries?: number;
   /** The `result` line's `num_turns`. */
   turns?: number;
-  /** From the moment the completion signal armed the library's grace window to the `result` line (or, cut off, the pass's end). Absent when the signal never came. */
+  /** From the moment the completion signal armed the library's grace window to the `result` line (Codex: the last `agent_message`) or, cut off, the pass's end. Absent when the signal never came. */
   gapMs?: number;
   /** The longest stretch with no line from that moment on, to the `result` line or the pass's end: what a completion timeout must exceed. */
   silenceMs?: number;
-  /** No `result` line followed the signal. */
+  /** No `result` line followed the signal (Codex: no `agent_message` holding a valid report came at or after it). */
   cutOff?: true;
 };
 
@@ -306,9 +325,116 @@ export const reportCapture = (now: () => number = Date.now) => {
 };
 export type ReportCapture = ReturnType<typeof reportCapture>;
 
-// One capture per Claude agent made with REPORT_SCHEMA=1, found from the agent object a pass was given.
+// `codex exec --output-schema` (#822) makes the pass's last `agent_message` the JSON report and nothing else; the earlier
+// ones are prose. A refused schema fails before any model turn: an `error` line, then `turn.failed` whose `error.message`
+// is the API's 400 body as a JSON string, with `"code":"invalid_json_schema"` in it (#821's probe).
+const FAILURE_CODE = /\\?"code\\?"\s*:\s*\\?"([A-Za-z0-9_.-]+)/;
+const failedReason = (line: { error?: { message?: unknown }; message?: unknown }) => {
+  const raw = line.error?.message ?? line.message;
+  const message = typeof raw === "string" ? raw : "";
+  // The code is read from anywhere in the message: at the top of the body, nested under `error`, or after a text prefix.
+  return `failed: ${FAILURE_CODE.exec(message)?.[1] ?? (message.slice(0, 80).trim() || "turn failed")}`;
+};
+
+/**
+ * `reportCapture`'s counterpart for a Codex pass, with the same four calls and the same facts: the report is the last
+ * `agent_message` parsed as JSON and checked by `reportFrom`. The signal's moment is the first line after which the
+ * parsed `text` and `result` events hold the signal, as the library arms its grace window. The pass is cut off when
+ * the signal came and no `agent_message` holding a valid report came at or after it (the signal in a prose message, a
+ * silence, and the library ended the pass before the JSON message). A Codex pass has no `tries` or `turns`.
+ */
+export const codexReportCapture = (now: () => number = Date.now): ReportCapture => {
+  type State = {
+    lines: number;
+    texts: string;
+    resultText?: string;
+    accumulated: string;
+    lastMessage?: { found: ReturnType<typeof reportFrom>; at: number; silenceMs: number };
+    reportLine?: number;
+    failed?: string;
+    signal?: { line: number; at: number };
+    lastLineAt?: number;
+    silenceMs: number;
+    endedAt?: number;
+  };
+  const fresh = (): State => ({ lines: 0, texts: "", accumulated: "", silenceMs: 0 });
+  let s = fresh();
+  return {
+    reset() {
+      s = fresh();
+    },
+    line(raw: string, events: readonly StreamEvent[]) {
+      const at = now();
+      const line = s.lines++;
+      for (const e of events) {
+        if (e.type === "text" && typeof e.text === "string") {
+          s.texts += e.text;
+          s.accumulated += e.text;
+        } else if (e.type === "result" && typeof e.result === "string") {
+          s.resultText = e.result;
+          s.accumulated += e.result;
+        }
+      }
+      let message: string | undefined;
+      if (raw.startsWith("{") && (raw.includes('"agent_message"') || raw.includes('"turn.failed"'))) {
+        try {
+          const parsed = JSON.parse(raw) as { type?: string; item?: { type?: string; text?: unknown }; error?: { message?: unknown }; message?: unknown };
+          if (parsed.type === "item.completed" && parsed.item?.type === "agent_message" && typeof parsed.item.text === "string") message = parsed.item.text;
+          else if (parsed.type === "turn.failed") s.failed ??= failedReason(parsed);
+        } catch {
+          // A line that is not JSON is no message.
+        }
+      }
+      if (s.signal === undefined) {
+        if (s.accumulated.includes(COMPLETION_SIGNAL)) {
+          s.signal = { line, at };
+          s.lastLineAt = at;
+        }
+      } else {
+        s.silenceMs = Math.max(s.silenceMs, at - (s.lastLineAt ?? at));
+        s.lastLineAt = at;
+      }
+      // The silence up to and including this message: the figure of the last one is the pass's, as later lines are after the report.
+      if (message !== undefined) {
+        let found: ReturnType<typeof reportFrom>;
+        try {
+          found = reportFrom(JSON.parse(message));
+        } catch {
+          found = { missing: "not JSON" };
+        }
+        s.lastMessage = { found, at, silenceMs: s.silenceMs };
+        // A later prose message invalidates the final report, but cannot undo a report's arrival.
+        if ("report" in found) s.reportLine = line;
+      }
+    },
+    finish(at: number = now()) {
+      s.endedAt ??= at;
+    },
+    read(): ReportFacts {
+      const output = s.resultText ? s.resultText : s.texts;
+      let found = s.lastMessage?.found ?? { missing: "no agent message" };
+      if ("missing" in found && s.failed) found = { missing: s.failed };
+      const facts: ReportFacts = { ...found, output };
+      if (s.signal !== undefined) {
+        const last = s.lastMessage;
+        if (last && s.reportLine !== undefined && s.reportLine >= s.signal.line) {
+          facts.gapMs = last.at - s.signal.at;
+          facts.silenceMs = last.silenceMs;
+        } else {
+          const end = s.endedAt ?? now();
+          facts.gapMs = end - s.signal.at;
+          facts.silenceMs = Math.max(s.silenceMs, end - (s.lastLineAt ?? s.signal.at));
+          facts.cutOff = true;
+        }
+      }
+      return facts;
+    },
+  };
+};
+
+// One capture per agent made with REPORT_SCHEMA=1, found from the agent object a pass was given.
 const captures = new WeakMap<object, ReportCapture>();
-/** The capture of the agent a pass was given: none for a Codex agent, or with REPORT_SCHEMA off. */
+/** The capture of the agent a pass was given: none with REPORT_SCHEMA off. */
 export const passReport = (agent: object): ReportCapture | undefined => captures.get(agent);
 
 // Session capture is off: Sandcastle would otherwise copy every sandbox
@@ -473,13 +599,24 @@ export const reviewWithFallback = <T>(
 // there. The exit code is codex's own; the library's parser drops the line as it does any it does not know.
 const codexAgent = (model: string, effort: Exclude<Effort, "max">) => {
   const provider = codex(model, { effort, captureSessions: false });
-  return {
+  const capture = REPORT_SCHEMA ? codexReportCapture() : undefined;
+  const agent = {
     ...provider,
     buildPrintCommand(options: Parameters<typeof provider.buildPrintCommand>[0]) {
       const printed = provider.buildPrintCommand(options);
-      return { ...printed, command: `${printed.command}; rc=$?; ${CODEX_RATE_LIMITS_READOUT}; exit $rc` };
+      // Each command is one iteration: the capture describes the last one only.
+      capture?.reset();
+      const command = capture ? withOutputSchema(printed.command) : printed.command;
+      return { ...printed, command: `${command}; rc=$?; ${CODEX_RATE_LIMITS_READOUT}; exit $rc` };
+    },
+    parseStreamLine(line: string) {
+      const events = provider.parseStreamLine(line);
+      capture?.line(line, events);
+      return events;
     },
   };
+  if (capture) captures.set(agent, capture);
+  return agent;
 };
 
 // The cross-family pass is a second opinion, not a gate: if it fails, the
@@ -490,10 +627,20 @@ export const crossReview = async <T>(
   run: (agent: ReturnType<typeof codex>) => Promise<T>,
 ): Promise<T | undefined> => {
   if (!CROSS_REVIEW) return undefined;
+  const agent = codexAgent(CROSS_REVIEW_MODEL, CROSS_REVIEW_EFFORT);
   try {
-    return await run(codexAgent(CROSS_REVIEW_MODEL, CROSS_REVIEW_EFFORT));
+    return await run(agent);
   } catch (error) {
-    console.log(`${label}: ${CROSS_REVIEW_MODEL} cross-review failed (${agentFailure(error)}); continuing without it.`);
+    if (!REPORT_SCHEMA) {
+      console.log(`${label}: ${CROSS_REVIEW_MODEL} cross-review failed (${agentFailure(error)}); continuing without it.`);
+      return undefined;
+    }
+    // The capture's own reason ("failed: invalid_json_schema") names a refused schema; the library's error says only that the turn failed.
+    const reason = passReport(agent)?.read().missing;
+    const cause = reason?.startsWith("failed: ") ? reason.slice("failed: ".length) : agentFailure(error);
+    console.log(
+      `${label}: ${CROSS_REVIEW_MODEL} cross-review failed with REPORT_SCHEMA=1 (${cause}); continuing without it - if Codex refused the report schema, every cross-review fails while the switch is on.`,
+    );
     return undefined;
   }
 };

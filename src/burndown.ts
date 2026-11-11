@@ -27,7 +27,7 @@ import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { format } from "node:util";
-import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
@@ -544,7 +544,7 @@ export const saidOf = (text: string, facts?: Pick<ReportFacts, "report" | "outpu
 };
 
 /** One pass's report as the step's timings line records it (`reportTiming`). */
-export type ReportTiming = { came: "report" | "tags" | "missing"; missing?: string; tries: number; turns?: number; gapMs?: number; silenceMs?: number; cutOff?: true };
+export type ReportTiming = { came: "report" | "tags" | "missing"; missing?: string; tries?: number; turns?: number; gapMs?: number; silenceMs?: number; cutOff?: true };
 
 /**
  * Whether the report came, for the step's timings line. `failed` is `agentFailure`'s text for a pass that threw: it came
@@ -554,13 +554,14 @@ export type ReportTiming = { came: "report" | "tags" | "missing"; missing?: stri
  */
 export const reportTiming = (facts: ReportFacts, failed?: string): ReportTiming => {
   const common = {
-    tries: facts.tries,
+    ...(facts.tries !== undefined ? { tries: facts.tries } : {}),
     ...(facts.turns !== undefined ? { turns: facts.turns } : {}),
     ...(facts.gapMs !== undefined ? { gapMs: facts.gapMs } : {}),
     ...(facts.silenceMs !== undefined ? { silenceMs: facts.silenceMs } : {}),
     ...(facts.cutOff ? { cutOff: true as const } : {}),
   };
-  if (failed !== undefined) return { came: "missing", missing: facts.missing === "retries exhausted" ? facts.missing : `failed: ${failed}`, ...common };
+  // The capture's own reason is the better one: the retries that ran out (Claude), or the code of a turn Codex failed (`failed: invalid_json_schema`).
+  if (failed !== undefined) return { came: "missing", missing: facts.missing === "retries exhausted" || facts.missing?.startsWith("failed: ") ? facts.missing : `failed: ${failed}`, ...common };
   if (facts.report) return { came: "report", ...common };
   const tagged = ["unmet", "changelog", "followup", "ungated"].some((tag) => ownLineMatches(facts.output, tag, tag === "unmet").length > 0);
   return { came: tagged ? "tags" : "missing", missing: facts.missing ?? "no report", ...common };
@@ -710,6 +711,24 @@ export const gapOf = (text: string, filed: Said = saidOf(text)): string | undefi
   }
   return said ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
+/** Whether a pass's final message is JSON (`JSON.parse` succeeds): a report is not prose, and a prose reader has nothing to find in it. */
+const isJson = (text: string): boolean => {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The gap a review pass left in prose, for the review loop. With REPORT_SCHEMA=1 the cross-review's final message is
+ * the JSON report (or, a report that came out wrong, still JSON): its words are the schema's, not a reviewer's prose, so
+ * `gapOf` reads none of it. `schema` is a parameter for a test: the switch is read once at import.
+ */
+export const reviewGap = (r: { stdout: string; said: Said }, cross: boolean, schema: boolean = REPORT_SCHEMA): string | undefined =>
+  schema && cross && isJson(r.stdout) ? undefined : gapOf(r.stdout, r.said);
+
 // The phase a pass's name says, in the words a person reads in the filed ticket.
 const phaseOf = (name: string) =>
   name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
@@ -1587,7 +1606,7 @@ export type PipelineContext = {
   followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[]; namedByOthers?(from: string): NamedFollowUp[] };
   /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`runTicketsView`). None, and it is shown none. */
   tickets?: readonly { id: string; title: string }[];
-  /** With REPORT_SCHEMA=1: where a Claude pass leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
+  /** With REPORT_SCHEMA=1: where a pass (Claude, or the Codex cross-review) leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
   reportTimings?: Map<string, ReportTiming>;
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
@@ -2490,10 +2509,10 @@ export const createPipeline = (ctx: PipelineContext) => {
           : undefined;
         await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenComments ? { comments: commentCount(seenComments) } : {}) });
         reviewed = true;
-        for (const r of [review, cross]) {
+        for (const [r, isCross] of [[review, false], [cross, true]] as const) {
           const u = r?.said.ungated;
           if (u) ungated.push(u);
-          const g = r && gapOf(r.stdout, r.said);
+          const g = r && reviewGap(r, isCross);
           if (g) gaps.push(g);
           noteChangelog(r?.said);
           const m = r?.said.unmet;
@@ -3402,7 +3421,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
   const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
-  // With REPORT_SCHEMA=1: whether the last Claude pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
+  // With REPORT_SCHEMA=1: whether the last agent pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
   const reportTimings = new Map<string, ReportTiming>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
