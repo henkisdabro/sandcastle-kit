@@ -78,6 +78,13 @@ from an older kit counts as near).
 A landing may take it, whatever its run holds against its share, and any other free slot one past
 its run's share, and when two runs' landings want it, the longer wait goes first (a run alone keeps
 one of the machine's slots the same way, in its worker count).
+
+The run's start line names this cap when it cuts the workers below `CONCURRENCY`: which setting holds
+the pool (`SANDCASTLE_MAX_SANDBOXES`, `maxSandboxes` in the machine settings, or the default of 6),
+that one slot is kept for landing, and that gate passes run beside the workers on the gate slots
+(`sandcastle size` suggests a figure).
+A ticket in its gates pass is not counted in "up to N at a time", so more than N tickets can be in a
+sandbox at once.
 With two runs wanting 5 each on 6 slots that is 3 + 2 tickets and a free slot for landing; with
 three, 2 + 2 + 1; with four, 2 + 1 + 1 + 1; on 3 slots between two runs, 1 + 1.
 While a landing runs, a ticket that ends does not hand its slot to a new ticket until the landing is
