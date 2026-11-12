@@ -780,7 +780,7 @@ const heldReasonIn = (root: string, startedAt: string | undefined, id: string): 
  * line that does not. The copy of this turn's own record a finished turn leaves in history is skipped. A turn
  * 1, or a record with no `settings.turn` (an older kit), has none.
  */
-const earlierTurns = (root: string, run: any): any[] => {
+export const earlierTurns = (root: string, run: any): any[] => {
   const turn = run.settings?.turn;
   const file = join(root, ".sandcastle/logs/history.jsonl");
   if (!Number.isInteger(turn) || turn < 2 || !existsSync(file)) return [];
@@ -798,6 +798,17 @@ const earlierTurns = (root: string, run: any): any[] => {
   }
   // A chain that stops short of turn 1 is not this run's: a line of another run could have the right number.
   return found.length === turn - 1 ? found : [];
+};
+
+/**
+ * The turn of this run (`run`, the current turn's record) that wrote a head record, from its `run` (the `startedAt` of
+ * the turn that wrote it): the matching earlier turn's `settings.turn`, or undefined for a record from an earlier run
+ * or from this turn itself. Matched on `startedAt` through the turns `earlierTurns` walks, never on `session`.
+ */
+export const turnOfHead = (root: string, run: any, headRun: string | undefined): number | undefined => {
+  if (!headRun) return undefined;
+  const turn = earlierTurns(root, run).find((t) => t.startedAt === headRun)?.settings?.turn;
+  return Number.isInteger(turn) ? turn : undefined;
 };
 
 /** Whether a later turn's record of a ticket is an attempt at it: not still waiting, and not a ticket put back in the queue unstarted. */

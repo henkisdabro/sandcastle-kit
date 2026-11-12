@@ -53,7 +53,7 @@ import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, wit
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { memoryLine, poolWarningsNow, sandboxMemory } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, trackerTokenUser, type Ticket, type Tracker } from "./tracker.ts";
-import { closingReport, summary } from "./report.ts";
+import { closingReport, summary, turnOfHead } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
@@ -63,7 +63,7 @@ import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, type From, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, personCommentsSince, repairWords, seenComments, stoppedLine, trustOf } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, resolveHoldNote, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -1671,6 +1671,8 @@ export type PipelineContext = {
   project: Project;
   tracker: Tracker;
   runId: string;
+  /** The turn of this run that wrote a head record (its `run`), when an earlier turn did: a carried branch's lines name it. Absent: none is known. */
+  turnOfHead?(headRun: string | undefined): number | undefined;
   dryRun: boolean;
   /** Repair passes per attempt (`repair.attempts`). */
   repair: number;
@@ -2423,6 +2425,10 @@ export const createPipeline = (ctx: PipelineContext) => {
       const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], project.root)) > 0;
       // The requeue-once state holds the first attempt's line only on a second attempt in this run.
       const requeued = requeuedAs.has(issue.id);
+      // Where the carried branch's work came from, for the lines below: its first attempt (requeued), the earlier turn of this
+      // run whose record wrote its head (`turnOfHead`), else an earlier run. Only a branch kept from before is looked up.
+      const headTurn = !requeued && carried ? ctx.turnOfHead?.(readHeads(project.root)[issue.id]?.run) : undefined;
+      const from: From = requeued || (headTurn === undefined ? false : { turn: headTurn });
       // The repair passes of the first attempt, so the outcome line counts the ticket's whole run: `repairs` below bounds one attempt's loop only.
       const earlierRepairs = requeued ? firstAttemptRepairs(results, issue.id) : 0;
       const earlierIdle = requeued ? firstAttemptIdleRepairs(results, issue.id) : 0;
@@ -2446,7 +2452,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // on the branch was never reviewed, unless a narrow review has since recorded the tip.
       const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch], project.root) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch], project.root);
       if (greenHead !== undefined) {
-        console.log((reviewedOnly !== undefined ? reviewedCarriedLine : greenCarriedLine)(ref(issue.id), greenHead, requeued, lateComment));
+        console.log((reviewedOnly !== undefined ? reviewedCarriedLine : greenCarriedLine)(ref(issue.id), greenHead, from, lateComment));
         run.ticket(issue.id, { note: lateComment ? "land only - a comment since its review, full review" : "land only - reviewed earlier" });
       }
       let mergeConflicted = false;
@@ -2472,7 +2478,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             identity,
           });
           if (r.ok) {
-            console.log(carriedMergeLine(ref(issue.id), base, behind, requeued, { files, regen: r.regen }));
+            console.log(carriedMergeLine(ref(issue.id), base, behind, from, { files, regen: r.regen }));
           } else {
             // Back to the merge as it stood, for the implementer (or, on a green
             // branch, the resolver) to resolve.
@@ -2480,11 +2486,11 @@ export const createPipeline = (ctx: PipelineContext) => {
             await sandbox.exec(merge);
             mergeConflicted = true;
             console.log(
-              `${ref(issue.id)}: ${carriedBranch(landOnly, requeued, reviewedOnly !== undefined)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
+              `${ref(issue.id)}: ${carriedBranch(landOnly, from, reviewedOnly !== undefined)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
             );
           }
         } else if (pull.exitCode === 0) {
-          console.log(carriedMergeLine(ref(issue.id), base, behind, requeued));
+          console.log(carriedMergeLine(ref(issue.id), base, behind, from));
           // The merge commit and the two commits it joined, read in the sandbox that made it: a base that moved
           // between a host read and the merge is then never mistaken for the tip the landing gate ran on.
           const [merge, head, joinedBase] = (await sandbox.exec("git rev-list --parents -n 1 HEAD")).stdout.trim().split(/\s+/);
@@ -2494,8 +2500,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           mergeConflicted = true;
           console.log(
             landOnly
-              ? `${ref(issue.id)}: ${carriedBranch(true, requeued, reviewedOnly !== undefined)} conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
-              : `${ref(issue.id)}: ${carriedBranch(false, requeued)} conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
+              ? `${ref(issue.id)}: ${carriedBranch(true, from, reviewedOnly !== undefined)} conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
+              : `${ref(issue.id)}: ${carriedBranch(false, from)} conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
           );
         }
         else {
@@ -4163,6 +4169,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     project,
     tracker,
     runId,
+    turnOfHead: (headRun) => (turn ? turnOfHead(project.root, { startedAt: run.startedAt, pid: process.pid, orchestrator: project.name, settings: { turn: turn.turn } }, headRun) : undefined),
     dryRun: DRY_RUN,
     repair: settings.repair,
     testRedGate: TEST_RED_GATE,
