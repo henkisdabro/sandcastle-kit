@@ -481,13 +481,13 @@ const github = (project: Project): Tracker => {
     },
     // What the ticket's author wrote or edited after the queue label last went on: the maintainer's decision on #829's
     // remaining gap. The author's own writing only: a maintainer's edit of an outsider's text (its `editor` is not the
-    // author) never holds. One GraphQL call; the newest 100 labelled events and comments, the newest 20 edits of each.
+    // author) never holds. One GraphQL call; the newest 100 labelled and title-renamed events and comments, the newest 20 edits of each.
     editedSinceQueued: async (id, runStart, limitMs = TRACKER_READ_MS) => {
       const edits = "userContentEdits(last: 20) { nodes { editedAt editor { login } } }";
       const query =
         "query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { issue(number: $number) { " +
         `author { login } authorAssociation lastEditedAt ${edits} ` +
-        "timelineItems(itemTypes: [LABELED_EVENT], last: 100) { nodes { ... on LabeledEvent { createdAt label { name } } } } " +
+        "timelineItems(itemTypes: [LABELED_EVENT, RENAMED_TITLE_EVENT], last: 100) { nodes { ... on LabeledEvent { createdAt label { name } } ... on RenamedTitleEvent { createdAt actor { login } } } } " +
         `comments(last: 100) { nodes { author { login } createdAt lastEditedAt ${edits} } } } } }`;
       const out = await ghAsync(["api", "graphql", "-f", `query=${query}`, "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${id}`], limitMs);
       type Edits = { nodes?: ({ editedAt?: string; editor?: { login?: string } | null } | null)[] | null };
@@ -495,7 +495,7 @@ const github = (project: Project): Tracker => {
         author?: { login?: string } | null;
         authorAssociation?: string;
         userContentEdits?: Edits | null;
-        timelineItems?: { nodes?: ({ createdAt?: string; label?: { name?: string } } | null)[] | null } | null;
+        timelineItems?: { nodes?: ({ createdAt?: string; label?: { name?: string }; actor?: { login?: string } | null } | null)[] | null } | null;
         comments?: { nodes?: ({ author?: { login?: string } | null; createdAt?: string; lastEditedAt?: string; userContentEdits?: Edits | null } | null)[] | null } | null;
       };
       const issue = (JSON.parse(out) as { data?: { repository?: { issue?: Issue | null } | null } }).data?.repository?.issue;
@@ -513,6 +513,13 @@ const github = (project: Project): Tracker => {
       const at = (t: string) => t.replace(/:\d\d(\.\d+)?Z$/, "Z");
       const body = editedByAuthor(issue.userContentEdits);
       if (body) return `body edited ${at(body)}`;
+      // The title reaches every pass through `gh issue view`, so the author's rename after the label counts like a body edit.
+      // A rename event has an actor and no label; a labelled event has a label and no actor.
+      const renamed = (issue.timelineItems?.nodes ?? [])
+        .flatMap((n) => (n?.createdAt && !n.label && after(n.createdAt) && (n.actor?.login ?? "").toLowerCase() === author ? [n.createdAt] : []))
+        .sort()
+        .pop();
+      if (renamed) return `title renamed ${at(renamed)}`;
       for (const c of [...(issue.comments?.nodes ?? [])].reverse()) {
         if (!c || (c.author?.login ?? "").toLowerCase() !== author) continue;
         const when = after(c.createdAt) ? c.createdAt : editedByAuthor(c.userContentEdits);
