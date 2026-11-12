@@ -1324,7 +1324,6 @@ const drainOf = (d: unknown): DrainEnd | undefined => {
   return Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause ? { turns: turns as number, landed: landed as number, cause } : undefined;
 };
 
-/** The closing summary as Markdown-ish text, every section present. */
 /**
  * The cause a refused preflight left in the run record: its message without the first line (which repeats the headline,
  * `NOT STARTED: Preflight failed - ...`), cut to three lines. A record without one gives none, and the headline keeps its pointer.
@@ -1335,6 +1334,7 @@ const preflightCause = (message: string | undefined): string[] => {
   return lines.slice(0, 3);
 };
 
+/** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
   const { ids, merged, notClosed, partly, closed, partlyRerun, ungated, byHand, held, uncommitted, followUps, filingFailed, toTriage } = o;
@@ -1360,7 +1360,7 @@ export const render = (f: Facts, plain = false): string => {
   const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
     !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
   // Refused by its preflight (a rejected credential, an unknown model): no sandbox started, so the headline says that, and
-  // an estimate it never began against is no news. The cause is the run's own last lines, which the record does not keep.
+  // an estimate it never began against is no news. The cause is the record's `preflightFailure`; a record from before it kept one points at the run's last lines.
   const preflightFailed = f.stage === "preflight" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
     !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
   const cause = preflightFailed ? preflightCause(f.preflightFailure) : [];
