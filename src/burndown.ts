@@ -3759,8 +3759,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     ...(showsPlanUsage({ apiKey: !!spend, oauthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN, models: passModels }) ? [{ provider: "claude" as const }] : []),
     ...(showsCodexUsage({ crossReview: CROSS_REVIEW, apiKey: !!env.CODEX_API_KEY, auth: CROSS_REVIEW ? readCodexAuth() : undefined }) ? [{ provider: "codex" as const }] : []),
   ];
-  // `USAGE_PAUSE`: the run takes the soft pause itself when a window of one of those providers reaches the
-  // threshold or an agent hits the limit, and resumes after the window's reset (src/usage.ts, `createUsagePause`).
+  // `USAGE_PAUSE`: the run takes the soft pause itself when a window of Claude's plan reaches the threshold or
+  // an agent hits the limit, and resumes after the window's reset; a spent Codex window skips the cross-review
+  // instead (src/usage.ts, `createUsagePause`).
   const usagePause =
     settings.usagePause === undefined
       ? undefined

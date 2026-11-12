@@ -1,5 +1,5 @@
 // USAGE_PAUSE: a run that waits out a plan window instead of running into it. With the setting on, the run
-// takes the soft pause of `sandcastle pause` itself when a window of a provider it uses reaches the threshold
+// takes the soft pause of `sandcastle pause` itself when a window of Claude's plan reaches the threshold
 // (from the agents' own readings), or when an agent hits the limit anyway, and resumes by itself a minute
 // after that window's reset. A person's `sandcastle resume` resumes earlier; a person's `sandcastle pause` is
 // never undone by the timer. The guard (`USAGE_CHECK`) prefers the same readings to the endpoint.

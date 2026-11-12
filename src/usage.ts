@@ -808,8 +808,9 @@ export const usageCommand = async ({
 // USAGE_PAUSE: wait out a plan window instead of running into it.
 //
 // With `USAGE_PAUSE=<percent>` (or `usagePause` in the project config) the run takes the soft pause of
-// `sandcastle pause` itself when a window of a provider it uses reaches the threshold, or when an agent hits the
-// limit anyway, and resumes by itself a minute after that window's reset. It reads the same agent readings the
+// `sandcastle pause` itself when a window of Claude's plan reaches the threshold, or when an agent hits the
+// limit anyway, and resumes by itself a minute after that window's reset. A Codex window at the threshold never
+// pauses the run: the cross-review it pays for is skipped instead (`crossReviewSpentFor`). It reads the same agent readings the
 // status view shows (`watchUsage`), so it needs no request and no credential. The pause is the control file
 // `sandcastle pause` writes (src/detach.ts), with the cause in it: that is what lets a person's `sandcastle
 // resume` end it early, and a person's `sandcastle pause` take it over so the timer never undoes it.
