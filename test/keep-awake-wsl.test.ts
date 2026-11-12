@@ -54,15 +54,23 @@ const withShims = async (body: string, fn: () => Promise<void>) => {
 test("under WSL the line says Windows decides sleep, and no helper is probed or run", async () => {
   const calls = await withShims("exit 1", async () => {
     assert.equal(await keepAwake({ wsl: true }), WSL_LINE);
+    assert.equal(await keepAwake({ wsl: false }), WSL_LINE, "the WSL answer is remembered before another probe");
   });
   assert.deepEqual(calls, []);
 });
 
-test("a helper that fails gives its first stderr line, and the next turn does not try it again", async () => {
-  const calls = await withShims('echo "Failed to inhibit: Access denied" >&2; echo "second line" >&2; exit 1', async () => {
+test("a helper that fails gives its first non-empty stderr line, trimmed", async () => {
+  const calls = await withShims('printf "\\n  Failed to inhibit: Access denied  \\nsecond line\\n" >&2; exit 1', async () => {
     const line = `off - ${cmd} failed: Failed to inhibit: Access denied`;
     assert.equal(await keepAwake({ wsl: false }), line);
-    assert.equal(await keepAwake({ wsl: false }), line);
+  });
+  assert.deepEqual(calls, ["probe", "run"]);
+});
+
+test("after a helper fails the next turn neither probes nor runs it again", async () => {
+  const calls = await withShims('echo "Failed to inhibit: Access denied" >&2; exit 1', async () => {
+    const first = await keepAwake({ wsl: false });
+    assert.equal(await keepAwake({ wsl: false }), first);
   });
   assert.deepEqual(calls, ["probe", "run"]);
 });

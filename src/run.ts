@@ -146,7 +146,7 @@ const KEEP_AWAKE_SETTLE_MS = 250;
 // The latest inhibitor this process started, if it is still held, and whether a pause let it go.
 let inhibitor: ChildProcess | undefined;
 // The inhibitor still settling (its first KEEP_AWAKE_SETTLE_MS), so a release in that window ends it too.
-let settling: ChildProcess | undefined;
+let settling: { child: ChildProcess; released: boolean } | undefined;
 let released = false;
 
 /**
@@ -204,7 +204,8 @@ export const keepAwake = async (opts?: { wsl?: boolean }): Promise<string> => {
   // release would end only the newest and the machine would never sleep while paused.
   if (inhibitor && inhibitor.exitCode === null && inhibitor.signalCode === null) return `on (${cmd})`;
   const child = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
-  settling = child;
+  const attempt = { child, released: false };
+  settling = attempt;
   // The helper's own words say why it failed (a polkit refusal, no system bus): the first non-empty line.
   let stderr = "";
   child.stderr?.setEncoding("utf8");
@@ -221,8 +222,8 @@ export const keepAwake = async (opts?: { wsl?: boolean }): Promise<string> => {
   const settled = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), KEEP_AWAKE_SETTLE_MS); });
   const failed = await Promise.race([ended, settled]);
   clearTimeout(timer);
-  if (settling === child) settling = undefined;
-  if (!failed) {
+  if (settling === attempt) settling = undefined;
+  if (!failed && !attempt.released) {
     inhibitor = child;
     released = false;
     // Nothing reads it from here on; a pipe nobody drains must not hold the helper up.
@@ -230,7 +231,10 @@ export const keepAwake = async (opts?: { wsl?: boolean }): Promise<string> => {
     return `on (${cmd})`;
   }
   const cause = stderr.split("\n").map((l) => l.trim()).find((l) => l !== "");
-  return (remembered = cause ? `off - ${cmd} failed: ${cause}` : `off - ${cmd} failed`);
+  const answer = cause ? `off - ${cmd} failed: ${cause}` : `off - ${cmd} failed`;
+  // A pause deliberately stopped this helper; caching that as a failure would disable the resume.
+  if (!attempt.released) remembered = answer;
+  return answer;
 };
 
 /**
@@ -239,7 +243,8 @@ export const keepAwake = async (opts?: { wsl?: boolean }): Promise<string> => {
  */
 export const releaseAwake = () => {
   if (settling) {
-    settling.kill();
+    settling.released = true;
+    settling.child.kill();
     settling = undefined;
     released = true;
   }
