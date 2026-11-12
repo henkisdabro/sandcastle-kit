@@ -12,8 +12,16 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   leaves the repo out gets a FIX there, and `sandcastle run` refuses the same way before any sandbox
   starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
   without the kit's tokens, and a token value in gate output is replaced with `<redacted>`. So is
-  a token of Codex's login (`~/.codex/auth.json`, mounted read-only when `CROSS_REVIEW=1`) in the
+  a token of Codex's login (`~/.codex/auth.json`, read when `CROSS_REVIEW=1`) in the
   output a crashed agent's log and crash note show.
+  Of that login, a sandbox gets the access token and the ID token but **not the refresh token**: with
+  `CROSS_REVIEW=1` each sandbox is handed a read-only copy of `auth.json` whose `tokens.refresh_token` is
+  blank, written once per run to a temp directory and removed when the run ends. A refresh rotates
+  the token server-side, so sandboxes that each refreshed with the host's would leave the host's copy stale and
+  its next use failing with "refresh token was already used". Nothing in a sandbox can refresh the login: when
+  the access token (10 days) expires mid-run, that sandbox's cross-review fails and the run goes on without it.
+  An API-key sign-in holds no refresh token and is copied as it is. Your own `~/.codex/auth.json` is only read.
+  If the temp copy cannot be written, the sandbox config fails rather than exposing the host's refresh token.
 - 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
   `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an
   agent follows them anyway.

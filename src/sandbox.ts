@@ -3,8 +3,8 @@
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv, stripVTControlCharacters } from "node:util";
@@ -1047,10 +1047,12 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
 // The sandbox
 // ---------------------------------------------------------------------------
 
-// The cross-family review signs in with the host's ChatGPT login. The file is
-// mounted read-only and copied, so a token refresh inside a container never
-// writes back to the host. preflight() refreshes the host login first, which
-// keeps the copies from needing a refresh of their own.
+// The cross-family review signs in with the host's ChatGPT login. A sandbox gets a copy with the refresh token
+// blanked (`codexSandboxAuth`), mounted read-only and copied in by the ready hook, so nothing in a container can
+// refresh the login or write back to the host. preflight() does not refresh the host login: its probe refreshes only
+// inside Codex's own 5-minute window before the access token expires, and `codex login` cannot force one. A copy that
+// kept the refresh token would be spent by every sandbox that crossed that point at once (a refresh rotates the token
+// server-side), leaving the host's copy stale. Blanked, a refresh attempt fails in that sandbox only.
 const CODEX_AUTH = "/home/agent/.codex-host/auth.json";
 
 // An agent's commit or merge ends by starting `git maintenance run --auto` (from git 2.29), which
@@ -1111,26 +1113,80 @@ export const MANAGED_SETTINGS = "/etc/claude-code";
 export const sandboxMounts = (project: Project) => [
   ...project.mounts,
   { hostPath: join(KIT, "container"), sandboxPath: MANAGED_SETTINGS, readonly: true },
-  ...(CROSS_REVIEW
-    ? (hideCodexCredentials(), [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }])
-    : []),
+  ...(CROSS_REVIEW ? [{ hostPath: codexAuthSource(), sandboxPath: CODEX_AUTH, readonly: true }] : []),
 ];
+
+/**
+ * The host's Codex login as a sandbox gets it: the same JSON with `tokens.refresh_token` set to `""`. The key stays
+ * (Codex reads a file without it as signed out) and an empty string parses and works while the access token is
+ * valid. Undefined when the file needs no rewrite - not JSON, an API-key sign-in (`tokens` null) or no
+ * `tokens.refresh_token` - because it then holds no refresh token to rotate.
+ */
+const codexSandboxAuth = (hostText: string): string | undefined => {
+  try {
+    const login = JSON.parse(hostText);
+    const tokens = login && typeof login === "object" ? login.tokens : undefined;
+    if (!tokens || typeof tokens !== "object" || !("refresh_token" in tokens)) return undefined;
+    tokens.refresh_token = "";
+    return `${JSON.stringify(login, null, 2)}\n`;
+  } catch {
+    return undefined;
+  }
+};
+
+// The run's one copy: written on the first sandbox's config, in a directory of the run's own, and removed at its
+// exit so no live access token stays under the temp directory.
+let codexAuthCopy: { dir: string; file: string } | undefined;
+let codexExitHandler = false;
+
+/** Removes the run's copy of the Codex login, if one was written. The run's exit handler; never throws. */
+export const removeCodexAuthCopy = () => {
+  const copy = codexAuthCopy;
+  codexAuthCopy = undefined;
+  if (!copy) return;
+  try {
+    rmSync(copy.dir, { recursive: true, force: true });
+  } catch {
+    // An exit handler has no one to tell.
+  }
+};
 
 // The mounted Codex login holds tokens `credentials()` never registers, so a crashed Codex pass whose
 // output echoes one would write it into the agent log and the crash note unredacted. Every string in
-// the file, nested ones too, goes to `hideFromGates`. A file that is missing, unreadable or not JSON
-// registers nothing: the mount is made as before.
-const hideCodexCredentials = () => {
+// the host's file, nested ones too, goes to `hideFromGates`. A file that is missing, unreadable or not JSON
+// registers nothing and is mounted as before (`~/.codex/auth.json` itself, read-only).
+const codexAuthSource = (): string => {
+  const host = "~/.codex/auth.json";
+  if (codexAuthCopy) return codexAuthCopy.file;
+  let text: string;
   try {
+    text = readFileSync(join(homedir(), ".codex", "auth.json"), "utf8");
     const found: string[] = [];
     const walk = (value: unknown) => {
       if (typeof value === "string") found.push(value);
       else if (value && typeof value === "object") Object.values(value).forEach(walk);
     };
-    walk(JSON.parse(readFileSync(join(homedir(), ".codex", "auth.json"), "utf8")));
+    walk(JSON.parse(text));
     hideFromGates(found);
   } catch {
     // Nothing to register; the mount does not depend on it.
+    return host;
+  }
+  const copy = codexSandboxAuth(text);
+  if (copy === undefined) return host;
+  // Once a refresh token was found, a failed temp write must never fall back to mounting the host's login.
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-codex-"));
+  const file = join(dir, "auth.json");
+  codexAuthCopy = { dir, file };
+  if (!codexExitHandler) process.on("exit", removeCodexAuthCopy);
+  codexExitHandler = true;
+  try {
+    writeFileSync(file, copy, { mode: 0o600 });
+    return file;
+  } catch (error) {
+    // A full disk can leave a partial access token on disk before writeFileSync throws.
+    removeCodexAuthCopy();
+    throw error;
   }
 };
 

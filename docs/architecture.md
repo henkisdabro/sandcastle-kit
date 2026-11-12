@@ -1684,6 +1684,18 @@ a release that drops it says `ALL` may be tried again.
 A project whose setup or gates need a raw socket fails there with `Operation not permitted`
 (`ping` and `traceroute` may, where they cannot fall back to an unprivileged ICMP socket).
 
+**The Codex login in a sandbox.** With `CROSS_REVIEW=1`, `sandboxMounts` mounts in place of
+`~/.codex/auth.json` a copy that `codexSandboxAuth` (`src/sandbox.ts`) builds from the host's text:
+the same JSON with `tokens.refresh_token` set to `""` (the key stays, since Codex reads a file
+without it as signed out). It is written once per run, to a temp directory of the run's own, and
+`removeCodexAuthCopy` (the run's `process` exit handler, which `src/run.ts` runs on a stop too)
+removes it. A refresh rotates the refresh token server-side, so copies that each kept it were spent
+by the first sandbox to refresh, leaving the host's login stale. A file that holds no refresh token
+(an API-key sign-in, `tokens` null) or cannot be read or parsed is mounted as before. The host's
+file is only read. If the temp copy cannot be created or written, config creation fails rather
+than mounting the host's refresh token, and a partial copy is removed.
+`test/codex-auth-copy.test.ts`, `test/codex-auth-copy-failure.test.ts`.
+
 **What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
 control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at
 each start, hence an empty `hooks/` reading as absent, above), the worktree's `.git` file and its
