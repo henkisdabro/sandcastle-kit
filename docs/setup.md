@@ -166,6 +166,10 @@ is filed, not a comment on it), matches by the same title or the same place rule
 agent the list as "Follow-ups already named from this ticket" (the issues earlier runs filed from it
 and the lines its earlier passes named, the review's implementer's among them), so the review does
 not restate the implementer's lines.
+Follow-ups from repair passes that name the same failing test (one of the red run's tests the
+pass was given, found in the follow-up's title or evidence) are one issue, whichever tickets they
+came from: the first is filed, the others are comments on it naming their ticket.
+A dry run lists them all.
 Every agent is also shown the run's other tickets (ref and title) and the follow-ups other tickets'
 agents have named so far this run, as "Other tickets in this run" and "Named by other tickets this
 run" (each left out when empty): a problem one of them covers is that ticket's work or filed

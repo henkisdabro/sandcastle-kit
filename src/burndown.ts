@@ -273,13 +273,21 @@ export const repairVerdict = (text: string, failing: string[] = []): { line: str
   const line = [...text.matchAll(/^[ \t]*Flaky:[ \t]*(.+)$/gm)].map((m) => m[1].trim()).filter((l) => l && l !== "...").at(-1);
   // `Flaky: none - <why>` names nothing either: its words would match no id and record every one.
   if (!line || !failing.length || /^none\b/i.test(line)) return { line: line ?? "", tests: [] };
-  const named = failing.filter((id) => {
-    const cut = id.lastIndexOf("::");
-    const name = cut >= 0 ? id.slice(cut + 2) : id;
-    return name !== "" && line.includes(name);
-  });
+  const named = testsNamed(line, failing);
   return { line, tests: named.length ? named : [...failing] };
 };
+
+/**
+ * The ids of `failing` (a red run's tests, `wholeTests` of its failure) that `text` names: an id is named when its test name
+ * (the text after its last `::`, else the whole id: a vitest or jest id is the file path) occurs in the text. One rule for the
+ * repair's `Flaky:` line (`repairVerdict`) and for a repair's follow-ups (`FollowUp.tests`), so the two cannot drift.
+ */
+export const testsNamed = (text: string, failing: readonly string[]): string[] =>
+  failing.filter((id) => {
+    const cut = id.lastIndexOf("::");
+    const name = cut >= 0 ? id.slice(cut + 2) : id;
+    return name !== "" && text.includes(name);
+  });
 
 // A spent plan allowance fails every issue after it the same way, each one
 // after paying for a sandbox and an install. The first one stops the queue.
@@ -502,7 +510,14 @@ export const addChangelog = (have: string[], text: string | ChangelogScan, narro
 };
 
 /** A problem outside its ticket that an agent named in a `<followup>` line: the kit files it for triage once the run has landed. */
-export type FollowUp = { title: string; evidence: string; from: string; phase: string };
+export type FollowUp = {
+  title: string;
+  evidence: string;
+  from: string;
+  phase: string;
+  /** Set for a repair pass's line only: the ids of the red run it was given that its title or evidence names (`testsNamed`). Lines naming one test are one issue whichever ticket said them. */
+  tests?: string[];
+};
 /** A follow-up as the run record keeps it: `id` is the ticket filed, absent in a dry run (which files nothing) or when filing failed (`failed`). */
 export type FiledFollowUp = { title: string; from: string; phase: string; id?: string; failed?: string };
 
@@ -907,6 +922,10 @@ const namesPlaceOf = (t: Ticket, seat: Seat): boolean => {
 const filedThisRun = new Set<string>();
 // The issue each place was filed as, by every turn of this run (`placeSeat`): the same finding in other words is a comment on it.
 const placesThisRun: Places = new Map();
+/** The issue each failing test's follow-ups were filed as (`FollowUp.tests`): a repair of another ticket naming the same test comments on it. */
+export type TestIssues = Map<string, string>;
+// By every turn of this run, like `placesThisRun`.
+const testIssuesThisRun: TestIssues = new Map();
 
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
@@ -924,10 +943,14 @@ const placesThisRun: Places = new Map();
 export const fileFollowUps = async (
   tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open" | "openAsync">>,
   followUps: readonly FollowUp[],
-  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists; named?: NamedOnBase; triage?: string },
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; byTest?: TestIssues; exists: PathExists; named?: NamedOnBase; triage?: string },
 ): Promise<FiledFollowUp[]> => {
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
+  const byTest = o.byTest ?? new Map<string, string>();
+  const tie = (f: FollowUp, id: string) => {
+    for (const t of f.tests ?? []) if (!byTest.has(t)) byTest.set(t, id);
+  };
   const out: FiledFollowUp[] = [];
   // The open tickets awaiting triage, read once for the batch and only when a follow-up gets as far as a new ticket. A
   // list that fails, or is not answered in time (`TRACKER_READ_MS`), files as before: the check is a courtesy, never a
@@ -948,7 +971,9 @@ export const fileFollowUps = async (
     if (seen.has(key)) continue;
     const at = { title: f.title, from: f.from, phase: f.phase };
     const place = placeSeat(f, o.exists, o.named);
-    const first = o.dryRun ? undefined : placeOf(places, place)?.id;
+    // A repair's line naming a test another line already got an issue for is about that test, whichever ticket said it.
+    const ofTest = o.dryRun ? undefined : f.tests?.map((t) => byTest.get(t)).find((id) => id !== undefined);
+    const first = ofTest ?? (o.dryRun ? undefined : placeOf(places, place)?.id);
     if (first !== undefined) {
       try {
         await o.write(() => {
@@ -956,6 +981,7 @@ export const fileFollowUps = async (
           return first;
         });
         seen.add(key);
+        tie(f, first);
       } catch (error) {
         out.push({ ...at, failed: errorLine(error) });
       }
@@ -975,6 +1001,7 @@ export const fileFollowUps = async (
         });
         seen.add(key);
         addPlace(places, place, same.id);
+        tie(f, same.id);
       } catch (error) {
         out.push({ ...at, failed: errorLine(error) });
       }
@@ -988,6 +1015,7 @@ export const fileFollowUps = async (
       out.push({ ...at, id });
       seen.add(key);
       addPlace(places, place, id);
+      tie(f, id);
     } catch (error) {
       out.push({ ...at, failed: errorLine(error) });
     }
@@ -1032,6 +1060,8 @@ export const createFollowUpBook = (
     write: (fn: () => string) => Promise<string>;
     seen?: Set<string>;
     places?: Places;
+    /** The issue each failing test's follow-ups were filed as; fresh by default, shared by a run's turns. */
+    byTest?: TestIssues;
     exists: PathExists;
     named?: NamedOnBase;
     /** What earlier runs filed (`filedBefore`): the same finding named again is a comment on that issue, as a repeat within a run is. */
@@ -1040,6 +1070,7 @@ export const createFollowUpBook = (
 ): FollowUpBook => {
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
+  const byTest = o.byTest ?? new Map<string, string>();
   // Without the evidence the record never kept, a filing is met by its title: the same one, or a match under the place rules.
   for (const e of o.earlier ?? []) if (e.id !== undefined) addPlace(places, placeSeat({ title: e.title, evidence: "", from: e.from, phase: e.phase }, o.exists, o.named), e.id);
   const heard: FollowUp[] = [];
@@ -1078,6 +1109,7 @@ export const createFollowUpBook = (
         write: refuse ? async () => { throw new Error(unsafe); } : o.write,
         seen,
         places,
+        byTest,
         exists: o.exists,
         named: o.named,
         triage: o.triage,
@@ -1092,7 +1124,7 @@ export const createFollowUpBook = (
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
         const ready = repeats.filter((f) => placeOf(places, placeSeat(f, o.exists, o.named)));
         // A comment that fails is not recorded: it stays held, and the next `file` tries it again.
-        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, exists: o.exists, named: o.named });
+        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, byTest, exists: o.exists, named: o.named });
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
       }
       if (!settled.length) return [];
@@ -2047,7 +2079,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     // until the window resets, this ticket parks like any other at a juncture (sandbox closed, branch kept), and
     // the same pass runs again in a fresh sandbox after the resume. Its time parked is `waitMs` of the step.
     let agentsRan = false;
-    const pass = async (given: Parameters<typeof sandbox.run>[0]) => {
+    // `failing`: for a repair pass, the red run's test ids it was given: its follow-ups are tagged with those they name (`FollowUp.tests`).
+    const pass = async (given: Parameters<typeof sandbox.run>[0], told: { failing?: readonly string[] } = {}) => {
       agentsRan = true;
       // What the ticket's earlier passes and earlier runs named, as of this pass: the review sees the implementer's lines.
       const opts = given.promptArgs && "FOLLOWUPS_NAMED" in given.promptArgs
@@ -2068,7 +2101,10 @@ export const createPipeline = (ctx: PipelineContext) => {
               const facts = capture?.read();
               if (facts) ctx.reportTimings?.set(issue.id, reportTiming(facts));
               const said = saidOf(r.stdout ?? "", facts);
-              for (const f of said.followups) ctx.followUps?.push({ ...f, from: issue.id, phase });
+              for (const f of said.followups) {
+                const tests = phase === "repair" && told.failing ? testsNamed(`${f.title}\n${f.evidence}`, told.failing) : [];
+                ctx.followUps?.push({ ...f, from: issue.id, phase, ...(tests.length && { tests }) });
+              }
               return Object.assign(r, { said });
             });
           // The kernel kills the largest process, usually a test the agent started, not the agent: the pass goes on, and the
@@ -2918,7 +2954,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             }),
             maxIterations: project.repair.maxIterations ?? 4,
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
-          });
+          }, { failing: wholeTests(failure) });
         },
           `${why} - pass ${repairs}`,
           () => implModel,
@@ -3840,6 +3876,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     write: (fn) => host.write(fn, trackerMade(project.root)),
     seen: filedThisRun,
     places: placesThisRun,
+    byTest: testIssuesThisRun,
     exists: onBase(project.root, project.baseBranch),
     named: namedOnBase(project.root, project.baseBranch),
     earlier: filedBefore(project.root, new Set(candidates.map((c) => c.id)), (id) => tracker.isClosed(id)),
