@@ -624,7 +624,8 @@ which never blocks the event loop and gives up at `TRACKER_READ_MS`), else `get`
 Every such read goes through the one `ghAsync` (`src/tracker.ts`, the blocker state reads of `src/blockers.ts` too), which tries a read
 three times in all before it counts as failed, with waits of 5 s and 15 s (`GH_READ_RETRY.waitsMs`), each try with its own limit:
 only a transient failure is tried again (no answer in time, an HTTP 5xx or 408, a timeout, a reset connection or an unexpected EOF),
-never a 4xx, an authentication failure, a missing remote or a missing `gh`. It says one `GitHub slow (...): trying again` line
+never another 4xx, an authentication failure, a missing remote or a missing `gh`, even when its
+error names a repository or URL containing `timeout`. It says one `GitHub slow (...): trying again` line
 when a read first retries. A write is never given to it, and the close after a merge is still tried once on purpose.
 The run's other tracker reads are asynchronous and time-limited the same way, optional on `Tracker` beside
 the sync forms commands outside a run keep (`queue`, `lint`, `report`): `reopenedSinceAsync` (`mergedEarlier`

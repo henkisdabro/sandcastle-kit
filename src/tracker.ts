@@ -247,6 +247,8 @@ const refusal = (e: unknown, args: string[]): never => {
 
 /** A failure worth a second try: the kit's own give-up, a 5xx, a timeout or a reset connection, as `container/gh-retry.sh` retries. */
 const TRANSIENT = /gave no answer in|HTTP 5\d\d|HTTP 408|timeout|timed out|deadline exceeded|connection reset|unexpected EOF/i;
+// A request URL or repository name in a permanent refusal may itself contain `timeout`.
+const PERMANENT = /Could not resolve to|bad credentials|gh auth login|authentication|no git remotes found|none of the git remotes .*point to a known GitHub host/i;
 
 /** The waits before the second and the third try of a read, and where the line saying so goes; read at call time, so a test sets short waits and collects the line. */
 export const GH_READ_RETRY: { waitsMs: number[]; say: (line: string) => void } = { waitsMs: [5_000, 15_000], say: console.log };
@@ -267,7 +269,10 @@ export const ghAsync = async (args: string[], limitMs: number): Promise<string> 
       // label named `timeout-...` would make every 404 of it look transient.
       const raw = String(err.stderr ?? "").trim() || String(err.message ?? "");
       const wait = GH_READ_RETRY.waitsMs[tried];
-      if (wait === undefined || !TRANSIENT.test(raw)) return refusal(e, args);
+      // An HTTP status takes precedence over words in its request URL (including `authentication`).
+      const status = raw.match(/\bHTTP (\d{3})\b/i)?.[1];
+      const permanent = status ? status.startsWith("4") && status !== "408" : PERMANENT.test(raw);
+      if (wait === undefined || permanent || !TRANSIENT.test(raw)) return refusal(e, args);
       if (tried === 0) GH_READ_RETRY.say(`GitHub slow (gh ${args.slice(0, 2).join(" ")}: ${raw.split("\n")[0].slice(0, 200)}): trying again`);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
