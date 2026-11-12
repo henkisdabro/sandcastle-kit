@@ -3578,8 +3578,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.
-  // Before it: the removal unlocks the worktrees it takes, and `unlockAll` then finds the rest.
-  if (!unlockOnExit) process.on("exit", () => exitScratch?.());
+  // Before the run lock's earlier listener too: another run must not start while scratch removal still writes git.
+  // The removal unlocks the worktrees it takes, and `unlockAll` then finds the rest.
+  if (!unlockOnExit) process.prependListener("exit", () => exitScratch?.());
   if (!unlockOnExit) process.on("exit", unlockAll);
   unlockOnExit = true;
   // The base gates' sandbox, the run's first, is checked against the start's reading; `host` takes over once it exists.

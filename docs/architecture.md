@@ -1728,7 +1728,8 @@ helper `removeScratchWorktrees`, `src/sandbox.ts`, which `cleanProject` shares):
 `gateBase`'s clean-up is a `finally` the signal path never reaches, and on a SIGINT or SIGTERM
 `exitOnSignal` leaves the teardown to the library, which only prints its "To clean up" line.
 `openOrAbandon` records each scratch worktree (a `sandcastle/*` branch's) it makes, and the run's
-exit listener, registered beside `unlockAll`, removes those: for each, the container
+exit listener, registered beside `unlockAll` and prepended so the project lock is still held,
+removes those: for each, the container
 (`removeSandboxContainer`), then `worktreeRefusal`'s check, the unlock, `git worktree remove
 --force`, `git branch -D` and `forgetFork`.
 Never an `agent-issue-*` worktree or an `agent/*` branch, and never one the run did not record, so
