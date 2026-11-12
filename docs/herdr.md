@@ -24,9 +24,9 @@ Start `sandcastle run` in a Herdr TUI pane and the run lays out its own view:
   conflicted, else *idle*. A `not landed` or `conflict` ticket that a later autonomy turn re-runs by
   itself is not counted as needing you while the run goes (its pane, with sandbox panes on, reads
   *idle* and names the ending); the view's last report, at the end of a turn, counts it, as the next
-  turn's view reports again if one follows. While the run spends a subscription on a Claude model, that pane also
-  reports the plan's usage as an `$sc_usage` token (`5h 14% · wk 93% ■`; `▲` from 75%, `■` from 90%,
-  which the plugin's sidebar row colours amber and red, and nothing is sent before an agent has
+  turn's view reports again if one follows.
+  While the run spends a subscription on a Claude model, that pane also reports
+  the plan's usage as an `$sc_usage` token (`5h 14% · wk 93% ■`; `▲` from 75%, `■` from 90%, which the plugin's sidebar row colours amber and red, and nothing is sent before an agent has
   reported one). With cross-review on a ChatGPT plan the token joins both providers' weekly windows
   (`claude wk 93% · codex wk 16% ■`), the mark that of the worst window of either.
 - 🧱 **A pane per sandbox, if you want them.** `herdr: { panes: "all" }` in `.sandcastle/config.ts`
@@ -95,8 +95,8 @@ shows the same thing:
   goes, *blocked* while a ticket needs you, during the run or after it (the app raises its own
   needs-you alert; a `not landed` or `conflict` ticket that a later turn takes by itself reads
   `later` - "retried next turn" - until the run's last turn or its end, and keeps the root
-  *working*; its slot terminals read *idle*, not *blocked*, the same way), else *done* at the end (*error* when the run ended early), with the merged share
-  of the run as its progress and the run line as its title.
+  *working*; its slot terminals read *idle*, not *blocked*, the same way), else *done* at the end
+  (*error* when the run ended early), with the merged share of the run as its progress and the run line as its title.
 - 🧱 **A terminal per sandbox.** Each running sandbox gets a terminal of its own, following its
   ticket's log and reporting its ticket and step. By default it is a sub-agent of the status view
   with no pane: the Herdr app lists it under the run's agent, named after the project and ticket
