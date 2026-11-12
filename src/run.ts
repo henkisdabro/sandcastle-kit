@@ -75,8 +75,9 @@ export const exitOnSignal = () => {
 const REWORDED: [RegExp, string][] = [
   [/^Could not fetch from origin \(reusing worktree at (.+) as-is, branch '(.+)'\)$/, "Resuming branch '$2' in its kept worktree ($1)"],
   // A scratch worktree (`sandcastle-base-gates-<time>`, a verify's) holds no branch's work and no run resumes it: a stop
-  // while one was open once promised the next run would.
-  [/^( *)To clean up: git worktree remove --force .*\/sandcastle-[^/]+$/, "$1To clean up: `sandcastle clean` - a throwaway worktree with no work in it"],
+  // while one was open once promised the next run would. The run removes its own on exit (`removeOwnScratchOnExit`), but
+  // this line comes before that exit's `.git` check, so it says so with the case where it does not.
+  [/^( *)To clean up: git worktree remove --force .*\/sandcastle-[^/]+$/, "$1To clean up: the run removes this throwaway worktree on exit unless its `.git` check fails - then `sandcastle clean` does"],
   [/^( *)To clean up: git worktree remove --force .+$/, "$1To clean up: `sandcastle clean` - or leave it, and the next `sandcastle run` resumes it"],
 ];
 export const reword = (line: string) => REWORDED.reduce((l, [re, to]) => l.replace(re, to), line);

@@ -8,7 +8,7 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, open
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { DockerAnswerError, reapOrphans, recordFork, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
+import { DockerAnswerError, ownScratchWorktrees, reapOrphans, recordFork, recordScratchWorktree, removeSandboxContainer, removeScratchWorktrees, sh, stopSandboxContainer } from "./sandbox.ts";
 import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
@@ -1433,6 +1433,14 @@ export const openOrAbandon = async <T>(project: Project, branch: string, open: (
         /* the add will say what is wrong with the repository */
       }
       await addWorktree(project, branch);
+      // A scratch worktree is the run's own from here: the exit removes it if a stop leaves it (`removeOwnScratchOnExit`).
+      if (branch.startsWith("sandcastle/")) {
+        try {
+          for (const path of worktreesOf(project, branch)) if (!before.includes(path)) recordScratchWorktree(path);
+        } catch {
+          /* the exit then leaves it for `sandcastle clean` */
+        }
+      }
     });
     return await open();
   } catch (error) {
@@ -1451,6 +1459,25 @@ export const openOrAbandon = async <T>(project: Project, branch: string, open: (
     }
     // A start that ran out of time is the machine's, not a fault to trace: said in words, with no stack trace.
     throw containerStartTimeout(error) ?? error;
+  }
+};
+
+/**
+ * A run's exit (a stop by SIGINT or SIGTERM, a crash): removes the scratch worktrees and `sandcastle/*` branches this
+ * process opened (`openOrAbandon` recorded them) and no run resumes. Not when `stoppedOnGuard` (a guard stop leaves
+ * them for a person, `sandcastle clean` removing them once the stop is dealt with), and not when `check` - the run's
+ * `.git` check at this moment - throws: a worktree's records may then be a sandbox's doing, and git must not run in
+ * it. An earlier run's leftover is never in the record. Never throws: an exit handler has no one to tell.
+ */
+export const removeOwnScratchOnExit = (project: Project, check: (when: string) => unknown, stoppedOnGuard: boolean): string[] => {
+  if (stoppedOnGuard || !ownScratchWorktrees().size) return [];
+  try {
+    // First: a process a sandbox left running could write the shared `.git` between the check and the removal.
+    for (const path of ownScratchWorktrees()) removeSandboxContainer(path);
+    check("at the run's exit");
+    return removeScratchWorktrees(project, worktreeRefusal(project), ownScratchWorktrees()).removed;
+  } catch {
+    return [];
   }
 };
 
