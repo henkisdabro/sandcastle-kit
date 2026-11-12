@@ -3735,6 +3735,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
         if (!priority) gateSlots.get(id)?.();
         return slotHook?.();
       },
+      // A ticket's green run, still inside its gates slot (`GateProgress.green`): the run's landing claim is taken before the slot frees,
+      // so it goes to the landing and not to the next ticket's gate. `landingPorts` is made below, before any gate runs.
+      green: () => landingPorts.claim?.greenGate(id),
       // Held for the machine's CPU pressure before the pass asks for a slot (`LOAD_PAUSE`): the same words in the heartbeat and the
       // ticket's note, and a ticket's own sandbox slot and worker are freed as a wait for a gates slot frees them. The base's and
       // the verify's have no ticket; the hold's own line names them.

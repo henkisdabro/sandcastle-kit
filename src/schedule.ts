@@ -472,7 +472,11 @@ export type HostPort = {
 /** The landing queue's side of the run's gates claim: `RunClaim` in `src/pool.ts`, which `landOne` drives with `take` and `gateEnded`. */
 export type LandingClaim = {
   bind(source: { waiting(): number; stopped(): boolean }): void;
-  pushed(): void;
+  pushed(id?: string): void;
+  /** A ticket gate went green and still holds its gates slot (the pipeline's gate port calls it): the run wants its claim from now on. */
+  greenGate(id: string): void;
+  /** An attempt that went green at its gates ended without a push: its pending want for the claim goes. */
+  greenDropped(id: string): void;
   started(): void;
   ended(): void;
   settle(): void;
@@ -517,8 +521,10 @@ export const createLanding = <G extends Green>(
   return {
     push: (g: G) => {
       queue.push(g);
-      ports.claim?.pushed();
+      ports.claim?.pushed(g.issue);
     },
+    /** An attempt ended without a push: a green gate's want for the run's claim, if it made one, goes. A pushed one has none left. */
+    dropped: (id: string) => ports.claim?.greenDropped(id),
     close: () => queue.close(),
     get size() {
       return queue.size;
@@ -1717,6 +1723,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           slot?.release();
           retaken.slot?.release();
           uncounted.delete(t.id);
+          // Whatever the ending (red later, a requeue, a stop, a crash, a hold, a conflict found at gates): a green gate's want for the run's
+          // claim stands only until the push, which already took it; a push leaves nothing for this to drop.
+          landing.dropped(t.id);
           working--;
           running.delete(t.id);
           gating.delete(t.id);

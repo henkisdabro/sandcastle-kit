@@ -99,6 +99,12 @@ export type GateProgress = {
    * goes on, as a hook that only notifies always has (any other value is no answer; a promise is awaited).
    */
   onSlot?: () => unknown;
+  /**
+   * A ticket's gate run (`priority` false) ended green, called inside the gates slot before it is released: the run's landing claim
+   * is taken while no other ticket gate can see the slot free (`RunClaim.greenGate`, `src/pool.ts`). Not called for a red run, a run
+   * the caller stopped (`onSlot` false), a run that threw, or a base, verify or landing gate.
+   */
+  green?: () => void;
   /** Gate `index` (0-based) starts. */
   gate?: (index: number, name: string) => void;
   /** Each gate's output is appended here as it arrives. */
@@ -301,6 +307,12 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const failures = run.failures.map(swap);
     return { ...run, failure: failures[0], failures };
   };
+  // A ticket's green run (`priority` false) tells its caller while the slot is still held: the run's landing claim is taken before
+  // another ticket gate can see the slot free, so it goes to that landing. A red run (the failure the run ends on) says nothing.
+  const done = (run: GateRun): GateRun => {
+    if (!priority && !run.failure && !run.failures.length) progress.green?.();
+    return run;
+  };
   return await withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
     const go = await progress.onSlot?.();
@@ -321,7 +333,7 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     // The red gate's one re-run (`PipelineContext.regate`) is inside this slot: a second `withSlot` would queue behind
     // every other run's gates again, minutes for a re-run meant to find out whether the machine was only busy. The
     // wait is the first run's, so the re-run records none. Not after a timeout, which is never re-run or repaired.
-    if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return { ...first, waitMs, ...loaded };
+    if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return done({ ...first, waitMs, ...loaded });
     progress.again?.(red.name);
     const rerunBegan = Date.now();
     const rerun = settle(await pass(startAt(red.name), filled(red.name, [red.tests])), red);
@@ -335,13 +347,13 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
       const third = settle(await pass(startAt(second.name), filled(second.name, [red.tests, second.rerun ? second.rerun.tests : second.tests])), red);
       const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? []), ...(third.rewrote ?? [])])];
       // The chain: the third run's result, then the re-run (with its `ms`), then the first red run (with the wait).
-      return { ...third, gates: [...first.gates.slice(0, redAt), ...third.gates], waitMs, ...loaded, rerunOf: { ...rerun, ms: rerunMs, rerunOf: { ...first, waitMs, ms: firstMs } }, ...(rewrote.length ? { rewrote } : {}) };
+      return done({ ...third, gates: [...first.gates.slice(0, redAt), ...third.gates], waitMs, ...loaded, rerunOf: { ...rerun, ms: rerunMs, rerunOf: { ...first, waitMs, ms: firstMs } }, ...(rewrote.length ? { rewrote } : {}) });
     }
     // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
     // A file the first run's gates rewrote is reported too: the re-run starts at the red gate, so the gate that
     // rewrote it may not run again, and the run's `gateRewrites` line would lose it.
     const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? [])])];
-    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, ...loaded, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) };
+    return done({ ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, ...loaded, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) });
   }), progress.wait, undefined, priority, false, undefined, claim);
 };
 
