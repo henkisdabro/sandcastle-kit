@@ -4268,6 +4268,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   };
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     fixes.told(c);
+    // Its wait is over and it queues for a free slot: the heartbeat names no ticket that has landed, as the record's note does not.
+    if (c.kind === "resolve queued" && resolving.has(c.id)) resolving.set(c.id, { since: resolving.get(c.id)!.since, for: [] });
     switch (c.kind) {
       case "landing":
         // Only the run line: the next landing writes it again.
