@@ -579,6 +579,8 @@ export const createLedger = (d: {
   run: { ticket(id: string, fields: TicketRecord): void };
   outcomes(outcomes: Record<string, Outcome>): void;
   view: { landed(issue: string, ok: boolean, word: string): void };
+  /** Whether a later autonomy turn re-runs the ticket by itself (`retriedNextTurn`): read after its record is written. Absent: none is. */
+  retried?(id: string): boolean;
   context(id: string): Context;
   bookkeep(id: string, fn: () => void): void;
   dropFirst(id: string): void;
@@ -613,7 +615,8 @@ export const createLedger = (d: {
     const { record, outcome, view } = said;
     if (record && (!unstarted(ending) || last)) d.bookkeep(id, () => d.run.ticket(id, record));
     if (outcome) d.bookkeep(id, () => d.outcomes({ [id]: outcome }));
-    if (view) d.bookkeep(id, () => d.view.landed(id, view.landed, view.word));
+    // A `not landed` or `conflict` ticket a later turn re-runs is nobody's to act on yet: its slot reads idle, with the ending's word.
+    if (view) d.bookkeep(id, () => d.view.landed(id, view.landed || ((record?.state === "not landed" || record?.state === "conflict") && d.retried?.(id) === true), view.word));
     // The landing worker's only voice in the run's output: without it, a run that spends its last
     // half hour landing prints nothing between the last agent pass and the closing summary.
     // A hold carries its reason: "needs a human" alone sent the reader to run.json for the paths.
