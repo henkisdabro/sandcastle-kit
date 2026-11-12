@@ -176,7 +176,10 @@ export const stoppedWaitNote = (ref: (id: string) => string, w?: FileWait) =>
  *
  * A ticket's files are read once, when it is first admitted; a ticket in flight changes files
  * after that (its branch gains a lockfile change), so `refresh` re-reads them before each
- * comparison. A ticket that has not started keeps what it was read as. The scheduler's own.
+ * comparison - once the run is going. While the schedule is made (`admit(t, false)`) nothing has
+ * run, so no branch has moved since the ticket admitted a moment ago was read, and re-reading
+ * every ticket in flight at each admit would be T(T-1)/2 reads for T tickets. A ticket that has
+ * not started keeps what it was read as. The scheduler's own.
  */
 const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) => TicketFiles, refresh?: (ticket: T, files: TicketFiles) => TicketFiles) => {
   const flying = new Map<string, { ticket: T; files: TicketFiles }>();
@@ -220,9 +223,12 @@ const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) => Ticket
     return at;
   };
   return {
-    /** Starts the ticket (claiming its files) or parks it, saying what it waits for. */
-    admit(t: T): { wait: FileWait } | { shares: FileShare[] } {
-      reread();
+    /**
+     * Starts the ticket (claiming its files) or parks it, saying what it waits for. The files of the
+     * tickets in flight are read again first, unless `running` is false (the schedule being made).
+     */
+    admit(t: T, running = true): { wait: FileWait } | { shares: FileShare[] } {
+      if (running) reread();
       return place(t);
     },
     /**
@@ -1045,7 +1051,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
   const now: Start<T>[] = [];
   const parked: Start<T>[] = [];
   for (const ticket of plan.tickets) {
-    const at = hold?.admit(ticket);
+    const at = hold?.admit(ticket, false);
     if (at && "wait" in at) parked.push({ ticket, wait: "file", file: at.wait });
     else now.push({ ticket, ...(at?.shares.length ? { shares: at.shares } : {}) });
   }

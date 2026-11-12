@@ -939,8 +939,14 @@ state.
   record exists) and told as the run goes (`started`, `waits`, `next run`). Mergeable shares are
   only named: one line per shared file listing its tickets (`fileShareSummary`; README.md and
   CHANGELOG.md are one count), the pair list in `.sandcastle/logs/file-shares.log`.
-  A ticket in flight has its branch's files read again before each comparison; a run
-  that starts nothing tells each parked ticket it waits for the next run; a dry run (no `files`)
+  A ticket in flight has its branch's files read again before each comparison once the run is
+  going, never while the schedule is being made (nothing has run, so no branch has moved, and
+  re-reading every admitted ticket at each admit was quadratic in the tickets). The reread is keyed on the
+  ticket's branch tip and the base commit (`refreshFiles`): both unchanged, the reading is kept;
+  either moved, the files are read again, since `unmergeableFiles` reads sizes at the base, so a
+  minified file the base gained makes an unmoved branch's file unmergeable. A read resolves the base
+  to a commit once and `expandTouches` reads each commit's tree once (`test/schedule-git-reads.test.ts`).
+  A run that starts nothing tells each parked ticket it waits for the next run; a dry run (no `files`)
   holds nothing.
 - **The fix board** (`createFixBoard`, `FixBoard`). Which ticket is repairing which failure
   (`failureKey`): a pipeline `claim`s it as its repair pass starts and asks `fixing` before its own,
