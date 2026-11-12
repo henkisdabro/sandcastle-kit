@@ -363,8 +363,8 @@ The per-ticket summary line (`ticketTime`) labels three figures: `work 19m + 8m 
 Work is `took` less `waited`, the waiting is `waited`, and the landing is the landing's elapsed
 (its own wait for a gates slot included), kept per ticket from the landing port's `timed` callback
 and shown only for a ticket that merged.
-A conflicted ticket's resolve wait is in none of the three.
-A sent-back ticket's resolve wait, which also comes before the pipeline, is handed in as
+A sent-back ticket's resolve wait is part of the waiting.
+It comes before the pipeline and is handed in as
 `at.resolveWaitMs`, and the first `setup` step takes it as `timed`'s `queuedMs`: `withQueued`
 (`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`. `took` never held it, so the pipeline adds
 it to both `took` and `waited` (`addResolveWait` in `src/burndown.ts`): the ticket's summary line keeps its
