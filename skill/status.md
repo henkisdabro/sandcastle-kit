@@ -68,6 +68,8 @@ started: main moved while sandboxes ran`). Tell the user the run is stopped, not
 A live run that spends a subscription on a Claude model also has a plan lane in the header: the
 plan's 5-hour and weekly windows, each with its percentage and reset time, and how long ago an agent
 last reported them (`claude 5h ... 14% · resets 18:10 · week ... 93% · resets Wed 06:00 · (2m ago)`).
+A window the agents' events do not carry is kept from the last event that had it, or, with none, not
+shown (a blank cell) and not judged.
 With no run live, `sandcastle usage` prints the same windows, read-only.
 Amber from 75% and red from 90%; grey with its age when no agent has reported for 15 minutes; the lane is left out before the first
 reading. With cross-review on a ChatGPT-signed-in Codex, a second line, `codex`, shows that plan's

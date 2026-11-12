@@ -863,10 +863,12 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   // The plan's usage, as the last agent reported it: a fact of the run, so it stands with or without a settings group. Under an API key there is none.
   const w = f.usage?.windows;
   const when = f.live ? "so far" : "at the end";
-  const usage = w ? [`Plan usage ${when}: 5h ${w.fiveHour.percent}%, week ${w.week.percent}%`] : [];
+  // A reading may carry one window (Claude Code writes the weekly one alone): the line says the windows it has.
+  const shown = (x: { fiveHour?: { percent: number }; week?: { percent: number } }) => [x.fiveHour && `5h ${x.fiveHour.percent}%`, x.week && `week ${x.week.percent}%`].filter(Boolean).join(", ");
+  const usage = w && shown(w) ? [`Plan usage ${when}: ${shown(w)}`] : [];
   // A cross-review run's Codex plan, beside Claude's: the two are different accounts, so each has its own line.
   const cw = f.codexUsage?.windows;
-  if (cw) usage.push(`Codex plan usage ${when}: 5h ${cw.fiveHour.percent}%, week ${cw.week.percent}%`);
+  if (cw && shown(cw)) usage.push(`Codex plan usage ${when}: ${shown(cw)}`);
   if (!s || typeof s !== "object") return usage;
   const count = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined);
   const plain = (v: unknown, pattern: RegExp) => (typeof v === "string" && pattern.test(v) ? v : undefined);

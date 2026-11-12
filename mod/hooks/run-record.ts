@@ -296,8 +296,12 @@ export type PlanWindow = { percent: number; resetsAt: number };
  */
 export type PlanUsage = {
   provider: "claude" | "codex";
-  /** The 5-hour and the weekly window: from a Claude agent's rate-limit event, or Codex's `rate_limits` (matched by their length, not their position). */
-  windows?: { fiveHour: PlanWindow; week: PlanWindow };
+  /**
+   * The 5-hour and the weekly window: from a Claude agent's rate-limit event, or Codex's `rate_limits` (matched by their
+   * length, not their position). A window the agents' events do not carry is kept from the last event that had it, or,
+   * with none, absent: it is not shown and not judged.
+   */
+  windows?: { fiveHour?: PlanWindow; week?: PlanWindow };
   /** Seconds since the epoch at which the kit read the event: the reading's age is measured from it. */
   at?: number;
 };

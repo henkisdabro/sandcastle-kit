@@ -65,7 +65,7 @@ test("the text is both windows' percentages, marked by the worse band: none belo
 test("no reading yet, or one that is no reading, is no text", () => {
   assert.equal(usageText(undefined), undefined);
   assert.equal(usageText({ provider: "claude" }), undefined);
-  assert.equal(usageText({ provider: "claude", windows: { fiveHour: { percent: Number.NaN, resetsAt: 1 }, week: { percent: 5, resetsAt: 2 } }, at: 3 }), undefined);
+  assert.equal(usageText({ provider: "claude", windows: { fiveHour: { percent: Number.NaN, resetsAt: 1 }, week: { percent: Number.NaN, resetsAt: 2 } }, at: 3 }), undefined);
 });
 
 test("panes none: the run's status pane gets sc_usage once a reading exists, and no token before", () => {

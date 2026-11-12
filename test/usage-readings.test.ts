@@ -36,12 +36,12 @@ test("a rate_limit_event line parses to the plan's reading, percent as a whole n
   });
   // A fraction rounds to the nearest percent and a spent window stops at 100.
   const w = usageFromEvent(event(0.005, 1.4), 1)?.windows;
-  assert.deepEqual([w?.fiveHour.percent, w?.week.percent], [1, 100]);
+  assert.deepEqual([w?.fiveHour?.percent, w?.week?.percent], [1, 100]);
 });
 
-test("a malformed line, another type of line, or an event without both windows gives no reading", () => {
-  const five = { type: "rate_limit_event", rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.1, resetsAt: 1791195000 } } } };
-  const text = { type: "rate_limit_event", rate_limit_info: { unifiedWindows: { five_hour: { utilization: "0.1", resetsAt: 1 }, seven_day: { utilization: 0.2, resetsAt: 2 } } } };
+test("a malformed line, another type of line, or an event with no well-formed window gives no reading", () => {
+  // Both windows malformed: one well-formed window now gives a reading (test/usage-partial-window.test.ts).
+  const text = { type: "rate_limit_event", rate_limit_info: { unifiedWindows: { five_hour: { utilization: "0.1", resetsAt: 1 }, seven_day: { utilization: "0.2", resetsAt: 2 } } } };
   for (const line of [
     "",
     "{",
@@ -49,7 +49,6 @@ test("a malformed line, another type of line, or an event without both windows g
     '{"type":"assistant","message":{"content":[{"type":"text","text":"rate_limit_event"}]}}',
     '{"type":"rate_limit_event"}',
     '{"type":"rate_limit_event","rate_limit_info":null}',
-    JSON.stringify(five),
     JSON.stringify(text),
     TICKET_LINE.replace('"type":"rate_limit_event"', '"type":"result"'),
   ]) assert.equal(usageFromEvent(line, 1), undefined, line);
@@ -81,7 +80,7 @@ const watching = (p: Project, run: string) => {
   after(() => watch.stop());
   return { clock, written, watch };
 };
-const percents = (u?: PlanUsage) => [u?.windows?.fiveHour.percent, u?.windows?.week.percent];
+const percents = (u?: PlanUsage) => [u?.windows?.fiveHour?.percent, u?.windows?.week?.percent];
 
 test("the newest reading across several agents' logs wins, not the highest", () => {
   const p = project("newest");
@@ -224,7 +223,7 @@ test("a record's usage is read back only as far as it is well-formed", () => {
   const good = { provider: "claude", windows: { fiveHour: { percent: 14, resetsAt: 5 }, week: { percent: 250, resetsAt: 6 } }, at: 7 };
   assert.deepEqual(readPlanUsage(good), { provider: "claude", windows: { fiveHour: { percent: 14, resetsAt: 5 }, week: { percent: 100, resetsAt: 6 } }, at: 7 });
   assert.deepEqual(readPlanUsage({ provider: "claude" }), { provider: "claude" });
-  assert.deepEqual(readPlanUsage({ ...good, windows: { fiveHour: { percent: "lots", resetsAt: 5 }, week: good.windows.week } }), { provider: "claude" });
+  assert.deepEqual(readPlanUsage({ ...good, windows: { fiveHour: { percent: "lots", resetsAt: 5 }, week: { percent: "lots", resetsAt: 6 } } }), { provider: "claude" });
   assert.deepEqual(readPlanUsage({ ...good, at: "now" }), { provider: "claude" });
   for (const junk of [undefined, null, "claude", 3, [1], { provider: "other", windows: good.windows }]) assert.equal(readPlanUsage(junk), undefined, JSON.stringify(junk));
 });
