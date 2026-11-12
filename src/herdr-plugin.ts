@@ -26,7 +26,7 @@ import { helpFor, wantsHelp } from "./help.ts";
 import { herdr, lineText, restartStatusView, runCounts, tellDeadTab } from "./herdr.ts";
 import { awaitedTooLong, awaitingDir, awaitReport, commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
-import { readTickets, type TicketRecord, type TicketState, WORDS } from "../mod/hooks/run-record.ts";
+import { readTickets, retriedNextTurn, type TicketRecord, type TicketState, WORDS } from "../mod/hooks/run-record.ts";
 import type { TicketPass } from "./report.ts";
 import { KIT } from "./sandbox.ts";
 import { terminalHost } from "./terminal-host.ts";
@@ -400,7 +400,7 @@ export const replaceDeadTab = (root: string, kit?: string) => {
 export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => boolean | void, live?: (root: string) => void) => {
   const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
   const runs = liveRuns(dir, probe, ended, live).sort((a, b) => Number(here(b)) - Number(here(a)));
-  return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}, !!r.paused && typeof r.paused === "object"), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
+  return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}, !!r.paused && typeof r.paused === "object", retriedNextTurn(r, true)), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
 };
 
 // ---------------------------------------------------------------------------

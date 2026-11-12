@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { GROUPS, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { real } from "./live-runs.ts";
 import { clear, record, windowTitle } from "./osc7501.ts";
 import type { CoreTerminal } from "./terminal-host.ts";
@@ -258,7 +258,7 @@ export const askingInCore = async <T>(about: string, ask: () => Promise<T>, out:
 };
 
 /** What the status view knows of the run, as its snapshot holds it. */
-export type RunFacts = { name: string; hasRecord: boolean; live: boolean; record: Pick<RunRecord, "finishedAt" | "paused">; tickets: Record<string, TicketRecord> };
+export type RunFacts = { name: string; hasRecord: boolean; live: boolean; record: Pick<RunRecord, "finishedAt" | "paused" | "settings" | "dryRun" | "stopped" | "verify" | "exitCode">; tickets: Record<string, TicketRecord> };
 
 const childId = (ticket: string) => ticket.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64) || "_";
 
@@ -270,7 +270,8 @@ const childId = (ticket: string) => ticket.replace(/[^A-Za-z0-9._-]/g, "_").slic
 export const runRecords = (run: RunFacts): Map<string, string> => {
   const shown = new Map<string, string>();
   if (!run.hasRecord) return shown;
-  const counts = runCounts(run.tickets, !!run.record.paused);
+  // A ticket a later turn takes by itself is not a person's yet: the root stays working (`retriedNextTurn`).
+  const counts = runCounts(run.tickets, !!run.record.paused, retriedNextTurn({ ...run.record, tickets: run.tickets }, run.live));
   const text = progress(counts);
   const state = counts.needsYou ? "blocked" : run.live ? "working" : run.record.finishedAt ? "done" : "error";
   shown.set(

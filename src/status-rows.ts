@@ -8,7 +8,7 @@
 // inferred from git, the logs and outcomes.json. A ticket state's group and word are the shared tables'
 // (mod/hooks/run-record.ts), never a copy of them; the derived states are GLOSSARY.md's.
 
-import { DERIVED_STATES, GROUPS, isOutcomeKind, isTicketState, WORDS, type OutcomeKind, type TicketState } from "../mod/hooks/run-record.ts";
+import { DERIVED_STATES, GROUPS, isOutcomeKind, isTicketState, retriedNextTurn, WORDS, type OutcomeKind, type TicketState } from "../mod/hooks/run-record.ts";
 import { needsDecision } from "./autonomy.ts";
 import { freeSlots, latestLog, latestPhaseLog, logTicket, phaseLog, shownId, whole, type LogFact, type Snapshot } from "./status-snapshot.ts";
 
@@ -232,8 +232,9 @@ export const ticketRows = (snapshot: Snapshot): Table => {
   let partly = 0;
   const later: Table["later"] = { ids: [], blocked: 0 };
 
-  const emit = (row: Omit<Row, "group" | "glyph" | "tone" | "prio" | "shown"> & { glyph?: string; tone?: Tone }, partlyDone = false) => {
-    const group = groupOf(row.state);
+  // `group` overrides the word's own: a `not landed` or `conflict` ticket a later turn takes by itself keeps its word, in `later`.
+  const emit = (row: Omit<Row, "group" | "glyph" | "tone" | "prio" | "shown"> & { glyph?: string; tone?: Tone; group?: ViewGroup }, partlyDone = false) => {
+    const group = row.group ?? groupOf(row.state);
     const full: Row = {
       ...row,
       shown: shownId(row.id),
@@ -245,6 +246,7 @@ export const ticketRows = (snapshot: Snapshot): Table => {
       link: linkOf(snapshot, row.id),
     };
     rows.push(full);
+    // Only a row whose word is `later` folds into the footer; a retried row keeps its word and stays in the table, counted as later.
     if (row.state === "later") {
       later.ids.push(full.shown);
       if (row.note.startsWith("waits for ")) later.blocked++;
@@ -255,6 +257,9 @@ export const ticketRows = (snapshot: Snapshot): Table => {
     if (partlyDone) partly++;
     counts[group]++;
   };
+
+  // The tickets a later autonomy turn will take by itself (never a killed run's: no turn follows).
+  const retried = retriedNextTurn({ ...record, tickets }, live);
 
   // 1. The live run's tickets, as its record has them.
   if (recorded) {
@@ -355,7 +360,12 @@ export const ticketRows = (snapshot: Snapshot): Table => {
       }
       // This run's landings above earlier runs' merged rows (their keys are epoch seconds).
       if (groupOf(state) === "merged") key += 10000000000;
-      emit({ id, state, time, timeTone, diff: diffCell(branch), cpu, tokens: tokensCell(t.tokens), cache: cacheShare(t.tokens, t.cacheRead), note: activity, noteTone, key, apart: false, glyph, tone });
+      let group: ViewGroup | undefined;
+      if (retried.has(id)) {
+        group = "later";
+        activity = `retried next turn${activity ? ` - ${activity}` : ""}`;
+      }
+      emit({ id, state, time, timeTone, diff: diffCell(branch), cpu, tokens: tokensCell(t.tokens), cache: cacheShare(t.tokens, t.cacheRead), note: activity, noteTone, key, apart: false, glyph, tone, group });
     }
   }
 

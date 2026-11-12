@@ -89,7 +89,9 @@ shows the same thing:
 
 - 🚦 **The run in the sidebar.** The status terminal reports the run as an agent: *working* while it
   goes, *blocked* while a ticket needs you, during the run or after it (the app raises its own
-  needs-you alert), else *done* at the end (*error* when the run ended early), with the merged share
+  needs-you alert; a `not landed` or `conflict` ticket that a later turn takes by itself reads
+  `later` - "retried next turn" - until the run's last turn or its end, and keeps the root
+  *working*), else *done* at the end (*error* when the run ended early), with the merged share
   of the run as its progress and the run line as its title.
 - 🧱 **A terminal per sandbox.** Each running sandbox gets a terminal of its own, following its
   ticket's log and reporting its ticket and step. By default it is a sub-agent of the status view

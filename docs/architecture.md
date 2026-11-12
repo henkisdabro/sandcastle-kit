@@ -1116,7 +1116,8 @@ record rewritten without `status` so that the status view's INT handling (`markQ
 bare shell is reused as is, a person's command is not (the pane is replaced, a tab created), and a
 pane that is still not a shell after 5 seconds is replaced too; a paused run says `paused` in the
 workspace row and the run agent's message, in place of "N working", unless a ticket needs you -
-`runCounts(tickets, paused)`, from the record's `paused`, and the tab bar's `lineText`; `refresh()`
+`runCounts(tickets, paused, retried)`, from the record's `paused` and `retriedNextTurn`'s set (tickets a later
+autonomy turn takes by itself: neither needs-you nor working, counted as `retried`), and the tab bar's `lineText`; `refresh()`
 re-sends the tokens when the pause begins or ends): the tab (adopted only from a terminal),
 per-sandbox panes only with `herdr.panes: "all"` (otherwise the run is one agent on the status
 pane), agent-state reports, sidebar tokens, the workspace's run summary.
@@ -1302,7 +1303,9 @@ A start that fails part-way ends what it started; a run with no status view refu
 on Herdr TUI.
 
 What the status view tells the core (`coreRecords`, `runRecords`): the terminal's root record is
-`working`, `blocked` with `kind=question` while any ticket needs a person, `done` once the record
+`working`, `blocked` with `kind=question` while any ticket needs a person (a `not landed` or `conflict` ticket
+in `retriedNextTurn`'s set, `mod/hooks/run-record.ts`, does not: a later turn takes it, and a run that is not
+live has no later turn), `done` once the record
 has `finishedAt`, `error` when the run ended early, with `progress` the merged share and the run
 line as the title (OSC 2: the official app's Agents panel shows titles, not messages).
 One child record per ticket in flight, cleared as it leaves.

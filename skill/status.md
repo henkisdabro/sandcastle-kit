@@ -36,7 +36,9 @@ apart). The states:
   `stopped` (finished, but the run stopped before landing), `orphaned` (its run was killed and its
   container still works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed
   or unqueued during the run, or marked `ready-for-human` before it started) is greyed with the
-  leftovers.
+  leftovers. A `not landed` or `conflict` ticket that a later turn of the run takes by itself
+  (autonomy level 2, 3 or `drain`, before the cap) reads `later` ("retried next turn - <why>")
+  until the run's last turn or its end, and is not counted here.
 - **`queued`** (next to start, how many are ahead, or - on the tickets next to start - `waits for
   the run's share` while other runs hold their part of the machine's sandbox slots, or `waits: slot kept to
   land` while the pool's last free slot is kept for a landing), **`blocked`** (what it waits for, and
