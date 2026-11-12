@@ -34,7 +34,8 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   after you label it is held for you: a queued GitHub ticket whose author is not an owner, member
   or collaborator is held (the hold label, as any held ticket, listed under Needs you) when its
   body or title, or one of the author's comments, was written, edited or renamed after the queue
-  label was last added (the title reaches every agent pass in `gh issue view`). Only the author's own writing counts; a maintainer's edit of it does not. Read the
+  label was last added (the title reaches every agent pass in `gh issue view`).
+  Only the author's own writing counts; a maintainer's edit of it does not. Read the
   change, then `sandcastle requeue <n>` accepts it: the queue label goes back on, which is a new
   label time. A ticket named on the command line that never carried the label is measured from
   the run's start. The check runs when a ticket's pipeline starts, a carried branch's and a second
