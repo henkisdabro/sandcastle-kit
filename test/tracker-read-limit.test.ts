@@ -11,11 +11,14 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { makeTracker, readTicketState, TRACKER_READ_MS } = await import("../src/tracker.ts");
+const { GH_READ_RETRY, makeTracker, readTicketState, TRACKER_READ_MS } = await import("../src/tracker.ts");
 const { fileFollowUps, handBack, notReopened, openOnQueue } = await import("../src/burndown.ts");
 const { blockedNote, blockerProblems, commentOnlyBlocks, openBlockersNow } = await import("../src/blockers.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
+
+// One try per read here: the retry has its own test (test/tracker-read-retry.test.ts).
+GH_READ_RETRY.waitsMs = [];
 
 const bin = mkdtempSync(join(tmpdir(), "sandcastle-test-bin-"));
 const fakeGh = (body: string) => {
@@ -181,6 +184,9 @@ test("the run's reads before a ticket starts, before it lands, for the overrun w
   const blockers = readFileSync(new URL("../src/blockers.ts", import.meta.url), "utf8");
   assert.match(blockers, /await tracker\.declaredBlockersAsync\(t\.id, limitMs\)/);
   assert.match(blockers, /await githubStateAsync\(ref\.id, limitMs\)/);
+  // The blocker's state goes through the tracker's retrying read, never a bare gh call of its own.
+  assert.doesNotMatch(blockers, /shAsync\("gh"/);
+  assert.match(blockers, /await ghAsync\(\["api", `repos\/\$\{repo\}\/issues\/\$\{id\}`/);
   assert.match(blockers, /\(limitMs === undefined \? refsOf\(project, tracker, t\) : await refsOfAsync\(project, tracker, t, limitMs\)\)/);
 });
 

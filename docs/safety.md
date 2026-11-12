@@ -48,7 +48,7 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   label time. A ticket named on the command line that never carried the label is measured from
   the run's start. The check runs when a ticket's pipeline starts, a carried branch's and a second
   attempt's included, and not again: **an edit made while its agents run is not caught**. A read
-  that fails does not hold the ticket; it is not started that turn and stays queued, with a line
+  that fails (after three tries when GitHub timed out or answered with a 5xx) does not hold the ticket; it is not started that turn and stays queued, with a line
   saying why.
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not

@@ -225,38 +225,64 @@ const nativeIds = (blockedBy: unknown, here: () => string | undefined): string[]
 // How an agent posts a comment, named wherever one is asked for: given only "comment on the ticket", agents passed an inline `--body`.
 const BODY_FILE = "(`gh issue comment {{ISSUE_NUMBER}} --body-file <file>`; an inline `--body` can match a permission rule by its words and be refused)";
 
+// A failed gh call is the operator's to act on (signed out, no such issue, no network): its own
+// first stderr line, not a stack trace. Callers that match a message (`already exists`) still can.
+const refusal = (e: unknown, args: string[]): never => {
+  const err = e as { stderr?: unknown; message?: string };
+  const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
+  // gh's own words name no way out: a Go dial error, or a signed-out token.
+  const fix = /no git remotes found|none of the git remotes .* point to a known GitHub host/i.test(why)
+    ? ` - this repository has no GitHub remote, so the github tracker has no GitHub issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
+    : /dial tcp|connection refused|no such host|i\/o timeout|proxyconnect|error connecting|TLS handshake|network is unreachable/i.test(why)
+    ? " - GitHub could not be reached. Check the network (or proxy), then try again."
+    : /HTTP 401|bad credentials|gh auth login|authentication/i.test(why)
+    ? " - gh is not signed in to GitHub: `gh auth status` says why, `gh auth login` signs it in."
+    : /gave no answer in/.test(why)
+    ? " - GitHub is slow or not answering."
+    : /Could not resolve to an? /i.test(why)
+    ? ""
+    : " - `sandcastle doctor` checks gh's sign-in and the GitHub remote.";
+  throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
+};
+
+/** A failure worth a second try: the kit's own give-up, a 5xx, a timeout or a reset connection, as `container/gh-retry.sh` retries. */
+const TRANSIENT = /gave no answer in|HTTP 5\d\d|HTTP 408|timeout|timed out|deadline exceeded|connection reset|unexpected EOF/i;
+// A request URL or repository name in a permanent refusal may itself contain `timeout`.
+const PERMANENT = /Could not resolve to|bad credentials|gh auth login|authentication|no git remotes found|none of the git remotes .*point to a known GitHub host/i;
+
+/** The waits before the second and the third try of a read, and where the line saying so goes; read at call time, so a test sets short waits and collects the line. */
+export const GH_READ_RETRY: { waitsMs: number[]; say: (line: string) => void } = { waitsMs: [5_000, 15_000], say: console.log };
+
+/**
+ * `gh` for the reads made during a run: the event loop goes on while gh answers, and a gh that does not answer in
+ * `limitMs` is a failed read, not a hang. A transient failure (`TRANSIENT`, judged on gh's own stderr, else the error's message) is tried
+ * again after each of `GH_READ_RETRY.waitsMs`, each try with its own limit; any other failure, and the last, is worded by
+ * `refusal`. Reads only: a write is never given to it.
+ */
+export const ghAsync = async (args: string[], limitMs: number): Promise<string> => {
+  for (let tried = 0; ; tried++) {
+    try {
+      return await shAsync("gh", args, limitMs);
+    } catch (e) {
+      const err = e as { stderr?: unknown; message?: string };
+      // gh's own words, else the kit's give-up: a failed exit's message repeats the command line, so a repository or
+      // label named `timeout-...` would make every 404 of it look transient.
+      const raw = String(err.stderr ?? "").trim() || String(err.message ?? "");
+      const wait = GH_READ_RETRY.waitsMs[tried];
+      // An HTTP status takes precedence over words in its request URL (including `authentication`).
+      const status = raw.match(/\bHTTP (\d{3})\b/i)?.[1];
+      const permanent = status ? status.startsWith("4") && status !== "408" : PERMANENT.test(raw);
+      if (wait === undefined || permanent || !TRANSIENT.test(raw)) return refusal(e, args);
+      if (tried === 0) GH_READ_RETRY.say(`GitHub slow (gh ${args.slice(0, 2).join(" ")}: ${raw.split("\n")[0].slice(0, 200)}): trying again`);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+};
+
 const github = (project: Project): Tracker => {
-  // A failed gh call is the operator's to act on (signed out, no such issue, no network): its own
-  // first stderr line, not a stack trace. Callers that match a message (`already exists`) still can.
-  const refusal = (e: unknown, args: string[]): never => {
-    const err = e as { stderr?: unknown; message?: string };
-    const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
-    // gh's own words name no way out: a Go dial error, or a signed-out token.
-    const fix = /no git remotes found|none of the git remotes .* point to a known GitHub host/i.test(why)
-      ? ` - this repository has no GitHub remote, so the github tracker has no GitHub issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
-      : /dial tcp|connection refused|no such host|i\/o timeout|proxyconnect|error connecting|TLS handshake|network is unreachable/i.test(why)
-      ? " - GitHub could not be reached. Check the network (or proxy), then try again."
-      : /HTTP 401|bad credentials|gh auth login|authentication/i.test(why)
-      ? " - gh is not signed in to GitHub: `gh auth status` says why, `gh auth login` signs it in."
-      : /gave no answer in/.test(why)
-      ? " - GitHub is slow or not answering."
-      : /Could not resolve to an? /i.test(why)
-      ? ""
-      : " - `sandcastle doctor` checks gh's sign-in and the GitHub remote.";
-    throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
-  };
   const gh = (args: string[]) => {
     try {
       return sh("gh", args);
-    } catch (e) {
-      return refusal(e, args);
-    }
-  };
-  // The same, for the reads made during a run: the event loop goes on while gh answers, and a gh that does not answer in
-  // time is a failed read, not a hang.
-  const ghAsync = async (args: string[], limitMs: number) => {
-    try {
-      return await shAsync("gh", args, limitMs);
     } catch (e) {
       return refusal(e, args);
     }
