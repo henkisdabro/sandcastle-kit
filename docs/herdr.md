@@ -21,7 +21,10 @@ Start `sandcastle run` in a Herdr TUI pane and the run lays out its own view:
   reports itself. The workspace shows `♜ 4/9 · 1 needs you` (red when something needs you) and the
   tab bar a line per run. The status view's pane is one agent, `sandcastle` titled `<project> run`:
   *working* while the run goes, then at its end *blocked* when a ticket is held, failed or
-  conflicted, else *idle*. While the run spends a subscription on a Claude model, that pane also
+  conflicted, else *idle*. A `not landed` or `conflict` ticket that a later autonomy turn re-runs by
+  itself is not counted as needing you while the run goes (its pane, with sandbox panes on, reads
+  *idle* and names the ending); the view's last report, at the end of a turn, counts it, as the next
+  turn's view reports again if one follows. While the run spends a subscription on a Claude model, that pane also
   reports the plan's usage as an `$sc_usage` token (`5h 14% · wk 93% ■`; `▲` from 75%, `■` from 90%,
   which the plugin's sidebar row colours amber and red, and nothing is sent before an agent has
   reported one). With cross-review on a ChatGPT plan the token joins both providers' weekly windows
@@ -32,7 +35,8 @@ Start `sandcastle run` in a Herdr TUI pane and the run lays out its own view:
   through implement, review, gates and repair. Each is reported as an agent named after its
   ticket (`#12 Add CSV export`): *working* while it implements, reviews or gates, *done* when its
   pipeline finishes - ready to land or red, the outcome is in the message - and *blocked* only
-  when a human has to act: a crash, a merge conflict, a branch held for a human merge. With the
+  when a human has to act: a crash, a merge conflict, a branch held for a human merge (a conflict or
+  failed landing that a later autonomy turn re-runs by itself reads *idle*, naming the ending). With the
   [plugin's sidebar rows](#the-herdr-plugin) each sandbox also shows its step and how long it has
   been at it. Once nothing is left to start, each pane closes as its sandbox finishes (a crashed
   one stays open). The default is `"none"`: five sandbox panes crowded the tab, and the status
@@ -91,7 +95,7 @@ shows the same thing:
   goes, *blocked* while a ticket needs you, during the run or after it (the app raises its own
   needs-you alert; a `not landed` or `conflict` ticket that a later turn takes by itself reads
   `later` - "retried next turn" - until the run's last turn or its end, and keeps the root
-  *working*), else *done* at the end (*error* when the run ended early), with the merged share
+  *working*; its slot terminals read *idle*, not *blocked*, the same way), else *done* at the end (*error* when the run ended early), with the merged share
   of the run as its progress and the run line as its title.
 - 🧱 **A terminal per sandbox.** Each running sandbox gets a terminal of its own, following its
   ticket's log and reporting its ticket and step. By default it is a sub-agent of the status view

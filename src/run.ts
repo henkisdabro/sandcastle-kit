@@ -22,7 +22,7 @@ import { redact } from "./worktree-lock.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
 import type { Settled } from "./usage.ts";
-import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunEstimate, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunEstimate, type RunRecord, retriedNextTurn, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
 // run is `sandcastle stop`'s, one in a terminal is Ctrl-C; a SIGTERM or SIGHUP is named as it is.
@@ -892,6 +892,8 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
     tickets: (): Record<string, TicketRecord> => run.tickets ?? {},
     /** A person has the run paused (`paused` in the record). */
     paused: () => run.paused !== undefined,
+    /** The tickets a later autonomy turn will re-run by itself: this process is the run, so it is live. */
+    retried: (): Set<string> => retriedNextTurn(run, true),
     /** The plan usage the record holds now, for the Herdr sidebar's token. */
     usage: () => run.usage,
     /** A new `state` also restarts its clock; a note alone does not. */

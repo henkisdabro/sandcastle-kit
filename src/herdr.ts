@@ -424,6 +424,8 @@ export const openSandboxView = (
   usage: () => PlanUsage[] | PlanUsage | undefined = () => undefined,
   // Whether a person has the run paused: the sidebar says so in place of "N working".
   paused: () => boolean = () => false,
+  // The tickets a later autonomy turn re-runs by itself: counted `later`, not as needing a person. Read only while the view is open.
+  retried: () => ReadonlySet<string> = () => new Set(),
 ): SandboxView => {
   // Every way out before this run writes its own record retires the earlier one.
   const none = () => {
@@ -702,7 +704,7 @@ export const openSandboxView = (
   };
   const reportSpace = () => {
     if (workspace) {
-      herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--token", `sandcastle=${spaceText(runCounts(tickets(), paused()))}`, "--ttl-ms", TTL]);
+      herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--token", `sandcastle=${spaceText(runCounts(tickets(), paused(), ended ? undefined : retried()))}`, "--ttl-ms", TTL]);
     }
   };
   const slotOf = (issue: string) => slots.find((s) => s.issue === issue);
@@ -714,7 +716,7 @@ export const openSandboxView = (
   let said = "";
   const reportRun = (final?: ReturnType<typeof runAgent>) => {
     if (statusGone) return;
-    const a = final ?? runAgent(runCounts(tickets(), paused()), ended);
+    const a = final ?? runAgent(runCounts(tickets(), paused(), ended ? undefined : retried()), ended);
     try {
       if (said !== `${a.state} ${a.message}`) {
         herdr(["pane", "report-agent", statusPane, "--source", SOURCE, "--agent", "sandcastle", "--state", a.state, "--message", a.message, "--seq", seq()]);

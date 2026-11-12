@@ -3654,7 +3654,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
   clock.step("status view");
-  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage, run.paused);
+  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage, run.paused, run.retried);
   const statusPane = view.status ?? openStatusPane(project);
   const viewHost = terminalHost().kind;
   if (!statusPane && viewHost === "herdr1") {
@@ -4149,7 +4149,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     return { base, gateNames, report: reports.get(id), dryRun: DRY_RUN, ...(kept && { kept: keptPath(project.root, kept.path) }), ...(hold && { hold: "note" as const }) };
   };
   // Every ending and requeue the scheduler tells, recorded in the ledger's words: the state, the outcome and the view's word.
-  const ledger = createLedger({ run, outcomes: outcomesFile(project, runId), view, context, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
+  const ledger = createLedger({ run, outcomes: outcomesFile(project, runId), view, retried: (id) => run.retried().has(id), context, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
   // The line a requeued ticket's second attempt's setup carries.
   const { requeuedAs } = ledger;
   const baseRed: string[] = [];
