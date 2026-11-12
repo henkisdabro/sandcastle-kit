@@ -518,6 +518,9 @@ the triage label or status; a read that fails files as before), and a ticket who
 line names a place of the line (`Seat.spots`) and whose title shares three significant words with it
 is the issue the evidence is posted on, as for a repeat within a run; a line that names no place
 matches none.
+Such a line leaves the run record, as a repeat is never listed: kept with no issue, the summary
+would ask a person to file by hand the duplicate the comment avoided.
+`test/followup-open-duplicate.test.ts`.
 A repair pass's line is also tagged with the red run's tests it names (`FollowUp.tests`: `testsNamed`,
 the rule `repairVerdict` matches the `Flaky:` line by, applied to the line's title and evidence; the
 pipeline's `pass` is told the ids through its second argument, so no other caller changes).
@@ -525,9 +528,6 @@ pipeline's `pass` is told the ids through its second argument, so no other calle
 lines were filed or commented as; an option, fresh by default, shared by a run's turns like `places`):
 a shared test id makes it a comment on that issue across source tickets. A dry run does not fold.
 `test/followup-same-test.test.ts`, `test/pipeline-repair-followup-tests.test.ts`.
-Such a line leaves the run record, as a repeat is never listed: kept with no issue, the summary
-would ask a person to file by hand the duplicate the comment avoided.
-`test/followup-open-duplicate.test.ts`.
 The two stops file them too (`stopLanding`, before the summary is printed), except after a safety
 stop - the shared `.git` changed - where nothing is written to the tracker: each entry stays in the
 record as `failed` with that reason, which the report lists under Needs you as one to file by hand -
