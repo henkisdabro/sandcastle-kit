@@ -16,7 +16,8 @@ import { red } from "./api-key.ts";
 import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen, turnsEndLine, UNCHECKED_NOTE } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, HANDED_BACK, hhmm, spanOf as span, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
+import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
+import { hhmm, spanOf as span } from "./figures.ts";
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { CPU_PRESSURE_HIGH, PRESSURE_WARN_FULL } from "./peaks.ts";
@@ -960,7 +961,6 @@ const planLimitLines = (f: Facts, skipped: string[]): string[] => {
       (off ? " `USAGE_PAUSE=95` (a percentage, 1 to 100) makes a run wait out the window and carry on." : ""),
   ];
 };
-
 
 /**
  * The suggested changelog lines as the closing summary and `report --changelog` print them: a line

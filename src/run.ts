@@ -18,6 +18,7 @@ import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, st
 import { protectedPathsNote } from "./guard.ts";
 import { CheckoutRefusal, OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
+import { k, tokenBrief } from "./figures.ts";
 import { redact } from "./worktree-lock.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
@@ -1123,15 +1124,6 @@ export const firstSlotWait = (project: Project, record: RunRecord, nowMs = Date.
   return left.length ? Math.min(...left) : undefined;
 };
 
-/** Local `HH:MM` of an ISO time: the closing summary's and the drain line's one way to say a time. */
-export const hhmm = (iso: string) => new Date(iso).toTimeString().slice(0, 5);
-/** A length of time in whole minutes (`20m`, `2h 22m`), as the closing summary and the drain line say it. */
-export const spanOf = (ms: number) => {
-  const m = Math.round(ms / 60_000);
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
-};
-
-const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
 
 /**
  * Whether ticket `id` is carried work: its branch `agent/issue-<id>` exists and is ahead of the base
@@ -1893,8 +1885,8 @@ const cachePart = (t: Tokens) => {
 
 // `in` is all input: uncached, written to the cache and read from it.
 export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${cachePart(t)}) / ${k(t.output)} out`;
-/** The status view's run line has no room for the cached share. */
-export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
+// The status view's run line has no room for the cached share: `tokenBrief` (src/figures.ts, light, which the drain line shares).
+export { tokenBrief };
 /**
  * A ticket's tokens as its run record entry holds them: the `tokens` text an older reader shows, unchanged, and the
  * cache-read input count beside it, which the status view's TOKENS column turns into the share served from cache.

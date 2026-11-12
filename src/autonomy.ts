@@ -4,7 +4,8 @@ import { createInterface } from "node:readline/promises";
 import { UNCHECKED_NOTE, type OutcomeEntry, type RunRecord } from "../mod/hooks/run-record.ts";
 import { CheckoutRefusal, OperatorError } from "./errors.ts";
 import type { Facts } from "./report.ts";
-import { hhmm, spanOf, tokenBrief } from "./run.ts";
+// From figures.ts, not run.ts: the status view imports this module, and must not load the run's modules.
+import { hhmm, spanOf, tokenBrief } from "./figures.ts";
 import type { Ticket, Tracker } from "./tracker.ts";
 
 /** `drain`: turns until the queue is drained or a stop condition holds, never more than DRAIN_CAP. */
