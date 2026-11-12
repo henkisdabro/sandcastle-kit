@@ -91,6 +91,11 @@ export type GateProgress = {
   wait?: () => void;
   /** The run holds this pass for the machine's CPU pressure (`LOAD_PAUSE`) before it asks for a gates slot; called once, when the hold begins. */
   loadWait?: () => void;
+  /**
+   * The gates slot was granted: called once per grant, inside the slot, before the load-hold line is written and before the
+   * first gate runs - also for a run that starts from a later gate (`from`), which `gate(0)` never reports. A plain call, no value.
+   */
+  onSlot?: () => void;
   /** Gate `index` (0-based) starts. */
   gate?: (index: number, name: string) => void;
   /** Each gate's output is appended here as it arrives. */
@@ -295,6 +300,7 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
   };
   return await withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
+    progress.onSlot?.();
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
     if (log && loadHeldMs >= 1000) appendFileSync(log, `# held ${Math.round(loadHeldMs / 1000)}s for machine load\n`);

@@ -839,8 +839,14 @@ state.
   `src/pool.ts`): the worker goes back to the queue (`occupy`: it awaits the attempt only until the attempt ends or goes
   off) while the attempt goes on, as a resolve's wait does. The ticket stays open until its ending and in `gating`
   (a resolve that shares its files still waits for it) until its gates end. `Work.gateWaiters`, the gates limit, caps the
-  attempts off their worker; one that reaches its gates wait at the cap is told no, keeps its slot and its worker and
-  waits as before. Every wait for a gates slot of a ticket gate asks, not only the first (a gate run after a repair does).
+  attempts off their worker that are still waiting for a gates slot; one that reaches its gates wait at the cap is told no,
+  keeps its slot and its worker and waits as before. A ticket leaves the count when its gates slot is granted
+  (`GateProgress.onSlot` in `src/gates.ts`, called once inside the slot before the first gate, also for a run that starts
+  from a later gate; `at.gateSlot()`): its sandbox stays on the uncounted lock and its worker stays free through its gate
+  run, but the off-count place goes to the next ticket that waits. Every wait for a gates slot of a ticket gate asks, not
+  only the first (a gate run after a repair does); one that is still off its worker (no retake since) counts again without
+  the cap check (`at.gateWait()` is true), as it cannot go back to a worker without a retake.
+  `test/gate-slot-uncounted.test.ts`.
   A red ticket takes a counted slot again just before its repair pass (and the review after it), not at the result: through
   a fix-board wait it stays on the uncounted lock (a waiter that holds a worker stops waiting on it meanwhile: the fix board
   below). `at.retake()` queues it in the pipeline queue at the top rank, so it is served as a
