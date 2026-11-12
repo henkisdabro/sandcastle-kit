@@ -195,6 +195,43 @@ export const setLoadHold = (hold: LoadHold | undefined) => {
   loadHold = hold;
 };
 
+/**
+ * A gate's `rerun` template filled from the failing tests of the runs given (each run's tests, unset when its output may
+ * be cut), or undefined for its full command: no template, a run's tests unset, no test at all (a lint or type gate), or
+ * `{files}` with an id that names no file. The one filler of the in-slot re-run and of the repair prompt's command.
+ */
+export const fillRerun = (template: string | undefined, runs: (string[] | undefined)[]): string | undefined => {
+  if (!template || runs.some((tests) => tests === undefined)) return undefined;
+  const ids = [...new Set(runs.flatMap((tests) => tests ?? []))];
+  if (!ids.length) return undefined;
+  let files: string[] | undefined;
+  if (template.includes("{files}")) {
+    const named = ids.map(failingTestFile);
+    if (named.some((f) => f === undefined)) return undefined;
+    files = [...new Set(named as string[])];
+  }
+  return template.replaceAll("{tests}", () => ids.map(shq).join(" ")).replaceAll("{files}", () => (files ?? []).map(shq).join(" "));
+};
+
+/**
+ * What a repair pass runs after a commit in place of the red gate's full command (the orchestrator runs every gate once the
+ * pass exits), as the text of the repair prompt's `{{GATE_RERUN}}`. `reds` are the gate's earlier red runs when `failure` is
+ * a third run's, so the command names every run's tests. In order: the gate's `rerun` template filled from the failing
+ * tests; else, for a gate whose failing tests are readable, their files by the runner the gate command names; else (lint, a
+ * build, the typecheck gate, an e2e gate with unreadable ids) the gate's own command. `command` is the filled one, if any.
+ */
+export const repairCheck = (project: Pick<Project, "gates">, failure: Failure, reds: Failure[] = []): { text: string; command?: string } => {
+  const template = project.gates.find((g) => g.name === failure.name)?.rerun;
+  const runs = [...reds, failure].map((f) => {
+    const ids = wholeTests(f);
+    return ids.length ? ids : undefined;
+  });
+  const command = fillRerun(template, runs);
+  if (command) return { command, text: `the failing tests, with the gate's targeted command:\n\n  \`\`\`\n  ${command}\n  \`\`\`` };
+  if (runs.every((ids) => ids !== undefined)) return { text: `the failing tests' files, by the test runner \`${failure.command}\` names, not the whole command` };
+  return { text: `this gate's own command, \`${failure.command}\`: its failure is not a list of tests` };
+};
+
 // In order. A branch stops at the first red gate - its repair pass is fed
 // that one's output, and the rest would only cost time. `all` runs every
 // gate, for a report that says which of them are red, not just the first.
@@ -284,22 +321,7 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const rewrote = await restoreGateChanges(sandbox, before);
     return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...cpuFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   };
-  // The gate's `rerun` command filled from the failing tests of the runs given (each run's tests, unset when its output may be
-  // cut), or undefined for its full command: no `rerun`, a run's tests unset, no test at all (a lint or type gate), or
-  // `{files}` with an id that names no file.
-  const filled = (name: string, runs: (string[] | undefined)[]): string | undefined => {
-    const template = project.gates.find((g) => g.name === name)?.rerun;
-    if (!template || runs.some((tests) => tests === undefined)) return undefined;
-    const ids = [...new Set(runs.flatMap((tests) => tests ?? []))];
-    if (!ids.length) return undefined;
-    let files: string[] | undefined;
-    if (template.includes("{files}")) {
-      const named = ids.map(failingTestFile);
-      if (named.some((f) => f === undefined)) return undefined;
-      files = [...new Set(named as string[])];
-    }
-    return template.replaceAll("{tests}", () => ids.map(shq).join(" ")).replaceAll("{files}", () => (files ?? []).map(shq).join(" "));
-  };
+  const filled = (name: string, runs: (string[] | undefined)[]): string | undefined => fillRerun(project.gates.find((g) => g.name === name)?.rerun, runs);
   // A red run of the `rerun` command stands for the first full run's failure, with the targeted run's command and tests
   // alongside (`Failure.rerun`). A targeted run that timed out keeps its own failure: no repair or third run follows it.
   const settle = (run: GateRun, first: Failure): GateRun => {
