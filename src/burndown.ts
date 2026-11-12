@@ -31,7 +31,7 @@ import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, repairCheck, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -49,7 +49,7 @@ import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeS
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { startClock, type StartClock } from "./start-clock.ts";
-import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, setupHook, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { memoryLine, poolWarningsNow, sandboxMemory } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, trackerTokenUser, type Ticket, type Tracker } from "./tracker.ts";
@@ -1603,6 +1603,16 @@ export const ticketTime = (tookMs: number | undefined, waitedMs = 0, landingMs?:
   return parts.length ? ` ${parts.join(", ")}` : "";
 };
 
+/**
+ * A sent-back ticket's resolve wait lies before its attempt, outside the pipeline's `took`: it goes into both `took` (the
+ * ticket's time) and `waited` (the part of it that is no work), so `ticketTime` shows the work unchanged and the waiting grown.
+ */
+export const addResolveWait = (took: Map<string, number>, waited: Map<string, number>, issue: string, resolveWaitMs: number | undefined): void => {
+  if (!(typeof resolveWaitMs === "number" && resolveWaitMs > 0)) return;
+  took.set(issue, (took.get(issue) ?? 0) + resolveWaitMs);
+  waited.set(issue, (waited.get(issue) ?? 0) + resolveWaitMs);
+};
+
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
 // `sandboxId`: the container's name (Sandcastle 0.14.0 on), which the CPU limit and the stop before a close address it by.
 export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close" | "sandboxId">;
@@ -1909,6 +1919,58 @@ export const createPipeline = (ctx: PipelineContext) => {
     return host.write ? host.write(cut) : cut();
   };
 
+  /**
+   * A fresh branch (no commit of its own) brought to the base's tip once its sandbox is open, before any agent works on
+   * it. `cutFromBase` cuts it before the open, but a landing that finishes during the rest of the setup is not in the tree
+   * the agent gets, and `conflictBefore` after implement would then send the ticket back. The branch is checked out in the
+   * sandbox's worktree by now, so the move is a fast-forward there (`merge --ff-only`: git declines rather than lose
+   * anything, and the ticket goes on from the tree it has). The worktree's records are held to git's own first
+   * (`checkRecords`). When it brought changed files the project's `setup` runs again in the sandbox, as a landing's merge
+   * does, and a failed one throws `SetupFailed` (the attempt fails, the scheduler sends it back once): no implement on a
+   * broken install. A branch with a commit of its own keeps its fork point (the base merge for a carried branch is later).
+   */
+  const catchUp = async (issue: string, branch: string, box: { worktreePath: string; exec(command: string): Promise<{ stdout: string }> }) => {
+    const move = (): string | undefined => {
+      let ahead: number;
+      let behind: number;
+      try {
+        ahead = Number(sh("git", ["rev-list", "--count", `refs/heads/${base}..refs/heads/${branch}`], project.root));
+        behind = Number(sh("git", ["rev-list", "--count", `refs/heads/${branch}..refs/heads/${base}`], project.root));
+      } catch {
+        return undefined;
+      }
+      if (ahead > 0 || !(behind > 0)) return undefined;
+      const was = `${ref(issue)}: ${branch} had no commits ahead of ${base} and was ${behind} commit(s) behind it when its sandbox opened`;
+      checkRecords(issue, box.worktreePath, `before moving ${branch} in ${keptPath(project.root, box.worktreePath)}`);
+      let before: string;
+      try {
+        before = sh("git", ["-C", box.worktreePath, "rev-parse", "HEAD"], project.root);
+        sh("git", ["-C", box.worktreePath, "merge", "--ff-only", "--no-overwrite-ignore", `refs/heads/${base}`], project.root);
+      } catch (error) {
+        if (error instanceof GuardStop) throw error;
+        console.log(`${was}, but could not be brought to ${base}'s tip (${errorLine(error)}); it goes on from the tree it has.`);
+        return undefined;
+      }
+      console.log(`${was} - brought to ${base}'s tip before implement.`);
+      try {
+        recordFork(project.root, branch, sh("git", ["rev-parse", `refs/heads/${base}`], project.root));
+      } catch (error) {
+        console.log(`${ref(issue)}: could not record where ${branch} was cut again (${errorLine(error)}); a later rewrite of ${base} is found from its merges alone.`);
+      }
+      try {
+        return sh("git", ["-C", box.worktreePath, "diff", "--name-only", before, "HEAD"], project.root);
+      } catch {
+        return "";
+      }
+    };
+    const brought = host.write ? await host.write(move) : move();
+    // A dependency the landing added must be installed before the agent works, as `landInSandbox` does after its merge.
+    if (brought && project.setup.length) {
+      await box.exec(setupHook(project.setup));
+      await assertSetup(box, project.setup, ref(issue));
+    }
+  };
+
   const addReport = (id: string, heading: string, text: string) =>
     reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
 
@@ -2063,6 +2125,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     };
 
     const started = Date.now();
+    addResolveWait(took, waited, issue.id, at?.resolveWaitMs);
     releaseBranchWorktree(branch, project.root);
     // From here the agent commits to the branch, and the setup may cut it from the base again: the `.git` check lets it move.
     host.begin(branch);
@@ -2217,6 +2280,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // Normally already locked by the worktree hook; this covers a worktree
       // Sandcastle reused.
       lockWorktree(sandbox.worktreePath, project.root);
+      await catchUp(issue.id, branch, sandbox);
       // A branch that no longer merges onto the base ends its pipeline at once: no review or gate run is spent on it,
       // and the scheduler sends it back to resolve the merge (the requeue-once rule). Never a green, which would tell
       // landing that the gates vouched for a commit they never ran on.
@@ -2971,6 +3035,8 @@ export const createPipeline = (ctx: PipelineContext) => {
               ...promptArgs,
               GATE_NAME: failure.name,
               GATE_COMMAND: failure.command,
+              // What the pass runs after a commit instead of the gate's full command, which the gate that follows it runs.
+              GATE_RERUN: repairCheck(project, failure, failure === threeRuns?.red ? earlier : []).text,
               // Only for the third run's own red: a later one is what a repair or a merged fix left, not a flake.
               GATE_OUTPUT: (failure === threeRuns?.red ? threeRuns.note : "") + fence(failure.output),
             }),

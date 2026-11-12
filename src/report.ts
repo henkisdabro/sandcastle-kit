@@ -420,6 +420,8 @@ export type TimeLost = {
   afterRequeueMs: number;
   repairs: number;
   repairMs: number;
+  /** The waits of sent-back tickets' resolves before their attempt began (the `waitMs` of `setup` lines); absent when none. */
+  resolveWaitMs?: number;
 };
 
 const GATE_SLOT_PHASES: readonly string[] = ["gates", LANDING_GATES, "base gates", "verify"];
@@ -447,6 +449,8 @@ export const timeLostFromTimings = (text: string, runId: string): TimeLost | und
     if (GATE_SLOT_PHASES.includes(line.phase)) lost.gateWaitMs += waitMs;
     if (line.phase === LANDING_GATES) lost.landingGateWaitMs += waitMs;
     if (line.phase === LANDING) lost.landingWaitMs += waitMs;
+    // A setup step has no wait of its own: its `waitMs` is the resolve's wait before the attempt (`at.resolveWaitMs`).
+    if (line.phase === "setup" && waitMs) lost.resolveWaitMs = (lost.resolveWaitMs ?? 0) + waitMs;
     const issue = String(line.issue ?? "");
     const marked = (line as { rerun?: unknown }).rerun === true;
     // A landing re-run inside its slot is a line of its own, marked; a requeued ticket's second landing is no re-run.
@@ -1264,6 +1268,7 @@ const causesOf = (f: Facts): { ms: number; text: string; gates?: true }[] => {
     ...(f.pausedMs ? [{ ms: f.pausedMs, text: `${span(f.pausedMs)} paused (sandcastle pause or the plan's usage)` }] : []),
     ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
     ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
+    ...(lost?.resolveWaitMs ? [{ ms: lost.resolveWaitMs, text: `${span(lost.resolveWaitMs)} with sent-back tickets waiting to resolve, summed over tickets` }] : []),
     ...(lost && lost.redReruns + lost.afterRepair + lost.afterRequeue + lost.repairs ? [passCause(lost)] : []),
   ].filter((c) => c.ms >= 60_000).sort((a, b) => b.ms - a.ms);
 };
@@ -1453,18 +1458,30 @@ export const render = (f: Facts, plain = false): string => {
   if (overran.length) done.push("Changed files beyond their Touches line:", ...overran.map((id) => `  ${name(id)}: ${overrunPaths(f.tickets[id].overrun!)}`));
   if (closed.length && f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   else if (merged.length) done.push(`The code is only on your local ${f.base} until you push it.`);
-  // A ticket the scheduler sent back once (a conflict or a red gate at landing) and landed on its second attempt.
-  // `requeued` stays on a merged ticket's record, and is null when the second attempt never began.
-  const sentBack = new Map<string, string[]>();
-  for (const id of merged.filter((id) => !!f.tickets[id].requeued)) {
-    const line = f.tickets[id].requeued!;
+  // A ticket the scheduler sent back (a conflict or a red gate at landing, a failed setup) and landed on a later attempt.
+  // `requeued` stays on a merged ticket's record, and is null when the later attempt never began: it gates the list.
+  // `requeues` holds every send-back in order; an older record has only `requeued`, one send-back.
+  const reasonOf = (line: string) => {
     // Where the conflict was found is in the line (`requeuedLine`); an older run record has none, and says none.
     const found = line.match(/^requeued after conflict (before review|before gates|at landing)/)?.[1];
     const where = found === "at landing" ? " at landing" : found ? ` found ${found.replace("before ", "before its ")}` : "";
-    const why = line.startsWith("requeued after conflict") ? `sent back after a conflict${where}` : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : line.startsWith("requeued after setup failed") ? "sent back after its setup failed" : "sent back at landing";
-    sentBack.set(why, [...(sentBack.get(why) ?? []), id]);
+    return line.startsWith("requeued after conflict") ? `sent back after a conflict${where}` : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : line.startsWith("requeued after setup failed") ? "sent back after its setup failed" : "sent back at landing";
+  };
+  // By attempt count, then by the reasons in order: tickets with the same sequence share one parenthesis.
+  const sentBack = new Map<number, Map<string, string[]>>();
+  for (const id of merged.filter((id) => !!f.tickets[id].requeued)) {
+    const t = f.tickets[id];
+    const lines = Array.isArray(t.requeues) ? t.requeues.filter((l): l is string => typeof l === "string" && !!l) : [];
+    const reasons = (lines.length ? lines : [t.requeued!]).map(reasonOf);
+    const why = [reasons[0], ...reasons.slice(1).map((r) => r.replace(/^sent back /, ""))].join(", then ");
+    const byWhy = sentBack.get(reasons.length + 1) ?? new Map<string, string[]>();
+    byWhy.set(why, [...(byWhy.get(why) ?? []), id]);
+    sentBack.set(reasons.length + 1, byWhy);
   }
-  if (sentBack.size) done.push(`Landed on a second attempt: ${[...sentBack].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);
+  for (const [attempts, byWhy] of [...sentBack].sort(([a], [b]) => a - b)) {
+    const head = attempts === 2 ? "Landed on a second attempt" : attempts === 3 ? "Landed on a third attempt" : `Landed after ${attempts} attempts`;
+    done.push(`${head}: ${[...byWhy].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);
+  }
   if (wouldMerge.length) {
     // Each branch was gated alone; whether they merge together is a separate question.
     const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";

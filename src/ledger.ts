@@ -589,13 +589,17 @@ export const createLedger = (d: {
   // Every ticket this run requeued, with its line; `requeuedAs` only while its second attempt is to come.
   const sentBack = new Map<string, string>();
   const requeuedAs = new Map<string, string>();
+  // Every line a ticket was sent back with, in order: the record's `requeues` (a ticket can be sent back twice).
+  const sentBackLines = new Map<string, string[]>();
   // The run's last words, once the schedule is over: until then a ticket it left unstarted has none.
   let last: { stopLine?: string } | undefined;
   const requeued = (id: string, again: Again) => {
     const line = requeuedLine(again.kind, again.with, again, again.found);
     sentBack.set(id, line);
     requeuedAs.set(id, line);
-    d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line }));
+    const lines = [...(sentBackLines.get(id) ?? []), line];
+    sentBackLines.set(id, lines);
+    d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line, requeues: lines }));
     d.say(`${d.ref(id)}: ${line}; it is tried again in this run.`);
   };
   const record = (id: string, ending: TicketEnding) => {
