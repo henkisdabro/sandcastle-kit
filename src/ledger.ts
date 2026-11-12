@@ -18,7 +18,7 @@
 
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { agentFailure } from "./agents.ts";
-import { remainderNote } from "./autonomy.ts";
+import { remainderNote, UNCHECKED_NOTE } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
 import { githubServerError, isSetupLine, promptExpansionLine, SetupFailed } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
@@ -277,6 +277,9 @@ export const pipelineOutcome = (o: Pick<Finished, "status" | "gates" | "heldNote
               ? { kind: "conflict", text: "merge conflict before landing" }
               : { kind: "no change", text: o.status };
 
+/** A ticket whose outsider-edit read failed (#893): not started and still queued; the run did not stop for it (`UNCHECKED_NOTE`). */
+export const uncheckedRecord = (): TicketRecord => ({ state: "skipped", note: UNCHECKED_NOTE });
+
 /** A ticket its label refuses, found as it would have started: skipped, saying why. */
 export const refusedRecord = (reason: string): TicketRecord => ({ state: "skipped", note: reason.replace(/^NOT STARTED: /, "not started: ") });
 
@@ -520,7 +523,7 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       const { why } = e;
       // Only the ticket whose own agent the limit cut short says so: one the stop left unstarted takes the run's last
       // words, the most severe cause, which may be a `.git` change found after the limit.
-      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : e.cutShort && why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
+      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "unchecked" ? uncheckedRecord() : why.kind === "refused label" ? refusedRecord(why.reason) : e.cutShort && why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
       return { record, tracker: comment(notLandedComment(c.report, undefined)) };
     }
     case "waiting":
@@ -539,7 +542,7 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
  * the limit cut short: its note is its own, and recorded as it ends, or its row reads as still working until the run ends.
  */
 const unstarted = (e: TicketEnding) =>
-  e.kind === "not begun" && !e.cutShort && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
+  e.kind === "not begun" && !e.cutShort && e.why.kind !== "withdrawn" && e.why.kind !== "unchecked" && e.why.kind !== "refused label";
 
 /** The writer's `outcomes` port onto the project's `outcomes.json`: the ledger is its only writer, so burndown hands it this. */
 export const outcomesFile = (project: Project, run: string) => (outcomes: Record<string, Outcome>) => recordOutcomes(project, run, outcomes);

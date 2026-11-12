@@ -580,7 +580,11 @@ ticket whose author is not an owner, member or collaborator is held when the aut
 edited its body, or commented, after the queue label was last added; a ticket that never carried
 the label is measured from the run's start (`TurnOptions.runStart`, the same for every turn, so a
 later turn does not let through an edit made during an earlier one). A read that fails is not a
-hold: the ticket is not started that turn. The files tracker has no outsiders and never holds.
+hold: the ticket is not started that turn, and ends as `not begun` with the `unchecked` reason
+(`Unchecked`, beside `Withdrawn`), never `withdrawn`. The ledger records it as `skipped` with
+`UNCHECKED_NOTE` (`src/autonomy.ts`) and it is no stop cause. The closing summary lists it under
+**Runnable now**, `withdrawn` does not count it and a drain turn may run it again (`Rerun.unchecked`).
+The files tracker has no outsiders and never holds.
 
 ## `src/landing.ts`
 

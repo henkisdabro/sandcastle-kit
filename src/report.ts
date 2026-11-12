@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { red } from "./api-key.ts";
-import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen, turnsEndLine } from "./autonomy.ts";
+import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen, turnsEndLine, UNCHECKED_NOTE } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
@@ -1580,11 +1580,14 @@ export const render = (f: Facts, plain = false): string => {
     const s = id ? f.tickets[id].state : undefined;
     return s && s !== "merged" ? ` (${s === "red" ? (redTogether(f, id!) ? "red together" : "gate red") : s})` : "";
   };
-  const skipped = ids(["skipped"]);
+  // A ticket whose outsider-edit read failed was not stopped by the run: it is runnable now, not "the run stopped early".
+  const unchecked = ids(["skipped"]).filter((id) => f.tickets[id].note === UNCHECKED_NOTE);
+  const skipped = ids(["skipped"]).filter((id) => !unchecked.includes(id));
   // Why each one can run, from the record: a ticket held for an overlap says which ticket it waited
   // for (and whether that one landed); one that waited on blockers, which; a conflicted one resumes its branch.
   const runnableWhy = (id: string) => {
     const t = f.tickets[id] ?? {};
+    if (unchecked.includes(id)) return UNCHECKED_NOTE;
     if (t.state === "paused") return `paused${t.note ? ` ${t.note}` : ""} - its branch resumes`;
     if (t.state === "conflict") return "conflicted - its branch resumes";
     if (t.state === "red") return "red - its branch resumes";
@@ -1599,7 +1602,7 @@ export const render = (f: Facts, plain = false): string => {
     return on.length ? `${on.length === 1 ? "blocker" : "blockers"} ${on.join(", ")} closed` : "blockers closed";
   };
   // A red ticket keeps its queue label (Next step says "still queued"), so the next run resumes its branch: it is runnable like a conflicted one.
-  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict" || f.tickets[id].state === "red"), ...f.runnable, ...partlyRerun, ...parked])];
+  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict" || f.tickets[id].state === "red"), ...f.runnable, ...partlyRerun, ...parked, ...unchecked])];
   const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     // A ticket cut short is runnable too, and its own line follows: "none" above it would contradict it.
