@@ -50,3 +50,14 @@ test("a missing login throws nothing and the mount is still made", () => {
   const mounts = sandboxMounts(project);
   assert.ok(mounts.some((m) => m.hostPath === "~/.codex/auth.json"));
 });
+
+// A directory where the file should be cannot be read, even by root (chmod 000 can be).
+test("an unreadable login throws nothing and the mount is still made", () => {
+  mkdirSync(authFile);
+  try {
+    const mounts = sandboxMounts(project);
+    assert.ok(mounts.some((m) => m.hostPath === "~/.codex/auth.json"));
+  } finally {
+    rmSync(authFile, { recursive: true });
+  }
+});
