@@ -338,8 +338,15 @@ export const tokensFromTimings = (text: string, runId: string): { total: Tokens;
     }
     if (!line || line.run !== runId || !line.tokens || typeof line.tokens !== "object") continue;
     const model = typeof line.model === "string" && line.model ? line.model : NO_MODEL;
-    total = addTokens(total ?? NO_TOKENS, line.tokens);
-    byModel[model] = addTokens(byModel[model] ?? NO_TOKENS, line.tokens);
+    // A split count only when it is a number: anything else (or a line an older kit wrote) reads as no split.
+    const { cacheWrite1h, cacheWrite5m, ...counts } = line.tokens;
+    const tokens: Tokens = {
+      ...counts,
+      ...(typeof cacheWrite1h === "number" && Number.isFinite(cacheWrite1h) ? { cacheWrite1h } : {}),
+      ...(typeof cacheWrite5m === "number" && Number.isFinite(cacheWrite5m) ? { cacheWrite5m } : {}),
+    };
+    total = addTokens(total ?? NO_TOKENS, tokens);
+    byModel[model] = addTokens(byModel[model] ?? NO_TOKENS, tokens);
   }
   return total ? { total, byModel } : undefined;
 };

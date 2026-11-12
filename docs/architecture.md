@@ -3081,6 +3081,17 @@ so auto memory stayed on); the container's environment is the sandbox's alone.
 Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnv`
 (`src/sandbox.ts`) leaves the agent's keys out, a person's `.env` naming one included: the exported
 value would win anyway (`test/agent-env.test.ts`, `test/claude-tools-allow-list.test.ts`).
+A review pass (the review model and its fallback, `reviewWithFallback`) and a resolve pass
+(`resolveAgent`: the implementer's model and effort) also get `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` on
+their command, which Claude Code 2.1.242 and later read (an older one ignores it).
+On a subscription Claude Code writes the prompt cache for an hour, and a 1-hour write bills at twice
+the input price, against 1.25 times for a 5-minute one; a review or resolve pass's longest gap between
+turns is a few minutes, so it never used the hour.
+An implement or repair pass waits on long test runs, often past five minutes, so it keeps Claude
+Code's own choice and its command names no TTL.
+`sandboxEnv` leaves `CLAUDE_CODE_PROMPT_CACHE_TTL` out of the container's environment as well, though
+the implementer's environment does not name it: a person's `.env` naming it would make Sandcastle
+refuse every review and resolve pass (`test/agent-cache-ttl.test.ts`).
 The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does
 not govern, and `git-guard.sh` is unchanged.
 

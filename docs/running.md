@@ -449,6 +449,10 @@ more, a project's first run with no estimate too (led by the gates wait, it name
 `sandcastle size`); a `Likely flaky:` line per test that went red and then green, or that a repair
 judged flaky, names the tickets that hit it (a red verify whose failing tests all flaked earlier in
 the run says so).
+The header's tokens, the `Tokens by model:` line and the run's per-ticket lines split the input in
+three: `42.5M in (40.3M read, 2.2M written 1h) / 1.2M out` is all input, then what was read from the
+prompt cache and what was written to it, with the cache's lifetime (`1h`, `5m`, or how much of it was
+`1h` when both) when Claude Code reported it; the rest of the input was uncached.
 `sandcastle report` prints it again at any time, with git and the blockers as they are now.
 Then:
 

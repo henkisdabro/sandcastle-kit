@@ -570,6 +570,8 @@ export const watchUsage = ({
     return sum;
   };
 
+  // The four counts a stream event gives; the TTL split of cache writes comes only with a pass's closing `result` line.
+  const COUNTS = ["input", "cacheWrite", "cacheRead", "output"] as const;
   const countTokens = (tail: Tail, line: string) => {
     const found = tokensFromEvent(line);
     if (!found) return;
@@ -578,7 +580,7 @@ export const watchUsage = ({
     const before = found.id === undefined ? undefined : seen.get(found.id);
     if (found.id !== undefined) seen.set(found.id, found.tokens);
     tail.peak = Math.max(tail.peak, contextOf(found.tokens));
-    for (const key of Object.keys(total) as (keyof Tokens)[]) total[key] += found.tokens[key] - (before?.[key] ?? 0);
+    for (const key of COUNTS) total[key] += found.tokens[key] - (before?.[key] ?? 0);
     changed.add(tail.owner!);
   };
 
