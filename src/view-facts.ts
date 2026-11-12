@@ -9,16 +9,20 @@ import { GROUPS, type TicketRecord } from "../mod/hooks/run-record.ts";
 // sidebar never says "needs you" about a ticket the view shows as fine, or the other way.
 // `paused` is present (true) only for a run a person has paused: the tickets still finishing are not
 // "working" then, the run is held.
-export type RunCounts = { working: number; needsYou: number; merged: number; total: number; paused?: true };
-export const runCounts = (tickets: Record<string, TicketRecord>, paused = false): RunCounts => {
+// `retried` is present (n) only when n > 0: the tickets in the `retried` set (`retriedNextTurn`) are a later turn's to
+// take by itself, so they are neither "needs you" nor "working" - the status view reads them as `later`.
+export type RunCounts = { working: number; needsYou: number; merged: number; total: number; paused?: true; retried?: number };
+export const runCounts = (tickets: Record<string, TicketRecord>, paused = false, retried: ReadonlySet<string> = new Set()): RunCounts => {
   // A ticket with no state, or one the guard dropped, is in the "other" group: counted in the total only.
-  const groups = Object.values(tickets).map((t) => (t.state ? GROUPS[t.state] : "other"));
+  const groups = Object.entries(tickets).map(([id, t]) => (retried.has(id) ? "later" : t.state ? GROUPS[t.state] : "other"));
+  const later = groups.filter((g) => g === "later").length;
   return {
     working: groups.filter((g) => g === "working").length,
     needsYou: groups.filter((g) => g === "needs you").length,
     merged: groups.filter((g) => g === "merged").length,
     total: groups.length,
     ...(paused ? { paused: true as const } : {}),
+    ...(later > 0 ? { retried: later } : {}),
   };
 };
 

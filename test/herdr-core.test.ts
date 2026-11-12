@@ -421,6 +421,21 @@ test("the run's records: progress 0..100, needs-you as blocked/question, a child
   assert.equal(runRecords(run({}, { hasRecord: false })).size, 0);
 });
 
+test("the root stays working while a later turn retries the ticket that failed, and is blocked in the last turn or for a killed run", () => {
+  const tickets = { a: ticket("not landed"), b: ticket("merged") };
+  const drain = (turn: number) => ({ settings: { autonomy: "drain", turn, cap: 20 } });
+  assert.equal(runRecords(run(tickets, { record: drain(2) })).get("root"), record({ state: "working", app: "sandcastle", progress: 50, title: "sandcastle shop", msg: "1/2" }));
+  assert.equal(
+    runRecords(run(tickets, { record: drain(20) })).get("root"),
+    record({ state: "blocked", app: "sandcastle", kind: "question", progress: 50, title: "sandcastle shop", msg: "1/2 · 1 needs you" }),
+  );
+  // Killed: a record with no finishedAt, but no turn will follow.
+  assert.equal(
+    runRecords(run(tickets, { live: false, record: drain(2) })).get("root"),
+    record({ state: "blocked", app: "sandcastle", kind: "question", progress: 50, title: "sandcastle shop", msg: "1/2 · 1 needs you" }),
+  );
+});
+
 test("the view's writer: only its own instance's, only on a terminal, only what changed; a ticket gone is cleared", () => {
   const dir = join(project(), ".sandcastle");
   writeFileSync(join(dir, "logs/core-view.json"), JSON.stringify({ instance: "i1", status: "t3" }));

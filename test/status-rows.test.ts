@@ -209,3 +209,40 @@ test("without .sandcastle the view exits 1 and draws nothing", () => {
   assert.equal(drawn.status, 1);
   assert.equal(drawn.frame, "");
 });
+
+// ---------------------------------------------------------------------------
+// A ticket a later autonomy turn takes by itself reads `later`, not `needs you` (retriedNextTurn).
+// ---------------------------------------------------------------------------
+
+const DRAIN = (turn: number) => ({ settings: { autonomy: "drain" as const, turn, cap: 20 } });
+
+test("a not landed ticket a later turn will retry keeps its word, reads later and is not counted as needing you", () => {
+  const { rows, counts, later } = ticketRows(live({ "7": { state: "not landed", note: "push timed out" } }, DRAIN(2)));
+  const r = row(rows, "7");
+  assert.equal(r.state, "not landed");
+  assert.equal(r.group, "later");
+  assert.equal(r.glyph, "…");
+  assert.ok(r.note.startsWith("retried next turn - push timed out"), r.note);
+  assert.equal(counts["needs you"], 0);
+  assert.equal(counts.later, 1);
+  // Its word is not `later`, so it stays a row of the collapsed table and not in the footer's count.
+  assert.deepEqual(later.ids, []);
+});
+
+test("the same ticket in the run's last turn needs you", () => {
+  const { rows, counts } = ticketRows(live({ "7": { state: "not landed", note: "push timed out" } }, DRAIN(20)));
+  assert.equal(row(rows, "7").group, "needs you");
+  assert.equal(row(rows, "7").note, "push timed out");
+  assert.equal(counts["needs you"], 1);
+  assert.equal(counts.later, 0);
+});
+
+test("a retried row that was sent back at landing says so after the retried prefix", () => {
+  const { rows } = ticketRows(live({ "8": { state: "conflict", requeued: "requeued after conflict with #3", note: "conflict again" } }, DRAIN(1)));
+  assert.ok(row(rows, "8").note.startsWith("retried next turn - requeued after conflict with #3"), row(rows, "8").note);
+});
+
+test("a run that is no longer live retries nothing", () => {
+  const { counts } = ticketRows(live({ "7": { state: "not landed" } }, DRAIN(2), { live: false }));
+  assert.equal(counts.later, 0);
+});

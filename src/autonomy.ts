@@ -1,7 +1,7 @@
 // Autonomy levels: how many turns (runs) one `sandcastle run` may make, which tickets a
 // further turn would take, and the level-1 question. The loop itself is in cli.ts.
 import { createInterface } from "node:readline/promises";
-import type { OutcomeEntry } from "../mod/hooks/run-record.ts";
+import { UNCHECKED_NOTE, type OutcomeEntry } from "../mod/hooks/run-record.ts";
 import { CheckoutRefusal, OperatorError } from "./errors.ts";
 import type { Facts } from "./report.ts";
 import type { Ticket, Tracker } from "./tracker.ts";
@@ -32,11 +32,8 @@ export const autonomyLevel = (env: string | undefined, config: unknown): Level =
 /** `unlanded`: green branches whose landing did not happen (a sandbox that would not open, a branch that moved); the next turn lands the recorded head. */
 export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: string[]; unlanded?: string[]; unchecked?: string[] };
 
-/**
- * The note of a ticket whose outsider-edit read failed (#893): not started, still queued, and the run did not stop for it.
- * Here, not in the ledger that writes it, so the drain can tell it from a ticket the run's stop left unstarted.
- */
-export const UNCHECKED_NOTE = "not started: could not read its edits from GitHub";
+/** The note of a ticket whose outsider-edit read failed (#893); it lives in the run record's module, which the views read, and is re-exported here. */
+export { UNCHECKED_NOTE };
 
 /**
  * What `unmetOf` (src/burndown.ts) puts in front of an `<unmet who="person">` line: the agent's explicit

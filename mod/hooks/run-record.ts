@@ -132,6 +132,36 @@ export const GROUPS: Record<TicketState, Group> = {
   skipped: "other",
 };
 
+/**
+ * The note of a ticket whose outsider-edit read failed (#893): not started, still queued, and the run did not stop for it.
+ * Here, not in the ledger that writes it, so the drain and the views can tell it from a ticket the run's stop left unstarted.
+ */
+export const UNCHECKED_NOTE = "not started: could not read its edits from GitHub";
+
+const whole = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
+
+/**
+ * The tickets a later autonomy turn will take by itself: `not landed` and `conflict` ones of a live run whose turn is under
+ * its level's cap (`settings.cap` is written only for such a turn: level 1 has none, nor has a follow-on turn past the cap)
+ * and which `noRerunCause` (src/autonomy.ts) would not stop - a dry run, a stop, a red base (unless judged load) or a
+ * ticket left unstarted by a usage limit. A forecast: the record is unfinished while a turn can still follow, and the
+ * drain's own end-of-turn stops finish it, when these read as needing a person again. Not live (a killed run): no turn
+ * follows, so none. Pure and defensive - a record is a file in a repository.
+ */
+export const retriedNextTurn = (record: unknown, live: boolean): Set<string> => {
+  if (!live || !record || typeof record !== "object") return new Set();
+  const r = record as { finishedAt?: unknown; exitCode?: unknown; settings?: unknown; dryRun?: unknown; stopped?: unknown; verify?: unknown };
+  if (r.finishedAt || whole(r.exitCode)) return new Set();
+  const settings = r.settings && typeof r.settings === "object" ? (r.settings as { cap?: unknown; turn?: unknown }) : {};
+  if (!whole(settings.cap) || !whole(settings.turn) || settings.turn >= settings.cap) return new Set();
+  if (r.dryRun || r.stopped) return new Set();
+  const verify = r.verify && typeof r.verify === "object" ? (r.verify as { green?: unknown; likelyLoad?: unknown; notRun?: unknown }) : undefined;
+  if (verify?.green === false && !(verify.likelyLoad === true && !verify.notRun)) return new Set();
+  const tickets = readTickets(record);
+  if (Object.values(tickets).some((t) => t.state === "skipped" && t.note !== UNCHECKED_NOTE)) return new Set();
+  return new Set(Object.entries(tickets).filter(([, t]) => t.state === "not landed" || t.state === "conflict").map(([id]) => id));
+};
+
 /** The status view's word for a ticket state, where it differs from the state's own name. */
 export const WORDS: Partial<Record<TicketState, string>> = { implement: "impl", "cross-review": "codex", red: "gate red", nochange: "no change" };
 
