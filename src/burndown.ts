@@ -3009,6 +3009,10 @@ export const createPipeline = (ctx: PipelineContext) => {
             }
           }
         }
+        // The run's `.git` check, after the fix board's wait and the merge of a landed fix, as the last thing before the pass:
+        // a change made on the host since the gates ran (or during the wait) would otherwise be read by the repair as the
+        // red's cause and filed as "environmental", the guard stopping the run only at the close. A failure is thrown, as at an open.
+        await checkGit(issue.id, `before repairing ${ref(issue.id)}`);
         seen.add(key);
         if (!forced) fixes.claim(key, issue.id);
         repairs++;

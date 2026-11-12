@@ -1820,7 +1820,10 @@ opened, since a blocking read would hang the whole run.
   `info/` on the host at every sandbox start to mount them read-only, and in a repository that had
   none the new directory stopped the run at its first sandbox, `test/guard-empty-hooks-root.test.ts`),
   and compared before every sandbox
-  opens, before every sandbox closes, before each landing and before each host write; the
+  opens, before every sandbox closes, before each landing, before each repair pass (`checkGit` in
+  the pipeline's repair loop, after the fix board's wait and the merge of a landed fix, so a change
+  made on the host in between is the ticket's `tampered` and not a red a repair concludes is
+  "environmental"; `test/pipeline-repair-git-check.test.ts`) and before each host write; the
   command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
   `core.hooksPath` and `core.fsmonitor` by environment.
 - The start baseline (`assertGitConfigBaseline`, `recordGitConfigStart`, `recordGitConfigEnd`,
