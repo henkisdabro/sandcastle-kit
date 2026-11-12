@@ -11,10 +11,13 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { makeTracker } = await import("../src/tracker.ts");
+const { GH_READ_RETRY, makeTracker } = await import("../src/tracker.ts");
 const { outsiderEdit } = await import("../src/burndown.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
+
+// One try per read here: the retry has its own test (test/tracker-read-retry.test.ts).
+GH_READ_RETRY.waitsMs = [];
 
 const bin = mkdtempSync(join(tmpdir(), "sandcastle-test-bin-"));
 const calls = join(bin, "calls");

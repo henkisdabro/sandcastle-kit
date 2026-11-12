@@ -599,7 +599,7 @@ ticket whose author is not an owner, member or collaborator is held when the aut
 edited its body, renamed it, or commented, after the queue label was last added; a ticket that
 never carried the label is measured from the run's start (`TurnOptions.runStart`, the same for every turn, so a
 later turn does not let through an edit made during an earlier one). A read that fails is not a
-hold: the ticket is not started that turn, and ends as `not begun` with the `unchecked` reason
+hold (after the three tries every GitHub read gets for a timeout or a 5xx): the ticket is not started that turn, and ends as `not begun` with the `unchecked` reason
 (`Unchecked`, beside `Withdrawn`), never `withdrawn`. The ledger records it as `skipped` with
 `UNCHECKED_NOTE` (`src/autonomy.ts`) and it is no stop cause. The closing summary lists it under
 **Runnable now**, `withdrawn` does not count it and a drain turn may run it again (`Rerun.unchecked`).
@@ -621,6 +621,11 @@ A tracker read made while a run is under way (the check before a ticket starts a
 lands, `handBack`, the overrun warning, the comments a head record counts) goes through
 `readTicketState`: `Tracker.getAsync` where the tracker has one (GitHub: `gh` through `shAsync`,
 which never blocks the event loop and gives up at `TRACKER_READ_MS`), else `get`. A timeout is a failed read, which each caller already handles.
+Every such read goes through the one `ghAsync` (`src/tracker.ts`, the blocker state reads of `src/blockers.ts` too), which tries a read
+three times in all before it counts as failed, with waits of 5 s and 15 s (`GH_READ_RETRY.waitsMs`), each try with its own limit:
+only a transient failure is tried again (no answer in time, an HTTP 5xx or 408, a timeout, a reset connection or an unexpected EOF),
+never a 4xx, an authentication failure, a missing remote or a missing `gh`. It says one `GitHub slow (...): trying again` line
+when a read first retries. A write is never given to it, and the close after a merge is still tried once on purpose.
 The run's other tracker reads are asynchronous and time-limited the same way, optional on `Tracker` beside
 the sync forms commands outside a run keep (`queue`, `lint`, `report`): `reopenedSinceAsync` (`mergedEarlier`
 through `notReopened`; unreadable means reopened, so the ticket runs normally), `openAsync` (the follow-up

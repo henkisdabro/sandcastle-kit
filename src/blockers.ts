@@ -14,8 +14,8 @@ import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
 import { mergedByHand, mergedPartly } from "./run.ts";
-import { shAsync, USER_CONFIG } from "./sandbox.ts";
-import { DEFAULT_DONE, refOf, slug, statusOf, TRACKER_READ_MS, trustedComment, type CommentBy, type TicketState, type Tracker } from "./tracker.ts";
+import { USER_CONFIG } from "./sandbox.ts";
+import { DEFAULT_DONE, ghAsync, refOf, slug, statusOf, TRACKER_READ_MS, trustedComment, type CommentBy, type TicketState, type Tracker } from "./tracker.ts";
 
 // `remote`: an issue of another GitHub repository (a native blocker across repositories), id `owner/repo#N`.
 // It is none of this run's tickets, so it is never queued and no landing here releases it.
@@ -149,7 +149,7 @@ const githubState = (id: string, repo = "{owner}/{repo}"): Blocker["state"] => {
 // status writes go on while gh answers, and one that does not answer is unreadable.
 const githubStateAsync = async (id: string, limitMs: number, repo = "{owner}/{repo}"): Promise<Blocker["state"]> => {
   try {
-    const out = await shAsync("gh", ["api", `repos/${repo}/issues/${id}`, "--jq", '.state + " " + (.state_reason // "")'], limitMs);
+    const out = await ghAsync(["api", `repos/${repo}/issues/${id}`, "--jq", '.state + " " + (.state_reason // "")'], limitMs);
     const [state, reason] = out.split(/\s+/);
     return state !== "closed" ? "open" : reason === "not_planned" ? "closed-unmerged" : "closed";
   } catch {
