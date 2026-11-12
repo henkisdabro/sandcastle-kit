@@ -1139,16 +1139,27 @@ const glanceNote = (note: string): string =>
     .join(GAP_JOIN);
 
 /**
- * The key a failing test is grouped by: a runner over a workspace names one test with different path prefixes on
- * different tickets (`pkg/app Sidebar.test.tsx > Sidebar > x`, `pkg/app src/ui/Sidebar.test.tsx > Sidebar > x`), so
- * a name with ` > ` is keyed by the last word of what precedes it, as a basename, plus the title. Any other name
- * (a pytest id, a bare name) is its own key.
+ * A failing test's identity: a runner over a workspace names one test with different path prefixes on different
+ * tickets (`pkg/app Sidebar.test.tsx > Sidebar > x`, `pkg/app src/ui/Sidebar.test.tsx > Sidebar > x`), so a name with
+ * ` > ` is the last word of what precedes it plus the title: `base` is that word's basename and the title, `dir` the
+ * word itself when it carries a directory. Any other name (a pytest id, a bare name) is its own `base`, with no `dir`.
  */
-const testKey = (name: string): string => {
+const testIdentity = (name: string): { base: string; dir?: string } => {
   const at = name.indexOf(" > ");
-  if (at < 0) return name;
+  if (at < 0) return { base: name };
   const word = name.slice(0, at).trim().split(/\s+/).pop() ?? "";
-  return `${basename(word)}${name.slice(at)}`;
+  return { base: `${basename(word)}${name.slice(at)}`, dir: word.includes("/") ? word : undefined };
+};
+
+/**
+ * Whether two names are one test: the same file and title, and - when both carry a directory - the same directory,
+ * so `pkg/a/index.test.ts > renders` and `pkg/b/index.test.ts > renders` are two tests. A name with no directory (a
+ * runner that prints the basename alone) matches any directory, as it always did.
+ */
+const sameTestName = (a: string, b: string): boolean => {
+  const x = testIdentity(a);
+  const y = testIdentity(b);
+  return x.base === y.base && (x.dir === undefined || y.dir === undefined || x.dir === y.dir);
 };
 
 /** The Next step for a refused commit: the work is done, and a further turn or a redo would only repeat the refusal. */
@@ -1530,20 +1541,31 @@ export const render = (f: Facts, plain = false): string => {
     for (const id of [...fixing, ...held]) for (const k of new Set(key(id))) by.set(k, [...(by.get(k) ?? []), id]);
     return [...by].filter(([, who]) => who.length > 1);
   };
-  // Grouped by `testKey`; a group keeps the first name seen, which is what every line prints.
+  // Grouped by test identity (`testIdentity`): one group per directory a file's tests carry, and a name with no
+  // directory joins every group of its file and title. A group keeps the first name seen, which every line prints.
   const sameTest = (() => {
-    const by = new Map<string, [string, string[]]>();
-    for (const id of [...fixing, ...held]) {
-      for (const name of f.tickets[id].failing ?? []) {
-        const key = testKey(name);
-        const found = by.get(key) ?? [name, []];
-        if (!found[1].includes(id)) found[1].push(id);
-        by.set(key, found);
+    const seen: { name: string; id: string; base: string; dir?: string }[] = [];
+    for (const id of [...fixing, ...held]) for (const name of f.tickets[id].failing ?? []) seen.push({ name, id, ...testIdentity(name) });
+    const groups: { first: number; name: string; names: string[]; who: string[] }[] = [];
+    for (const base of new Set(seen.map((x) => x.base))) {
+      const ofBase = seen.filter((x) => x.base === base);
+      const dirs = [...new Set(ofBase.flatMap((x) => (x.dir === undefined ? [] : [x.dir])))];
+      for (const dir of dirs.length ? dirs : [undefined]) {
+        const members = ofBase.filter((x) => x.dir === undefined || x.dir === dir);
+        groups.push({ first: seen.indexOf(members[0]), name: members[0].name, names: members.map((x) => x.name), who: [...new Set(members.map((x) => x.id))] });
       }
     }
-    return [...by.values()].filter(([, who]) => who.length > 1);
+    // Two directory groups a basename-only name leads, on the same tickets, would print one line twice: keep one.
+    const line = (g: (typeof groups)[number]) => `${g.name}\n${[...g.who].sort().join(" ")}`;
+    const kept = new Map<string, (typeof groups)[number]>();
+    for (const g of groups.filter((x) => x.who.length > 1).sort((a, b) => a.first - b.first)) {
+      const had = kept.get(line(g));
+      if (had) had.names = [...new Set([...had.names, ...g.names])];
+      else kept.set(line(g), g);
+    }
+    return [...kept.values()].map((g): [string, string[], string[]] => [g.name, g.who, g.names]);
   })();
-  const inSameTest = (file: string, who: string[]) => sameTest.some(([test, w]) => testKey(test.split("::")[0]) === testKey(file) && who.every((id) => w.includes(id)));
+  const inSameTest = (file: string, who: string[]) => sameTest.some(([, w, names]) => names.some((n) => sameTestName(n.split("::")[0], file)) && who.every((id) => w.includes(id)));
   const sameFile = group((id) => {
     const t = f.tickets[id];
     return [...(t.state === "held" ? [] : (t.files ?? [])), ...(t.failing ?? []).map((x) => x.split("::")[0])];
