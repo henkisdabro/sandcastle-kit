@@ -337,8 +337,10 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   A later turn the checkout refused to start (a dirty working tree, a branch that is not the base,
   git's half-done leftovers - another session's edit mid-run, say) ends the run as the turn before it
   did: **0** on a green merged base, 1 on a red one.
-  Its cause is in the closing summary's Run section (`Drain: ...` at `drain`, `Turn 2 could not
-  start: ...` at the other levels), so `sandcastle report` shows it after the run.
+  Its cause is in the closing summary's Run section, so `sandcastle report` shows it after the run.
+  At `drain` the line gives the whole run:
+  `Drain: <N> turns, <HH:MM> to <HH:MM> (<span>), <landed> landed (<#refs>), tokens <in> / <out>, stopped because <cause>`.
+  At the other levels it reads `Turn 2 could not start: ...`.
   Otherwise 1 is a red merged base or a refusal before any turn ran: a refused first turn, and every
   safety stop (the `.git` guard's `NOT STARTED: the shared .git differs ...`, a bad label) at any turn.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
