@@ -127,6 +127,8 @@ export type Facts = {
   standing: string[];
   /** Standing branches whose ticket an earlier run held for a person, by branch: that outcome's text. A branch of this run's own, or with no outcome, is not here. */
   earlierHeld?: Record<string, string>;
+  /** Of `earlierHeld`'s branches, the criterion the branch's head record says it left unmet, by branch: its hand merge says "part of", never `closes`. */
+  earlierUnmet?: Record<string, string>;
   /** Tickets whose recorded outcome (any run) is a held conflict resolution: `sandcastle land` lands one, with the gates, where a landing hold is merged by hand. */
   heldResolutions?: string[];
   /** Tickets whose recorded outcome (any run) is a branch the kit could not re-create on a rewritten base: its own commits are rebuilt on the base by hand, never merged as it stands (its old base is in the branch's history). */
@@ -626,6 +628,15 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     }),
   );
 
+  // The same head record `byHandPartly` reads: a branch an earlier run held with a criterion unmet is partly done, and a merge that says `closes` would close its ticket.
+  const heads = readHeads(root);
+  const earlierUnmet = Object.fromEntries(
+    Object.keys(earlierHeld).flatMap((b) => {
+      const unmet = heads[b.replace(/^agent\/issue-/, "")]?.unmet;
+      return unmet ? [[b, unmet]] : [];
+    }),
+  );
+
   // Matched by its own wording (`needs a human: conflict resolution changed ...`, what `heldResolution` records; the files after it vary, so no whole-line compare): a hold in any other
   // words (an older kit's, a protected path's) keeps the hand merge, which `sandcastle land` would refuse or skip the review of.
   const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(STRAY_NOTE_START)).map(([id]) => id);
@@ -674,6 +685,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     upstream,
     standing,
     earlierHeld,
+    earlierUnmet,
     heldResolutions,
     heldRewritten,
     keptWorktrees: run.keptWorktrees ?? [],
@@ -1719,8 +1731,8 @@ export const render = (f: Facts, plain = false): string => {
   if (heldEarlier.length) {
     const one = heldEarlier.length === 1;
     const b = one ? heldEarlier[0] : "<branch>";
-    // An earlier run's branch has no unmet fact to read, so each merge says `closes`; one command per branch, each with its own ref.
-    const merges = heldEarlier.map((x) => `\`${handMergeCommand(x, refOf(x.replace(/^agent\/issue-/, "")))}\``).join(", ");
+    // A branch whose head record left a criterion unmet gets a "part of" merge (`gather` reads it); one with none says `closes`. One command per branch, each with its own ref.
+    const merges = heldEarlier.map((x) => `\`${handMergeCommand(x, refOf(x.replace(/^agent\/issue-/, "")), !!f.earlierUnmet?.[x])}\``).join(", ");
     next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with ${merges}, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
   }
   // A merged ticket's kept worktree (a stray file its agent left, a gate restore that failed) holds the branch the landing could not delete,
