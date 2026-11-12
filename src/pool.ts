@@ -803,13 +803,28 @@ export const claimSlot = (pool: PoolName): SlotClaim => {
  * events (`pushed`, `started`, `ended`) and `landOne` the gate's (`take`, `gateEnded`); it keeps a claim standing while
  * a landing is in flight and has not begun its gate run, or a green is queued, and no stop holds: never more than one.
  * While a landing's gates run no claim stands for the next branch - with a spare slot a ticket gate takes it - and the
- * run claims again the moment that gate run ends, so the slot it frees goes to the next landing. Held in this process only.
+ * run claims again the moment that gate run ends, so the slot it frees goes to the next landing. A ticket gate that goes green
+ * claims too (`greenGate`), inside its slot and before it frees it: the slot goes to that landing, where it went to the next
+ * ticket's gate (whose merge the landing then made stale), until the attempt pushes (`pushed`) or ends without (`greenDropped`).
+ * Held in this process only.
  */
 export type RunClaim = {
   /** The landing queue's size (greens waiting, not the one in flight) and whether a stop holds: read live at every event. */
   bind(source: { waiting(): number; stopped(): boolean }): void;
-  /** A green branch was queued. */
-  pushed(): void;
+  /**
+   * A ticket gate went green and still holds its gates slot: the run wants a claim from now on, as if the green were queued, so
+   * the slot it frees goes to that landing and not to another ticket gate. One pending want per ticket: a second call for the
+   * same `id` before it is dropped changes nothing.
+   */
+  greenGate(id: string): void;
+  /**
+   * That attempt ended without pushing its branch to the landing queue (red later, a stop, a crash, a hold), or left its gates for a
+   * repair or a review, or gates again: its pending want goes, and the claim with it unless another stands. Kept, it would hold the
+   * attempt's own later gate run back for ever. A push or an `id` with none pending does nothing.
+   */
+  greenDropped(id: string): void;
+  /** A green branch was queued: `id`'s pending want, if any, becomes the queued one (a branch pushed with no gate run, carried or land-only, has none and leaves the others'). */
+  pushed(id?: string): void;
   /** A landing took a branch off the queue. */
   started(): void;
   /** That landing is over, gated or not (a merge, a conflict, a throw, a stop): its claim, if it never gated, goes or stays for the next one. */
@@ -828,8 +843,10 @@ export const createRunClaim = (pool: PoolName = "gates"): RunClaim => {
   // A landing is in flight and its gate run has not begun / a gate run is going.
   let ahead = false;
   let gating = false;
+  // Tickets whose gates went green and whose branch is not yet queued to land: each counts as a green queued.
+  const pending = new Set<string>();
   const settle = () => {
-    const want = !(source?.stopped() ?? false) && !gating && (ahead || (source?.waiting() ?? 0) > 0);
+    const want = !(source?.stopped() ?? false) && !gating && (ahead || pending.size > 0 || (source?.waiting() ?? 0) > 0);
     if (want && !claim) claim = claimSlot(pool);
     if (!want && claim) {
       claim.release();
@@ -838,7 +855,18 @@ export const createRunClaim = (pool: PoolName = "gates"): RunClaim => {
   };
   return {
     bind: (s) => void (source = s),
-    pushed: settle,
+    greenGate: (id) => {
+      pending.add(id);
+      settle();
+    },
+    greenDropped: (id) => {
+      pending.delete(id);
+      settle();
+    },
+    pushed: (id) => {
+      if (id !== undefined) pending.delete(id);
+      settle();
+    },
     started: () => {
       ahead = true;
       settle();
