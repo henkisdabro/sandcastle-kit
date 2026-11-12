@@ -79,7 +79,7 @@ const run = (o: { dryRun?: boolean; seen?: Set<string>; create?: () => string } 
   const project = { root, name: "fixture", baseBranch: "main", label: "ready-for-agent", gates: [{ name: "test", command: "run-tests" }], tracker: fakeTracker() } as unknown as Project;
   const record = recordRun(project);
   removeAtExit();
-  const recorded = (): { title: string; from: string; phase: string; id?: string; failed?: string }[] =>
+  const recorded = (): { title: string; from: string; phase: string; evidence?: string; fullTitle?: string; id?: string; failed?: string }[] =>
     JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")).followUps ?? [];
   const made: string[] = [];
   const tracker = { ref: (id: string) => `#${id}`, comment: () => {}, create: o.create ?? ((title: string) => String(made.push(title) + 100)) };
@@ -156,8 +156,8 @@ test("a follow-up is in the run record, unfiled, as soon as the agent's pass has
   await pipelineSaying("7", { impl: IMPL, review: REVIEW });
   // Two problems: the reworded one is not a third.
   assert.deepEqual(recorded(), [
-    { title: SHARDS, from: "7", phase: "implement" },
-    { title: LIMIT, from: "7", phase: "review" },
+    { title: SHARDS, from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only" },
+    { title: LIMIT, from: "7", phase: "review", evidence: "test/full-check.sh:88 runs docker with no timeout" },
   ]);
   assert.deepEqual(made, []);
 });
@@ -175,11 +175,11 @@ test("a schedule that rejects after an agent named a follow-up leaves it in the 
   };
   const { result: error } = await quietly(() => schedule.run().then(() => undefined, (e: unknown) => e as Error));
   assert.match(String(error?.message), /the ledger could not write/);
-  assert.deepEqual(recorded(), [{ title: SHARDS, from: "7", phase: "implement" }], "in run.json before anything has filed it");
+  assert.deepEqual(recorded(), [{ title: SHARDS, from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only" }], "in run.json before anything has filed it");
   // The stop path, where the shared .git changed: nothing is written to the tracker.
   const { result: kept } = await quietly(() => book.file("the shared .git changed"));
   assert.deepEqual(made, []);
-  assert.deepEqual(kept, [{ title: SHARDS, from: "7", phase: "implement", failed: "the shared .git changed" }]);
+  assert.deepEqual(kept, [{ title: SHARDS, from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only", failed: "the shared .git changed" }]);
   assert.deepEqual(recorded(), kept);
   record.update({ stopped: "the shared .git changed" });
   const lines = needsYou(await summary(project)).split("\n").filter((l) => l.includes(SHARDS));
@@ -192,8 +192,8 @@ test("a crash where writing is safe files the follow-ups before the summary, whi
   await quietly(() => book.file());
   assert.deepEqual(made, [SHARDS, LIMIT]);
   assert.deepEqual(recorded(), [
-    { title: SHARDS, from: "7", phase: "implement", id: "101" },
-    { title: LIMIT, from: "7", phase: "review", id: "102" },
+    { title: SHARDS, from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only", id: "101" },
+    { title: LIMIT, from: "7", phase: "review", evidence: "test/full-check.sh:88 runs docker with no timeout", id: "102" },
   ]);
   record.update({ stopped: "the ledger could not write" });
   const lines = needsYou(await summary(project)).split("\n").filter((l) => l.includes("filed for triage"));
@@ -217,7 +217,7 @@ test("a normal run files each follow-up once: filing again, after a stop's filin
 test("a title an earlier turn of the run filed is not listed or filed again", async () => {
   const { book, pipelineSaying, recorded, made } = run({ seen: new Set([SHARDS.toLowerCase()]) });
   await pipelineSaying("7", { impl: IMPL, review: REVIEW });
-  assert.deepEqual(recorded(), [{ title: LIMIT, from: "7", phase: "review" }]);
+  assert.deepEqual(recorded(), [{ title: LIMIT, from: "7", phase: "review", evidence: "test/full-check.sh:88 runs docker with no timeout" }]);
   await book.file();
   assert.deepEqual(made, [LIMIT]);
 });
@@ -226,8 +226,8 @@ test("a dry run keeps its follow-ups unfiled in the record, and a stop files not
   const { book, pipelineSaying, recorded, made } = run({ dryRun: true });
   await pipelineSaying("7", { impl: IMPL });
   const { result: listed } = await quietly(() => book.file("the shared .git changed"));
-  assert.deepEqual(listed, [{ title: SHARDS, from: "7", phase: "implement" }]);
-  assert.deepEqual(recorded(), [{ title: SHARDS, from: "7", phase: "implement" }]);
+  assert.deepEqual(listed, [{ title: SHARDS, from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only" }]);
+  assert.deepEqual(recorded(), [{ title: SHARDS, from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only" }]);
   assert.deepEqual(made, []);
 });
 
@@ -241,7 +241,7 @@ test("a filing that fails keeps its reason in the record, and a later filing doe
   });
   await pipelineSaying("7", { impl: IMPL });
   await book.file();
-  assert.deepEqual(recorded(), [{ title: SHARDS, from: "7", phase: "implement", failed: "gh issue create failed: HTTP 502" }]);
+  assert.deepEqual(recorded(), [{ title: SHARDS, from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only", failed: "gh issue create failed: HTTP 502" }]);
   assert.deepEqual(await book.file(), []);
   assert.equal(calls, 1);
 });

@@ -476,6 +476,10 @@ the run record's `followUps` as its pass ends, an unfiled entry (no `id`), so a 
 before the filing - the schedule rejecting, or a safety stop - still has them for its closing
 summary and the next run; a title is listed once, and not at all when an earlier turn of the run
 filed it.
+An entry keeps the agent's `evidence` whole, and `fullTitle` when the title was cut to
+`FOLLOWUP_TITLE_MAX` (`title` stays the de-duplication key and the filed issue's title): a bullet
+the summary says to file by hand shows the full title and an indented `evidence:` line, cut at 500
+characters with the agent logs' path, so nobody greps the logs for the tag.
 After the run's notes are posted, the book's `file` files each entry still unfiled through
 `fileFollowUps` and the tracker's `create` on the host writer (a ticket file is a commit on the
 base, so `trackerMade` checks it), a title once per run; a dry run files none.
@@ -488,8 +492,8 @@ seeded into `places` as places with their issue ids) and the lines this run's pa
 remerge and repair prompts; empty when there is none, in the pipeline's default arguments, and
 filled by `pass` at every agent pass, so the review sees the implementer's lines), and a line that
 restates one - the same title from the same source ticket (`Seat.key`), or a match under the place
-rules - is a comment on that issue, not a new one (the history keeps no evidence, so an earlier
-filing is met by its title). `test/followup-already-named.test.ts`.
+rules - is a comment on that issue, not a new one (older history entries may lack evidence, so an
+earlier filing is met by its title). `test/followup-already-named.test.ts`.
 The same argument carries two lists about the run's other tickets, appended by `runTicketsView` and
 each left out when empty: "Other tickets in this run" (ref and title of each ticket the turn may
 run, this one left out: the pipeline context's `tickets`, which `burndown()` fills from
@@ -539,7 +543,7 @@ a shared test id makes it a comment on that issue across source tickets. A dry r
 The two stops file them too (`stopLanding`, before the summary is printed), except after a safety
 stop - the shared `.git` changed - where nothing is written to the tracker: each entry stays in the
 record as `failed` with that reason, which the report lists under Needs you as one to file by hand -
-the reason said once for the set (`followUpsWithheld`), live and in the summary, over bare bullets
+the reason said once for the set (`followUpsWithheld`), live and in the summary, over one bullet each
 (a crash of the schedule is a safety stop when the host git refused a write, and otherwise the
 writer's own `.git` check refuses a write the fingerprint forbids).
 The run record's `followUps` keeps what each became, and the report lists them under Needs you - the

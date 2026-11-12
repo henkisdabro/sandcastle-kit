@@ -289,7 +289,8 @@ This continues SKILL.md: run its "Before every action" first.
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
       next run picks up the remainder - unless the line says the remainder needs a person (a decision, a deploy, access),
       when the summary suggests moving the ticket to the hold label instead). A follow-up the summary says to file by hand is one the kit
-      could not file, after a stop or a failed filing: file it, or offer to. The rest are under a `### To triage`
+      could not file, after a stop or a failed filing: file it, or offer to, with the `evidence:` line under its bullet
+      as the ticket's body (never search the agents' logs for the `<followup>` tag: that is how duplicates were filed). The rest are under a `### To triage`
       sub-heading, after the run's own items, and the headline's `to triage` counts them (`need you` counts the items
       above it): each follow-up `filed for triage` (the kit filed it from an agent's `<followup>` line) and each
       `needs-triage` issue opened during the run. One line on what it asks, and offer the `queue` action for it.
