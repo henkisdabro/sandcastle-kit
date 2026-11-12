@@ -2104,9 +2104,9 @@ taken.
 Unlike one, it is not counted against `maxSandboxes`: `liveSlots` leaves it out, so it is not in
 `members()`' `held` (the shares) nor in `lastFreeSlot`'s count, and a waiting ticket's agent pass can
 take its numbered slot.
-`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - its name starts
-with `sandboxes-` and ends in `.lock`, which is all that count asks - so other runs and the views see
-every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
+`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - the view's
+`readPool` counts it apart by its `-waiting-` (`pool.sandboxes.outside`, drawn `+N for gates`) - so
+other runs and the views see every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
 waiting, and as many again whose gates slot was granted (they stay on the lock through their gates).
 `test/gate-wait-frees-sandbox.test.ts`.
 
