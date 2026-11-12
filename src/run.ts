@@ -398,8 +398,9 @@ export const preflight = async (project: Project, image: string, extra: { model:
       : undefined;
   });
   if (CROSS_REVIEW) {
-    // On the HOST, not in the image: this also refreshes the host's ChatGPT
-    // login, which every sandbox then copies (see sandboxConfig).
+    // On the HOST, not in the image: it proves the host's ChatGPT login works. It refreshes that login only inside
+    // Codex's own 5-minute window before the access token expires, so the sandboxes' copies do not rely on it:
+    // they carry no refresh token at all (see `codexSandboxAuth` in src/sandbox.ts).
     probes.push(
       ask(
         "codex",
