@@ -66,6 +66,8 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
   const baseRuns: string[] = [];
   const toldRed: string[][] = [];
   const lines: string[] = [];
+  // What the passes' `<followup>` lines reached the run's book as (`ctx.followUps`).
+  const followUps: import("../src/burndown.ts").FollowUp[] = [];
   const gates = new Map<string, GateRun[]>();
   const kernel = { oom: 0, kills: 0 };
   const agents: Record<string, (id: string, worktree: string) => string | void> = {
@@ -132,6 +134,7 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
     ...(recordedGreen ? { baseRecordedGreen: recordedGreen } : {}),
     baseWentRed: (tests) => toldRed.push(tests),
     timed: async (_issue, _phase, fn) => fn(),
+    followUps: { push: (f: import("../src/burndown.ts").FollowUp) => void followUps.push(f) } as unknown as Ctx["followUps"],
     run: { ticket: () => {} },
     view: { claim: () => {} },
     host: { begin: () => {}, settle: async () => {} },
@@ -152,5 +155,5 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
       console.log = log;
     }
   };
-  return { root, agents, repairs, baseRuns, toldRed, lines, attempt, kernel };
+  return { root, agents, repairs, baseRuns, toldRed, lines, followUps, attempt, kernel };
 };
