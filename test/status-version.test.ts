@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Snapshot } from "../src/status-snapshot.ts";
 import { buildFixture } from "./status-fixture.ts";
+import { visibleWidth } from "../src/status-grid.ts";
 import { drawFrame } from "./status-run.ts";
 
 const { palette, renderFrame } = await import("../src/status-render.ts");
@@ -79,6 +80,19 @@ test("the version is in the muted colour and the clock keeps the accent", () => 
   const frame = draw(snapshot("0.24.0"), 200, 400, colours).join("\n");
   assert.ok(frame.includes(`${colours.accent}13:00:00${colours.off}`));
   assert.ok(frame.includes(`${colours.mute}v0.24.0${colours.off}`));
+});
+
+test("a snapshot with a version keeps every line within the pane and the three-row logo whole, from 60 to 330 columns", () => {
+  // The view always has a version, and the breakpoint tests (status-render.test.ts) draw without one: the version
+  // widens the third row and the one-row logo, never past the pane, and the third row stays within the first's width.
+  for (let cols = 60; cols <= 330; cols++) {
+    for (const rows of [12, 400]) {
+      const frame = draw(snapshot("0.24.0"), cols, rows);
+      for (const line of frame) assert.ok(visibleWidth(line) <= cols, `${cols}x${rows}: ${line}`);
+      for (const line of frame) if (/^[┌├└│]/.test(line)) assert.equal(visibleWidth(line), cols, `${cols}x${rows}: ${line}`);
+      if (rows === 400) assert.match(frame.join("\n"), /│ +██▀██ · {3}base main {2}· {2}13:00:00 {2}· {2}v0\.24\.0 +│/, `${cols} columns`);
+    }
+  }
 });
 
 test("status 0 in a project prints the installed kit's version", () => {
