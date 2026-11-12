@@ -149,7 +149,7 @@ test("the timings lines give the gates slot waits, the landings' sandbox slot wa
     line({ run: "r0", issue: "1", phase: "gates", ms: 99 * MIN, waitMs: 99 * MIN }),
     "not json",
   ].join("\n");
-  assert.deepEqual(timeLostFromTimings(text, "r1"), { ...noLoss, gateWaitMs: 27 * MIN, landingWaitMs: 3 * MIN, afterRepair: 1, afterRepairMs: 2 * MIN, afterRequeue: 1, afterRequeueMs: 4 * MIN, repairs: 1, repairMs: 6 * MIN });
+  assert.deepEqual(timeLostFromTimings(text, "r1"), { ...noLoss, gateWaitMs: 27 * MIN, landingWaitMs: 3 * MIN, resolveWaitMs: 9 * MIN, afterRepair: 1, afterRepairMs: 2 * MIN, afterRequeue: 1, afterRequeueMs: 4 * MIN, repairs: 1, repairMs: 6 * MIN });
   assert.equal(timeLostFromTimings(text, "none"), undefined);
 });
 
