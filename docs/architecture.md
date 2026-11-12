@@ -45,6 +45,10 @@ ignored files out, so the flag makes git refuse, not overwrite, one the base now
 installed dependencies kept, once its records pass `assertWorktreeRecords`) - one with uncommitted
 or untracked files, or outside `.sandcastle/worktrees/` (a person's own), is left, as git refuses to
 move its branch; `test/stale-empty-branch.test.ts`, `test/stale-empty-branch-kept-worktree.test.ts`;
+a fresh branch is brought up again once its sandbox is open (`catchUp`, before the implement pass): a landing that
+finished during the rest of the setup is fast-forwarded in, in the ticket's worktree, through `host.write` and
+after `checkRecords`; changed files run the project's `setup` again, and a failed one is `SetupFailed`;
+`test/pipeline-fresh-branch-catch-up.test.ts`;
 a kit worktree Sandcastle's open would reuse - holding the branch, or at its path - has its records
 checked before the open too, at the setup and at a resume, `test/guard-worktree-records.test.ts`),
 timings.
