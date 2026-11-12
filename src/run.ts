@@ -361,6 +361,20 @@ export const preflightFailure = (
   return `NOT STARTED: Preflight failed - no sandbox started:\n  ${lines.join("\n  ")}`;
 };
 
+/**
+ * A refused preflight's message into the run record, before `burndown()` rethrows it: the command prints the text once,
+ * and an agent closing the run later had no way to learn the cause from the record. Never throws: a record that cannot
+ * be written must not hide the refusal.
+ */
+export const recordPreflightFailure = (record: { update: (fields: RunRecord) => void }, error: unknown): void => {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    record.update({ preflightFailure: message });
+  } catch {
+    // The refusal itself still reaches the caller.
+  }
+};
+
 // `extra` is a model only some tickets ask for (a label), with where it came from.
 export const preflight = async (project: Project, image: string, extra: { model: string; from: string }[] = []) => {
   // Before any probe, and with preflight skipped too: without Codex on the host every ticket's

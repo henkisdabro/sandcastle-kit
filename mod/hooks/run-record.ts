@@ -297,6 +297,8 @@ export type RunRecord = {
   waiting?: { issue: string; on: string[] }[];
   /** What the run line shows while the run is live. */
   stage?: string;
+  /** The message a refused preflight threw (the one the command printed), written before the error is rethrown: the closing summary's headline shows its cause. Absent unless the preflight refused the run. */
+  preflightFailure?: string;
   concurrency?: number;
   /**
    * How loaded the run was, kept in the history line so the estimate prices a run from earlier runs of a similar load:
