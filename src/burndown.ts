@@ -101,7 +101,7 @@ type Outcome = {
   repairs: number;
   idleRepairs?: number;
   /** The last repair pass committed nothing and ended with `<verdict>outside-branch</verdict>` (`repairVerdict`): its line and the tests it judged flaky. */
-  outside?: { line: string; tests: string[] };
+  outside?: { line: string; tests: string[]; by?: string };
   /** Red twice on test timeouts while the machine's CPU pressure was high (`loadMade`): no repair pass; the ticket says to run it again when the machine is quiet. */
   loadRed?: true;
   gates: Gate[];
@@ -2819,7 +2819,16 @@ export const createPipeline = (ctx: PipelineContext) => {
       // Whether the pass before committed: only then is a new failure an effect of the repair worth the extra pass.
       let lastCommitted = true;
       // The last pass committed nothing and said the red is outside the branch: one gate run, then no more passes.
-      let outside: { line: string; tests: string[] } | undefined;
+      let outside: { line: string; tests: string[]; by?: string } | undefined;
+      // Another ticket's repair already judged these very tests outside its branch (the fix board): no pass here, the
+      // verdict is that ticket's. Never for a forced red, which is the same text on every ticket and no test's failure.
+      const judgedElsewhere = (failure: Failure) => {
+        const found = forced ? undefined : fixes.outsideFor(wholeTests(failure));
+        if (!found || found.by === issue.id) return false;
+        outside = { line: found.line, tests: found.tests, by: found.by };
+        console.log(`${ref(issue.id)}: ${failure.name} red on the tests ${ref(found.by)}'s repair judged outside its branch - no repair pass`);
+        return true;
+      };
       for (
         let red = gated.failure;
         red && !loadRed && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
@@ -2842,6 +2851,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const key = failureKey(failure);
         // Before the fix board is consulted: a ticket parked here claims nothing, so no other ticket waits for its fix through the pause.
         await juncture("repair");
+        if (judgedElsewhere(failure)) break;
         // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
         // the new base and gate again. A forced red is the same text on every ticket and waits for none.
         const asked = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
@@ -2871,6 +2881,8 @@ export const createPipeline = (ctx: PipelineContext) => {
             waitedFor.delete(key);
             continue;
           }
+          // The fixer ended red and landed nothing, perhaps with a verdict that this red is outside its branch.
+          if (!fixLanded && judgedElsewhere(failure)) break;
           if (fixLanded) {
             // A merge that conflicts is left for the repair, as the carried branch's is at landing.
             const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
@@ -2940,6 +2952,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (!fixed) break;
         // A tag on a pass that committed is ignored: the commits are the repair, and they are gated as ever.
         outside = verdict && !lastCommitted ? verdict : undefined;
+        if (outside) fixes.judgedOutside(issue.id, outside);
         at?.gates?.();
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
         if (outside) {
