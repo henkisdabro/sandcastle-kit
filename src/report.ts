@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { red } from "./api-key.ts";
-import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen, turnsEndLine } from "./autonomy.ts";
+import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen, turnsEndLine, UNCHECKED_NOTE } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
@@ -127,6 +127,8 @@ export type Facts = {
   standing: string[];
   /** Standing branches whose ticket an earlier run held for a person, by branch: that outcome's text. A branch of this run's own, or with no outcome, is not here. */
   earlierHeld?: Record<string, string>;
+  /** Of `earlierHeld`'s branches, the criterion the branch's head record says it left unmet, by branch: its hand merge says "part of", never `closes`. */
+  earlierUnmet?: Record<string, string>;
   /** Tickets whose recorded outcome (any run) is a held conflict resolution: `sandcastle land` lands one, with the gates, where a landing hold is merged by hand. */
   heldResolutions?: string[];
   /** Tickets whose recorded outcome (any run) is a branch the kit could not re-create on a rewritten base: its own commits are rebuilt on the base by hand, never merged as it stands (its old base is in the branch's history). */
@@ -339,8 +341,15 @@ export const tokensFromTimings = (text: string, runId: string): { total: Tokens;
     }
     if (!line || line.run !== runId || !line.tokens || typeof line.tokens !== "object") continue;
     const model = typeof line.model === "string" && line.model ? line.model : NO_MODEL;
-    total = addTokens(total ?? NO_TOKENS, line.tokens);
-    byModel[model] = addTokens(byModel[model] ?? NO_TOKENS, line.tokens);
+    // A split count only when it is a number: anything else (or a line an older kit wrote) reads as no split.
+    const { cacheWrite1h, cacheWrite5m, ...counts } = line.tokens;
+    const tokens: Tokens = {
+      ...counts,
+      ...(typeof cacheWrite1h === "number" && Number.isFinite(cacheWrite1h) ? { cacheWrite1h } : {}),
+      ...(typeof cacheWrite5m === "number" && Number.isFinite(cacheWrite5m) ? { cacheWrite5m } : {}),
+    };
+    total = addTokens(total ?? NO_TOKENS, tokens);
+    byModel[model] = addTokens(byModel[model] ?? NO_TOKENS, tokens);
   }
   return total ? { total, byModel } : undefined;
 };
@@ -414,6 +423,8 @@ export type TimeLost = {
   afterRequeueMs: number;
   repairs: number;
   repairMs: number;
+  /** The waits of sent-back tickets' resolves before their attempt began (the `waitMs` of `setup` lines); absent when none. */
+  resolveWaitMs?: number;
 };
 
 const GATE_SLOT_PHASES: readonly string[] = ["gates", LANDING_GATES, "base gates", "verify"];
@@ -441,6 +452,8 @@ export const timeLostFromTimings = (text: string, runId: string): TimeLost | und
     if (GATE_SLOT_PHASES.includes(line.phase)) lost.gateWaitMs += waitMs;
     if (line.phase === LANDING_GATES) lost.landingGateWaitMs += waitMs;
     if (line.phase === LANDING) lost.landingWaitMs += waitMs;
+    // A setup step has no wait of its own: its `waitMs` is the resolve's wait before the attempt (`at.resolveWaitMs`).
+    if (line.phase === "setup" && waitMs) lost.resolveWaitMs = (lost.resolveWaitMs ?? 0) + waitMs;
     const issue = String(line.issue ?? "");
     const marked = (line as { rerun?: unknown }).rerun === true;
     // A landing re-run inside its slot is a line of its own, marked; a requeued ticket's second landing is no re-run.
@@ -629,6 +642,15 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     }),
   );
 
+  // The same head record `byHandPartly` reads: a branch an earlier run held with a criterion unmet is partly done, and a merge that says `closes` would close its ticket.
+  const heads = readHeads(root);
+  const earlierUnmet = Object.fromEntries(
+    Object.keys(earlierHeld).flatMap((b) => {
+      const unmet = heads[b.replace(/^agent\/issue-/, "")]?.unmet;
+      return unmet ? [[b, unmet]] : [];
+    }),
+  );
+
   // Matched by its own wording (`needs a human: conflict resolution changed ...`, what `heldResolution` records; the files after it vary, so no whole-line compare): a hold in any other
   // words (an older kit's, a protected path's) keeps the hand merge, which `sandcastle land` would refuse or skip the review of.
   const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(STRAY_NOTE_START)).map(([id]) => id);
@@ -677,6 +699,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     upstream,
     standing,
     earlierHeld,
+    earlierUnmet,
     heldResolutions,
     heldRewritten,
     keptWorktrees: run.keptWorktrees ?? [],
@@ -860,7 +883,7 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
 
   const lines = [`Settings: ${items.join(" · ")}`, ...usage];
   const again = level === 0 && !f.next ? rerunnable(f) : undefined;
-  const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? [])])] : [];
+  const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? []), ...(again.unchecked ?? [])])] : [];
   if (left.length) {
     lines.push(
       `Autonomy 0 makes one turn, and ${left.map(refOf).join(" ")} could run again: \`AUTONOMY_LEVEL=2\` (or \`drain\`) lets one \`sandcastle run\` take ` +
@@ -1130,16 +1153,27 @@ const glanceNote = (note: string): string =>
     .join(GAP_JOIN);
 
 /**
- * The key a failing test is grouped by: a runner over a workspace names one test with different path prefixes on
- * different tickets (`pkg/app Sidebar.test.tsx > Sidebar > x`, `pkg/app src/ui/Sidebar.test.tsx > Sidebar > x`), so
- * a name with ` > ` is keyed by the last word of what precedes it, as a basename, plus the title. Any other name
- * (a pytest id, a bare name) is its own key.
+ * A failing test's identity: a runner over a workspace names one test with different path prefixes on different
+ * tickets (`pkg/app Sidebar.test.tsx > Sidebar > x`, `pkg/app src/ui/Sidebar.test.tsx > Sidebar > x`), so a name with
+ * ` > ` is the last word of what precedes it plus the title: `base` is that word's basename and the title, `dir` the
+ * word itself when it carries a directory. Any other name (a pytest id, a bare name) is its own `base`, with no `dir`.
  */
-const testKey = (name: string): string => {
+const testIdentity = (name: string): { base: string; dir?: string } => {
   const at = name.indexOf(" > ");
-  if (at < 0) return name;
+  if (at < 0) return { base: name };
   const word = name.slice(0, at).trim().split(/\s+/).pop() ?? "";
-  return `${basename(word)}${name.slice(at)}`;
+  return { base: `${basename(word)}${name.slice(at)}`, dir: word.includes("/") ? word : undefined };
+};
+
+/**
+ * Whether two names are one test: the same file and title, and - when both carry a directory - the same directory,
+ * so `pkg/a/index.test.ts > renders` and `pkg/b/index.test.ts > renders` are two tests. A name with no directory (a
+ * runner that prints the basename alone) matches any directory, as it always did.
+ */
+const sameTestName = (a: string, b: string): boolean => {
+  const x = testIdentity(a);
+  const y = testIdentity(b);
+  return x.base === y.base && (x.dir === undefined || y.dir === undefined || x.dir === y.dir);
 };
 
 /** The Next step for a refused commit: the work is done, and a further turn or a redo would only repeat the refusal. */
@@ -1237,6 +1271,7 @@ const causesOf = (f: Facts): { ms: number; text: string; gates?: true }[] => {
     ...(f.pausedMs ? [{ ms: f.pausedMs, text: `${span(f.pausedMs)} paused (sandcastle pause or the plan's usage)` }] : []),
     ...(f.sandboxWaitMs ? [{ ms: f.sandboxWaitMs, text: `${span(f.sandboxWaitMs)} with a worker waiting for a sandbox slot` }] : []),
     ...(lost?.landingWaitMs ? [{ ms: lost.landingWaitMs, text: `${span(lost.landingWaitMs)} with landings waiting for a sandbox slot` }] : []),
+    ...(lost?.resolveWaitMs ? [{ ms: lost.resolveWaitMs, text: `${span(lost.resolveWaitMs)} with sent-back tickets waiting to resolve, summed over tickets` }] : []),
     ...(lost && lost.redReruns + lost.afterRepair + lost.afterRequeue + lost.repairs ? [passCause(lost)] : []),
   ].filter((c) => c.ms >= 60_000).sort((a, b) => b.ms - a.ms);
 };
@@ -1432,18 +1467,30 @@ export const render = (f: Facts, plain = false): string => {
   if (overran.length) done.push("Changed files beyond their Touches line:", ...overran.map((id) => `  ${name(id)}: ${overrunPaths(f.tickets[id].overrun!)}`));
   if (closed.length && f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   else if (merged.length) done.push(`The code is only on your local ${f.base} until you push it.`);
-  // A ticket the scheduler sent back once (a conflict or a red gate at landing) and landed on its second attempt.
-  // `requeued` stays on a merged ticket's record, and is null when the second attempt never began.
-  const sentBack = new Map<string, string[]>();
-  for (const id of merged.filter((id) => !!f.tickets[id].requeued)) {
-    const line = f.tickets[id].requeued!;
+  // A ticket the scheduler sent back (a conflict or a red gate at landing, a failed setup) and landed on a later attempt.
+  // `requeued` stays on a merged ticket's record, and is null when the later attempt never began: it gates the list.
+  // `requeues` holds every send-back in order; an older record has only `requeued`, one send-back.
+  const reasonOf = (line: string) => {
     // Where the conflict was found is in the line (`requeuedLine`); an older run record has none, and says none.
     const found = line.match(/^requeued after conflict (before review|before gates|at landing)/)?.[1];
     const where = found === "at landing" ? " at landing" : found ? ` found ${found.replace("before ", "before its ")}` : "";
-    const why = line.startsWith("requeued after conflict") ? `sent back after a conflict${where}` : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : line.startsWith("requeued after setup failed") ? "sent back after its setup failed" : "sent back at landing";
-    sentBack.set(why, [...(sentBack.get(why) ?? []), id]);
+    return line.startsWith("requeued after conflict") ? `sent back after a conflict${where}` : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : line.startsWith("requeued after setup failed") ? "sent back after its setup failed" : "sent back at landing";
+  };
+  // By attempt count, then by the reasons in order: tickets with the same sequence share one parenthesis.
+  const sentBack = new Map<number, Map<string, string[]>>();
+  for (const id of merged.filter((id) => !!f.tickets[id].requeued)) {
+    const t = f.tickets[id];
+    const lines = Array.isArray(t.requeues) ? t.requeues.filter((l): l is string => typeof l === "string" && !!l) : [];
+    const reasons = (lines.length ? lines : [t.requeued!]).map(reasonOf);
+    const why = [reasons[0], ...reasons.slice(1).map((r) => r.replace(/^sent back /, ""))].join(", then ");
+    const byWhy = sentBack.get(reasons.length + 1) ?? new Map<string, string[]>();
+    byWhy.set(why, [...(byWhy.get(why) ?? []), id]);
+    sentBack.set(reasons.length + 1, byWhy);
   }
-  if (sentBack.size) done.push(`Landed on a second attempt: ${[...sentBack].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);
+  for (const [attempts, byWhy] of [...sentBack].sort(([a], [b]) => a - b)) {
+    const head = attempts === 2 ? "Landed on a second attempt" : attempts === 3 ? "Landed on a third attempt" : `Landed after ${attempts} attempts`;
+    done.push(`${head}: ${[...byWhy].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);
+  }
   if (wouldMerge.length) {
     // Each branch was gated alone; whether they merge together is a separate question.
     const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";
@@ -1527,20 +1574,31 @@ export const render = (f: Facts, plain = false): string => {
     for (const id of [...fixing, ...held]) for (const k of new Set(key(id))) by.set(k, [...(by.get(k) ?? []), id]);
     return [...by].filter(([, who]) => who.length > 1);
   };
-  // Grouped by `testKey`; a group keeps the first name seen, which is what every line prints.
+  // Grouped by test identity (`testIdentity`): one group per directory a file's tests carry, and a name with no
+  // directory joins every group of its file and title. A group keeps the first name seen, which every line prints.
   const sameTest = (() => {
-    const by = new Map<string, [string, string[]]>();
-    for (const id of [...fixing, ...held]) {
-      for (const name of f.tickets[id].failing ?? []) {
-        const key = testKey(name);
-        const found = by.get(key) ?? [name, []];
-        if (!found[1].includes(id)) found[1].push(id);
-        by.set(key, found);
+    const seen: { name: string; id: string; base: string; dir?: string }[] = [];
+    for (const id of [...fixing, ...held]) for (const name of f.tickets[id].failing ?? []) seen.push({ name, id, ...testIdentity(name) });
+    const groups: { first: number; name: string; names: string[]; who: string[] }[] = [];
+    for (const base of new Set(seen.map((x) => x.base))) {
+      const ofBase = seen.filter((x) => x.base === base);
+      const dirs = [...new Set(ofBase.flatMap((x) => (x.dir === undefined ? [] : [x.dir])))];
+      for (const dir of dirs.length ? dirs : [undefined]) {
+        const members = ofBase.filter((x) => x.dir === undefined || x.dir === dir);
+        groups.push({ first: seen.indexOf(members[0]), name: members[0].name, names: members.map((x) => x.name), who: [...new Set(members.map((x) => x.id))] });
       }
     }
-    return [...by.values()].filter(([, who]) => who.length > 1);
+    // Two directory groups a basename-only name leads, on the same tickets, would print one line twice: keep one.
+    const line = (g: (typeof groups)[number]) => `${g.name}\n${[...g.who].sort().join(" ")}`;
+    const kept = new Map<string, (typeof groups)[number]>();
+    for (const g of groups.filter((x) => x.who.length > 1).sort((a, b) => a.first - b.first)) {
+      const had = kept.get(line(g));
+      if (had) had.names = [...new Set([...had.names, ...g.names])];
+      else kept.set(line(g), g);
+    }
+    return [...kept.values()].map((g): [string, string[], string[]] => [g.name, g.who, g.names]);
   })();
-  const inSameTest = (file: string, who: string[]) => sameTest.some(([test, w]) => testKey(test.split("::")[0]) === testKey(file) && who.every((id) => w.includes(id)));
+  const inSameTest = (file: string, who: string[]) => sameTest.some(([, w, names]) => names.some((n) => sameTestName(n.split("::")[0], file)) && who.every((id) => w.includes(id)));
   const sameFile = group((id) => {
     const t = f.tickets[id];
     return [...(t.state === "held" ? [] : (t.files ?? [])), ...(t.failing ?? []).map((x) => x.split("::")[0])];
@@ -1555,11 +1613,14 @@ export const render = (f: Facts, plain = false): string => {
     const s = id ? f.tickets[id].state : undefined;
     return s && s !== "merged" ? ` (${s === "red" ? (redTogether(f, id!) ? "red together" : "gate red") : s})` : "";
   };
-  const skipped = ids(["skipped"]);
+  // A ticket whose outsider-edit read failed was not stopped by the run: it is runnable now, not "the run stopped early".
+  const unchecked = ids(["skipped"]).filter((id) => f.tickets[id].note === UNCHECKED_NOTE);
+  const skipped = ids(["skipped"]).filter((id) => !unchecked.includes(id));
   // Why each one can run, from the record: a ticket held for an overlap says which ticket it waited
   // for (and whether that one landed); one that waited on blockers, which; a conflicted one resumes its branch.
   const runnableWhy = (id: string) => {
     const t = f.tickets[id] ?? {};
+    if (unchecked.includes(id)) return UNCHECKED_NOTE;
     if (t.state === "paused") return `paused${t.note ? ` ${t.note}` : ""} - its branch resumes`;
     if (t.state === "conflict") return "conflicted - its branch resumes";
     if (t.state === "red") return "red - its branch resumes";
@@ -1574,7 +1635,7 @@ export const render = (f: Facts, plain = false): string => {
     return on.length ? `${on.length === 1 ? "blocker" : "blockers"} ${on.join(", ")} closed` : "blockers closed";
   };
   // A red ticket keeps its queue label (Next step says "still queued"), so the next run resumes its branch: it is runnable like a conflicted one.
-  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict" || f.tickets[id].state === "red"), ...f.runnable, ...partlyRerun, ...parked])];
+  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict" || f.tickets[id].state === "red"), ...f.runnable, ...partlyRerun, ...parked, ...unchecked])];
   const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     // A ticket cut short is runnable too, and its own line follows: "none" above it would contradict it.
@@ -1691,7 +1752,9 @@ export const render = (f: Facts, plain = false): string => {
   // Never closed by the kit (the agent may be wrong), and still queued: every later run would pay for it again.
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} ticket(s) this run unblocked: \`sandcastle run\`.`);
-  if (skipped.length && !f.setupProblem) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
+  // A ticket whose outsider-edit read failed never started either, and stays queued: runnable, so it has a step too.
+  const neverStarted = (f.setupProblem ? 0 : skipped.length) + unchecked.length;
+  if (neverStarted) next.push(`Run again for the ${neverStarted} ticket(s) that never started.`);
   if (requeued.length) next.push(`\`sandcastle run\` again for ${list(requeued)}: requeued during this run.`);
   // They keep their queue label, and the next run resumes a kept branch rather than starting over.
   if (parked.length + cut.length + unstarted.length) {
@@ -1728,8 +1791,8 @@ export const render = (f: Facts, plain = false): string => {
   if (heldEarlier.length) {
     const one = heldEarlier.length === 1;
     const b = one ? heldEarlier[0] : "<branch>";
-    // An earlier run's branch has no unmet fact to read, so each merge says `closes`; one command per branch, each with its own ref.
-    const merges = heldEarlier.map((x) => `\`${handMergeCommand(x, refOf(x.replace(/^agent\/issue-/, "")))}\``).join(", ");
+    // A branch whose head record left a criterion unmet gets a "part of" merge (`gather` reads it); one with none says `closes`. One command per branch, each with its own ref.
+    const merges = heldEarlier.map((x) => `\`${handMergeCommand(x, refOf(x.replace(/^agent\/issue-/, "")), !!f.earlierUnmet?.[x])}\``).join(", ");
     next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with ${merges}, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
   }
   // A merged ticket's kept worktree (a stray file its agent left, a gate restore that failed) holds the branch the landing could not delete,

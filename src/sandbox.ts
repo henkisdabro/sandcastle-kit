@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv, stripVTControlCharacters } from "node:util";
-import { claudeEnv, CROSS_REVIEW } from "./agents.ts";
+import { CACHE_TTL_KEY, claudeEnv, CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
 import { nearest, OperatorError, SetupFailed } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
@@ -1041,9 +1041,10 @@ export const hostTimeZone = (): string | undefined => {
 export const sandboxEnv = (project: Project): Record<string, string> => {
   const TZ = hostTimeZone();
   // A key the agent's own env sets (`claudeEnv`) stays out: Sandcastle refuses every pass whose agent and sandbox name
-  // the same key, and the agent's value, exported before its command, would win anyway.
+  // the same key, and the agent's value, exported before its command, would win anyway. So does the prompt cache TTL a
+  // review or resolve pass sets (`CACHE_TTL_KEY`), even though an implement pass's env does not name it.
   const env = credentials(project);
-  for (const key of Object.keys(claudeEnv())) delete env[key];
+  for (const key of [...Object.keys(claudeEnv()), CACHE_TTL_KEY]) delete env[key];
   return withGitMaintenanceOff({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) });
 };
 
@@ -1057,9 +1058,27 @@ export const sandboxMounts = (project: Project) => [
   ...project.mounts,
   { hostPath: join(KIT, "container"), sandboxPath: MANAGED_SETTINGS, readonly: true },
   ...(CROSS_REVIEW
-    ? [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }]
+    ? (hideCodexCredentials(), [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }])
     : []),
 ];
+
+// The mounted Codex login holds tokens `credentials()` never registers, so a crashed Codex pass whose
+// output echoes one would write it into the agent log and the crash note unredacted. Every string in
+// the file, nested ones too, goes to `hideFromGates`. A file that is missing, unreadable or not JSON
+// registers nothing: the mount is made as before.
+const hideCodexCredentials = () => {
+  try {
+    const found: string[] = [];
+    const walk = (value: unknown) => {
+      if (typeof value === "string") found.push(value);
+      else if (value && typeof value === "object") Object.values(value).forEach(walk);
+    };
+    walk(JSON.parse(readFileSync(join(homedir(), ".codex", "auth.json"), "utf8")));
+    hideFromGates(found);
+  } catch {
+    // Nothing to register; the mount does not depend on it.
+  }
+};
 
 // Sandcastle runs the ready hooks all at once, so this one races the project's setup: written to
 // git's XDG global file rather than `~/.gitconfig`, it never meets a setup step's `git config

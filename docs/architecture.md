@@ -45,6 +45,10 @@ ignored files out, so the flag makes git refuse, not overwrite, one the base now
 installed dependencies kept, once its records pass `assertWorktreeRecords`) - one with uncommitted
 or untracked files, or outside `.sandcastle/worktrees/` (a person's own), is left, as git refuses to
 move its branch; `test/stale-empty-branch.test.ts`, `test/stale-empty-branch-kept-worktree.test.ts`;
+a fresh branch is brought up again once its sandbox is open (`catchUp`, before the implement pass): a landing that
+finished during the rest of the setup is fast-forwarded in, in the ticket's worktree, through `host.write` and
+after `checkRecords`; changed files run the project's `setup` again, and a failed one is `SetupFailed`;
+`test/pipeline-fresh-branch-catch-up.test.ts`;
 a kit worktree Sandcastle's open would reuse - holding the branch, or at its path - has its records
 checked before the open too, at the setup and at a resume, `test/guard-worktree-records.test.ts`),
 timings.
@@ -114,7 +118,19 @@ A conflict only in `generated` paths goes through `resolveGenerated`. A failed r
 elsewhere (the base moved after `conflictBefore` read it) or a refused merge is aborted, with a
 line saying so, and the branch is gated as it stands: no agent pass or requeue starts here, and the
 landing's own precheck finds a real conflict. No merge on the `redAtLanding` path (no gate runs),
-nor before the gate run after a repair pass or a fix-board merge. `preRepair` is read after it, so
+nor before the gate run after a repair pass or a fix-board merge.
+The check and the merge run twice for the attempt's first gate run: before the wait for the gates
+slot (setup then runs outside the slot) and again once the slot is granted, because the wait is
+minutes at `maxGates: 1` and the base moves in it. The second pass is the `onSlot` hook the pipeline
+hands its `gate` port, which `runGates` awaits inside the slot before the first gate
+(`GateProgress.onSlot`; `false` stops the run: no gate, the slot freed, a `GateRun` with no gates and
+no failures, never a green one). When the branch already holds the base's tip (the first merge left
+it there and the base did not move) it answers at once after one `rev-list --count`. Otherwise
+`conflictBefore` is asked again: a conflict stops the run and the attempt ends exactly as the check
+before the wait ends it (`conflict`, found at `gates`); no conflict runs `mergeBaseBeforeGates` again,
+with its undo rules unchanged (a first merge that was undone is tried again too), and the gates go on.
+The gate runs after a repair pass or a fix wait pass no hook (`test/pipeline-base-merge-at-slot.test.ts`).
+`preRepair` is read after the merge, so
 a re-review after a repair covers repair commits only; `touchesOverrun` (three-dot, `--no-merges`)
 and `branchFiles` count the branch's own files, not what the merge brought; the green head record
 is the merged tip. With `land: "merge"` a landed ticket gains an in-branch `Merge <base> into
@@ -351,11 +367,15 @@ The per-ticket summary line (`ticketTime`) labels three figures: `work 19m + 8m 
 Work is `took` less `waited`, the waiting is `waited`, and the landing is the landing's elapsed
 (its own wait for a gates slot included), kept per ticket from the landing port's `timed` callback
 and shown only for a ticket that merged.
-A conflicted ticket's resolve wait is in none of the three.
-A sent-back ticket's resolve wait, which also comes before the pipeline, is handed in as
+A sent-back ticket's resolve wait is part of the waiting.
+It comes before the pipeline and is handed in as
 `at.resolveWaitMs`, and the first `setup` step takes it as `timed`'s `queuedMs`: `withQueued`
-(`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`, and not to `waited`, since `took`
-never held it.
+(`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`. `took` never held it, so the pipeline adds
+it to both `took` and `waited` (`addResolveWait` in `src/burndown.ts`): the ticket's summary line keeps its
+work figure and shows the wait as `+ Nm waiting`. The report reads the same wait from the `waitMs` of the
+`setup` lines (`TimeLost.resolveWaitMs`, absent when none) as its own cause in `Largest causes measured`:
+`Nm with sent-back tickets waiting to resolve, summed over tickets`
+(`test/report-requeue-count.test.ts`).
 
 **Sandbox CPUs** (`sandboxCpus` in `src/sandbox.ts`): one function decides a sandbox's
 `docker run --cpus` from its kind - a `ticket`'s (the VM's CPUs divided by the run's concurrency) or
@@ -509,6 +529,13 @@ matches none.
 Such a line leaves the run record, as a repeat is never listed: kept with no issue, the summary
 would ask a person to file by hand the duplicate the comment avoided.
 `test/followup-open-duplicate.test.ts`.
+A repair pass's line is also tagged with the red run's tests it names (`FollowUp.tests`: `testsNamed`,
+the rule `repairVerdict` matches the `Flaky:` line by, applied to the line's title and evidence; the
+pipeline's `pass` is told the ids through its second argument, so no other caller changes).
+`fileFollowUps` meets such a line, before the place lookup, against `byTest` (the issue each test's
+lines were filed or commented as; an option, fresh by default, shared by a run's turns like `places`):
+a shared test id makes it a comment on that issue across source tickets. A dry run does not fold.
+`test/followup-same-test.test.ts`, `test/pipeline-repair-followup-tests.test.ts`.
 The two stops file them too (`stopLanding`, before the summary is printed), except after a safety
 stop - the shared `.git` changed - where nothing is written to the tracker: each entry stays in the
 record as `failed` with that reason, which the report lists under Needs you as one to file by hand -
@@ -538,9 +565,15 @@ step (approving prose keeps finding phrasings the detector reads as a gap;
 `test/gap-in-prose-false.test.ts`). `gapLines` also leaves out of a note, where it is shown, a sentence
 that reports the reviewer's own work ("I added one commit", unless it also says something remains) or
 that the remaining cases are inputs the tool already refuses; being applied at render time, it covers
-records an older kit wrote. The Needs fixing section groups failing tests by `testKey`: a name with
-` > ` is keyed by the basename of the last word before it plus the title, so one test named with two
-path prefixes is one `Same failing test` line, printed with the first name seen.
+records an older kit wrote.
+The Needs fixing section groups failing tests by their identity (`testIdentity`): a name with ` > `
+is the basename of the last word before it plus the title, and the word's directory when it has one.
+Two names are one test when both carry a directory and it is the same, or when either has none
+(a runner that prints the basename alone), so one test named with two path prefixes is one
+`Same failing test` line, printed with the first name seen, while `pkg/a/index.test.ts > renders`
+and `pkg/b/index.test.ts > renders` are two tests.
+A basename-only name joins the group of each directory; two groups that would print the same line
+on the same tickets are one.
 
 A start that took 10 s or more says where its time went: `Start took 64.2 s: blocker reads 31.0 s,
 queue read 12.3 s, versions 9.8 s, docker info 4.1 s, others 7.0 s`, printed as a statement of its
@@ -559,10 +592,14 @@ prints none.
 **The outsider-edit hold** (`outsiderEdit`, over the tracker's `editedSinceQueued`) is asked once
 per attempt, after `withdrawal` and before a slot or an agent, and never at landing. A GitHub
 ticket whose author is not an owner, member or collaborator is held when the author wrote or
-edited its body, or commented, after the queue label was last added; a ticket that never carried
-the label is measured from the run's start (`TurnOptions.runStart`, the same for every turn, so a
+edited its body, renamed it, or commented, after the queue label was last added; a ticket that
+never carried the label is measured from the run's start (`TurnOptions.runStart`, the same for every turn, so a
 later turn does not let through an edit made during an earlier one). A read that fails is not a
-hold: the ticket is not started that turn. The files tracker has no outsiders and never holds.
+hold: the ticket is not started that turn, and ends as `not begun` with the `unchecked` reason
+(`Unchecked`, beside `Withdrawn`), never `withdrawn`. The ledger records it as `skipped` with
+`UNCHECKED_NOTE` (`src/autonomy.ts`) and it is no stop cause. The closing summary lists it under
+**Runnable now**, `withdrawn` does not count it and a drain turn may run it again (`Rerun.unchecked`).
+The files tracker has no outsiders and never holds.
 
 ## `src/landing.ts`
 
@@ -629,6 +666,12 @@ The ticket ledger: one place that turns each ending (`src/schedule.ts`) into eve
   merge check, `landing`), which the closing summary's `Landed on a second attempt` line words from
   the run record (`test/requeue-where.test.ts`); a record from before that has no place and reads
   "after a conflict".
+  Every send-back's line is kept in the ticket's `requeues` list, in order (`requeued` stays the last
+  line, and goes null when its attempt never began): a ticket can be sent back twice (`sendBack` allows a
+  second when the colliding landing finished after the resolve began). The summary gates on `requeued`,
+  counts attempts as `requeues.length + 1` and says `Landed on a second attempt`, `... third attempt` or
+  `Landed after N attempts` (four or more), one line per count, tickets with the same reasons in one
+  parenthesis (`test/report-requeue-count.test.ts`); a record without `requeues` has one send-back, in `requeued`.
   A second collision's note names the tickets of both attempts (`describe`). `landOne` writes no
   verdict, so a requeued ticket whose second attempt never began has nothing to undo: it is recorded
   from the ending the scheduler makes of it (its first landing, or withdrawn - then said as not
@@ -719,7 +762,8 @@ state.
   naming only that conflict's tickets).
   The pipeline can requeue too: a branch that no
   longer merges onto the base, by git's own merge on the host after implement (before review) and
-  again before the gates (`conflictBefore` in `createPipeline`; a conflict only in `generated` files
+  again before the gates, and once more when the gates slot is granted if the base moved in the
+  wait (`conflictBefore` in `createPipeline`; a conflict only in `generated` files
   does not count; the merge the pipeline makes in the sandbox just before the gates is not this check, it is `mergeBaseBeforeGates` above), ends its pipeline there and the attempt reports a `conflict` (`Attempted`),
   never a green - the gates vouched for no commit of it - and that conflict goes through the same
   rule as one at landing (`sendBack`); not sent back, it ends as a `conflict` (`Ending`), and sent
@@ -769,7 +813,8 @@ state.
   line says "as seen on the branch before".
   A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
-  is queued to land and no ticket in its gates shares one (`ahead` in `src/schedule.ts`; a ticket
+  is queued to land, no ticket in its gates shares one and no released resolve shares one (`ahead` in
+  `src/schedule.ts`; a ticket
   reaches its gates when `at.gates()` is called, after its review and again before each later gate
   run, and leaves them at a `repair` or `review` juncture, since a repair and the review after it can
   take an hour, or when its attempt ends; `test/schedule-resolve-one-holder.test.ts`). Whenever those tickets started: one still implementing or in review never holds the resolve,
@@ -780,13 +825,34 @@ state.
   hands it to the wait and goes back to the queue, and the ticket is pushed again, first in line,
   once nothing is ahead of it - and is not in the run's demand, and ends at a stop; a pause
   parks it as at the start; the run says `resolve waits` once the list has held for `RESOLVE_SETTLE_MS`
-  (the log line once, a later change only the record's note; a ticket in its gates is worded
-  "lands or leaves the run", a queued branch "has landed"), `resolve queued` when the wait ends (the
+  (the log line on the first telling and again whenever a ticket joins the list, compared with the
+  list it last said, never when one only leaves it - the record's note follows every change; a
+  ticket in its gates or a released resolve is worded "lands or leaves the run", a queued branch
+  "has landed"; the heartbeat names what each resolve waits for), `resolve queued` when the wait ends (the
   record's note says it waits for a free slot, not for the ticket that has landed) and
   `resolve starts` for a wait it said,
   `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`,
   `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`,
-  `test/schedule-resolve-late-holder.test.ts`).
+  `test/schedule-resolve-late-holder.test.ts`, `test/resolve-wait-line.test.ts`).
+  **Fresh starts are held.** While a resolve waits (`offWorker`), a worker does not take a ticket
+  that has not started (queued at `FIRST` or `RELEASED`) whose files (`hold.touched()`) share one
+  with the resolve's own files or the files it conflicted on (`heldFor`): it takes the next queued
+  ticket that is not held, and with only held ones queued it waits as a worker holding for a resolve does (`holdFresh`).
+  A ticket that started before the wait began and reaches its gates during it still holds the
+  resolve until it lands, so the resolve never meets a second conflict from one; the wait is bounded
+  because no ticket that shares its files can start and join the list behind it. A held ticket adds
+  nothing to the run's demand, shows as blocked with
+  `waits for #N to resolve its conflict first (shares <file>)` (`resolve holds`; the resolve sent
+  back first, of several), and starts in its old place in line once the resolve is pushed again or
+  the run starts nothing (`resolve frees`). A requeued ticket or a retake is never held, nor is
+  anything in a dry run (`test/schedule-resolve-fresh-hold.test.ts`).
+  **Released resolves that share a file go one at a time.** A released resolve - queued again at
+  `REQUEUED`, or in its resolve attempt and not yet landed or ended (`releasedResolves`) - counts
+  in `ahead` for every waiting resolve it shares a file with, until it lands or leaves the run. A
+  waiting resolve never counts another waiting one (each would wait for the other), except one sent
+  back earlier whose own wait is over at the same moment: when one landing frees two that share a
+  file, the one sent back first is released and the other waits for its landing
+  (`test/schedule-resolve-one-at-a-time.test.ts`).
   While a resolve waits for queued branches only (none in its gates), a worker that is free does
   not take a ticket that has not started: it waits, with its slot if it holds one (a landing that
   waits for a slot still takes it back), and takes the resolve when it is pushed, else the landing
@@ -839,8 +905,14 @@ state.
   `src/pool.ts`): the worker goes back to the queue (`occupy`: it awaits the attempt only until the attempt ends or goes
   off) while the attempt goes on, as a resolve's wait does. The ticket stays open until its ending and in `gating`
   (a resolve that shares its files still waits for it) until its gates end. `Work.gateWaiters`, the gates limit, caps the
-  attempts off their worker; one that reaches its gates wait at the cap is told no, keeps its slot and its worker and
-  waits as before. Every wait for a gates slot of a ticket gate asks, not only the first (a gate run after a repair does).
+  attempts off their worker that are still waiting for a gates slot; one that reaches its gates wait at the cap is told no,
+  keeps its slot and its worker and waits as before. A ticket leaves the count when its gates slot is granted
+  (`GateProgress.onSlot` in `src/gates.ts`, called once inside the slot before the first gate, also for a run that starts
+  from a later gate; `at.gateSlot()`): its sandbox stays on the uncounted lock and its worker stays free through its gate
+  run, but the off-count place goes to the next ticket that waits. Every wait for a gates slot of a ticket gate asks, not
+  only the first (a gate run after a repair does); one that is still off its worker (no retake since) counts again without
+  the cap check (`at.gateWait()` is true), as it cannot go back to a worker without a retake.
+  `test/gate-slot-uncounted.test.ts`.
   A red ticket takes a counted slot again just before its repair pass (and the review after it), not at the result: through
   a fix-board wait it stays on the uncounted lock (a waiter that holds a worker stops waiting on it meanwhile: the fix board
   below). `at.retake()` queues it in the pipeline queue at the top rank, so it is served as a
@@ -892,6 +964,14 @@ state.
   waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
   ticket that repaired before it waited keeps those commits under the review after repair.
   `test/fix-wait.test.ts`.
+  The board also keeps the run's "outside the branch" verdicts: a repair pass that committed nothing and
+  ended with `<verdict>outside-branch</verdict>` is recorded (`judgedOutside`: the line and the red run's
+  test ids, none recorded without an id), and `outsideFor(tests)` gives the first verdict whose tests include
+  every one of them. A ticket red on only those tests, asked after the red-on-base check and before `fixing`
+  (and again after a `wait` that ended without a landing: the fixer ended red), starts no repair pass and no
+  further gate run: it ends red with `outcome.outside` set to that verdict and `by`, the judging ticket, and
+  its note reads `#N's repair judged it outside this branch: <line>`. A forced red never asks.
+  `test/fix-board-outside-verdict.test.ts`.
   The same holds for a worker: a fixer off its worker on an uncounted lock asks for one again
   before its repair pass (`at.retake`), and with one worker a waiter that holds it would wait on a
   fixer that waits for it.
@@ -1334,6 +1414,9 @@ terminal. `status 0` reads every source once through the same collectors (`readS
 The **layout** has no fixed breakpoints, and no near-miss joints: a lane's rule meets a table bar
 exactly or stays at least 5 columns from every one, and a lane with no such column folds into the
 summary line.
+The logo ends with the kit's version after the clock (`Snapshot.version`, read once at the view's start
+from the kit's `package.json` by `kitPackageVersion`, not through `src/upgrading.ts`, which is heavy;
+unset, the logo is as without it); its width counts in the lanes-beside-it decision.
 The header is the logo and the lanes (GLOSSARY.md) in priority order - RUN (state and start, turn
 and estimated end, tokens, and an API key's spend, red, so it shows at any width), MACHINE, MODELS
 (implement, review, repair; ids without `claude-`), SETTINGS, PLAN (left out without a reading) -
@@ -1918,6 +2001,16 @@ one ticket-gate run.
 `createLanding` (`src/schedule.ts`) tells the claim of each push, of each landing that starts and of each that ends
 (`LandPorts.claim`, which `landingWork` makes and hands to `landOne`), and of a stop (`StopWriter.watch`, and the
 scheduler's `noticeStop` for the host's live failure), so `src/schedule.ts` still imports nothing from the pool.
+It is also taken when a ticket's gate run goes green (`GateProgress.green`, called by `runGates` inside its gates
+slot, before the slot is released: `RunClaim.greenGate(id)`), so the slot it frees goes to that landing and not to
+another ticket's gate, whose merge the landing would then make stale.
+That want is per ticket and idempotent (a second green before it is dropped changes nothing); the push (`pushed(id)`)
+turns it into the queued green, and `createLanding`'s `dropped(id)` ends it for an attempt that ends without a push -
+any ending, told in the scheduler's `finally`.
+It is dropped too as the attempt leaves its gates for a repair or a review, or starts another gate run (`at.gates`):
+kept, it held every ticket gate back for that pass at `maxGates: 1`, and the ticket's own gates after it waited
+behind it for ever (`test/pool-claim-green-regate.test.ts`); a green end of the later run takes it again.
+A base, verify or landing gate, a red run and a run stopped for a conflict tell it nothing.
 It is taken at the push when no landing gate is running (a branch queued while one runs is claimed when that gate
 run ends, so with `maxGates` above 1 a spare slot stays free for ticket gates), and never more than one stands.
 `landOne` hands it to `ctx.gate` when its gates begin (`take`) and takes none of its own; the gate's priority wait
@@ -1937,7 +2030,8 @@ in the sandbox slot its pipeline holds, so with that slot the last one free (a p
 while the ticket's gate waited behind the claim, and neither moved (`test/landing-claim-sandbox-wait.test.ts`).
 The claim is kept in this process (`claims`), not in the pool's files, so a crash leaves nothing behind;
 `test/pool-landing-claim-queued.test.ts` (gates limit 1) and `test/pool-landing-claim-queued-spare.test.ts` (2) for
-the run's claim, `test/pool-landing-claim.test.ts`, `test/pool-landing-claim-spare.test.ts` and
+the run's claim, `test/pool-claim-green-gate.test.ts` for the green ticket gate's,
+`test/pool-landing-claim.test.ts`, `test/pool-landing-claim-spare.test.ts` and
 `test/landing-claim-gates.test.ts` for the single claim.
 The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is
 this process's, and another run needs only a wait's start - and, for the pool's last free slot,
@@ -1987,7 +2081,8 @@ Unlike one, it is not counted against `maxSandboxes`: `liveSlots` leaves it out,
 take its numbered slot.
 `usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - its name starts
 with `sandboxes-` and ends in `.lock`, which is all that count asks - so other runs and the views see
-every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run.
+every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
+waiting, and as many again whose gates slot was granted (they stay on the lock through their gates).
 `test/gate-wait-frees-sandbox.test.ts`.
 
 **A wait that holds a slot.**
@@ -3040,6 +3135,17 @@ so auto memory stayed on); the container's environment is the sandbox's alone.
 Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnv`
 (`src/sandbox.ts`) leaves the agent's keys out, a person's `.env` naming one included: the exported
 value would win anyway (`test/agent-env.test.ts`, `test/claude-tools-allow-list.test.ts`).
+A review pass (the review model and its fallback, `reviewWithFallback`) and a resolve pass
+(`resolveAgent`: the implementer's model and effort) also get `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` on
+their command, which Claude Code 2.1.242 and later read (an older one ignores it).
+On a subscription Claude Code writes the prompt cache for an hour, and a 1-hour write bills at twice
+the input price, against 1.25 times for a 5-minute one; a review or resolve pass's longest gap between
+turns is a few minutes, so it never used the hour.
+An implement or repair pass waits on long test runs, often past five minutes, so it keeps Claude
+Code's own choice and its command names no TTL.
+`sandboxEnv` leaves `CLAUDE_CODE_PROMPT_CACHE_TTL` out of the container's environment as well, though
+the implementer's environment does not name it: a person's `.env` naming it would make Sandcastle
+refuse every review and resolve pass (`test/agent-cache-ttl.test.ts`).
 The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does
 not govern, and `git-guard.sh` is unchanged.
 

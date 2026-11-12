@@ -202,7 +202,7 @@ test("the ledger records a requeue as it is told, and drops a withdrawn ticket's
     say: (line) => void said.push(line),
   });
   ledger.tell({ kind: "requeued", id: "2", again: { kind: "conflict", with: ["1"] } });
-  assert.deepEqual(writes, [["2", { state: "queued", note: "requeued after conflict with #1", requeued: "requeued after conflict with #1" }]]);
+  assert.deepEqual(writes, [["2", { state: "queued", note: "requeued after conflict with #1", requeued: "requeued after conflict with #1", requeues: ["requeued after conflict with #1"] }]]);
   assert.deepEqual(said, ["#2: requeued after conflict with #1; it is tried again in this run."]);
   assert.equal(ledger.requeuedAs.get("2"), "requeued after conflict with #1");
   ledger.tell({ kind: "ended", id: "2", ending: first({ kind: "withdrawn", reason: "closed during the run" }) });

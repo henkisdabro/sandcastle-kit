@@ -18,7 +18,7 @@
 
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { agentFailure } from "./agents.ts";
-import { remainderNote } from "./autonomy.ts";
+import { remainderNote, UNCHECKED_NOTE } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
 import { githubServerError, isSetupLine, promptExpansionLine, SetupFailed } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
@@ -49,7 +49,7 @@ export type Finished = {
   head?: string;
   repairs: number;
   /** The line of a repair's `<verdict>outside-branch</verdict>`: a red ticket says the repairer judged the failure not this branch's. */
-  outside?: { line: string };
+  outside?: { line: string; by?: string };
   /** Red on test timeouts while the machine's CPU pressure was high, twice, and not repaired (`loadMade`): the note says to run it again when the machine is quiet. */
   loadRed?: true;
   gates: Gate[];
@@ -277,6 +277,9 @@ export const pipelineOutcome = (o: Pick<Finished, "status" | "gates" | "heldNote
               ? { kind: "conflict", text: "merge conflict before landing" }
               : { kind: "no change", text: o.status };
 
+/** A ticket whose outsider-edit read failed (#893): not started and still queued; the run did not stop for it (`UNCHECKED_NOTE`). */
+export const uncheckedRecord = (): TicketRecord => ({ state: "skipped", note: UNCHECKED_NOTE });
+
 /** A ticket its label refuses, found as it would have started: skipped, saying why. */
 export const refusedRecord = (reason: string): TicketRecord => ({ state: "skipped", note: reason.replace(/^NOT STARTED: /, "not started: ") });
 
@@ -426,7 +429,7 @@ const describePipeline = (o: Finished, c: Context): Said => {
       case "merged-earlier":
         return { state: "ready", note: `merged earlier (${o.head}) - to close` };
       case "gate-failed":
-        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}${o.outside ? ` - the repair judged it outside this branch${o.outside.line ? `: ${o.outside.line}` : ""}` : ""}${o.loadRed ? " - test timeouts under machine load, not repaired; run it again when the machine is quiet" : ""}` };
+        return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}${o.outside ? ` - ${o.outside.by ? `${refOf(o.outside.by)}'s repair judged it` : "the repair judged it"} outside this branch${o.outside.line ? `: ${o.outside.line}` : ""}` : ""}${o.loadRed ? " - test timeouts under machine load, not repaired; run it again when the machine is quiet" : ""}` };
       case "held":
         return { state: "held", note: o.heldNote ?? "held for a human" };
       // The scheduler ends such a branch as a `conflict` (`describeConflict`): this is the pipeline's own word for it.
@@ -520,7 +523,7 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       const { why } = e;
       // Only the ticket whose own agent the limit cut short says so: one the stop left unstarted takes the run's last
       // words, the most severe cause, which may be a `.git` change found after the limit.
-      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : e.cutShort && why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
+      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "unchecked" ? uncheckedRecord() : why.kind === "refused label" ? refusedRecord(why.reason) : e.cutShort && why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
       return { record, tracker: comment(notLandedComment(c.report, undefined)) };
     }
     case "waiting":
@@ -539,7 +542,7 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
  * the limit cut short: its note is its own, and recorded as it ends, or its row reads as still working until the run ends.
  */
 const unstarted = (e: TicketEnding) =>
-  e.kind === "not begun" && !e.cutShort && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
+  e.kind === "not begun" && !e.cutShort && e.why.kind !== "withdrawn" && e.why.kind !== "unchecked" && e.why.kind !== "refused label";
 
 /** The writer's `outcomes` port onto the project's `outcomes.json`: the ledger is its only writer, so burndown hands it this. */
 export const outcomesFile = (project: Project, run: string) => (outcomes: Record<string, Outcome>) => recordOutcomes(project, run, outcomes);
@@ -586,13 +589,17 @@ export const createLedger = (d: {
   // Every ticket this run requeued, with its line; `requeuedAs` only while its second attempt is to come.
   const sentBack = new Map<string, string>();
   const requeuedAs = new Map<string, string>();
+  // Every line a ticket was sent back with, in order: the record's `requeues` (a ticket can be sent back twice).
+  const sentBackLines = new Map<string, string[]>();
   // The run's last words, once the schedule is over: until then a ticket it left unstarted has none.
   let last: { stopLine?: string } | undefined;
   const requeued = (id: string, again: Again) => {
     const line = requeuedLine(again.kind, again.with, again, again.found);
     sentBack.set(id, line);
     requeuedAs.set(id, line);
-    d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line }));
+    const lines = [...(sentBackLines.get(id) ?? []), line];
+    sentBackLines.set(id, lines);
+    d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line, requeues: lines }));
     d.say(`${d.ref(id)}: ${line}; it is tried again in this run.`);
   };
   const record = (id: string, ending: TicketEnding) => {
