@@ -921,6 +921,14 @@ state.
   waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
   ticket that repaired before it waited keeps those commits under the review after repair.
   `test/fix-wait.test.ts`.
+  The board also keeps the run's "outside the branch" verdicts: a repair pass that committed nothing and
+  ended with `<verdict>outside-branch</verdict>` is recorded (`judgedOutside`: the line and the red run's
+  test ids, none recorded without an id), and `outsideFor(tests)` gives the first verdict whose tests include
+  every one of them. A ticket red on only those tests, asked after the red-on-base check and before `fixing`
+  (and again after a `wait` that ended without a landing: the fixer ended red), starts no repair pass and no
+  further gate run: it ends red with `outcome.outside` set to that verdict and `by`, the judging ticket, and
+  its note reads `#N's repair judged it outside this branch: <line>`. A forced red never asks.
+  `test/fix-board-outside-verdict.test.ts`.
   The same holds for a worker: a fixer off its worker on an uncounted lock asks for one again
   before its repair pass (`at.retake`), and with one worker a waiter that holds it would wait on a
   fixer that waits for it.

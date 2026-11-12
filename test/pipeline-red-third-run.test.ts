@@ -356,6 +356,9 @@ test("a repair after another ticket's fix was merged in is not told about the th
     fixing: () => (asked++ === 0 ? (land(), { by: "9", landed: true }) : undefined),
     claim: () => {},
     wait: async () => true,
+    // No other ticket's repair judged anything outside its branch.
+    outsideFor: () => undefined,
+    judgedOutside: () => {},
   } as unknown as FixBoard;
   const h = harness({ fixes });
   land = () => h.land("other.txt", "the other ticket's fix\n");

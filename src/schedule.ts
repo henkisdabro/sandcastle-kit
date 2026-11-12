@@ -733,8 +733,10 @@ export const onBase = (landed: Landed) => landed.kind === "merged" || landed.kin
  * would hold the one it waits for - while `stuck` says so of the ticket waited on, or of one that ticket waits on in turn,
  * the waiter stops waiting. A ticket whose landing put a commit on the base
  * (`landedAt`, read as it ends) has it remembered, and `fixing` hands it on: a ticket whose branch
- * holds that commit already got the fix when it started, so a merge brings it nothing. In memory, one
- * per run.
+ * holds that commit already got the fix when it started, so a merge brings it nothing. A repair that judged
+ * its red outside its branch is recorded (`judgedOutside`), and `outsideFor` gives it to a later ticket red on
+ * only those tests, which then repairs nothing: a ticket that ends red never lands, so no wait would carry
+ * that answer. In memory, one per run.
  */
 export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?: (id: string) => string | undefined, stuck?: (waiter: string, on: string) => boolean) => {
   const claims = new Map<string, string>();
@@ -747,6 +749,8 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?:
   const sentBack = new Map<string, Set<string>>();
   const resumes = new Map<string, ((landed: boolean) => void)[]>();
   const waitingOn = new Map<string, string>();
+  // The repairs that judged their red outside the branch (`<verdict>outside-branch</verdict>`), in the order they were given.
+  const outsides: { by: string; line: string; tests: string[] }[] = [];
   const release = (id: string, landed: boolean) => {
     for (const resume of resumes.get(id)?.splice(0) ?? []) resume(landed);
   };
@@ -757,6 +761,21 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?:
   return {
     /** `id` is repairing `key`. The first ticket to claim it that has not ended keeps it. */
     claim,
+    /**
+     * Ticket `id`'s repair judged its red outside the branch: the verdict's `line` and the red run's `tests` (never
+     * the agent's prose). One with no test id is not recorded: it says nothing a later ticket's red can be matched to.
+     */
+    judgedOutside(id: string, verdict: { line: string; tests: string[] }) {
+      if (verdict.tests.length) outsides.push({ by: id, line: verdict.line, tests: [...verdict.tests] });
+    },
+    /**
+     * The first recorded verdict whose tests include every id in `tests`, with the ticket that gave it; undefined for
+     * no tests, or when some failing test is not in any one verdict (the red is then not wholly the verdict's).
+     */
+    outsideFor(tests: string[]): { by: string; line: string; tests: string[] } | undefined {
+      if (!tests.length) return undefined;
+      return outsides.find((v) => tests.every((t) => v.tests.includes(t)));
+    },
     /**
      * The other ticket repairing `key`, when `id` may wait for it: `landed` when its fix is on the base
      * already, so `id` merges the base without waiting (its gate may have finished just after that landing),
