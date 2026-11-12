@@ -73,7 +73,13 @@ see the whole set, and fix all of them.
 
 # Gates
 
-After a commit, run all of these in the repo root and make them pass - the orchestrator re-runs them after you exit:
+After a commit, run only these in the repo root and make them pass:
+
+- {{GATE_RERUN}}
+- the typecheck gate, if the project has one (the gate below that type-checks or builds).
+
+The orchestrator runs every gate after you exit, the full suite included, and a fix that breaks another
+test is found by that run: do not run the full suite yourself. The project's gates, in its order:
 
 ```
 {{KIT_GATES}}
@@ -92,9 +98,9 @@ available here.
 
 # Finishing
 
-**If you committed a fix:** run `{{GATE_COMMAND}}` exactly as written, then the other gates. A run of
-a few test files is not the gate: say plainly if you did not run the full command. Make sure
-everything is committed.
+**If you committed a fix:** run the checks under "Gates" (the failing tests and the typecheck gate), not
+the whole gate command again: the orchestrator gates the branch right after you exit. Say plainly which
+you ran. Make sure everything is committed.
 
 **If you committed nothing:** do not re-run the full suite; the run you made to find every failure is
 your evidence.

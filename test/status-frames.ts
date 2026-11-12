@@ -7,13 +7,13 @@
 
 import { palette, renderFrame } from "../src/status-render.ts";
 import { ticketRows } from "../src/status-rows.ts";
-import { readSnapshot, sandcastleDir } from "../src/status-snapshot.ts";
+import { kitPackageVersion, readSnapshot, sandcastleDir } from "../src/status-snapshot.ts";
 
 const env = process.env;
 const [rows = "400", ...widths] = process.argv.slice(2);
 const dir = sandcastleDir(env);
 if (!dir) throw new Error("no .sandcastle in SANDCASTLE_PROJECT");
-const snapshot = await readSnapshot(dir, { env, terminal: false });
+const snapshot = await readSnapshot(dir, { env, terminal: false, version: kitPackageVersion() });
 // Into a pipe the view draws no colour, whatever NO_COLOR and COLORTERM say.
 const colours = palette(false, false);
 const table = ticketRows(snapshot);

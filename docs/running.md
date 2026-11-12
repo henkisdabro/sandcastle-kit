@@ -132,7 +132,8 @@ Inside Herdr the run lays it out itself (below), and does not start if it cannot
 The run prints a heartbeat line every five minutes while anything is in flight - tickets working (a
 gates step says when it waits for a gates slot, and counts its time from the first gate), landings
 (a landing says when it waits for a sandbox slot, and counts its time from the slot), sent-back
-tickets waiting to resolve a conflict, and green tickets queued to land (from their gates going
+tickets waiting to resolve a conflict (each with what it waits for: `#10 12m (for #20, #30)`), and
+green tickets queued to land (from their gates going
 green until the landing worker takes them); it also says when the run has waited for a sandbox slot
 longer than a typical issue takes (the wait is the run's, not a ticket's: a pipeline takes its slot
 first, then the ticket first in line) - and the status view flags a sandbox whose log has been quiet
@@ -151,7 +152,9 @@ run.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees with
 the run.
-Its header is the logo and the **lanes** beside it: RUN (the stage, `turn 2/3` - the turn out of the
+Its header is the logo - the project, its base, the clock and, in the muted colour after the clock, the
+version of the kit that is drawing (`v0.24.0`; none if the kit's `package.json` cannot be read) -
+and the **lanes** beside it: RUN (the stage, `turn 2/3` - the turn out of the
 level's cap, none for level 1, which asks after every turn: `turn 2` - and the tokens spent),
 MACHINE (the pool's sandboxes and gates), MODELS (each pass's model, and the repair attempts a
 ticket gets after a red gate: `repair 1`, or a greyed `○ repair` with `repair.attempts: 0`),
@@ -263,7 +266,7 @@ line beside it.
 | `queued` `blocked` | Not started, in this run: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots (or that the pool's last free slot is kept for a landing), or what it waits for and whether this run holds that blocker. With no run live, every labelled ticket reads `queued` (`for the next run`). A `requeued` line marks a second attempt this run, after a conflict or a red at landing, or a conflict its pipeline found before its review or gates |
 | `later` | A labelled ticket outside the live run (a run that names its tickets, or one queued after the start), queued or blocked: `next run`, or `waits for #N to close`. Grey, after `merged` and before `left over` in the list, and counted apart in the legend: `queued` and `blocked` count this run's tickets only. The collapsing view (`sandcastle status`, the Herdr status pane) draws no row for it and counts them in one line at the table's foot, `43 for a later run (#382-#609), 2 blocked`, so a long queue never pushes the run's rows off the pane; `sandcastle status all` and `status 0` list each as a row |
 | `paused` | Parked between two phases of a [paused](#-pausing-a-run) run: its sandbox is closed and its branch kept, and the note names the phase it resumes at and the commit (`before review at a1b2c3d`) |
-| `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early. This run's landings are listed above earlier runs' merged rows |
+| `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early - or because GitHub could not be read for an outsider's edit to the ticket (`not started: could not read its edits from GitHub`): it stays queued and the summary lists it under **Runnable now**. This run's landings are listed above earlier runs' merged rows |
 | `left over` | A branch from an earlier run, not in this one; `sandcastle clean` removes it once it is merged |
 
 **Landing.** Each green branch lands as soon as its gates pass, while the others still run, on one
@@ -447,6 +450,10 @@ more, a project's first run with no estimate too (led by the gates wait, it name
 `sandcastle size`); a `Likely flaky:` line per test that went red and then green, or that a repair
 judged flaky, names the tickets that hit it (a red verify whose failing tests all flaked earlier in
 the run says so).
+The header's tokens, the `Tokens by model:` line and the run's per-ticket lines split the input in
+three: `42.5M in (40.3M read, 2.2M written 1h) / 1.2M out` is all input, then what was read from the
+prompt cache and what was written to it, with the cache's lifetime (`1h`, `5m`, or how much of it was
+`1h` when both) when Claude Code reported it; the rest of the input was uncached.
 `sandcastle report` prints it again at any time, with git and the blockers as they are now.
 Then:
 
@@ -572,6 +579,10 @@ A queued ticket with a branch from an earlier run builds on that branch:
   the overlap.
   The start names each such file once with its tickets (README.md and CHANGELOG.md, which nearly
   every ticket touches, are one count), and writes every pair to `logs/file-shares.log`.
+- While a ticket sent back after a conflict waits to resolve it, a ticket that has not started and
+  shares a file with it shows as blocked, "waits for #N to resolve its conflict first (shares
+  <file>)", and starts after that resolve; a ticket that shares nothing starts as before.
+  Two resolves that share a file go one at a time, the one sent back first going first.
 - A ticket closed, unqueued or sent to a human mid-run is left alone, and a run that died between
   merging and closing is finished by the next one.
 

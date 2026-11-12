@@ -1,5 +1,5 @@
 // The closing summary's token figures (src/report.ts): a run's tokens summed
-// from timings.jsonl with the cached share, and the per-model line.
+// from timings.jsonl with the cache reads and writes, and the per-model line.
 //
 //   pnpm test:file test/tokens.test.ts
 
@@ -57,9 +57,9 @@ test("tokensFromTimings is undefined when no line of the run has tokens", () => 
   assert.equal(tokensFromTimings("", A), undefined);
 });
 
-test("the headline shows the cached share", () => {
+test("the headline shows the cache reads and writes", () => {
   const text = render(facts({ tokens: "1 in / 1 out", tokenTotal: t(1000, 2000, 3_000_000, 4000) }));
-  assert.match(text, /tokens 3\.0M in \(3\.0M cached\) \/ 4k out/);
+  assert.match(text, /tokens 3\.0M in \(3\.0M read, 2k written\) \/ 4k out/);
   assert.doesNotMatch(text, /1 in \/ 1 out/);
 });
 
@@ -73,7 +73,7 @@ test("Tokens by model lists the larger model first", () => {
   const at = text.split("\n").find((l) => l.startsWith("Tokens by model:"));
   assert.ok(at, text);
   assert.ok(at.indexOf("large") < at.indexOf("small"), at);
-  assert.match(at, /large 6k in \(5k cached\) \/ 100 out · small 1 in \(0 cached\) \/ 1 out/);
+  assert.match(at, /large 6k in \(5k read\) \/ 100 out · small 1 in \(0 read\) \/ 1 out/);
 });
 
 test("with only unrecorded models there is no per-model line", () => {

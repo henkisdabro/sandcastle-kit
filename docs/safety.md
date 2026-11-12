@@ -11,7 +11,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   cannot push, and that it can see the repository: a fine-grained token whose Repository access
   leaves the repo out gets a FIX there, and `sandcastle run` refuses the same way before any sandbox
   starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
-  without the kit's tokens, and a token value in gate output is replaced with `<redacted>`.
+  without the kit's tokens, and a token value in gate output is replaced with `<redacted>`. So is
+  a token of Codex's login (`~/.codex/auth.json`, mounted read-only when `CROSS_REVIEW=1`) in the
+  output a crashed agent's log and crash note show.
 - 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
   `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an
   agent follows them anyway.
@@ -31,8 +33,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   trusts its body**, so read an issue from a stranger before you label it. What the author writes
   after you label it is held for you: a queued GitHub ticket whose author is not an owner, member
   or collaborator is held (the hold label, as any held ticket, listed under Needs you) when its
-  body, or one of the author's comments, was written or edited after the queue label was last
-  added. Only the author's own writing counts; a maintainer's edit of it does not. Read the
+  body or title, or one of the author's comments, was written, edited or renamed after the queue
+  label was last added (the title reaches every agent pass in `gh issue view`).
+  Only the author's own writing counts; a maintainer's edit of it does not. Read the
   change, then `sandcastle requeue <n>` accepts it: the queue label goes back on, which is a new
   label time. A ticket named on the command line that never carried the label is measured from
   the run's start. The check runs when a ticket's pipeline starts, a carried branch's and a second

@@ -27,11 +27,11 @@ import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { format } from "node:util";
-import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, resolveAgent, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, repairCheck, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -49,7 +49,7 @@ import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeS
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { startClock, type StartClock } from "./start-clock.ts";
-import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
+import { assertSetup, cpusLine, credentials, limitMemory, oomKills, oomNote, withOom, ensureImage, errorLine, machineSettings, ownCommitList, ownCommits, ownRange, projectApiKeySpend, recordFork, sandboxConfig, sandboxCpus, setupHook, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { memoryLine, poolWarningsNow, sandboxMemory } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, readTicketState, TRACKER_READ_MS, trackerTokenUser, type Ticket, type Tracker } from "./tracker.ts";
@@ -66,7 +66,7 @@ import {
   carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, personCommentsSince, repairWords, seenComments, stoppedLine, trustOf } from "./ledger.ts";
-import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, resolveHoldNote, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -101,7 +101,7 @@ type Outcome = {
   repairs: number;
   idleRepairs?: number;
   /** The last repair pass committed nothing and ended with `<verdict>outside-branch</verdict>` (`repairVerdict`): its line and the tests it judged flaky. */
-  outside?: { line: string; tests: string[] };
+  outside?: { line: string; tests: string[]; by?: string };
   /** Red twice on test timeouts while the machine's CPU pressure was high (`loadMade`): no repair pass; the ticket says to run it again when the machine is quiet. */
   loadRed?: true;
   gates: Gate[];
@@ -273,13 +273,21 @@ export const repairVerdict = (text: string, failing: string[] = []): { line: str
   const line = [...text.matchAll(/^[ \t]*Flaky:[ \t]*(.+)$/gm)].map((m) => m[1].trim()).filter((l) => l && l !== "...").at(-1);
   // `Flaky: none - <why>` names nothing either: its words would match no id and record every one.
   if (!line || !failing.length || /^none\b/i.test(line)) return { line: line ?? "", tests: [] };
-  const named = failing.filter((id) => {
-    const cut = id.lastIndexOf("::");
-    const name = cut >= 0 ? id.slice(cut + 2) : id;
-    return name !== "" && line.includes(name);
-  });
+  const named = testsNamed(line, failing);
   return { line, tests: named.length ? named : [...failing] };
 };
+
+/**
+ * The ids of `failing` (a red run's tests, `wholeTests` of its failure) that `text` names: an id is named when its test name
+ * (the text after its last `::`, else the whole id: a vitest or jest id is the file path) occurs in the text. One rule for the
+ * repair's `Flaky:` line (`repairVerdict`) and for a repair's follow-ups (`FollowUp.tests`), so the two cannot drift.
+ */
+export const testsNamed = (text: string, failing: readonly string[]): string[] =>
+  failing.filter((id) => {
+    const cut = id.lastIndexOf("::");
+    const name = cut >= 0 ? id.slice(cut + 2) : id;
+    return name !== "" && text.includes(name);
+  });
 
 // A spent plan allowance fails every issue after it the same way, each one
 // after paying for a sandbox and an install. The first one stops the queue.
@@ -502,7 +510,19 @@ export const addChangelog = (have: string[], text: string | ChangelogScan, narro
 };
 
 /** A problem outside its ticket that an agent named in a `<followup>` line: the kit files it for triage once the run has landed. */
-export type FollowUp = { title: string; evidence: string; from: string; phase: string };
+export type FollowUp = {
+  title: string;
+  evidence: string;
+  from: string;
+  phase: string;
+  /** Set for a repair pass's line only: the ids of the red run it was given that its title or evidence names (`testsNamed`). Lines naming one test are one issue whichever ticket said them. */
+  tests?: string[];
+};
+/** A repair pass's follow-up tagged with the tests of the red run it names (`testsNamed`); nothing for another pass or no match. */
+const testsOfRepair = (phase: string, f: { title: string; evidence: string }, failing: readonly string[] | undefined): { tests?: string[] } => {
+  const tests = phase === "repair" && failing ? testsNamed(`${f.title}\n${f.evidence}`, failing) : [];
+  return tests.length ? { tests } : {};
+};
 /** A follow-up as the run record keeps it: `id` is the ticket filed, absent in a dry run (which files nothing) or when filing failed (`failed`). */
 export type FiledFollowUp = { title: string; from: string; phase: string; id?: string; failed?: string };
 
@@ -907,6 +927,10 @@ const namesPlaceOf = (t: Ticket, seat: Seat): boolean => {
 const filedThisRun = new Set<string>();
 // The issue each place was filed as, by every turn of this run (`placeSeat`): the same finding in other words is a comment on it.
 const placesThisRun: Places = new Map();
+/** The issue each failing test's follow-ups were filed as (`FollowUp.tests`): a repair of another ticket naming the same test comments on it. */
+export type TestIssues = Map<string, string>;
+// By every turn of this run, like `placesThisRun`.
+const testIssuesThisRun: TestIssues = new Map();
 
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
@@ -924,10 +948,14 @@ const placesThisRun: Places = new Map();
 export const fileFollowUps = async (
   tracker: Pick<Tracker, "create" | "ref" | "comment"> & Partial<Pick<Tracker, "open" | "openAsync">>,
   followUps: readonly FollowUp[],
-  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists; named?: NamedOnBase; triage?: string },
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; byTest?: TestIssues; exists: PathExists; named?: NamedOnBase; triage?: string },
 ): Promise<FiledFollowUp[]> => {
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
+  const byTest = o.byTest ?? new Map<string, string>();
+  const tie = (f: FollowUp, id: string) => {
+    for (const t of f.tests ?? []) if (!byTest.has(t)) byTest.set(t, id);
+  };
   const out: FiledFollowUp[] = [];
   // The open tickets awaiting triage, read once for the batch and only when a follow-up gets as far as a new ticket. A
   // list that fails, or is not answered in time (`TRACKER_READ_MS`), files as before: the check is a courtesy, never a
@@ -948,7 +976,9 @@ export const fileFollowUps = async (
     if (seen.has(key)) continue;
     const at = { title: f.title, from: f.from, phase: f.phase };
     const place = placeSeat(f, o.exists, o.named);
-    const first = o.dryRun ? undefined : placeOf(places, place)?.id;
+    // A repair's line naming a test another line already got an issue for is about that test, whichever ticket said it.
+    const ofTest = o.dryRun ? undefined : f.tests?.map((t) => byTest.get(t)).find((id) => id !== undefined);
+    const first = ofTest ?? (o.dryRun ? undefined : placeOf(places, place)?.id);
     if (first !== undefined) {
       try {
         await o.write(() => {
@@ -956,6 +986,7 @@ export const fileFollowUps = async (
           return first;
         });
         seen.add(key);
+        tie(f, first);
       } catch (error) {
         out.push({ ...at, failed: errorLine(error) });
       }
@@ -975,6 +1006,7 @@ export const fileFollowUps = async (
         });
         seen.add(key);
         addPlace(places, place, same.id);
+        tie(f, same.id);
       } catch (error) {
         out.push({ ...at, failed: errorLine(error) });
       }
@@ -988,6 +1020,7 @@ export const fileFollowUps = async (
       out.push({ ...at, id });
       seen.add(key);
       addPlace(places, place, id);
+      tie(f, id);
     } catch (error) {
       out.push({ ...at, failed: errorLine(error) });
     }
@@ -1032,6 +1065,8 @@ export const createFollowUpBook = (
     write: (fn: () => string) => Promise<string>;
     seen?: Set<string>;
     places?: Places;
+    /** The issue each failing test's follow-ups were filed as; fresh by default, shared by a run's turns. */
+    byTest?: TestIssues;
     exists: PathExists;
     named?: NamedOnBase;
     /** What earlier runs filed (`filedBefore`): the same finding named again is a comment on that issue, as a repeat within a run is. */
@@ -1040,6 +1075,7 @@ export const createFollowUpBook = (
 ): FollowUpBook => {
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
+  const byTest = o.byTest ?? new Map<string, string>();
   // Without the evidence the record never kept, a filing is met by its title: the same one, or a match under the place rules.
   for (const e of o.earlier ?? []) if (e.id !== undefined) addPlace(places, placeSeat({ title: e.title, evidence: "", from: e.from, phase: e.phase }, o.exists, o.named), e.id);
   const heard: FollowUp[] = [];
@@ -1078,6 +1114,7 @@ export const createFollowUpBook = (
         write: refuse ? async () => { throw new Error(unsafe); } : o.write,
         seen,
         places,
+        byTest,
         exists: o.exists,
         named: o.named,
         triage: o.triage,
@@ -1092,7 +1129,7 @@ export const createFollowUpBook = (
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
         const ready = repeats.filter((f) => placeOf(places, placeSeat(f, o.exists, o.named)));
         // A comment that fails is not recorded: it stays held, and the next `file` tries it again.
-        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, exists: o.exists, named: o.named });
+        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, byTest, exists: o.exists, named: o.named });
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
       }
       if (!settled.length) return [];
@@ -1315,7 +1352,7 @@ const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${
 
 /**
  * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
- * it says one), the sent-back tickets waiting to resolve, the green tickets queued for the landing worker, then the
+ * it says one), the sent-back tickets waiting to resolve (each with what it waits for, `for`, when told), the green tickets queued for the landing worker, then the
  * run's wait for a sandbox slot (`slotWait`, when its oldest open wait began; `createSlotWaits`) once it is longer
  * than a typical issue takes (`typicalMs`; with no history nothing is said, as the estimate says nothing then). The wait
  * is the run's, not a ticket's: a worker leases its slot before it takes a ticket. No line when none of these is in flight.
@@ -1325,7 +1362,7 @@ export const heartbeatLine = (o: {
   clock: string;
   working: { ref: string; phase: string; since: number }[];
   landing?: { ref: string; phase?: string; since: number }[];
-  resolving?: { ref: string; since: number }[];
+  resolving?: { ref: string; since: number; for?: string[] }[];
   queued?: { ref: string; since: number }[];
   slotWait?: number;
   /** What holds the slot wait back, when not a full pool alone: the run's share beside another run, or the slot kept for landing. */
@@ -1336,7 +1373,7 @@ export const heartbeatLine = (o: {
   const parts: string[] = [];
   if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
-  if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}${w.for?.length ? ` (for ${w.for.join(", ")})` : ""}`).join(", ")}`);
   if (o.queued?.length) parts.push(`queued to land: ${o.queued.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
   const why = o.waitsFor === "share" ? " (this run's share beside another run)" : o.waitsFor === "landing" ? " (the pool's last free slot is kept for a landing)" : "";
   if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}${why}`);
@@ -1450,7 +1487,7 @@ export const createHoldRecord = (o: {
     // The count line for the docs files every ticket touches, once.
     for (const line of fileShareSummary(o.ref, pairs).filter((l) => l.endsWith("(not listed)") && !said.has(l))) fresh.push(line);
     if (fresh.length) {
-      o.say(said.size ? "  more tickets that share files:" : "  tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:");
+      o.say(said.size ? "  more tickets that share files:" : "  tickets that share files; if they conflict at landing, the later one is sent back and its merge resolved (once, or again if another ticket lands while it resolves):");
       for (const line of fresh) {
         said.add(line);
         o.say(`    ${line}`);
@@ -1493,8 +1530,9 @@ export const createHoldRecord = (o: {
           return;
         case "resolve waits": {
           const note = resolveWaitNote(o.ref, c);
-          // Said once: a list that changes later updates the record's note, not the log.
-          if (c.first) o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
+          // Said first, and again when a ticket joins the list (`joined`): a line that named only the first list hid the
+          // tickets that held the resolve after it. One that only leaves the list updates the record's note, not the log.
+          if (c.first || c.joined) o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
           run.ticket(c.id, { note });
           return;
         }
@@ -1504,6 +1542,13 @@ export const createHoldRecord = (o: {
         case "resolve starts":
           o.say(`  ${o.ref(c.id)} resolves its conflict now: the tickets it waited for have landed or left the run`);
           run.ticket(c.id, { note: null });
+          return;
+        case "resolve holds":
+          // Blocked, as a ticket parked behind a file is: it cannot start until the resolve it shares a file with has.
+          run.ticket(c.id, { state: "blocked", note: resolveHoldNote(o.ref, c) });
+          return;
+        case "resolve frees":
+          run.ticket(c.id, { state: "queued", note: null });
       }
     },
   };
@@ -1558,6 +1603,16 @@ export const ticketTime = (tookMs: number | undefined, waitedMs = 0, landingMs?:
   return parts.length ? ` ${parts.join(", ")}` : "";
 };
 
+/**
+ * A sent-back ticket's resolve wait lies before its attempt, outside the pipeline's `took`: it goes into both `took` (the
+ * ticket's time) and `waited` (the part of it that is no work), so `ticketTime` shows the work unchanged and the waiting grown.
+ */
+export const addResolveWait = (took: Map<string, number>, waited: Map<string, number>, issue: string, resolveWaitMs: number | undefined): void => {
+  if (!(typeof resolveWaitMs === "number" && resolveWaitMs > 0)) return;
+  took.set(issue, (took.get(issue) ?? 0) + resolveWaitMs);
+  waited.set(issue, (waited.get(issue) ?? 0) + resolveWaitMs);
+};
+
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
 // `sandboxId`: the container's name (Sandcastle 0.14.0 on), which the CPU limit and the stop before a close address it by.
 export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close" | "sandboxId">;
@@ -1590,8 +1645,12 @@ export type PipelineContext = {
    * re-run is red on the same gate on tests disjoint from the first red's (`runGates`' `thirdOnDisjoint`): the result is
    * then the third run's, its `rerunOf` the re-run and that one's `rerunOf` the first red, and the pipeline makes no
    * `regate` call for it either. The landing port asks for neither, so a landing runs at most twice.
+   *
+   * `onSlot`: awaited once the gates slot is granted, before the first gate (`GateProgress.onSlot`); `false` runs no gate and
+   * gives the slot back, the result a `GateRun` with no gates and no failures. A fake port calls it before it returns its run,
+   * as the grant. Only the first gate run of an attempt passes one (the base moves during the wait for the slot).
    */
-  gate: (box: PipelineBox, id: string, rerunOnRed?: boolean) => Promise<GateRun>;
+  gate: (box: PipelineBox, id: string, rerunOnRed?: boolean, onSlot?: () => Promise<boolean>) => Promise<GateRun>;
   /**
    * The gates from the one named on (`from`) - that one, then each after it in config order - in the ticket's sandbox:
    * what an attempt's first red gets before any repair pass, in case it was only the machine being busy. A pipeline
@@ -1728,6 +1787,13 @@ export const createGateSeat = (ports: { gateWait(): boolean; retake(): Promise<{
       off = true;
       return true;
     },
+    /**
+     * A wait for a gates slot while the ticket is off already (its gates slot was granted, `gateSlot`, and no retake since: a
+     * `regate`): tell the scheduler it waits again, so it counts in the gates limit once more. It holds no lease to move.
+     */
+    waitAgain() {
+      if (off) ports.gateWait();
+    },
     /** A counted slot again; undefined when the run is paused (the caller parks and asks again). None to hold without the port or on a stopped run: the uncounted lock stays. */
     async retake(): Promise<{ slot?: SlotLease } | undefined> {
       asking = true;
@@ -1851,6 +1917,58 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
     };
     return host.write ? host.write(cut) : cut();
+  };
+
+  /**
+   * A fresh branch (no commit of its own) brought to the base's tip once its sandbox is open, before any agent works on
+   * it. `cutFromBase` cuts it before the open, but a landing that finishes during the rest of the setup is not in the tree
+   * the agent gets, and `conflictBefore` after implement would then send the ticket back. The branch is checked out in the
+   * sandbox's worktree by now, so the move is a fast-forward there (`merge --ff-only`: git declines rather than lose
+   * anything, and the ticket goes on from the tree it has). The worktree's records are held to git's own first
+   * (`checkRecords`). When it brought changed files the project's `setup` runs again in the sandbox, as a landing's merge
+   * does, and a failed one throws `SetupFailed` (the attempt fails, the scheduler sends it back once): no implement on a
+   * broken install. A branch with a commit of its own keeps its fork point (the base merge for a carried branch is later).
+   */
+  const catchUp = async (issue: string, branch: string, box: { worktreePath: string; exec(command: string): Promise<{ stdout: string }> }) => {
+    const move = (): string | undefined => {
+      let ahead: number;
+      let behind: number;
+      try {
+        ahead = Number(sh("git", ["rev-list", "--count", `refs/heads/${base}..refs/heads/${branch}`], project.root));
+        behind = Number(sh("git", ["rev-list", "--count", `refs/heads/${branch}..refs/heads/${base}`], project.root));
+      } catch {
+        return undefined;
+      }
+      if (ahead > 0 || !(behind > 0)) return undefined;
+      const was = `${ref(issue)}: ${branch} had no commits ahead of ${base} and was ${behind} commit(s) behind it when its sandbox opened`;
+      checkRecords(issue, box.worktreePath, `before moving ${branch} in ${keptPath(project.root, box.worktreePath)}`);
+      let before: string;
+      try {
+        before = sh("git", ["-C", box.worktreePath, "rev-parse", "HEAD"], project.root);
+        sh("git", ["-C", box.worktreePath, "merge", "--ff-only", "--no-overwrite-ignore", `refs/heads/${base}`], project.root);
+      } catch (error) {
+        if (error instanceof GuardStop) throw error;
+        console.log(`${was}, but could not be brought to ${base}'s tip (${errorLine(error)}); it goes on from the tree it has.`);
+        return undefined;
+      }
+      console.log(`${was} - brought to ${base}'s tip before implement.`);
+      try {
+        recordFork(project.root, branch, sh("git", ["rev-parse", `refs/heads/${base}`], project.root));
+      } catch (error) {
+        console.log(`${ref(issue)}: could not record where ${branch} was cut again (${errorLine(error)}); a later rewrite of ${base} is found from its merges alone.`);
+      }
+      try {
+        return sh("git", ["-C", box.worktreePath, "diff", "--name-only", before, "HEAD"], project.root);
+      } catch {
+        return "";
+      }
+    };
+    const brought = host.write ? await host.write(move) : move();
+    // A dependency the landing added must be installed before the agent works, as `landInSandbox` does after its merge.
+    if (brought && project.setup.length) {
+      await box.exec(setupHook(project.setup));
+      await assertSetup(box, project.setup, ref(issue));
+    }
   };
 
   const addReport = (id: string, heading: string, text: string) =>
@@ -2007,6 +2125,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     };
 
     const started = Date.now();
+    addResolveWait(took, waited, issue.id, at?.resolveWaitMs);
     releaseBranchWorktree(branch, project.root);
     // From here the agent commits to the branch, and the setup may cut it from the base again: the `.git` check lets it move.
     host.begin(branch);
@@ -2036,7 +2155,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     // until the window resets, this ticket parks like any other at a juncture (sandbox closed, branch kept), and
     // the same pass runs again in a fresh sandbox after the resume. Its time parked is `waitMs` of the step.
     let agentsRan = false;
-    const pass = async (given: Parameters<typeof sandbox.run>[0]) => {
+    // `failing`: for a repair pass, the red run's test ids it was given: its follow-ups are tagged with those they name (`FollowUp.tests`).
+    const pass = async (given: Parameters<typeof sandbox.run>[0], told: { failing?: readonly string[] } = {}) => {
       agentsRan = true;
       // What the ticket's earlier passes and earlier runs named, as of this pass: the review sees the implementer's lines.
       const opts = given.promptArgs && "FOLLOWUPS_NAMED" in given.promptArgs
@@ -2057,7 +2177,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               const facts = capture?.read();
               if (facts) ctx.reportTimings?.set(issue.id, reportTiming(facts));
               const said = saidOf(r.stdout ?? "", facts);
-              for (const f of said.followups) ctx.followUps?.push({ ...f, from: issue.id, phase });
+              for (const f of said.followups) ctx.followUps?.push({ ...f, from: issue.id, phase, ...testsOfRepair(phase, f, told.failing) });
               return Object.assign(r, { said });
             });
           // The kernel kills the largest process, usually a test the agent started, not the agent: the pass goes on, and the
@@ -2160,6 +2280,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // Normally already locked by the worktree hook; this covers a worktree
       // Sandcastle reused.
       lockWorktree(sandbox.worktreePath, project.root);
+      await catchUp(issue.id, branch, sandbox);
       // A branch that no longer merges onto the base ends its pipeline at once: no review or gate run is spent on it,
       // and the scheduler sends it back to resolve the merge (the requeue-once rule). Never a green, which would tell
       // landing that the gates vouched for a commit they never ran on.
@@ -2367,7 +2488,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           return pass({
             name: `resolve-${issue.id}`,
             logging,
-            agent: implAgent(own),
+            agent: resolveAgent(own),
             promptFile: prompts.resolve,
             promptArgs: usedArgs(prompts.resolve, promptArgs),
             maxIterations: project.repair.maxIterations ?? 4,
@@ -2676,7 +2797,20 @@ export const createPipeline = (ctx: PipelineContext) => {
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
       } else {
         await mergeBaseBeforeGates();
-        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
+        // The wait for the gates slot can take many minutes at `maxGates: 1`, and the base moves in it: once the slot is granted
+        // the branch is checked and merged again, before the first gate. A conflict stops the run before any gate ran.
+        let stopped: Outcome | undefined;
+        gated = await timed(issue.id, "gates", () =>
+          gate(sandbox, issue.id, !!ctx.regate && repair > 0, async () => {
+            // The base has not moved past the branch: nothing changed since the check above, and no git call beyond the count.
+            if (!(Number(sh("git", ["rev-list", "--count", `${branch}..${base}`], project.root)) > 0)) return true;
+            stopped = conflicted("gates", { reviewCommits, repairs: earlierRepairs, idleRepairs: earlierIdle, carried });
+            if (stopped) return false;
+            await mergeBaseBeforeGates();
+            return true;
+          }),
+        );
+        if (stopped) return stopped;
       }
       // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
       // the tip looking reviewed with no gate result, and a re-run would only gate it again.
@@ -2795,7 +2929,16 @@ export const createPipeline = (ctx: PipelineContext) => {
       // Whether the pass before committed: only then is a new failure an effect of the repair worth the extra pass.
       let lastCommitted = true;
       // The last pass committed nothing and said the red is outside the branch: one gate run, then no more passes.
-      let outside: { line: string; tests: string[] } | undefined;
+      let outside: { line: string; tests: string[]; by?: string } | undefined;
+      // Another ticket's repair already judged these very tests outside its branch (the fix board): no pass here, the
+      // verdict is that ticket's. Never for a forced red, which is the same text on every ticket and no test's failure.
+      const judgedElsewhere = (failure: Failure) => {
+        const found = forced ? undefined : fixes.outsideFor(wholeTests(failure));
+        if (!found || found.by === issue.id) return false;
+        outside = { line: found.line, tests: found.tests, by: found.by };
+        console.log(`${ref(issue.id)}: ${failure.name} red on the tests ${ref(found.by)}'s repair judged outside its branch - no repair pass`);
+        return true;
+      };
       for (
         let red = gated.failure;
         red && !loadRed && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || (lastCommitted && !seen.has(failureKey(red))));
@@ -2818,6 +2961,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const key = failureKey(failure);
         // Before the fix board is consulted: a ticket parked here claims nothing, so no other ticket waits for its fix through the pause.
         await juncture("repair");
+        if (judgedElsewhere(failure)) break;
         // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
         // the new base and gate again. A forced red is the same text on every ticket and waits for none.
         const asked = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
@@ -2847,6 +2991,8 @@ export const createPipeline = (ctx: PipelineContext) => {
             waitedFor.delete(key);
             continue;
           }
+          // The fixer ended red and landed nothing, perhaps with a verdict that this red is outside its branch.
+          if (!fixLanded && judgedElsewhere(failure)) break;
           if (fixLanded) {
             // A merge that conflicts is left for the repair, as the carried branch's is at landing.
             const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
@@ -2889,12 +3035,14 @@ export const createPipeline = (ctx: PipelineContext) => {
               ...promptArgs,
               GATE_NAME: failure.name,
               GATE_COMMAND: failure.command,
+              // What the pass runs after a commit instead of the gate's full command, which the gate that follows it runs.
+              GATE_RERUN: repairCheck(project, failure, failure === threeRuns?.red ? earlier : []).text,
               // Only for the third run's own red: a later one is what a repair or a merged fix left, not a flake.
               GATE_OUTPUT: (failure === threeRuns?.red ? threeRuns.note : "") + fence(failure.output),
             }),
             maxIterations: project.repair.maxIterations ?? 4,
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
-          });
+          }, { failing: wholeTests(failure) });
         },
           `${why} - pass ${repairs}`,
           () => implModel,
@@ -2916,6 +3064,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (!fixed) break;
         // A tag on a pass that committed is ignored: the commits are the repair, and they are gated as ever.
         outside = verdict && !lastCommitted ? verdict : undefined;
+        if (outside) fixes.judgedOutside(issue.id, outside);
         at?.gates?.();
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
         if (outside) {
@@ -3449,7 +3598,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const active = new Map<string, { phase: string; since: number }>();
   // The heartbeat's other tickets in flight: a landing (its step, once it says one) and a sent-back ticket's wait to resolve (since it was told).
   const landing = new Map<string, { phase?: string; since: number }>();
-  const resolving = new Map<string, number>();
+  const resolving = new Map<string, { since: number; for: string[] }>();
   // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
   const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
@@ -3675,7 +3824,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
   // A ticket's move of its sandbox slot to an uncounted lock (`createGateSeat`), by ticket: told by a ticket gate's wait for a gates slot.
   const gateWaits = new Map<string, () => void>();
-  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim) => {
+  // Told as a ticket gate's gates slot is granted: the scheduler's `at.gateSlot`, which takes the ticket out of the gates limit's count.
+  const gateSlots = new Map<string, () => void>();
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim, slotHook?: () => Promise<boolean>) => {
     const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
@@ -3690,6 +3841,15 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
         // A ticket's gates only: a landing's, the base's and the verify's sandbox is a slot the run's end waits on.
         if (!priority) gateWaits.get(id)?.();
       },
+      // A ticket's gates only (as `wait`): the slot is granted, before the first gate.
+      // `slotHook`'s answer (the pipeline's re-check of the branch) is the gate run's: false stops it before the first gate.
+      onSlot: () => {
+        if (!priority) gateSlots.get(id)?.();
+        return slotHook?.();
+      },
+      // A ticket's green run, still inside its gates slot (`GateProgress.green`): the run's landing claim is taken before the slot frees,
+      // so it goes to the landing and not to the next ticket's gate. `landingPorts` is made below, before any gate runs.
+      green: () => landingPorts.claim?.greenGate(id),
       // Held for the machine's CPU pressure before the pass asks for a slot (`LOAD_PAUSE`): the same words in the heartbeat and the
       // ticket's note, and a ticket's own sandbox slot and worker are freed as a wait for a gates slot frees them. The base's and
       // the verify's have no ticket; the hold's own line names them.
@@ -3762,7 +3922,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
       // A landing that has not reported a step yet is merging: an entry with no step read as stuck.
       landing: [...landing].map(([n, l]) => ({ ref: ref(n), phase: l.phase ?? "merging", since: l.since })),
-      resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
+      resolving: [...resolving].map(([n, w]) => ({ ref: ref(n), since: w.since, for: w.for.map(ref) })),
       queued: [...queuedToLand].map(([n, since]) => ({ ref: ref(n), since })),
       slotWait: slotWaits.since,
       ...(slotWaitsFor ? { waitsFor: slotWaitsFor } : {}),
@@ -3808,6 +3968,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     write: (fn) => host.write(fn, trackerMade(project.root)),
     seen: filedThisRun,
     places: placesThisRun,
+    byTest: testIssuesThisRun,
     exists: onBase(project.root, project.baseBranch),
     named: namedOnBase(project.root, project.baseBranch),
     earlier: filedBefore(project.root, new Set(candidates.map((c) => c.id)), (id) => tracker.isClosed(id)),
@@ -3924,7 +4085,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     // A setup step that failed throws `SetupFailed` inside the open, so the open's clean-up removes what it made: the attempt
     // is lost, and the scheduler sends the ticket back once (src/schedule.ts).
     open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }).then((s) => assertSetup(s, project.setup, branch)).then((s) => limitMemory(s, project.memory)), host.exclusive),
-    gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed),
+    gate: (box, id, rerunOnRed, onSlot) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed, undefined, onSlot),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>
       timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () =>
@@ -3989,7 +4150,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   };
   // One attempt of a ticket (schedule.ts runs it), in the sandbox slot its worker leased (`slot`): the usage check and
   // the tracker's word before it, then its pipeline.
-  const attempt = async (issue: Issue, { last, juncture, paused, gates, gateWait, retake, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; retake(): Promise<{ slot?: SlotLease } | undefined>; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
+  const attempt = async (issue: Issue, { last, juncture, paused, gates, gateWait, gateSlot, retake, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; gateSlot(): void; retake(): Promise<{ slot?: SlotLease } | undefined>; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
     // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
     // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
     let lease: SlotLease | undefined = slot;
@@ -4019,7 +4180,11 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     // The first wait for a gates slot of a ticket gate (the heartbeat's wait callback): move the slot off the count.
     gateWaits.set(issue.id, () => {
       if (lease && seat.move(lease)) lease = undefined;
+      // Already off with no lease to move (a wait after the gates slot was granted): the scheduler counts it as a waiter again.
+      else seat.waitAgain();
     });
+    // The gates slot is granted (`GateProgress.onSlot`): the ticket leaves the run's off-count places while its gates run.
+    gateSlots.set(issue.id, gateSlot);
     // At its start the ticket gives the slot back for a pause and takes one only once it goes on (below).
     const start: Park = { suspend: async () => give(), resume: async () => {} };
     await pausing.waitOutPause(usagePause !== undefined, paused, (phase) => juncture(phase, start));
@@ -4039,7 +4204,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     const outsider = await outsiderEdit(tracker, issue.id, turn?.runStart ?? Date.parse(runId));
     if (outsider?.kind === "unread") {
       console.log(`${ref(issue.id)}: ${outsider.why}.`);
-      return { kind: "not begun", why: { kind: "withdrawn", reason: outsider.why } };
+      return { kind: "not begun", why: { kind: "unchecked", reason: outsider.why } };
     }
     const parkable = (park?: Park): Park => ({
       suspend: async () => {
@@ -4076,6 +4241,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       } finally {
         give();
         gateWaits.delete(issue.id);
+        gateSlots.delete(issue.id);
         seats.delete(issue.id);
       }
     })().then(
@@ -4168,6 +4334,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   };
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     fixes.told(c);
+    // Its wait is over and it queues for a free slot: the heartbeat names no ticket that has landed, as the record's note does not.
+    if (c.kind === "resolve queued" && resolving.has(c.id)) resolving.set(c.id, { since: resolving.get(c.id)!.since, for: [] });
     switch (c.kind) {
       case "landing":
         // Only the run line: the next landing writes it again.
@@ -4183,8 +4351,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
         ledger.tell(c);
         return holds.tell(run, c);
       case "resolve waits":
-        // The heartbeat's wait counts from the first telling; a later one only changes the list.
-        if (!resolving.has(c.id)) resolving.set(c.id, Date.now());
+        // The heartbeat's wait counts from the first telling; each telling keeps its list, which the heartbeat names.
+        resolving.set(c.id, { since: resolving.get(c.id)?.since ?? Date.now(), for: c.for });
         return holds.tell(run, c);
       case "resolve queued":
         return holds.tell(run, c);

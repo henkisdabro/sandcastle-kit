@@ -91,6 +91,20 @@ export type GateProgress = {
   wait?: () => void;
   /** The run holds this pass for the machine's CPU pressure (`LOAD_PAUSE`) before it asks for a gates slot; called once, when the hold begins. */
   loadWait?: () => void;
+  /**
+   * The gates slot was granted: called once per grant, inside the slot, before the load-hold line is written and before the
+   * first gate runs - also for a run that starts from a later gate (`from`), which `gate(0)` never reports. Awaited, and its
+   * answer decides whether the gates run: `false` stops the run, which runs no gate, gives the slot back and returns a `GateRun`
+   * with no gates and no failures (never a green run, which has a gate per configured gate). Nothing or `true`
+   * goes on, as a hook that only notifies always has (any other value is no answer; a promise is awaited).
+   */
+  onSlot?: () => unknown;
+  /**
+   * A ticket's gate run (`priority` false) ended green, called inside the gates slot before it is released: the run's landing claim
+   * is taken while no other ticket gate can see the slot free (`RunClaim.greenGate`, `src/pool.ts`). Not called for a red run, a run
+   * the caller stopped (`onSlot` false), a run that threw, or a base, verify or landing gate.
+   */
+  green?: () => void;
   /** Gate `index` (0-based) starts. */
   gate?: (index: number, name: string) => void;
   /** Each gate's output is appended here as it arrives. */
@@ -179,6 +193,43 @@ type LoadHold = (label: string, onHold?: () => void) => Promise<void>;
 let loadHold: LoadHold | undefined;
 export const setLoadHold = (hold: LoadHold | undefined) => {
   loadHold = hold;
+};
+
+/**
+ * A gate's `rerun` template filled from the failing tests of the runs given (each run's tests, unset when its output may
+ * be cut), or undefined for its full command: no template, a run's tests unset, no test at all (a lint or type gate), or
+ * `{files}` with an id that names no file. The one filler of the in-slot re-run and of the repair prompt's command.
+ */
+export const fillRerun = (template: string | undefined, runs: (string[] | undefined)[]): string | undefined => {
+  if (!template || runs.some((tests) => tests === undefined)) return undefined;
+  const ids = [...new Set(runs.flatMap((tests) => tests ?? []))];
+  if (!ids.length) return undefined;
+  let files: string[] | undefined;
+  if (template.includes("{files}")) {
+    const named = ids.map(failingTestFile);
+    if (named.some((f) => f === undefined)) return undefined;
+    files = [...new Set(named as string[])];
+  }
+  return template.replaceAll("{tests}", () => ids.map(shq).join(" ")).replaceAll("{files}", () => (files ?? []).map(shq).join(" "));
+};
+
+/**
+ * What a repair pass runs after a commit in place of the red gate's full command (the orchestrator runs every gate once the
+ * pass exits), as the text of the repair prompt's `{{GATE_RERUN}}`. `reds` are the gate's earlier red runs when `failure` is
+ * a third run's, so the command names every run's tests. In order: the gate's `rerun` template filled from the failing
+ * tests; else, for a gate whose failing tests are readable, their files by the runner the gate command names; else (lint, a
+ * build, the typecheck gate, an e2e gate with unreadable ids) the gate's own command. `command` is the filled one, if any.
+ */
+export const repairCheck = (project: Pick<Project, "gates">, failure: Failure, reds: Failure[] = []): { text: string; command?: string } => {
+  const template = project.gates.find((g) => g.name === failure.name)?.rerun;
+  const runs = [...reds, failure].map((f) => {
+    const ids = wholeTests(f);
+    return ids.length ? ids : undefined;
+  });
+  const command = fillRerun(template, runs);
+  if (command) return { command, text: `the failing tests, with the gate's targeted command:\n\n  \`\`\`\n  ${command}\n  \`\`\`` };
+  if (runs.every((ids) => ids !== undefined)) return { text: `the failing tests' files, by the test runner \`${failure.command}\` names, not the whole command` };
+  return { text: `this gate's own command, \`${failure.command}\`: its failure is not a list of tests` };
 };
 
 // In order. A branch stops at the first red gate - its repair pass is fed
@@ -270,22 +321,7 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const rewrote = await restoreGateChanges(sandbox, before);
     return { gates, failure: failures[0], failures, ...(head ? { head } : {}), ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...cpuFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   };
-  // The gate's `rerun` command filled from the failing tests of the runs given (each run's tests, unset when its output may be
-  // cut), or undefined for its full command: no `rerun`, a run's tests unset, no test at all (a lint or type gate), or
-  // `{files}` with an id that names no file.
-  const filled = (name: string, runs: (string[] | undefined)[]): string | undefined => {
-    const template = project.gates.find((g) => g.name === name)?.rerun;
-    if (!template || runs.some((tests) => tests === undefined)) return undefined;
-    const ids = [...new Set(runs.flatMap((tests) => tests ?? []))];
-    if (!ids.length) return undefined;
-    let files: string[] | undefined;
-    if (template.includes("{files}")) {
-      const named = ids.map(failingTestFile);
-      if (named.some((f) => f === undefined)) return undefined;
-      files = [...new Set(named as string[])];
-    }
-    return template.replaceAll("{tests}", () => ids.map(shq).join(" ")).replaceAll("{files}", () => (files ?? []).map(shq).join(" "));
-  };
+  const filled = (name: string, runs: (string[] | undefined)[]): string | undefined => fillRerun(project.gates.find((g) => g.name === name)?.rerun, runs);
   // A red run of the `rerun` command stands for the first full run's failure, with the targeted run's command and tests
   // alongside (`Failure.rerun`). A targeted run that timed out keeps its own failure: no repair or third run follows it.
   const settle = (run: GateRun, first: Failure): GateRun => {
@@ -293,12 +329,24 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const failures = run.failures.map(swap);
     return { ...run, failure: failures[0], failures };
   };
+  // A ticket's green run (`priority` false) tells its caller while the slot is still held: the run's landing claim is taken before
+  // another ticket gate can see the slot free, so it goes to that landing. A red run (the failure the run ends on) says nothing.
+  const done = (run: GateRun): GateRun => {
+    if (!priority && !run.failure && !run.failures.length) progress.green?.();
+    return run;
+  };
   return await withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
+    const go = await progress.onSlot?.();
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
     if (log && loadHeldMs >= 1000) appendFileSync(log, `# held ${Math.round(loadHeldMs / 1000)}s for machine load\n`);
     if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
+    // The caller said stop once the slot was held (a branch the base moved onto while it waited now conflicts): no gate runs on it.
+    if (go === false) {
+      if (log) appendFileSync(log, "# stopped by the caller once the gates slot was granted: no gate ran\n");
+      return { gates: [], failures: [], waitMs, ...loaded };
+    }
     const began = Date.now();
     const first = await pass(startAt(from));
     const firstMs = Date.now() - began;
@@ -307,7 +355,7 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     // The red gate's one re-run (`PipelineContext.regate`) is inside this slot: a second `withSlot` would queue behind
     // every other run's gates again, minutes for a re-run meant to find out whether the machine was only busy. The
     // wait is the first run's, so the re-run records none. Not after a timeout, which is never re-run or repaired.
-    if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return { ...first, waitMs, ...loaded };
+    if (!rerunOnRed || !red || red.exitCode === 124 || redAt < 0) return done({ ...first, waitMs, ...loaded });
     progress.again?.(red.name);
     const rerunBegan = Date.now();
     const rerun = settle(await pass(startAt(red.name), filled(red.name, [red.tests])), red);
@@ -321,13 +369,13 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
       const third = settle(await pass(startAt(second.name), filled(second.name, [red.tests, second.rerun ? second.rerun.tests : second.tests])), red);
       const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? []), ...(third.rewrote ?? [])])];
       // The chain: the third run's result, then the re-run (with its `ms`), then the first red run (with the wait).
-      return { ...third, gates: [...first.gates.slice(0, redAt), ...third.gates], waitMs, ...loaded, rerunOf: { ...rerun, ms: rerunMs, rerunOf: { ...first, waitMs, ms: firstMs } }, ...(rewrote.length ? { rewrote } : {}) };
+      return done({ ...third, gates: [...first.gates.slice(0, redAt), ...third.gates], waitMs, ...loaded, rerunOf: { ...rerun, ms: rerunMs, rerunOf: { ...first, waitMs, ms: firstMs } }, ...(rewrote.length ? { rewrote } : {}) });
     }
     // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
     // A file the first run's gates rewrote is reported too: the re-run starts at the red gate, so the gate that
     // rewrote it may not run again, and the run's `gateRewrites` line would lose it.
     const rewrote = [...new Set([...(first.rewrote ?? []), ...(rerun.rewrote ?? [])])];
-    return { ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, ...loaded, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) };
+    return done({ ...rerun, gates: [...first.gates.slice(0, redAt), ...rerun.gates], waitMs, ...loaded, rerunOf: { ...first, waitMs, ms: firstMs }, ...(rewrote.length ? { rewrote } : {}) });
   }), progress.wait, undefined, priority, false, undefined, claim);
 };
 
@@ -483,7 +531,7 @@ export const runGitHookProbe = async (sandbox: Parameters<typeof execGate>[0]): 
 /** The base check's lines for a `core.hooksPath` that does not exist inside a sandbox (`hooksPathOutside`); none when it does. */
 export const hooksPathWarning = (root: string): string[] => {
   const value = hooksPathOutside(root);
-  return value ? hooksPathLines(value).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
+  return value ? hooksPathLines(value, root).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
 };
 
 /**

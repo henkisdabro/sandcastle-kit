@@ -146,3 +146,9 @@ test("gather: a live run leaves out the worktrees of its own tickets, still in f
   assert.equal(f.live, true);
   assert.deepEqual((f.earlierKept ?? []).map((k) => k.issue).sort(), ["3", "4", "5"]);
 });
+
+test("gather: a stopped run that recorded no kept worktrees does not call its own tickets' worktrees earlier runs'", async () => {
+  const { project } = repo({ pid: 1, finishedAt: "2026-10-02T09:00:00.000Z", exitCode: 1, stoppedBy: "sandcastle stop", tickets: { "4": { state: "stopped", title: "four" }, "6": { state: "stopped", title: "six" } } });
+  const f = await gather(project, () => undefined);
+  assert.deepEqual((f.earlierKept ?? []).map((k) => k.issue).sort(), ["3", "5"]);
+});

@@ -65,6 +65,11 @@ test("some free slots: it starts with those and waits for the rest; enough free:
   assert.equal(plenty[0], "webshop is live (1 slot, demand 1): this run's share is 4 (one of the pool's slots is kept for any run's landing); it starts at once");
 });
 
+test("a share of 0 with no slot free waits for the other run, never 'starts at once'", () => {
+  const none = startLines({ share: 0, free: 0 }, [other({ held: 2, demand: 2 })]);
+  assert.equal(none[0], "webshop is live (2 slots, demand 2): this run's share is 0 (one of the pool's slots is kept for any run's landing); it starts as webshop's tickets finish, the first likely in ~12m");
+});
+
 test("two other runs are both named, and the first slot is the sooner wait", () => {
   const [line] = startLines({ share: 2, free: 0 }, [other({ held: 3, demand: 3, wait: 20 * 60 }), other({ project: "web", held: 3, demand: 4, wait: 7 * 60 })]);
   assert.equal(line, "webshop is live (3 slots, demand 3) and web is live (3 slots, demand 4): this run's share is 2 (one of the pool's slots is kept for any run's landing); it starts as webshop's and web's tickets finish, the first likely in ~7m");

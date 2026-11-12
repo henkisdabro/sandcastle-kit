@@ -148,14 +148,18 @@ This continues SKILL.md: run its "Before every action" first.
    With no such note in SKILL.md's text (and none seen earlier in the session), the detached run
    is not your own process, so your harness never tells you it finished. Right after starting it, run `sandcastle wait` as a background command your
    harness reports back on when it exits (`run_in_background` in Claude Code): it blocks while the
-   run is live, then prints the closing summary and exits with the run's exit code (1 when the merged base ended red: do not push it). A harness caps
+   run is live, then prints the closing summary and exits with the run's exit code. Exit 1 is any end that was not clean - a red merged base (do not push it), the
+   guard's stop, `sandcastle stop`, a refused preflight - so read the summary's `## 🏁` headline for which, never the code alone. A harness caps
    a background command (Claude Code: 30 minutes by default, 2 hours at most - pass
    `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
    timeout it exits 124 with the run untouched, which is no result - start the same
    `sandcastle wait` again. N is how long `sandcastle wait N` waits for the run to end; once it
    has ended, `wait` reads the tracker again to print the closing summary, which takes longer with
    many blocked tickets, so the harness's own timeout needs room above N. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
-   user asks, and `sandcastle wait` then shows how it ended. To hold the run without losing work
+   user asks, and `sandcastle wait` then shows how it ended: keep its output (never `>/dev/null`), since a stopped run
+   prints no summary of its own, and `sandcastle report` shows it only until the next run starts. That summary is the
+   close: when the mod's end prompt for the same run arrives afterwards, acknowledge it in one line rather than
+   closing the run twice. To hold the run without losing work
    (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
    agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
    when the user asks (pause.md), and `sandcastle wait` keeps waiting through a pause.
@@ -235,7 +239,7 @@ This continues SKILL.md: run its "Before every action" first.
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, blocked (left out at 0), tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
       ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent; if it says `RED twice, likely load`, the failures were only test timeouts or a gate far slower than recorded, so `sandcastle gates` on a quiet machine is the check: say which, and still do not push.
-      If an `Against the estimate:` line follows, the run's time or tokens were more than twice the start estimate's (or under half): relay it, and for a slow run the `Largest causes measured:` line under it (time paused, time beside another run, slot waits, re-runs and repairs). That line also comes alone, for a run inside its estimate (or with none, a project's first) where one cause took a fifth of its time or more: relay it too, and when it names `sandcastle size`, offer to run it. A `Likely flaky:` line per test names a test that went red and then green on a re-run, or that a repair pass judged flaky, with the tickets that hit it (a red verify whose failing tests all flaked earlier in the run says `a test this run already saw flake`): mention them, as a flaky test is worth a ticket of its own.
+      If an `Against the estimate:` line follows, the run's time or tokens were more than twice the start estimate's (or under half): relay it, and for a slow run the `Largest causes measured:` line under it (time paused, time beside another run, slot waits, sent-back tickets waiting to resolve, re-runs and repairs). That line also comes alone, for a run inside its estimate (or with none, a project's first) where one cause took a fifth of its time or more: relay it too, and when it names `sandcastle size`, offer to run it. A `Likely flaky:` line per test names a test that went red and then green on a re-run, or that a repair pass judged flaky, with the tickets that hit it (a red verify whose failing tests all flaked earlier in the run says `a test this run already saw flake`): mention them, as a flaky test is worth a ticket of its own.
       If it reads `NOT re-gated: the verify could not open its sandbox`, the merged base is ungated (a worktree or container start timed out): run `sandcastle gates`, and do not push until it is green.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
@@ -270,10 +274,10 @@ This continues SKILL.md: run its "Before every action" first.
       them. A block headed `Upgrading notes` is what an existing project must act on: keep it apart,
       never among the changes. The summary shows only the last run's lines: for a release's changelog, `sandcastle report
       --changelog [--since <ref>]` lists the lines of every ticket that landed since a ref (default: the
-      latest tag) across runs, and the landed tickets that have none. A `Landed on a second attempt` line names the tickets the run sent back
-      once after a conflict (at landing, or found before its review or gates), a red gate at landing or a
-      failed `setup` step and then merged, and says which: say so, as it is the reason a
-      ticket's work took two passes.
+      latest tag) across runs, and the landed tickets that have none. A `Landed on a second attempt` line (or `Landed on a third attempt`, or
+      `Landed after N attempts` for four or more) names the tickets the run sent back after a conflict (at landing, or found
+      before its review or gates), a red gate at landing or a failed `setup` step and then merged, and says each
+      reason in order (the run record's `requeues`): say so, as it is the reason a ticket's work took more than one pass.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
       held, its size, the review and merge commands, the criterion an agent left unmet if the line
       names one (`sandcastle land` leaves that ticket open), and anything that needs a decision.

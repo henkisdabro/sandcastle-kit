@@ -74,6 +74,9 @@ export const exitOnSignal = () => {
 // kit's to clean, which a hand-run `git worktree remove` bypasses.
 const REWORDED: [RegExp, string][] = [
   [/^Could not fetch from origin \(reusing worktree at (.+) as-is, branch '(.+)'\)$/, "Resuming branch '$2' in its kept worktree ($1)"],
+  // A scratch worktree (`sandcastle-base-gates-<time>`, a verify's) holds no branch's work and no run resumes it: a stop
+  // while one was open once promised the next run would.
+  [/^( *)To clean up: git worktree remove --force .*\/sandcastle-[^/]+$/, "$1To clean up: `sandcastle clean` - a throwaway worktree with no work in it"],
   [/^( *)To clean up: git worktree remove --force .+$/, "$1To clean up: `sandcastle clean` - or leave it, and the next `sandcastle run` resumes it"],
 ];
 export const reword = (line: string) => REWORDED.reduce((l, [re, to]) => l.replace(re, to), line);
@@ -323,9 +326,22 @@ const ask = (cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
 // (never the value), since finding a stale token cost a field report about ten tool calls.
 const AUTH_REJECTION = /\b401\b|authenticat|invalid.*(api.key|token)|oauth|400 \(no body\)/i;
 
+// What Codex's own CLI prints when the host's ChatGPT login is stale or rotated away ("refresh token was already used").
+const CODEX_LOGIN = /refresh token|could not be refreshed|log ?in again|sign in again|not logged in|\b401\b/i;
+
+/**
+ * A failed `codex exec` probe's output as one reason: its tracing lines (an ISO time first) dropped, a line it printed
+ * twice kept once, the last three left, so the 300-character cut never falls on a repeat or a log line.
+ */
+export const codexReply = (out: string): string => {
+  const lines = out.split("\n").map((l) => l.trim()).filter((l) => l && !/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(l));
+  return [...new Set(lines)].slice(-3).join(" ").slice(0, 300);
+};
+
 export const preflightFailure = (
   failures: { model: string; reply: string }[],
   credential: { key: string; file: string } | undefined,
+  codexModel?: string,
 ): string => {
   const same = failures.every((f) => f.reply === failures[0]!.reply);
   const lines = same
@@ -336,6 +352,10 @@ export const preflightFailure = (
       `The credential was likely rejected: ${credential.key} from ${credential.file}. ` +
         `Make a new one (\`claude setup-token\` for a subscription) and replace that value in ${credential.file}.`,
     );
+  }
+  // The Codex probe runs on the host's ChatGPT login, so its fix is a new login there, not a token file.
+  if (codexModel && failures.some((f) => f.model === codexModel && CODEX_LOGIN.test(f.reply))) {
+    lines.push("The host's Codex login was likely rejected: sign in again on this machine (`codex logout && codex login`), or run without CROSS_REVIEW.");
   }
   return `NOT STARTED: Preflight failed - no sandbox started:\n  ${lines.join("\n  ")}`;
 };
@@ -384,14 +404,14 @@ export const preflight = async (project: Project, image: string, extra: { model:
         "codex",
         ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-m", CROSS_REVIEW_MODEL, "Reply OK"],
         { cwd: tmpdir() },
-      ).then((r) => (r.ok ? undefined : { model: CROSS_REVIEW_MODEL, reply: r.out.split("\n").slice(-3).join(" ").slice(0, 300) })),
+      ).then((r) => (r.ok ? undefined : { model: CROSS_REVIEW_MODEL, reply: codexReply(r.out) })),
     );
   }
   const failures = (await Promise.all(probes)).filter((f): f is { model: string; reply: string } => f !== undefined);
   if (failures.length) {
     // The hint names the Claude credential; a Codex reply comes from the host's ChatGPT login, not that file.
     const claudeOnly = failures.every((f) => f.model !== CROSS_REVIEW_MODEL);
-    throw new OperatorError(preflightFailure(failures, claudeOnly ? credentialSource(project) : undefined));
+    throw new OperatorError(preflightFailure(failures, claudeOnly ? credentialSource(project) : undefined, CROSS_REVIEW ? CROSS_REVIEW_MODEL : undefined));
   }
   console.log(`Preflight ok: ${MODELS_LINE}`);
 };
@@ -687,7 +707,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     const allowed = new Set(["ISSUE_NUMBER", "TICKET", "TICKET_BODY", "SOURCE_BRANCH", "TARGET_BRANCH"]);
     // The orchestrator fills these for a repair pass. Sandcastle substitutes
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
-    if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
+    if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_RERUN", "GATE_OUTPUT"]) allowed.add(k);
     // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
     // And its final message, which the same prompts hold the place of.
     if (kind === "review" || kind === "rereview" || kind === "remerge") for (const k of ["IMPL_UNMET", "IMPL_SAID"]) allowed.add(k);
@@ -1733,26 +1753,66 @@ export const narrowReviewBase = (root: string, base: string, id: string): string
 // a pass is the sum of its iterations.
 // ---------------------------------------------------------------------------
 
-export type Tokens = { input: number; cacheWrite: number; cacheRead: number; output: number };
+// `cacheWrite1h` / `cacheWrite5m`: how `cacheWrite` splits by cache TTL, when Claude's `result` line said so (a 1-hour
+// write bills at 2x input, a 5-minute one at 1.25x). Absent on a Codex pass and on a timings.jsonl line an older kit wrote.
+export type Tokens = { input: number; cacheWrite: number; cacheRead: number; output: number; cacheWrite1h?: number; cacheWrite5m?: number };
 export const NO_TOKENS: Tokens = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
 
-export const addTokens = (a: Tokens, b: Tokens): Tokens => ({
-  input: a.input + b.input,
-  cacheWrite: a.cacheWrite + b.cacheWrite,
-  cacheRead: a.cacheRead + b.cacheRead,
-  output: a.output + b.output,
-});
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+/**
+ * A figure's TTL split: its counts (a missing one 0), `neutral` for a figure that wrote nothing (NO_TOKENS, a Codex pass
+ * with no writes), or `none` for one that wrote with no split at all - which alone drops the split from a sum, so a
+ * total never claims a split it does not have.
+ */
+const splitOf = (t: Tokens): { h1: number; m5: number } | "neutral" | "none" => {
+  const h1 = num(t.cacheWrite1h);
+  const m5 = num(t.cacheWrite5m);
+  if (h1 !== undefined || m5 !== undefined) return { h1: h1 ?? 0, m5: m5 ?? 0 };
+  return t.cacheWrite ? "none" : "neutral";
+};
+
+export const addTokens = (a: Tokens, b: Tokens): Tokens => {
+  const sum = { input: a.input + b.input, cacheWrite: a.cacheWrite + b.cacheWrite, cacheRead: a.cacheRead + b.cacheRead, output: a.output + b.output };
+  const [x, y] = [splitOf(a), splitOf(b)];
+  if (x === "none" || y === "none" || (x === "neutral" && y === "neutral")) return sum;
+  const [p, q] = [x === "neutral" ? { h1: 0, m5: 0 } : x, y === "neutral" ? { h1: 0, m5: 0 } : y];
+  return { ...sum, cacheWrite1h: p.h1 + q.h1, cacheWrite5m: p.m5 + q.m5 };
+};
 
 export const runTokens = (result: unknown): Tokens | undefined => {
   const iterations = (result as { iterations?: { usage?: IterationUsage }[] } | undefined)?.iterations;
   const usages = (Array.isArray(iterations) ? iterations : []).map((i) => i.usage).filter((u): u is IterationUsage => !!u);
   if (!usages.length) return undefined;
   return usages
-    .map((u) => ({ input: u.inputTokens, cacheWrite: u.cacheCreationInputTokens, cacheRead: u.cacheReadInputTokens, output: u.outputTokens }))
+    .map((u): Tokens => {
+      // The split counts `resultUsage` (src/agents.ts) adds; Sandcastle passes the usage object through unchanged.
+      const { cacheCreationEphemeral1hInputTokens: h1, cacheCreationEphemeral5mInputTokens: m5 } = u as { cacheCreationEphemeral1hInputTokens?: unknown; cacheCreationEphemeral5mInputTokens?: unknown };
+      return {
+        input: u.inputTokens,
+        cacheWrite: u.cacheCreationInputTokens,
+        cacheRead: u.cacheReadInputTokens,
+        output: u.outputTokens,
+        ...(num(h1) !== undefined ? { cacheWrite1h: num(h1) } : {}),
+        ...(num(m5) !== undefined ? { cacheWrite5m: num(m5) } : {}),
+      };
+    })
     .reduce(addTokens, NO_TOKENS);
 };
 
-export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
+/** The cache part of a tokens line: what was read, and what was written, with its TTL when the split is known and adds up. */
+const cachePart = (t: Tokens) => {
+  if (!t.cacheWrite) return `${k(t.cacheRead)} read`;
+  const split = splitOf(t);
+  const written = `${k(t.cacheRead)} read, ${k(t.cacheWrite)} written`;
+  if (typeof split === "string" || split.h1 + split.m5 !== t.cacheWrite) return written;
+  if (!split.m5) return `${written} 1h`;
+  if (!split.h1) return `${written} 5m`;
+  return `${written}, ${k(split.h1)} of it 1h`;
+};
+
+// `in` is all input: uncached, written to the cache and read from it.
+export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${cachePart(t)}) / ${k(t.output)} out`;
 /** The status view's run line has no room for the cached share. */
 export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
 /**

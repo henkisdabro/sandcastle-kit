@@ -139,6 +139,6 @@ test("the file-shares log line for two tickets that change one file says what ha
   });
   assert.deepEqual(
     start[1].shares?.map((s) => fileShareLine(ref, "2", s)),
-    ["#1 and #2 both change page.html - if they conflict at landing, the later one is sent back once and its merge resolved"],
+    ["#1 and #2 both change page.html - if they conflict at landing, the later one is sent back and its merge resolved (once, or again if another ticket lands while it resolves)"],
   );
 });

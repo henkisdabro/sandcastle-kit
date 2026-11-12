@@ -426,7 +426,7 @@ export const report = (project: Project, p: Plan) => {
   const gitHooks = gitHooksDir(project.root);
   const outside = hooksPathOutside(project.root);
   if (outside) {
-    console.log(`  WARNING: ${hooksPathLines(outside).join("\n  ")}`);
+    console.log(`  WARNING: ${hooksPathLines(outside, project.root).join("\n  ")}`);
   } else if (gitHooks) {
     console.log(`  Git hooks (${gitHooks}) run on every agent commit in the sandbox; \`sandcastle gates\` checks they can.`);
   }
@@ -487,10 +487,47 @@ export const hostHooks = (root: string, names: readonly string[]): string[] => {
  * compares the config with its baseline (`assertGitConfigBaseline`): after a clean end it takes a relative path to a
  * tracked directory of the repo without a question, and asks for `--accept-git-config` once for any other value.
  */
-export const hooksPathLines = (value: string): string[] => [
-  `core.hooksPath is ${JSON.stringify(value)}, which is not a directory of the project, so it does not exist inside a sandbox: git finds no hooks there and agent commits run none.`,
-  "-> `git config core.hooksPath <relative path>`, the hooks directory relative to the project root (for example `.githooks`). The next start takes that change without a question when the path is a tracked directory of the repo and the last run ended cleanly; any other value needs `--accept-git-config` once.",
-];
+export const hooksPathLines = (value: string, root?: string): string[] => {
+  const own = root === undefined ? undefined : ownAbsoluteHooksPath(root, value);
+  if (own) {
+    return [
+      `core.hooksPath is ${JSON.stringify(value)}, the absolute form of this project's own \`${own}\`, which does not exist inside a sandbox: git finds no hooks there and agent commits run none. ${REWRITE_NOTE}`,
+      `-> \`git config core.hooksPath ${own}\`. The next start takes that change without a question when the last run ended cleanly.`,
+    ];
+  }
+  return [
+    `core.hooksPath is ${JSON.stringify(value)}, which is not a directory of the project, so it does not exist inside a sandbox: git finds no hooks there and agent commits run none.`,
+    "-> `git config core.hooksPath <relative path>`, the hooks directory relative to the project root (for example `.githooks`). The next start takes that change without a question when the path is a tracked directory of the repo and the last run ended cleanly; any other value needs `--accept-git-config` once.",
+  ];
+};
+
+/** Why a relative hooks path turns absolute by itself: shared by doctor, `lean`, the base check and the guard's lines. */
+export const REWRITE_NOTE =
+  "This matches a known Claude Code rewrite: its worktree setup writes the absolute form of a relative `core.hooksPath` into the shared `.git/config`.";
+
+/**
+ * The relative hooks path an absolute `core.hooksPath` is the host form of: `<root>/<rel>` naming a directory inside the
+ * project, outside `.git`. Undefined for any other value, so the lines never name a fix the value does not imply.
+ */
+export const ownAbsoluteHooksPath = (root: string, value: string): string | undefined => {
+  if (!value.startsWith("/")) return undefined;
+  let real = root;
+  try {
+    real = realpathSync(root);
+  } catch {
+    /* the root as given */
+  }
+  for (const base of new Set([root, real])) {
+    const rel = relative(base, value);
+    if (!rel || rel.startsWith("..") || rel.startsWith("/") || rel.split("/").some((p) => p.toLowerCase() === ".git")) continue;
+    try {
+      if (lstatSync(join(base, rel)).isDirectory()) return rel;
+    } catch {
+      /* not there: not this project's own directory */
+    }
+  }
+  return undefined;
+};
 
 // ---------------------------------------------------------------------------
 // Hook check: can every kept hook run in the image? For each command, in a

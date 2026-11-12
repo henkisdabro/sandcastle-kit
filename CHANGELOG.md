@@ -37,6 +37,30 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- A `core.hooksPath` turned into the absolute form of the project's own hooks directory, as Claude
+  Code's worktree setup writes it into the shared `.git/config`, is now named in the guard's stop,
+  the start's refusal and doctor's line, with both values and `git config core.hooksPath <the
+  relative value>` as the way back. The guard still writes nothing itself, and any other change
+  keeps its value hidden.
+- The start lines, `file-shares.log`, the docs and the skill no longer say a conflicting ticket is
+  sent back only once: it is sent back again when another ticket lands while it resolves. (#930)
+- A run stopped by a person (or killed) while its base gates waited for a slot is now summarised as
+  stopped, not as "red on main before any agent ran" with a gates log that no gate wrote.
+- A run its preflight refused now heads its summary "NOT STARTED: preflight failed" and points at
+  the run's last lines for the cause, with no "Against the estimate" line.
+- A failed Codex preflight now prints its error once, without the CLI's tracing lines, and a stale
+  host login names its fix: `codex logout && codex login`, or a run without `CROSS_REVIEW`.
+- The start line no longer says a run "starts at once" when its share of the machine is 0 and no
+  slot is free; it says it starts as the other run's tickets finish.
+- The start line's `Machine-wide: sandboxes 4/3` now says how many sandboxes are waiting for a gates
+  slot outside the limit, so the count no longer reads as a broken limit.
+- A stopped run that recorded no kept worktrees no longer lists its own tickets' worktrees as
+  "kept by earlier runs".
+- A throwaway worktree (the base gates', a verify's) that a stop leaves behind is no longer said to
+  be resumed by the next run: `sandcastle clean` removes it.
+- The skill reads exit 1 from `sandcastle wait` by the summary's headline (a red base, a stop, a
+  refused preflight), keeps `wait`'s output after a stop, closes a run it stopped once, and says
+  what a hot file in `queue --lint` asks of the person.
 - Agents' prompts now show only ticket comments from the repository's owners, members and
   collaborators and the ticket's author, with a line counting the rest, and a comment opening with
   the agent marker is treated as the agent's own only when the `GH_TOKEN` account wrote it. (#829)
