@@ -971,9 +971,9 @@ const landsFree = (load: number | undefined, slots: number | undefined) => load 
 
 /**
  * Seconds per step (the 75th percentile of the window's steps of a phase), and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
- * `LANDING_GATES` is one ticket's landing gates summed, the median over the window's tickets that landed (a fast-forward,
- * with no gate, counts 0; a held, red or conflicted ticket, or one from before landings were timed, is no landing; a re-run
- * inside the landing gate's slot, marked `rerun`, is left out), and absent when the window has no landing.
+ * `LANDING_GATES` is one ticket's landing gates summed, the median over the window's landings that ran gates (a fast-forward,
+ * a held, red or conflicted ticket, or one from before landings were timed, is left out; so is a re-run
+ * inside the landing gate's slot, marked `rerun`), and absent when the window has no landing gates.
  * With `slots` of 2 or more, a landing of a run recorded at concurrency 1 is left out too (`landsFree`): when none remains,
  * `LANDING_GATES` is the window's `gates` figure (one ticket's gate run), when there is one. Without `slots` the result is the window's alone.
  */
@@ -1003,12 +1003,11 @@ export const typicalTimes = (project: Project, extra: number[] = [], slots?: num
       continue;
     }
     // A landing's own line holds its landing gates' time already: left out, or it counts them twice. A merged one
-    // does say the ticket landed: a fast-forward's, with no gates, is a landing of 0. A conflict's is none, and so is
-    // a red one's, though its landing gates ran: a ticket whose landings all failed is dropped below.
+    // does say the ticket landed. A fast-forward has no landing gates line to count; a ticket whose landings all
+    // failed is dropped below, though its landing gates ran.
     if (l.phase === LANDING) {
       if (l.ok === true) landed.add(key);
       else notLanded.add(key);
-      if (l.ok === true && !free) landing.set(key, landing.get(key) ?? 0);
       continue;
     }
     byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);
@@ -1022,11 +1021,13 @@ export const typicalTimes = (project: Project, extra: number[] = [], slots?: num
   if (issue !== undefined) out.issue = Math.round(issue / 1000);
   for (const key of notLanded) if (!landed.has(key)) landing.delete(key);
   if (landing.size) {
-    // Over the tickets that landed: one held, red or from before landings were timed has no landing to count, and
-    // counting it as 0 made the median 0 when most of a window had none.
+    // Over the landings that ran gates: a fast-forward runs none, and counting it as 0 made the median 0 when half the
+    // landings were free, so the status view's floor of "n landings times 0" said nothing. One held, red or from before
+    // landings were timed has no landing to count either.
     const landMs = median([...landing.values()]);
     if (landMs !== undefined) out[LANDING_GATES] = Math.round(landMs / 1000);
-  } else if (slots !== undefined && slots >= 2 && out.gates !== undefined) {
+  }
+  if (out[LANDING_GATES] === undefined && slots !== undefined && slots >= 2 && out.gates !== undefined) {
     // No landing of a run that could have gated: the first lands free, every other one runs the gates, as the estimate prices it.
     out[LANDING_GATES] = out.gates;
   }
@@ -1461,9 +1462,14 @@ export const priceRun = (
   const span = (lo: number, hi: number, show: (n: number) => string) => (show(lo) === show(hi) ? show(lo) : `${show(lo)} to ${show(hi)}`);
   // Base gates and verify, from the runs the window holds: one each per run, before every ticket and after the last.
   const windowRuns = new Set(window.map((l) => String(l.run)));
+  // A run that skipped its verify writes no `verify` line, as a skipped base gates pass writes a 0 ms one: so the figure is
+  // one value per run that has a `base gates` line (its lines of the phase summed: a red verify run again writes two), a
+  // run with none of the phase counting 0. A run with no `base gates` line (an older one) is left out of both stages.
+  const gatedRuns = new Set(stageLines.filter((l) => l.phase === "base gates" && windowRuns.has(String(l.run))).map((l) => String(l.run)));
   const stage = (phase: string, at: (xs: number[]) => number) => {
-    const ms = stageLines.filter((l) => l.phase === phase && windowRuns.has(String(l.run))).map((l) => l.ms as number);
-    return ms.length ? at(ms) : 0;
+    const perRun = new Map<string, number>([...gatedRuns].map((r) => [r, 0]));
+    for (const l of stageLines) if (l.phase === phase && perRun.has(String(l.run))) perRun.set(String(l.run), perRun.get(String(l.run))! + (l.ms as number));
+    return perRun.size ? at([...perRun.values()]) : 0;
   };
   const steps = (at: (xs: number[]) => number) => stage("base gates", at) + stage("verify", at);
   const midSteps = steps(median as (xs: number[]) => number);

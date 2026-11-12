@@ -225,7 +225,7 @@ const WORKING: readonly string[] = ["setup", "implement", "resolve", "review", "
 /**
  * When a live run ends, as the header says it: the queued tickets at a typical issue's length each,
  * the working ones at what is left of theirs (a minute at least), over the sandboxes the run uses at once; and
- * no earlier than the tickets not yet landed times a ticket's usual landing gates. Only while the run is
+ * no earlier than the tickets not yet landed, less one, times a usual landing's gates (the next landing may be a fast-forward, which runs none). Only while the run is
  * running and has a typical issue.
  */
 export const runEnds = (record: RunRecord, tickets: Record<string, TicketRecord>, now: number): number | undefined => {
@@ -240,7 +240,7 @@ export const runEnds = (record: RunRecord, tickets: Record<string, TicketRecord>
   const n = all.filter((x) => [...WORKING, "queued", "ready", "landing"].includes(x.state ?? "")).length;
   const concurrency = typeof record.concurrency === "number" ? record.concurrency : 1;
   const landingGates = typeof typical["landing gates"] === "number" ? (typical["landing gates"] as number) : 0;
-  return Math.floor(Math.max(now + (q * t + a) / Math.max(concurrency, 1), now + n * landingGates));
+  return Math.floor(Math.max(now + (q * t + a) / Math.max(concurrency, 1), now + Math.max(n - 1, 0) * landingGates));
 };
 
 /** Sandboxes a live run has yet to fill: queued tickets that fit in them start at once. */
