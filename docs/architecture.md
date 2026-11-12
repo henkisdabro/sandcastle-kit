@@ -912,6 +912,8 @@ state.
   run, but the off-count place goes to the next ticket that waits. Every wait for a gates slot of a ticket gate asks, not
   only the first (a gate run after a repair does); one that is still off its worker (no retake since) counts again without
   the cap check (`at.gateWait()` is true), as it cannot go back to a worker without a retake.
+  The status view's `readPool` counts the `-waiting-` locks apart (`pool.sandboxes.outside`): the MACHINE lane's
+  sandboxes row draws `used/limit` from the counted slots and adds `+N for gates`. `test/status-pool-outside.test.ts`.
   `test/gate-slot-uncounted.test.ts`.
   A red ticket takes a counted slot again just before its repair pass (and the review after it), not at the result: through
   a fix-board wait it stays on the uncounted lock (a waiter that holds a worker stops waiting on it meanwhile: the fix board
@@ -2127,9 +2129,9 @@ taken.
 Unlike one, it is not counted against `maxSandboxes`: `liveSlots` leaves it out, so it is not in
 `members()`' `held` (the shares) nor in `lastFreeSlot`'s count, and a waiting ticket's agent pass can
 take its numbered slot.
-`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - its name starts
-with `sandboxes-` and ends in `.lock`, which is all that count asks - so other runs and the views see
-every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
+`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - the view's
+`readPool` counts it apart by its `-waiting-` (`pool.sandboxes.outside`, drawn `+N for gates`) - so
+other runs and the views see every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
 waiting, and as many again whose gates slot was granted (they stay on the lock through their gates).
 `test/gate-wait-frees-sandbox.test.ts`.
 

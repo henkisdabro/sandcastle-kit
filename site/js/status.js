@@ -252,7 +252,7 @@ function inputs(t) {
     branches: {},
     containers: {},
     cpus: 8,
-    pool: { sandboxes: { used: Math.min(working, 6), limit: '6' }, gates: { used: Math.min(gating, 2), limit: '2' } },
+    pool: { sandboxes: { used: Math.min(working, 6), outside: 0, limit: '6' }, gates: { used: Math.min(gating, 2), limit: '2' } },
     queue: { tickets: [] },
     unpushed,
     settings: {

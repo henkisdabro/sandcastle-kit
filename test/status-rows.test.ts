@@ -36,7 +36,7 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   branches: {},
   containers: {},
   cpus: 8,
-  pool: { sandboxes: { used: 0, limit: "6" }, gates: { used: 0, limit: "2" } },
+  pool: { sandboxes: { used: 0, outside: 0, limit: "6" }, gates: { used: 0, limit: "2" } },
   queue: { tickets: [] },
   unpushed: 0,
   models: "",
