@@ -1590,8 +1590,12 @@ export type PipelineContext = {
    * re-run is red on the same gate on tests disjoint from the first red's (`runGates`' `thirdOnDisjoint`): the result is
    * then the third run's, its `rerunOf` the re-run and that one's `rerunOf` the first red, and the pipeline makes no
    * `regate` call for it either. The landing port asks for neither, so a landing runs at most twice.
+   *
+   * `onSlot`: awaited once the gates slot is granted, before the first gate (`GateProgress.onSlot`); `false` runs no gate and
+   * gives the slot back, the result a `GateRun` with no gates and no failures. A fake port calls it before it returns its run,
+   * as the grant. Only the first gate run of an attempt passes one (the base moves during the wait for the slot).
    */
-  gate: (box: PipelineBox, id: string, rerunOnRed?: boolean) => Promise<GateRun>;
+  gate: (box: PipelineBox, id: string, rerunOnRed?: boolean, onSlot?: () => Promise<boolean>) => Promise<GateRun>;
   /**
    * The gates from the one named on (`from`) - that one, then each after it in config order - in the ticket's sandbox:
    * what an attempt's first red gets before any repair pass, in case it was only the machine being busy. A pipeline
@@ -2683,7 +2687,20 @@ export const createPipeline = (ctx: PipelineContext) => {
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
       } else {
         await mergeBaseBeforeGates();
-        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id, !!ctx.regate && repair > 0));
+        // The wait for the gates slot can take many minutes at `maxGates: 1`, and the base moves in it: once the slot is granted
+        // the branch is checked and merged again, before the first gate. A conflict stops the run before any gate ran.
+        let stopped: Outcome | undefined;
+        gated = await timed(issue.id, "gates", () =>
+          gate(sandbox, issue.id, !!ctx.regate && repair > 0, async () => {
+            // The base has not moved past the branch: nothing changed since the check above, and no git call beyond the count.
+            if (!(Number(sh("git", ["rev-list", "--count", `${branch}..${base}`], project.root)) > 0)) return true;
+            stopped = conflicted("gates", { reviewCommits, repairs: earlierRepairs, idleRepairs: earlierIdle, carried });
+            if (stopped) return false;
+            await mergeBaseBeforeGates();
+            return true;
+          }),
+        );
+        if (stopped) return stopped;
       }
       // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
       // the tip looking reviewed with no gate result, and a re-run would only gate it again.
@@ -3684,7 +3701,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const gateWaits = new Map<string, () => void>();
   // Told as a ticket gate's gates slot is granted: the scheduler's `at.gateSlot`, which takes the ticket out of the gates limit's count.
   const gateSlots = new Map<string, () => void>();
-  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim) => {
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim, slotHook?: () => Promise<boolean>) => {
     const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
@@ -3700,8 +3717,10 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
         if (!priority) gateWaits.get(id)?.();
       },
       // A ticket's gates only (as `wait`): the slot is granted, before the first gate.
+      // `slotHook`'s answer (the pipeline's re-check of the branch) is the gate run's: false stops it before the first gate.
       onSlot: () => {
         if (!priority) gateSlots.get(id)?.();
+        return slotHook?.();
       },
       // Held for the machine's CPU pressure before the pass asks for a slot (`LOAD_PAUSE`): the same words in the heartbeat and the
       // ticket's note, and a ticket's own sandbox slot and worker are freed as a wait for a gates slot frees them. The base's and
@@ -3937,7 +3956,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     // A setup step that failed throws `SetupFailed` inside the open, so the open's clean-up removes what it made: the attempt
     // is lost, and the scheduler sends the ticket back once (src/schedule.ts).
     open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }).then((s) => assertSetup(s, project.setup, branch)).then((s) => limitMemory(s, project.memory)), host.exclusive),
-    gate: (box, id, rerunOnRed) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed),
+    gate: (box, id, rerunOnRed, onSlot) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed, undefined, onSlot),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>
       timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id), unreviewed: unreviewedAtStart.has(id) }, () =>

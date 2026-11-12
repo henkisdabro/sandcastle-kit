@@ -409,8 +409,8 @@ test("burndown() hands createPipeline the re-run port, built on its own runGates
 
 test("burndown() has the first ticket gate run re-run its red inside the slot, and the pipeline asks for it only with a re-run port and repair passes", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(src, /gate: \(box, id, rerunOnRed\) => runGates\(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed\),/);
-  assert.match(src, /gate\(sandbox, issue\.id, !!ctx\.regate && repair > 0\)/);
+  assert.match(src, /gate: \(box, id, rerunOnRed, onSlot\) => runGates\(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed, undefined, onSlot\),/);
+  assert.match(src, /gate\(sandbox, issue\.id, !!ctx\.regate && repair > 0, async \(\) => \{/);
 });
 
 // runGates itself: the gate to start from, with the configured numbering in its log and progress.
