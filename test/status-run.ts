@@ -612,7 +612,9 @@ kill $helper 2>/dev/null
     const found: Painted[] = [];
     for (const m of out.matchAll(/\u001b\[H([\s\S]*?)\u001b\[J/g)) {
       const end = m.index! + m[0].length;
-      if (m.index! >= from) found.push({ raw: m[1]!.replace(/\r\n/g, "\n"), text: plain(m[1]!.replace(/\r\n/g, "\n")), end });
+      // `\r+\n`, not `\r\n`: after a line that fills the pane's width, macOS's pty sends `\r\r\n`, and the stray `\r` left on
+      // the line counted as a column past the pane's width (a terminal draws nothing for it).
+      if (m.index! >= from) found.push({ raw: m[1]!.replace(/\r+\n/g, "\n"), text: plain(m[1]!.replace(/\r+\n/g, "\n")), end });
     }
     return found;
   };
