@@ -261,7 +261,8 @@ This continues SKILL.md: run its "Before every action" first.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
-      Under it, the `Settings:` line names the run's settings, a `Plan usage at the end:` line
+      Under it, the `Settings:` line names the run's settings (the concurrency it ran at, and
+      `of N asked` when that was fewer), a `Plan usage at the end:` line
       (a run on a subscription) gives the plan windows present in the latest merged reading,
       a `Codex plan usage at the end:` line (a cross-review run on a ChatGPT plan)
       gives Codex's the same way, and a line after them may name the switch that would have helped
@@ -298,7 +299,9 @@ This continues SKILL.md: run its "Before every action" first.
       the headline's `need you`) is the kit's guess at a gap a reviewer put in prose and filed nowhere: read the
       sentence, and if it is a real gap file it as a ticket (offer to); most are approving prose and need nothing.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
-      the file or test, whether it shares a cause with another, and the concrete fix path. The
+      the file or test, whether it shares a cause with another, and the concrete fix path. In a
+      turn the loop follows, a ticket marked `turn N runs it again by itself` is not a failure
+      to act on and is not in the headline's `need fixing`: leave it to the next turn. The
       summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
       place to look - read both branches' failures before calling it one cause. For a red gate, read the gate log
       (`.sandcastle/logs/agent-issue-<n>-gates-<n>.log`) and the repair log's last lines; a gate
