@@ -76,7 +76,7 @@ test("more than 40 test files is refused, naming them, unless --all is given", (
   assert.equal(refused.status, 3);
   assert.deepEqual(refused.files, []);
   assert.match(refused.stderr, /^41 test files mention src\/core\.ts .*--all/);
-  assert.match(refused.stderr, /test\/t40\.test\.ts/);
+  assert.match(refused.stderr, /^ {2}\.\.\. and 21 more \(--all runs them all\)$/m);
   const forced = related(dir, "src/core.ts", "--all");
   assert.equal(forced.status, 0, forced.stderr);
   assert.equal(forced.files.length, 41);

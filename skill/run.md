@@ -83,7 +83,7 @@ This continues SKILL.md: run its "Before every action" first.
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
      before left conflicted, released, partly done (still queued) or green but not landed; a red ticket is not run again. A ticket queued after
-     the run started (unblocked) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
+     the run started (unblocked, or held only by another such ticket, which then joins as its dependant) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
      (`drain` may repeat it; `2` and `3` take one per run); one a stop leaves unrun waits for the next `sandcastle run`. A drain stops when no ticket is left to
      run again or a stop holds: no progress, the same ticket conflicting, left partly done or failing to land in two
      turns running, a red merged base (not one judged likely load, red twice on test timeouts or a gate far slower than usual: the next turn gates the base again first, and a base that is really red stops it there), a usage limit or a stopped run, 20 turns at most.
@@ -218,8 +218,8 @@ This continues SKILL.md: run its "Before every action" first.
    The earlier turns' other lines (what they merged, the `Autonomy level` lines) are in the run's
    output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end (and in
    the summary's Run section) is `Drain: <N> turns, <HH:MM> to <HH:MM> (<span>), <landed> landed (<#refs>), tokens <in> / <out>, stopped because <cause>` (the whole run's span, tickets and tokens; an older run's is `Drain: <N> turns, <landed> landed, stopped because <cause>`); at `2`, `3` and `drain`, a line for each ticket
-   queued after the run started that no turn took (a follow-on turn takes the unblocked ones when the run would
-   end, once at `2` and `3`): quote the cause and name those tickets in the hand-back. A later turn the checkout
+   queued after the run started that no turn took (a follow-on turn takes the unblocked ones and their late
+   dependants when the run would end, once at `2` and `3`): quote the cause and name those tickets in the hand-back. A later turn the checkout
    refused (`turn 2 could not start: the working tree is dirty (<files>)`, or the wrong branch, or git's
    leftovers) is such a cause, in the summary's Run section at every level: quote it, and say the run exited 0
    on a green merged base - the files are someone's edit to commit or stash before the next `sandcastle run`.
@@ -261,7 +261,8 @@ This continues SKILL.md: run its "Before every action" first.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
-      Under it, the `Settings:` line names the run's settings, a `Plan usage at the end:` line
+      Under it, the `Settings:` line names the run's settings (the concurrency it ran at, and
+      `of N asked` when that was fewer), a `Plan usage at the end:` line
       (a run on a subscription) gives the plan windows present in the latest merged reading,
       a `Codex plan usage at the end:` line (a cross-review run on a ChatGPT plan)
       gives Codex's the same way, and a line after them may name the switch that would have helped
@@ -298,7 +299,9 @@ This continues SKILL.md: run its "Before every action" first.
       the headline's `need you`) is the kit's guess at a gap a reviewer put in prose and filed nowhere: read the
       sentence, and if it is a real gap file it as a ticket (offer to); most are approving prose and need nothing.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
-      the file or test, whether it shares a cause with another, and the concrete fix path. The
+      the file or test, whether it shares a cause with another, and the concrete fix path. In a
+      turn the loop follows, a ticket marked `turn N runs it again by itself` is not a failure
+      to act on and is not in the headline's `need fixing`: leave it to the next turn. The
       summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
       place to look - read both branches' failures before calling it one cause. For a red gate, read the gate log
       (`.sandcastle/logs/agent-issue-<n>-gates-<n>.log`) and the repair log's last lines; a gate

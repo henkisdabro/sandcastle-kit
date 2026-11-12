@@ -19,7 +19,7 @@ type Facts = Parameters<typeof afterTurn>[0];
 
 const ticket = (id: string) => ({ id, title: `T${id}`, body: "", comments: [] });
 const fake = (queue: () => string[]) => ({ ref: refOf, queued: () => queue().map(ticket) }) as unknown as Tracker;
-const none = async () => new Set<string>();
+const none = async () => new Map<string, string[]>();
 const facts = (tickets: Facts["tickets"], runnable: string[]): Facts =>
   ({ base: "main", tracker: "github", started: "t", live: false, dryRun: false, verify: { green: true, line: "" }, gateCount: 1, tickets, runnable, blocked: [], standing: [], keptWorktrees: [], changed: {} }) as Facts;
 
@@ -51,7 +51,7 @@ test("lateQueueLines: one line per late ticket, none for a blocked one or when t
     "#7 was queued after this run started: `sandcastle run` takes it",
     "#8 was queued after this run started: `sandcastle run` takes it",
   ]);
-  assert.deepEqual(await lateQueueLines(tracker, new Set(["1"]), async () => new Set(["7"])), ["#8 was queued after this run started: `sandcastle run` takes it"]);
+  assert.deepEqual(await lateQueueLines(tracker, new Set(["1"]), async () => new Map([["7", ["99"]]])), ["#8 was queued after this run started: `sandcastle run` takes it"]);
 });
 
 test("lateQueueLines: an unreadable queue prints nothing", async () => {

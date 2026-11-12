@@ -1,9 +1,7 @@
 // The drain's end line gives the whole run - its span, the tickets landed and the tokens - not only the turn count:
 // `drainLine` words the figures, `drainTotals` sums them over the run's turns (the record and the earlier turns in
 // history.jsonl, never an older run's), and `sandcastle report` renders the record's line with the last finish as its end.
-// No gh, Docker or network. Run with TZ=UTC.
-//
-//   TZ=UTC pnpm test:file test/drain-run-totals.test.ts
+// No gh, Docker or network. The zone is UTC so the HH:MM figures are the same on every machine.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -12,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+process.env.TZ = "UTC";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { drainLine } = await import("../src/autonomy.ts");

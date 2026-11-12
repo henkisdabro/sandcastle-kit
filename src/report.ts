@@ -824,6 +824,17 @@ export const drainTotals = (root: string, run: any, end: string): { started: str
   return { started: turns[0].startedAt, ended: end, ids, ...(tokens ? { tokens } : {}) };
 };
 
+/**
+ * The turn of this run (`run`, the current turn's record) that wrote a head record, from its `run` (the `startedAt` of
+ * the turn that wrote it): the matching earlier turn's `settings.turn`, or undefined for a record from an earlier run
+ * or from this turn itself. Matched on `startedAt` through the turns `earlierTurns` walks, never on `session`.
+ */
+export const turnOfHead = (root: string, run: any, headRun: string | undefined): number | undefined => {
+  if (!headRun) return undefined;
+  const turn = earlierTurns(root, run).find((t) => t.startedAt === headRun)?.settings?.turn;
+  return Number.isInteger(turn) ? turn : undefined;
+};
+
 /** Whether a later turn's record of a ticket is an attempt at it: not still waiting, and not a ticket put back in the queue unstarted. */
 const attemptedIn = (t: TicketRecord) => sectionOf(t.state) !== undefined && !LEFT.includes(t.state!) && !(t.state === "queued" && !t.requeued);
 
@@ -902,6 +913,10 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   const stop = count(s.usageStop);
   const items: string[] = [];
   if (level !== undefined) items.push(`autonomy ${level}${turn ? ` (turn ${turn}${cap ? ` of ${cap}` : ""})` : ""}`);
+  // The tickets at once the run ran at, and what it asked for when the machine's sandbox cap made it fewer.
+  const conc = count(s.concurrency);
+  const asked = count(s.asked);
+  if (conc !== undefined) items.push(asked !== undefined && asked !== conc ? `concurrency ${conc} of ${asked} asked` : `concurrency ${conc}`);
   if (s.crossReview === true) {
     const model = plain(s.crossReviewModel, /^[A-Za-z0-9._:/-]+$/);
     const effort = plain(s.crossReviewEffort, /^(low|medium|high|xhigh)$/);
@@ -1420,7 +1435,12 @@ export const render = (f: Facts, plain = false): string => {
     .flatMap((c) => carriedKept(c.facts).map((k) => ({ ...k, turn: c.turn, state: c.facts.tickets[k.issue]?.state })))
     .filter((k, i, all) => all.findIndex((o) => o.path === k.path) === i && !f.keptWorktrees.some((own) => own.path === k.path));
   const carriedTriage = carried.reduce((n, c) => n + c.o.toTriage, 0);
-  const fixing = ids(NEEDS_FIXING);
+  // The next turn of the loop runs the tickets `next` names again by itself: they are no failure for a person to fix,
+  // so they stay out of the count, the groups and the advice, and the section lists them apart.
+  const nextTurn = new Set(f.next?.tickets ?? []);
+  const failed = ids(NEEDS_FIXING);
+  const fixing = failed.filter((id) => !nextTurn.has(id) && !nextTurn.has(refOf(id)));
+  const retried = failed.filter((id) => !fixing.includes(id));
   // Put back in the queue while the run was going (landing found it red together with another ticket, say):
   // it runs again next time, and nothing here asks a person to act on it.
   // A fact about the attempt, not a ticket state: the record says "queued" and carries the line in `requeued`.
@@ -1643,7 +1663,7 @@ export const render = (f: Facts, plain = false): string => {
   );
 
   // Needs fixing, with what several branches have in common
-  const fixLines = fixing.map((id) => {
+  const fixLine = (id: string, again?: string) => {
     const t = f.tickets[id];
     const what = t.state === "conflict"
       ? `merge conflict: ${t.note ?? ""}`
@@ -1652,8 +1672,11 @@ export const render = (f: Facts, plain = false): string => {
         ? `${t.note!.replace(/^red /, "red together ")} (green on its own branch)`
         : t.state === "red" ? `gate ${t.note ?? "red"}` : `${t.state}: ${t.note ?? ""}`;
     const tests = t.failing?.length ? ` - failing: ${t.failing.join(", ")}` : "";
-    return `- ${name(id)} - ${what}${tests} (branch agent/issue-${id})`;
-  });
+    return `- ${name(id)} - ${what}${again ? ` - ${again}` : ""}${tests} (branch agent/issue-${id})`;
+  };
+  const fixLines = fixing.map((id) => fixLine(id));
+  const againText = `turn ${f.next?.turn} runs it again by itself`;
+  const retriedLines = retried.map((id) => fixLine(id, againText));
   // One test failing on several branches is likely one cause. One file only
   // says where to look first: two branches can conflict in a file, or fail
   // different tests in it, for unrelated reasons.
@@ -1693,7 +1716,7 @@ export const render = (f: Facts, plain = false): string => {
   }).filter(([file, who]) => !inSameTest(file, who));
   for (const [test, who] of sameTest) fixLines.push(`Same failing test: ${test} - on ${list(who)}. Likely one cause: fix it once.`);
   for (const [file, who] of sameFile) fixLines.push(`Same file: ${file} - ${list(who)} fail or conflict there. Check whether it is one cause.`);
-  section(h("## ❌ Needs fixing (failed or conflicted)", "## Needs fixing (failed or conflicted)"), fixLines);
+  section(h("## ❌ Needs fixing (failed or conflicted)", "## Needs fixing (failed or conflicted)"), [...fixLines, ...retriedLines]);
 
   // Runnable / blocked
   const ticketState = (label: string) => {

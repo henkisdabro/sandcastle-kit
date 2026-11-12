@@ -616,13 +616,16 @@ export const createLedger = (d: {
     if (record && (!unstarted(ending) || last)) d.bookkeep(id, () => d.run.ticket(id, record));
     if (outcome) d.bookkeep(id, () => d.outcomes({ [id]: outcome }));
     // A `not landed` or `conflict` ticket a later turn re-runs is nobody's to act on yet: its slot reads idle, with the ending's word.
-    if (view) d.bookkeep(id, () => d.view.landed(id, view.landed || ((record?.state === "not landed" || record?.state === "conflict") && d.retried?.(id) === true), view.word));
+    // Asked once: the view and the line below say the same.
+    const retriedLater = (record?.state === "not landed" || record?.state === "conflict") && d.retried?.(id) === true;
+    if (view) d.bookkeep(id, () => d.view.landed(id, view.landed || retriedLater, view.word));
     // The landing worker's only voice in the run's output: without it, a run that spends its last
     // half hour landing prints nothing between the last agent pass and the closing summary.
     // A hold carries its reason: "needs a human" alone sent the reader to run.json for the paths.
     // A conflict found before landing ends the ticket as finally as one at landing: said the same way. A conflict
     // carries its note too (with whom, which files): "merge conflict." alone left the reader to the closing summary.
-    if (view && (ending.kind === "landing" || ending.kind === "conflict")) d.say(`${d.ref(id)}: ${view.word}${(record?.state === "held" || record?.state === "conflict") && record.note ? `: ${record.note}` : ""}.`);
+    // A landing that did not land says why (a read timeout is not a red gate) and whether a later turn retries it.
+    if (view && (ending.kind === "landing" || ending.kind === "conflict")) d.say(`${d.ref(id)}: ${view.word}${(record?.state === "held" || record?.state === "conflict" || record?.state === "not landed") && record.note ? `: ${record.note}` : ""}${record?.state === "not landed" && retriedLater ? "; a later turn retries it" : ""}.`);
     // A hand-back is as final as a landing, and nothing else prints it before the closing summary. A
     // conflict-resolution hold (status `held`) is excluded: burndown prints that one as it holds it.
     if (ending.kind === "pipeline" && ending.outcome.status !== "held" && record?.state === "held") d.say(`${d.ref(id)}: ${record.note}.`);

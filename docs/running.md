@@ -453,9 +453,12 @@ during the run, under a `### To triage` sub-heading after the rest and counted i
 triage" - as are a dry run's follow-ups, which a real run would file - and a follow-up the kit
 failed to file, which you file by hand and the header counts as "need you"); **Needs fixing** (red,
 conflicted, crashed or unlanded branches, with the files or tests and causes several branches
-share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state** (commits
-not on the upstream - the tickets are closed but the code has not left your machine); and the **Next
-step**.
+share; in a turn the loop follows, a ticket the next turn runs again by itself is not counted as
+needing a fix and is listed last, marked `turn 2 runs it again by itself`); **Runnable now / Still
+blocked** (blockers re-read after landing); **Local state** (commits not on the upstream - the
+tickets are closed but the code has not left your machine); and the **Next step**.
+The `Settings:` line names the concurrency the run ran at (`concurrency 2 of 4 asked` when the
+machine's sandbox cap made it fewer than asked, `concurrency 2` otherwise).
 Under the header's `Settings:` line, a run that showed the plan's usage says where it ended:
 `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going; only the windows the
 readings carry, `week 30%` say), and a cross-review run
@@ -506,6 +509,8 @@ At `2`, `3` and `drain`, a ticket queued while the run was live (and not held be
 blocker) joins it as a **follow-on turn**: where the run would end because no ticket is left to run
 again, or because `2` or `3` reached its own turn cap, it runs those tickets as one more turn, under
 the same stops and the 20-turn cap.
+A late ticket held only by other late tickets joins the same turn as their dependant, and starts
+when its blocker lands; one held by anything else waits for the next run.
 At `2` and `3` that is at most one follow-on turn per run, even past the level's own cap; at `drain`
 the follow-on turns may repeat, so a ticket queued during one can earn the next.
 A ticket queued after the follow-on turn at `2` or `3` waits for the next `sandcastle run`, and the
@@ -639,8 +644,16 @@ A machine that goes to sleep pauses every sandbox mid-task, so by default a run 
 until the run ends - `caffeinate -i` on macOS, `systemd-inhibit` on Linux - and prints
 `Keep awake: on` when it starts. The display can still turn off and the screen still locks. The
 helper is tied to the run's process, so it stops when the run ends, crashes or is killed. If the
-helper is missing, or fails as soon as it starts (`systemd-inhibit` with no system bus, as in WSL
-without systemd or a container), the line says `off` and why, and the run goes on without it.
+helper is missing, or fails as soon as it starts (`systemd-inhibit` with no system bus, as in a
+container, or a polkit refusal), the line says `off` and gives the helper's own error, its first
+line of output (`off - systemd-inhibit failed: Failed to inhibit: Access denied`), and the run
+goes on without it. A failure is remembered for the rest of the run, so later turns do not start
+the helper again.
+
+Under WSL the kit does not try the helper: Windows decides when the PC sleeps, and an inhibitor
+inside the Linux VM cannot keep it awake. The line says `off - under WSL, Windows decides when the
+PC sleeps`. Keep the PC awake in Windows' power settings (Settings, System, Power: set "Screen and
+sleep" to never sleep while plugged in) for the length of an unattended run.
 
 - **One run on your energy settings:** `KEEP_AWAKE=0 sandcastle run`.
 - **Always:** `"keepAwake": false` in your [personal settings](configuration.md#personal-settings).
