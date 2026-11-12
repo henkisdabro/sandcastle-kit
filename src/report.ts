@@ -168,6 +168,8 @@ export type Facts = {
   followUps?: FiledFollowUp[];
   /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
   stage?: string;
+  /** The run record's `preflightFailure`: why the preflight refused the run (its message, as the command printed it). */
+  preflightFailure?: string;
   exitCode?: number | null;
   /** Each base gate's verdict, when the run stopped on red base gates. */
   baseGates?: { gate: string; ok: boolean }[];
@@ -720,6 +722,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     filed: filed.filter((i) => !followUps.some((u) => u.id === i.id)),
     followUps,
     stage: run.stage,
+    preflightFailure: typeof run.preflightFailure === "string" ? run.preflightFailure : undefined,
     exitCode: run.exitCode,
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
@@ -1335,6 +1338,16 @@ const drainOf = (d: unknown): DrainEnd | undefined => {
   return Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause ? { turns: turns as number, landed: landed as number, cause } : undefined;
 };
 
+/**
+ * The cause a refused preflight left in the run record: its message without the first line (which repeats the headline,
+ * `NOT STARTED: Preflight failed - ...`), cut to three lines. A record without one gives none, and the headline keeps its pointer.
+ */
+const preflightCause = (message: string | undefined): string[] => {
+  const lines = (message ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines[0] && /^NOT STARTED:/i.test(lines[0])) lines.shift();
+  return lines.slice(0, 3);
+};
+
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
@@ -1361,9 +1374,10 @@ export const render = (f: Facts, plain = false): string => {
   const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
     !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
   // Refused by its preflight (a rejected credential, an unknown model): no sandbox started, so the headline says that, and
-  // an estimate it never began against is no news. The cause is the run's own last lines, which the record does not keep.
+  // an estimate it never began against is no news. The cause is the record's `preflightFailure`; a record from before it kept one points at the run's last lines.
   const preflightFailed = f.stage === "preflight" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
     !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
+  const cause = preflightFailed ? preflightCause(f.preflightFailure) : [];
   // Ended before its summary (Ctrl-C, a crash, kill -9): its tickets mid-work were
   // counted as attempted and listed nowhere, under a headline that said "finished".
   const early = !baseRed && !f.stopped && !f.live &&
@@ -1418,7 +1432,7 @@ export const render = (f: Facts, plain = false): string => {
   out.push(
     baseRed
       ? `${h("## 🏁 Run", "## Run")} stopped: red on ${f.base} before any agent ran - nothing was started`
-      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : preflightFailed ? `NOT STARTED: preflight failed (exit ${f.exitCode}) - no sandbox started; its cause is the run's last lines (.sandcastle/logs/run-output.log for a detached run)` : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : preflightFailed ? (cause.length ? `NOT STARTED: preflight failed (exit ${f.exitCode}) - no sandbox started:` : `NOT STARTED: preflight failed (exit ${f.exitCode}) - no sandbox started; its cause is the run's last lines (.sandcastle/logs/run-output.log for a detached run)`) : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}${cause.map((l) => `\n  ${l}`).join("")}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +

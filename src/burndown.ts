@@ -43,7 +43,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logAgentExit, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordPreflightFailure, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -3737,7 +3737,13 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     const labelled = candidates.filter((i) => overrides.get(i.id)?.model === model).map((i) => ref(i.id));
     return { model, from: `label model:${model} on ${labelled.join(", ")}` };
   });
-  await timed("", "preflight", () => preflight(project, image, extraModels));
+  try {
+    await timed("", "preflight", () => preflight(project, image, extraModels));
+  } catch (e) {
+    // The refusal is printed once, by the command; the record keeps its cause for a summary asked for later.
+    recordPreflightFailure(run, e);
+    throw e;
+  }
   const env = credentials(project);
   // The guard's reading is the one settings field a turn may change: it is recorded as a fact beside the setting, when it is lost or back.
   let readingNoted = usageReadingLost();
