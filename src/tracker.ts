@@ -77,8 +77,11 @@ export const trackerTokenUser = (tracker: Pick<Tracker, "kind">, project: Pick<P
 /** The words every comment an agent posts on a ticket opens with (the GitHub tracker's `words`): the kit's own, to `personCommentsSince`. */
 export const AGENT_COMMENT_MARKER = "Sandcastle agent:";
 
-/** Who wrote one comment, as GitHub says: the login and `authorAssociation` (`OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`...). */
-export type CommentBy = { login?: string; association?: string };
+/**
+ * Who wrote one comment, as GitHub says: the login and `authorAssociation` (`OWNER`, `MEMBER`, `COLLABORATOR`,
+ * `CONTRIBUTOR`, `NONE`...), and when (`at`: its `createdAt` as GitHub gives it; a ticket file's comments carry none).
+ */
+export type CommentBy = { login?: string; association?: string; at?: string };
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[]; author?: string; commentBy?: CommentBy[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
 
@@ -132,6 +135,13 @@ export interface Tracker {
    * counts the ticket as blocked, as it does any blocker it cannot read.
    */
   declaredBlockersAsync?(id: string, limitMs?: number): Promise<string[]>;
+  /**
+   * GitHub only (a ticket file has no outside author): one line naming what the ticket's author wrote or edited after
+   * the queue label was last put on it (`body edited <time>`, `comment by <login> <time>`), when the author is not an
+   * owner, member or collaborator; undefined when nothing counts. A ticket never labelled is measured from `runStart`
+   * (ms), when the person named it. A read that fails or is given up at `limitMs` (`TRACKER_READ_MS`) throws.
+   */
+  editedSinceQueued?(id: string, runStart: number, limitMs?: number): Promise<string | undefined>;
   /** Whether a ticket id is closed, for a blocker on this same tracker. */
   isClosed(id: string): boolean | undefined;
   /** What a dry run tells agents not to touch. */
@@ -309,7 +319,8 @@ const github = (project: Project): Tracker => {
   // Who wrote the ticket and each comment, for `trustedComment`: kept beside the text, which every reader of `comments` takes as it is.
   const authors = (i: any): Pick<Ticket, "author" | "commentBy"> => ({
     author: i.author?.login,
-    commentBy: (i.comments ?? []).map((c: { author?: { login?: string }; authorAssociation?: string }) => ({ login: c.author?.login, association: c.authorAssociation })),
+    // `at` only when GitHub gave one, so a comment without a time reads exactly as before.
+    commentBy: (i.comments ?? []).map((c: { author?: { login?: string }; authorAssociation?: string; createdAt?: string }) => ({ login: c.author?.login, association: c.authorAssociation, ...(c.createdAt ? { at: c.createdAt } : {}) })),
   });
   const listFields = (withComments: boolean) => `number,title,body,author,updatedAt,labels${withComments ? ",comments" : ""}`;
   const listArgs = (extra: string[]) => (fields: string) => ["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", fields];
@@ -468,6 +479,47 @@ const github = (project: Project): Tracker => {
         return true;
       }
     },
+    // What the ticket's author wrote or edited after the queue label last went on: the maintainer's decision on #829's
+    // remaining gap. The author's own writing only: a maintainer's edit of an outsider's text (its `editor` is not the
+    // author) never holds. One GraphQL call; the newest 100 labelled events and comments, the newest 20 edits of each.
+    editedSinceQueued: async (id, runStart, limitMs = TRACKER_READ_MS) => {
+      const edits = "userContentEdits(last: 20) { nodes { editedAt editor { login } } }";
+      const query =
+        "query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { issue(number: $number) { " +
+        `author { login } authorAssociation lastEditedAt ${edits} ` +
+        "timelineItems(itemTypes: [LABELED_EVENT], last: 100) { nodes { ... on LabeledEvent { createdAt label { name } } } } " +
+        `comments(last: 100) { nodes { author { login } createdAt lastEditedAt ${edits} } } } } }`;
+      const out = await ghAsync(["api", "graphql", "-f", `query=${query}`, "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${id}`], limitMs);
+      type Edits = { nodes?: ({ editedAt?: string; editor?: { login?: string } | null } | null)[] | null };
+      type Issue = {
+        author?: { login?: string } | null;
+        authorAssociation?: string;
+        userContentEdits?: Edits | null;
+        timelineItems?: { nodes?: ({ createdAt?: string; label?: { name?: string } } | null)[] | null } | null;
+        comments?: { nodes?: ({ author?: { login?: string } | null; createdAt?: string; lastEditedAt?: string; userContentEdits?: Edits | null } | null)[] | null } | null;
+      };
+      const issue = (JSON.parse(out) as { data?: { repository?: { issue?: Issue | null } | null } }).data?.repository?.issue;
+      if (!issue) throw new OperatorError(`gh api graphql failed: no issue ${id} in the answer`);
+      if (["OWNER", "MEMBER", "COLLABORATOR"].includes((issue.authorAssociation ?? "").toUpperCase())) return undefined;
+      const author = (issue.author?.login ?? "").toLowerCase();
+      if (!author) return undefined;
+      const queue = project.label.toLowerCase();
+      const labelled = (issue.timelineItems?.nodes ?? []).flatMap((n) => (n?.createdAt && n.label?.name?.toLowerCase() === queue ? [Date.parse(n.createdAt)] : []));
+      const since = labelled.length ? Math.max(...labelled) : runStart;
+      const after = (t?: string) => !!t && Date.parse(t) > since;
+      // The newest edit the author made after `since`; an edit by anyone else, or by an account GitHub no longer shows, does not count.
+      const editedByAuthor = (e?: Edits | null) =>
+        (e?.nodes ?? []).flatMap((n) => (n?.editedAt && after(n.editedAt) && (n.editor?.login ?? "").toLowerCase() === author ? [n.editedAt] : [])).sort().pop();
+      const at = (t: string) => t.replace(/:\d\d(\.\d+)?Z$/, "Z");
+      const body = editedByAuthor(issue.userContentEdits);
+      if (body) return `body edited ${at(body)}`;
+      for (const c of [...(issue.comments?.nodes ?? [])].reverse()) {
+        if (!c || (c.author?.login ?? "").toLowerCase() !== author) continue;
+        const when = after(c.createdAt) ? c.createdAt : editedByAuthor(c.userContentEdits);
+        if (when) return `comment by ${c.author?.login} ${at(when)}`;
+      }
+      return undefined;
+    },
     // GitHub's native "blocked by" edges. A ticket neither the list nor `get` has read is asked for.
     declaredBlockers: (id) => {
       if (!nativeBlockers) return [];
@@ -555,7 +607,12 @@ const clean = (v: string) => v.replace(/^[`"'*]+|[`"'*]+$/g, "").trim();
  * here.
  */
 export const headerOf = (text: string) => {
-  const lines = text.split("\n");
+  // A BOM before the title and a CRLF file are the same ticket as without them: the BOM would hide the
+  // front matter's `---`, and a trailing `\r` fails `META`. `eol` and `bom` let a write put both back.
+  const bom = text.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const body = text.slice(bom.length);
+  const eol = /^[^\n]*\r\n/.test(body) ? "\r\n" : "\n";
+  const lines = body.split(/\r?\n/);
   const meta = new Map<string, { value: string; index: number }>();
   let i = 0;
   if (lines[0] === "---") {
@@ -577,18 +634,18 @@ export const headerOf = (text: string) => {
     if (!m || lines[i].startsWith("#")) break;
     meta.set(m[1].toLowerCase(), { value: clean(m[2]), index: i });
   }
-  return { lines, meta, title };
+  return { lines, meta, title, eol, bom };
 };
 
 export const statusOf = (text: string) => headerOf(text).meta.get("status")?.value.toLowerCase();
 
 const withStatus = (text: string, value: string) => {
-  const { lines, meta, title } = headerOf(text);
+  const { lines, meta, title, eol, bom } = headerOf(text);
   const at = meta.get("status");
   if (at) lines[at.index] = lines[at.index].replace(/(:\**[ \t]*).*$/, `$1${value}`);
   else if (title >= 0) lines.splice(title + 1, 0, "", `Status: ${value}`, ...(lines[title + 1]?.trim() ? [""] : []));
   else lines.unshift(`Status: ${value}`, "");
-  return lines.join("\n");
+  return bom + lines.join(eol);
 };
 
 export type FileTicket = { id: string; path: string; feature: string; number: string; text: string; status?: string; blockedBy: string[] };
@@ -647,17 +704,23 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
   };
   const toTicket = (t: FileTicket): Ticket => ({
     id: t.id,
-    title: t.text.match(/^#\s+(.+)$/m)?.[1] ?? t.path,
+    title: t.text.replace(/^\uFEFF/, "").match(/^#[ \t]+(.+?)[ \t]*\r?$/m)?.[1] ?? t.path,
     ...split(t.text),
     status: t.status,
   });
-  const isDone = (t: FileTicket) => !!t.status && done.includes(t.status);
+  // `statusOf` lowercases what it reads, so the configured words are compared lowercased too; `done[0]`
+  // is written as configured.
+  const doneWords = done.map((d) => d.toLowerCase());
+  const queueWord = project.label.toLowerCase();
+  const isDone = (t: FileTicket) => !!t.status && doneWords.includes(t.status);
   const write = (t: FileTicket, status: string | undefined, comment?: string) => {
     let text = readFileSync(join(root, t.path), "utf8");
     if (status) text = withStatus(text, status);
     if (comment === undefined) return writeFileSync(join(root, t.path), text);
     const heading = /^## Comments\b/m.test(text) ? "" : "\n## Comments\n";
-    writeFileSync(join(root, t.path), `${text.trimEnd()}\n${heading}\n### ${new Date().toISOString().slice(0, 10)} - sandcastle\n\n${comment.trim()}\n`);
+    const out = `${text.trimEnd()}\n${heading}\n### ${new Date().toISOString().slice(0, 10)} - sandcastle\n\n${comment.trim()}\n`;
+    // A CRLF ticket stays CRLF throughout, the appended comment included.
+    writeFileSync(join(root, t.path), headerOf(text).eol === "\r\n" ? out.replace(/\r?\n/g, "\r\n") : out);
   };
   // Whoever last touched the ticket, by git: the mtime of a checkout says nothing.
   const lastCommitAt = (path: string) => {
@@ -668,7 +731,7 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
     kind: "files",
     agentsWrite: false,
     ref: (id) => id,
-    queued: () => scan().filter((t) => t.status === project.label).map((t) => ({ ...toTicket(t), updated: lastCommitAt(t.path) })),
+    queued: () => scan().filter((t) => t.status === queueWord).map((t) => ({ ...toTicket(t), updated: lastCommitAt(t.path) })),
     open: () => scan().filter((t) => !isDone(t)).map(toTicket),
     get: (id) => {
       const t = find(id);
@@ -800,7 +863,7 @@ export const requeueTicketWithEffect = (tracker: Tracker, label: string, args: s
   const ref = tracker.ref(id);
   if (!t.open) throw new OperatorError(`${ref} is closed. Reopen it first if it needs more work.`);
   const text = note && `Note for the next run, from \`sandcastle requeue\`:\n\n${note}`;
-  if (t.status === label && !t.held) {
+  if (t.status?.toLowerCase() === label.toLowerCase() && !t.held) {
     if (!text) return { message: `${ref} is still in the queue; nothing to change. Add --note "..." to leave the next run a note.`, relabelled: false };
     tracker.comment(id, text);
     return { message: `${ref} is still in the queue; added your note.`, relabelled: false };

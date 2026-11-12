@@ -15,7 +15,7 @@ import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
 import { mergedByHand, mergedPartly } from "./run.ts";
 import { shAsync, USER_CONFIG } from "./sandbox.ts";
-import { DEFAULT_DONE, refOf, slug, statusOf, TRACKER_READ_MS, type TicketState, type Tracker } from "./tracker.ts";
+import { DEFAULT_DONE, refOf, slug, statusOf, TRACKER_READ_MS, trustedComment, type CommentBy, type TicketState, type Tracker } from "./tracker.ts";
 
 // `remote`: an issue of another GitHub repository (a native blocker across repositories), id `owner/repo#N`.
 // It is none of this run's tickets, so it is never queued and no landing here releases it.
@@ -240,7 +240,7 @@ const whyKey = (tracker: Tracker, b: Blocker, queued?: Set<string>): string | un
   b.state !== "open" || !(b.kind === "ticket" || (b.kind === "github" && tracker.kind === "github")) || queued?.has(b.id) ? undefined : `${b.kind}:${b.id}`;
 
 const whyFrom = (project: Project, b: Blocker, t: TicketState, queued?: Set<string>): Why | undefined =>
-  t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? (mergedPartly(project.root, project.baseBranch, b.id) ? "merged-partly" : "merged-by-hand") : "held") : (queued ? true : t.status !== project.label) ? "unqueued" : undefined;
+  t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? (mergedPartly(project.root, project.baseBranch, b.id) ? "merged-partly" : "merged-by-hand") : "held") : (queued ? true : t.status?.toLowerCase() !== project.label.toLowerCase()) ? "unqueued" : undefined;
 
 // On GitHub a declared blocker is a native "blocked by" edge: an issue gh reads the state of, closed
 // as not planned included. One the body names too is one blocker.
@@ -284,7 +284,7 @@ const declaredIn = (project: Project, id: string, text: string): Ref[] => {
   );
 };
 
-type Commented = { id: string; body?: string; comments?: string[]; queued: boolean };
+type Commented = { id: string; body?: string; comments?: string[]; author?: string; commentBy?: CommentBy[]; queued: boolean };
 
 /**
  * Tickets whose comments say "blocked by X" while the body does not: a run
@@ -298,7 +298,8 @@ export const commentOnlyBlocks = async (project: Project, tracker: Tracker, tick
   for (const i of tickets) {
     const inBody = new Set((limitMs === undefined ? refsOf(project, tracker, i) : await refsOfAsync(project, tracker, i, limitMs)).map((r) => `${r.kind}:${r.id}`));
     const named = new Map<string, Ref>();
-    for (const c of i.comments ?? []) for (const r of [...parseRefs(project, c), ...declaredIn(project, i.id, c)]) if (!inBody.has(`${r.kind}:${r.id}`)) named.set(`${r.kind}:${r.id}`, r);
+    // On GitHub an outsider's comment is untrusted, as in a prompt (`trustedComment`); a ticket file has no `commentBy`.
+    for (const [n, c] of (i.comments ?? []).entries()) if (!i.commentBy?.[n] || trustedComment(i.commentBy[n], i.author)) for (const r of [...parseRefs(project, c), ...declaredIn(project, i.id, c)]) if (!inBody.has(`${r.kind}:${r.id}`)) named.set(`${r.kind}:${r.id}`, r);
     if (!named.size) continue;
     const blockers = await Promise.all([...named.values()].map(resolve));
     found.push({ issue: i.id, queued: i.queued, blockers, stale: blockers.every((b) => b.state === "closed") });

@@ -351,6 +351,47 @@ const checkSettingTypes = (config: ProjectConfig, refuse: (what: string) => neve
   if (config.repair?.attempts !== undefined && !isCount(config.repair.attempts, 0)) refuse(`\`repair.attempts\` must be a whole number of 0 or more (0 turns repair off), not ${JSON.stringify(config.repair.attempts)}.`);
 };
 
+const TRACKER_TYPES = ["github", "files"];
+const isNonEmptyString = (v: unknown) => typeof v === "string" && v.trim() !== "";
+
+/**
+ * `tracker` is a string or an object, so `NESTED` cannot hold it. A kind the kit does not know used to
+ * mean GitHub Issues, a `dir` typo was ignored, and a string `done` made `close()` write its first letter.
+ */
+const checkTrackerShape = (tracker: unknown, refuse: (what: string) => never) => {
+  if (tracker === undefined) return;
+  const kinds = TRACKER_TYPES.map((t) => JSON.stringify(t)).join(" or ");
+  if (typeof tracker === "string") {
+    if (!TRACKER_TYPES.includes(tracker)) refuse(`\`tracker\` must be ${kinds} or an object ({ type, dir, done }), not ${JSON.stringify(tracker)}.`);
+    return;
+  }
+  if (typeof tracker !== "object" || tracker === null || Array.isArray(tracker)) refuse(`\`tracker\` must be ${kinds} or an object ({ type, dir, done }), not ${JSON.stringify(tracker)}.`);
+  const t = tracker as Record<string, unknown>;
+  refuseUnknown(refuse, Object.keys(t), ["type", "dir", "done"], "tracker.");
+  if (typeof t.type !== "string" || !TRACKER_TYPES.includes(t.type)) refuse(`\`tracker.type\` must be ${kinds}, not ${JSON.stringify(t.type)}.`);
+  if (t.dir !== undefined && !isNonEmptyString(t.dir)) refuse(`\`tracker.dir\` must be a non-empty string, not ${JSON.stringify(t.dir)}.`);
+  if (t.done !== undefined && !(isStrings(t.done) && (t.done as string[]).length > 0 && (t.done as string[]).every(isNonEmptyString))) {
+    refuse(`\`tracker.done\` must be a non-empty list of strings, such as ["done"], not ${JSON.stringify(t.done)}.`);
+  }
+};
+
+/** What `NESTED` leaves open under `blockers`: the types of `linear` and `files` (a string `linear` threw from `tokens()` partway through a run). */
+const checkBlockersShape = (blockers: unknown, refuse: (what: string) => never) => {
+  if (typeof blockers !== "object" || blockers === null || Array.isArray(blockers)) return;
+  const b = blockers as Record<string, unknown>;
+  if (b.linear !== undefined && !isStrings(b.linear)) refuse(`\`blockers.linear\` must be a list of strings, such as ["ENG"], not ${JSON.stringify(b.linear)}.`);
+  if (b.files === undefined) return;
+  if (typeof b.files !== "object" || b.files === null || Array.isArray(b.files)) refuse(`\`blockers.files\` must be an object ({ dir, done }), not ${JSON.stringify(b.files)}.`);
+  const f = b.files as Record<string, unknown>;
+  refuseUnknown(refuse, Object.keys(f), ["dir", "done"], "blockers.files.");
+  // A missing `dir` is allowed: `tokens()` falls back to the tracker's own.
+  if (f.dir !== undefined && !isNonEmptyString(f.dir)) refuse(`\`blockers.files.dir\` must be a non-empty string, not ${JSON.stringify(f.dir)}.`);
+  // An empty list would never count a blocker done, so every ticket it names would wait for good.
+  if (f.done !== undefined && !(isStrings(f.done) && (f.done as string[]).length > 0 && (f.done as string[]).every(isNonEmptyString))) {
+    refuse(`\`blockers.files.done\` must be a non-empty list of strings, such as ["done"], not ${JSON.stringify(f.done)}.`);
+  }
+};
+
 /** Unknown keys and wrong types, refused with the key and what it takes, before anything runs. */
 const checkShape = (config: ProjectConfig) => {
   const refuse = refuserFor(CONFIG_PATH);
@@ -362,6 +403,8 @@ const checkShape = (config: ProjectConfig) => {
     if (typeof c[key] !== "object" || c[key] === null || Array.isArray(c[key])) refuse(`\`${key}\` must be an object ({ ${known.join(", ")} }).`);
     unknown(Object.keys(c[key] as object), known, `${key}.`);
   }
+  checkTrackerShape(c.tracker, refuse);
+  checkBlockersShape(c.blockers, refuse);
   for (const key of ["name", "baseBranch", "label", "dockerfile", "rules"]) {
     if (c[key] !== undefined && (typeof c[key] !== "string" || !c[key])) refuse(`\`${key}\` must be a non-empty string, not ${JSON.stringify(c[key])}.`);
   }

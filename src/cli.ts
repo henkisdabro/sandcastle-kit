@@ -60,6 +60,7 @@
 //                    those with no line apart; read-only, no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
 //                    it fits its pane unless given "all"
+//                    `--json`: the ticket rows of one reading as JSON (`ticketRows`, `src/status-rows.ts`), for other views
 //   build [--force]  build the base and project images
 //   preflight [--api-key]
 //                    one reply from every model, nothing else; asks first, as a run
@@ -145,7 +146,7 @@ import { confirmApiKey } from "./api-key.ts";
 import { startClock } from "./start-clock.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen, turnRefusedCause, turnsEndLine } from "./autonomy.ts";
 import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
@@ -158,7 +159,7 @@ import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { changelogSince, closingReport, type Facts, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
-import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTicketsFromEnv, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
+import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTicketsFromEnv, parseRunArgs, preflight, readOutcomes, recordDrain, rewordLibraryLines } from "./run.ts";
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
@@ -417,12 +418,32 @@ try {
       };
       // The no-PSI line is the run's, said once across its turns.
       const psi = { told: false };
+      // The outsider-edit hold measures from the person's start of the run, not each turn's own.
+      const runStart = Date.now();
+      // A later turn the checkout refused: its cause is recorded and said at every level, not at drain alone.
+      let refusedTurn = false;
       for (let turn = 1; ; turn++) {
         // The last turn's verify was red, likely load: this turn, a re-run or a follow-on, gates the base before any agent starts.
         const gateBase = mustGateBase(lastFacts);
         if (gateBase) console.log(`The merged ${project.baseBranch} was red, likely load - this turn gates it again before any agent starts.`);
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}), psi }))) {
+        let started: boolean;
+        try {
+          started = await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}), psi, runStart });
+        } catch (error) {
+          // A later turn the checkout refused (another session's edit mid-run, say) ends the run as the turn before it did:
+          // the merged base that turn re-gated decides the exit, not the refusal. Turn 1, and every other refusal (the
+          // `.git` guard, the git config baseline), is a stop before any turn or a safety stop, and keeps exit 1.
+          const cause = turn > 1 ? turnRefusedCause(error, turn) : undefined;
+          if (!cause) throw error;
+          console.error(`\n${(error as Error).message}`);
+          drain.cause = cause;
+          refusedTurn = true;
+          // The last turn's summary said the loop runs again; it does not, so its steps are the operator's after all.
+          console.log(await operatorSteps(project));
+          break;
+        }
+        if (!started) {
           drain.cause ??= "no ticket could start";
           break;
         }
@@ -498,8 +519,13 @@ try {
         delete process.env.ISSUES;
         process.env.TICKETS = ids.join(",");
       }
+      // How the turns ended, said and kept in the last turn's record, so `sandcastle report` shows it after the run.
+      if (drain.turns > 0 && (level === "drain" || refusedTurn)) {
+        const end = { turns: drain.turns, landed: drain.landed, cause: drain.cause ?? "the run ended" };
+        console.log(turnsEndLine(level, end));
+        recordDrain(end);
+      }
       if ((level === 2 || level === 3 || level === "drain") && drain.turns > 0) {
-        if (level === "drain") console.log(drainLine(drain.turns, drain.landed, drain.cause ?? "the run ended"));
         // One more queue read: a ticket queued while the run was live that no turn took (a stop, the cap or the one follow-on turn's limit) waits for the next run.
         const tracker = makeTracker(project);
         const known = queuedAtStart && new Set([...queuedAtStart, ...drain.inRun]);

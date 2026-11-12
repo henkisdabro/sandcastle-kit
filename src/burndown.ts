@@ -27,7 +27,7 @@ import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { format } from "node:util";
-import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
@@ -42,7 +42,7 @@ import { agentBaseline, onNoPsi, cpuFields, cpuOf, peakOf, pressureFields, press
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logAgentExit, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
@@ -65,7 +65,7 @@ import { sandboxOpener } from "./land.ts";
 import {
   carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
-import { accountLanding, causeWords, type Context, commentCount, createLedger, outcomesFile, personCommentsSince, repairWords, stoppedLine, trustOf } from "./ledger.ts";
+import { accountLanding, causeWords, type Context, createLedger, outcomesFile, personCommentsSince, repairWords, seenComments, stoppedLine, trustOf } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
@@ -207,6 +207,28 @@ export const handBack = async (o: Outcome, tracker: Pick<Tracker, "agentsWrite" 
   } catch {
     return o;
   }
+};
+
+/**
+ * The check beside the tracker's word before a pipeline starts (every pipeline: a carried branch that only lands or
+ * only gets a review, and a second attempt too): a queued GitHub ticket by an author who is no owner, member or
+ * collaborator, which that author wrote or edited after the queue label was last added, is held for a person, who reads
+ * the change and accepts it with `sandcastle requeue` (a new label time). `held`: the note the ticket is held with.
+ * `unread`: the read failed or was given up, so the ticket is not started this turn and stays queued - a GitHub
+ * hiccup must not move tickets to the hold label. A tracker with no such read (ticket files) is never asked.
+ * An edit made after the pipeline starts is not caught: the check is at start only.
+ */
+export const outsiderEdit = async (tracker: Pick<Tracker, "editedSinceQueued">, id: string, runStart: number, limitMs = TRACKER_READ_MS): Promise<{ kind: "held"; why: string; note: string } | { kind: "unread"; why: string } | undefined> => {
+  if (!tracker.editedSinceQueued) return undefined;
+  let change: string | undefined;
+  try {
+    change = await tracker.editedSinceQueued(id, runStart, limitMs);
+  } catch (error) {
+    return { kind: "unread", why: `could not read whether its author edited it after it was queued (${errorLine(error)}); not started this turn, it stays queued` };
+  }
+  if (!change) return undefined;
+  const why = `its author changed it after it was queued (${change})`;
+  return { kind: "held", why, note: `Sandcastle held this: ${why}. Read it, then \`sandcastle requeue ${id}\` to run it.` };
 };
 
 // What an issue's pane and sidebar entry say when its pipeline ends - the
@@ -544,7 +566,7 @@ export const saidOf = (text: string, facts?: Pick<ReportFacts, "report" | "outpu
 };
 
 /** One pass's report as the step's timings line records it (`reportTiming`). */
-export type ReportTiming = { came: "report" | "tags" | "missing"; missing?: string; tries: number; turns?: number; gapMs?: number; silenceMs?: number; cutOff?: true };
+export type ReportTiming = { came: "report" | "tags" | "missing"; missing?: string; tries?: number; turns?: number; gapMs?: number; silenceMs?: number; cutOff?: true };
 
 /**
  * Whether the report came, for the step's timings line. `failed` is `agentFailure`'s text for a pass that threw: it came
@@ -554,13 +576,14 @@ export type ReportTiming = { came: "report" | "tags" | "missing"; missing?: stri
  */
 export const reportTiming = (facts: ReportFacts, failed?: string): ReportTiming => {
   const common = {
-    tries: facts.tries,
+    ...(facts.tries !== undefined ? { tries: facts.tries } : {}),
     ...(facts.turns !== undefined ? { turns: facts.turns } : {}),
     ...(facts.gapMs !== undefined ? { gapMs: facts.gapMs } : {}),
     ...(facts.silenceMs !== undefined ? { silenceMs: facts.silenceMs } : {}),
     ...(facts.cutOff ? { cutOff: true as const } : {}),
   };
-  if (failed !== undefined) return { came: "missing", missing: facts.missing === "retries exhausted" ? facts.missing : `failed: ${failed}`, ...common };
+  // The capture's own reason is the better one: the retries that ran out (Claude), or the code of a turn Codex failed (`failed: invalid_json_schema`).
+  if (failed !== undefined) return { came: "missing", missing: facts.missing === "retries exhausted" || facts.missing?.startsWith("failed: ") ? facts.missing : `failed: ${failed}`, ...common };
   if (facts.report) return { came: "report", ...common };
   const tagged = ["unmet", "changelog", "followup", "ungated"].some((tag) => ownLineMatches(facts.output, tag, tag === "unmet").length > 0);
   return { came: tagged ? "tags" : "missing", missing: facts.missing ?? "no report", ...common };
@@ -710,6 +733,24 @@ export const gapOf = (text: string, filed: Said = saidOf(text)): string | undefi
   }
   return said ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
+/** Whether a pass's final message is JSON (`JSON.parse` succeeds): a report is not prose, and a prose reader has nothing to find in it. */
+const isJson = (text: string): boolean => {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The gap a review pass left in prose, for the review loop. With REPORT_SCHEMA=1 the cross-review's final message is
+ * the JSON report (or, a report that came out wrong, still JSON): its words are the schema's, not a reviewer's prose, so
+ * `gapOf` reads none of it. `schema` is a parameter for a test: the switch is read once at import.
+ */
+export const reviewGap = (r: { stdout: string; said: Said }, cross: boolean, schema: boolean = REPORT_SCHEMA): string | undefined =>
+  schema && cross && isJson(r.stdout) ? undefined : gapOf(r.stdout, r.said);
+
 // The phase a pass's name says, in the words a person reads in the filed ticket.
 const phaseOf = (name: string) =>
   name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
@@ -1157,7 +1198,7 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
  */
 export const carriedKindAtStart = (root: string, base: string, issue: Pick<Issue, "id" | "comments" | "author" | "commentBy">, tokenUser: string | null = null): "carried" | "unreviewed" | undefined => {
   const kind = carriedKind(root, base, issue.id);
-  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments, trustOf(issue, tokenUser)).length > 0 ? "unreviewed" : kind;
+  return kind === "carried" && personCommentsSince(issue.comments ?? [], readHeads(root)[issue.id]?.comments, trustOf(issue, tokenUser), readHeads(root)[issue.id]?.commentsAt).length > 0 ? "unreviewed" : kind;
 };
 
 /**
@@ -1587,7 +1628,7 @@ export type PipelineContext = {
   followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[]; namedByOthers?(from: string): NamedFollowUp[] };
   /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`runTicketsView`). None, and it is shown none. */
   tickets?: readonly { id: string; title: string }[];
-  /** With REPORT_SCHEMA=1: where a Claude pass leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
+  /** With REPORT_SCHEMA=1: where a pass (Claude, or the Codex cross-review) leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
   reportTimings?: Map<string, ReportTiming>;
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
@@ -1823,17 +1864,16 @@ export const createPipeline = (ctx: PipelineContext) => {
       return undefined;
     }
   };
-  const ticketComments = async (id: string): Promise<string[] | undefined> => (await ticketThread(id))?.comments;
   /** A person's comments on the ticket past the count its head record kept, by accounts that may be trusted (`personCommentsSince`). */
   const personCommentsOn = async (issue: Issue): Promise<string[]> => {
     const read = (await ticketThread(issue.id)) ?? issue;
-    return personCommentsSince(read.comments ?? [], readHeads(project.root)[issue.id]?.comments, trustOf(read, trackerTokenUser(tracker, project)));
+    return personCommentsSince(read.comments ?? [], readHeads(project.root)[issue.id]?.comments, trustOf(read, trackerTokenUser(tracker, project)), readHeads(project.root)[issue.id]?.commentsAt);
   };
 
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number }) => {
+  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }) => {
     if (dryRun) return;
     try {
       // `comments` is given only by the full review, read just before its pass starts (`fullReview`): a person's comment
@@ -2049,6 +2089,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           }
           // The time parked before the error is no work of the ticket's either.
           if (parkedInStep > parkedBefore) waited.set(issue.id, (waited.get(issue.id) ?? 0) + parkedInStep - parkedBefore);
+          // After `passHitLimit` has read the log: the crash detail must not push an agent's own limit line out of its tail.
+          logAgentExit(opts.logging, error);
           throw error;
         }
       }
@@ -2460,7 +2502,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         await juncture("review");
         // The comments the reviewer is about to read. Only this review records the count: the narrow reviews and the
         // re-review after a repair are told to leave the spec alone, so a comment before them is still unread.
-        const seenComments = await ticketComments(issue.id);
+        const seenThread = await ticketThread(issue.id);
         let reviewModel: string | undefined;
         const beforeReview = ownNow();
         const listBefore = ownList();
@@ -2488,12 +2530,12 @@ export const createPipeline = (ctx: PipelineContext) => {
               () => CROSS_REVIEW_MODEL,
             )
           : undefined;
-        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenComments ? { comments: commentCount(seenComments) } : {}) });
+        await noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root), ...(seenThread ? seenComments(seenThread) : {}) });
         reviewed = true;
-        for (const r of [review, cross]) {
+        for (const [r, isCross] of [[review, false], [cross, true]] as const) {
           const u = r?.said.ungated;
           if (u) ungated.push(u);
-          const g = r && gapOf(r.stdout, r.said);
+          const g = r && reviewGap(r, isCross);
           if (g) gaps.push(g);
           noteChangelog(r?.said);
           const m = r?.said.unmet;
@@ -2726,7 +2768,15 @@ export const createPipeline = (ctx: PipelineContext) => {
         for (const f of loaded.failures) for (const t of wholeTests(f)) loadTests.add(t);
         console.log(`${ref(issue.id)}: ${gated.failure.name} red on test timeouts under machine load (CPU pressure ${gated.cpuMachineMean}%${gated.cpuEstimate ? ", an estimate from the load average" : ""}) - no repair pass, gating once more`);
         at?.gates?.();
-        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        // From the red gate on, as the flake re-run above does: the gates before it passed on this tree and may be a
+        // build or an e2e run that takes minutes. Without `regate`, or with the red gate not among the results, a full run.
+        const loadAt = loaded.gates.findIndex((g) => g.name === loaded.failure?.name);
+        const again = ctx.regate;
+        if (again && loaded.failure && loadAt >= 0) {
+          const from = loaded.failure.name;
+          const rerun = await timed(issue.id, "gates", () => again(sandbox, issue.id, from));
+          gated = { ...rerun, gates: [...loaded.gates.slice(0, loadAt), ...rerun.gates] };
+        } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
         if (!gated.failure) console.log(`${ref(issue.id)}: ${loaded.failure?.name ?? "a gate"} red under machine load, then green on a re-gate - no repair pass`);
         else if (loadMade(gated)) {
           loadRed = true;
@@ -3017,8 +3067,9 @@ export const burndown = async (project: Project, turn?: TurnOptions): Promise<bo
 
 /** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
 // `psi`: the run's own, across its turns: whether the no-PSI line was said.
+// `runStart`: when the person started the run (ms), the same for every turn: a later turn's own start would let an outsider's edit made during an earlier turn through.
 type PsiState = { told: boolean };
-type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
+type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; runStart?: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
 
 const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   // The first turn takes the clock `sandcastle run` started; a later turn counts only its own steps.
@@ -3402,7 +3453,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
   const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
-  // With REPORT_SCHEMA=1: whether the last Claude pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
+  // With REPORT_SCHEMA=1: whether the last agent pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
   const reportTimings = new Map<string, ReportTiming>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
@@ -3984,6 +4035,12 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       }
     })();
     if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
+    // At every pipeline's start and only there (landing asks `withdrawal` alone): an outsider's edit after the label.
+    const outsider = await outsiderEdit(tracker, issue.id, turn?.runStart ?? Date.parse(runId));
+    if (outsider?.kind === "unread") {
+      console.log(`${ref(issue.id)}: ${outsider.why}.`);
+      return { kind: "not begun", why: { kind: "withdrawn", reason: outsider.why } };
+    }
     const parkable = (park?: Park): Park => ({
       suspend: async () => {
         await park?.suspend();
@@ -3997,6 +4054,21 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     });
     const result = await (async () => {
       try {
+        // Held for a person before it takes a slot or runs an agent: the pipeline's ending is the kit's own hold.
+        if (outsider?.kind === "held") {
+          console.log(`${ref(issue.id)}: ${outsider.why} - held for a human.`);
+          notes.push({ issue: issue.id, kind: "hold", text: outsider.note });
+          const branch = `agent/issue-${issue.id}`;
+          // A fresh ticket has no branch yet: no commits to count.
+          const commits = (() => {
+            try {
+              return ownCommits(base, branch, project.root);
+            } catch {
+              return 0;
+            }
+          })();
+          return heldResolution(issue.id, branch, outsider.why, { commits, reviewCommits: 0, gates: [] });
+        }
         // A pause gives the slot back and waits; the ticket then leases its own, in the time parked. Its worker's slot
         // was gone too when the run was paused as the attempt began.
         for (await juncture("start", start); !lease; await juncture("start", start)) await take();

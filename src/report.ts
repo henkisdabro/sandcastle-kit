@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { red } from "./api-key.ts";
-import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
+import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen, turnsEndLine } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
@@ -22,6 +22,7 @@ import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { CPU_PRESSURE_HIGH, PRESSURE_WARN_FULL } from "./peaks.ts";
 import { PEAK_CONTEXT_WARN, readPlanUsages } from "./usage.ts";
 import { LANDING, LANDING_GATES, rewroteLine } from "./gates.ts";
+import { handMergeCommand } from "./landing.ts";
 import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
 import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
@@ -170,8 +171,10 @@ export type Facts = {
   baseGates?: { gate: string; ok: boolean }[];
   /** Tests found red on the base mid-run (the run record's `baseRed`): no branch was repaired for them. */
   baseRed?: string[];
-  /** The run record's `mergeUnchecked`: a host merge check that could not run for objects a partial clone lacks. */
+  /** The run record's `mergeUnchecked`: a host merge check that could not run - for objects a partial clone lacks, or a conflict resolution's stray check on a git older than 2.38 or a failed git call. */
   mergeUnchecked?: string;
+  /** The run record's `drain`: how a run of several turns ended (a drain's stop, or a later turn that could not start). */
+  drain?: DrainEnd;
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
   /** The Claude plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
@@ -695,6 +698,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
     mergeUnchecked: typeof run.mergeUnchecked === "string" ? run.mergeUnchecked : undefined,
+    drain: drainOf(run.drain),
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
     usage: earlier ? undefined : readPlanUsages(run.usage).find((u) => u.provider === "claude"),
     codexUsage: earlier ? undefined : readPlanUsages(run.usage).find((u) => u.provider === "codex"),
@@ -1022,7 +1026,7 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
       // (`sandcastle land` merges it as partly done and leaves the ticket open).
       const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
       // A held conflict resolution is landed with `sandcastle land`, which gates the merge; a hand merge runs no gate.
-      const how = f.heldResolutions?.includes(id) ? `land: sandcastle land ${id}` : `merge: git merge --no-ff agent/issue-${id}`;
+      const how = f.heldResolutions?.includes(id) ? `land: sandcastle land ${id}` : `merge: ${handMergeCommand(`agent/issue-${id}`, refOf(id), !!t.unmet)}`;
       // Its history holds the old base, which a merge or a plain log would show as the branch's own: only the commits since the fork are its work.
       if (f.heldRewritten?.includes(id)) return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p --no-merges agent/issue-${id} ^${f.base} ^<old ${f.base}>   rebuild: git rebase --onto ${f.base} <old ${f.base}> agent/issue-${id}   (<old ${f.base}> is named above)`];
       return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   ${how}`];
@@ -1069,12 +1073,70 @@ const gapLines = (f: Facts, o: Owed, carried: { turn: number; facts: Facts; o: O
   const finds = [
     ...o.gapped.map((id) => ({ id, facts: f, turn: 0 })),
     ...carried.flatMap((c) => c.o.gapped.map((id) => ({ id, facts: c.facts, turn: c.turn }))),
-  ].map(({ id, facts, turn }) => {
-    const note = facts.tickets[id].gap ?? "";
+  ].flatMap(({ id, facts, turn }) => {
+    const note = glanceNote(facts.tickets[id].gap ?? "");
+    if (!note) return [];
     const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
-    return `${refOf(id)} "${note}"${more}${turn ? ` (turn ${turn})` : ""}`;
+    return [`${refOf(id)} "${note}"${more}${turn ? ` (turn ${turn})` : ""}`];
   });
   return finds.length ? [`Worth a glance - the reviewer's prose may name a gap: ${finds.join("; ")}`] : [];
+};
+
+// The separator `gapOf` (src/burndown.ts) puts between sentences that were not next to each other.
+const GAP_JOIN = " … ";
+// A sentence boundary as `sentencesOf` (src/burndown.ts) reads it: this file imports only types from there. Quoted text
+// is held whole first (QUOTED_TEXT), so a quoted sentence's own full stop ends no sentence of the reviewer's.
+const SENTENCE_BOUNDARY = /(?<=[.!?])\s+(?=[A-Z"`(*\uE000])/;
+const QUOTED_TEXT = /`[^`\n]*`|"[^"]*"|\u201c[^\u201d]*\u201d/g;
+const QUOTE_SLOT = /\uE000(\d+)\uE000/g;
+// Code and quoted words are not the reviewer's own prose: "I fixed the `missing` flag parsing." says nothing is missing.
+const ownProse = (sentence: string) => sentence.replace(QUOTED_TEXT, "").trim().replace(/^\*\*/, "").trim();
+// The reviewer reporting its own work ("I added one commit for two gaps.") reads as approval on a line meant for gaps.
+const OWN_WORK = /^I(?:['\u2019]ve| have)?\s+(?:(?:also|then|just|only)\s+)?(?:added|committed|fixed|kept|wrote|made|moved|changed|updated|removed|replaced|renamed|extended|tightened|corrected|amended)\b/;
+// ... unless the same sentence says something is still open ("I fixed it in src, but the same gap remains in docs"):
+// that is a real gap, and dropping it would hide it. "remaining" is no match: it only describes what is left to review.
+const STILL_OPEN_HERE = /\b(?:remains?|still|not\s+(?:yet\s+)?(?:fixed|addressed|handled|tested|covered)|left\s+(?:alone|unfixed|undone|untested)|untested|uncovered|missing|no\s+test)\b/i;
+// A refusal already in place ("The remaining `--colour` strings are inputs the tool refuses.") is the opposite of a gap,
+// whatever else the sentence says, so it has no still-open exception.
+const REFUSAL_IN_PLACE = /\b(?:is|are)\s+(?:an?\s+)?inputs?\s+(?:that\s+)?(?:the\s+)?[\w-]+\s+(?:already\s+)?(?:refuses|rejects)\b/i;
+
+const dropsFromGlance = (sentence: string): boolean => {
+  const prose = ownProse(sentence);
+  if (REFUSAL_IN_PLACE.test(prose)) return true;
+  return OWN_WORK.test(prose) && !STILL_OPEN_HERE.test(prose);
+};
+
+/**
+ * A ticket's `gap` note as `Worth a glance` quotes it: the sentences that report the reviewer's own work or a refusal
+ * already in place left out, the rest joined as `gapOf` joined them. Applied where the note is shown, so a record an
+ * older kit wrote is covered too. Empty when nothing is left.
+ */
+const glanceNote = (note: string): string =>
+  note
+    .split(GAP_JOIN)
+    .map((group) => {
+      const quotes: string[] = [];
+      return group
+        .replace(QUOTED_TEXT, (m) => (m.startsWith("`") ? m : `\uE000${quotes.push(m) - 1}\uE000`))
+        .split(SENTENCE_BOUNDARY)
+        .map((x) => x.replace(QUOTE_SLOT, (_, i: string) => quotes[Number(i)]).trim())
+        .filter((x) => x && !dropsFromGlance(x))
+        .join(" ");
+    })
+    .filter(Boolean)
+    .join(GAP_JOIN);
+
+/**
+ * The key a failing test is grouped by: a runner over a workspace names one test with different path prefixes on
+ * different tickets (`pkg/app Sidebar.test.tsx > Sidebar > x`, `pkg/app src/ui/Sidebar.test.tsx > Sidebar > x`), so
+ * a name with ` > ` is keyed by the last word of what precedes it, as a basename, plus the title. Any other name
+ * (a pytest id, a bare name) is its own key.
+ */
+const testKey = (name: string): string => {
+  const at = name.indexOf(" > ");
+  if (at < 0) return name;
+  const word = name.slice(0, at).trim().split(/\s+/).pop() ?? "";
+  return `${basename(word)}${name.slice(at)}`;
 };
 
 /** The Next step for a refused commit: the work is done, and a further turn or a redo would only repeat the refusal. */
@@ -1214,6 +1276,13 @@ const flakyLines = (f: Facts): string[] => {
   return all.length > 8 ? [...lines, `Likely flaky: and ${all.length - 8} more`] : lines;
 };
 
+// The record's `drain`, or none when any part of it has the wrong type (a file in a repository).
+const drainOf = (d: unknown): DrainEnd | undefined => {
+  if (!d || typeof d !== "object") return undefined;
+  const { turns, landed, cause } = d as Record<string, unknown>;
+  return Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause ? { turns: turns as number, landed: landed as number, cause } : undefined;
+};
+
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
@@ -1298,6 +1367,8 @@ export const render = (f: Facts, plain = false): string => {
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : f.tokensNote === "unknown" ? " - tokens unknown" : ""}${f.tokensNote === "incomplete" ? " (incomplete)" : ""}`,
+    // How the run's turns ended, right under the headline: the run's exit says nothing of it at 0 (a later turn the checkout refused).
+    ...(f.drain ? [turnsEndLine(f.settings?.autonomy, f.drain)] : []),
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
       : f.verify === undefined || f.verify === null
@@ -1447,8 +1518,20 @@ export const render = (f: Facts, plain = false): string => {
     for (const id of [...fixing, ...held]) for (const k of new Set(key(id))) by.set(k, [...(by.get(k) ?? []), id]);
     return [...by].filter(([, who]) => who.length > 1);
   };
-  const sameTest = group((id) => f.tickets[id].failing ?? []);
-  const inSameTest = (file: string, who: string[]) => sameTest.some(([test, w]) => test.split("::")[0] === file && who.every((id) => w.includes(id)));
+  // Grouped by `testKey`; a group keeps the first name seen, which is what every line prints.
+  const sameTest = (() => {
+    const by = new Map<string, [string, string[]]>();
+    for (const id of [...fixing, ...held]) {
+      for (const name of f.tickets[id].failing ?? []) {
+        const key = testKey(name);
+        const found = by.get(key) ?? [name, []];
+        if (!found[1].includes(id)) found[1].push(id);
+        by.set(key, found);
+      }
+    }
+    return [...by.values()].filter(([, who]) => who.length > 1);
+  })();
+  const inSameTest = (file: string, who: string[]) => sameTest.some(([test, w]) => testKey(test.split("::")[0]) === testKey(file) && who.every((id) => w.includes(id)));
   const sameFile = group((id) => {
     const t = f.tickets[id];
     return [...(t.state === "held" ? [] : (t.files ?? [])), ...(t.failing ?? []).map((x) => x.split("::")[0])];
@@ -1470,6 +1553,7 @@ export const render = (f: Facts, plain = false): string => {
     const t = f.tickets[id] ?? {};
     if (t.state === "paused") return `paused${t.note ? ` ${t.note}` : ""} - its branch resumes`;
     if (t.state === "conflict") return "conflicted - its branch resumes";
+    if (t.state === "red") return "red - its branch resumes";
     if (partlyRerun.includes(id)) return "merged partly done - the remainder is still open";
     const overlap = /^waits for (\S+) \(this run\) - next run$/.exec(t.note ?? "");
     if (overlap) {
@@ -1480,7 +1564,8 @@ export const render = (f: Facts, plain = false): string => {
     const on = /^waits for (.*)$/.exec(t.note ?? "")?.[1]?.replace(/\s*\([^)]*\)/g, "").split(",").map((l) => l.trim()).filter(Boolean) ?? [];
     return on.length ? `${on.length === 1 ? "blocker" : "blockers"} ${on.join(", ")} closed` : "blockers closed";
   };
-  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable, ...partlyRerun, ...parked])];
+  // A red ticket keeps its queue label (Next step says "still queued"), so the next run resumes its branch: it is runnable like a conflicted one.
+  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict" || f.tickets[id].state === "red"), ...f.runnable, ...partlyRerun, ...parked])];
   const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     // A ticket cut short is runnable too, and its own line follows: "none" above it would contradict it.
@@ -1634,7 +1719,9 @@ export const render = (f: Facts, plain = false): string => {
   if (heldEarlier.length) {
     const one = heldEarlier.length === 1;
     const b = one ? heldEarlier[0] : "<branch>";
-    next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with \`git merge --no-ff ${b}\`, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
+    // An earlier run's branch has no unmet fact to read, so each merge says `closes`; one command per branch, each with its own ref.
+    const merges = heldEarlier.map((x) => `\`${handMergeCommand(x, refOf(x.replace(/^agent\/issue-/, "")))}\``).join(", ");
+    next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with ${merges}, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
   }
   // A merged ticket's kept worktree (a stray file its agent left, a gate restore that failed) holds the branch the landing could not delete,
   // and no other step reaches it. Only a merged one: `clean` removes every worktree, and the others hold work a run or a person still needs.

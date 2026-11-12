@@ -16,7 +16,7 @@ import type { EngineInterface, Register } from "claude-code";
 
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
-import { activity, afterTurn, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
+import { activity, afterTurn, followRun, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
 import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, heldRelease, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
@@ -489,11 +489,11 @@ async function warm($: EngineInterface) {
   try {
     const now = await $.clock.now();
     let memory = parseWarmth(await read($, warmth));
-    // Another run starts the count of misses over; the turn that ended last still counts.
-    if (memory.run !== run.startedAt) memory = { misses: 0, ...(memory.turnEnd === undefined ? {} : { turnEnd: memory.turnEnd }), ...(run.startedAt === undefined ? {} : { run: run.startedAt }) };
+    // Another run starts the count of misses over; a later turn of the same process does not (followRun).
+    memory = followRun(memory, run);
     const usage = await $.session.usage();
-    // The run's start is the floor: the turn that started it ended about then, and a reload forgets the later ones.
-    const input = (m: Warmth) => ({ enabled: run.keepWarm, live: true, lastActivity: activity(m, Date.parse(run.startedAt ?? "")), last: m.last, misses: m.misses, rateLimits: usage.rateLimits, now });
+    // The start of the run's first turn is the floor: the turn that started it ended about then, and a reload forgets the later ones.
+    const input = (m: Warmth) => ({ enabled: run.keepWarm, live: true, lastActivity: activity(m, m.since), last: m.last, misses: m.misses, rateLimits: usage.rateLimits, now });
     let verdict = keepWarm(input(memory));
     if (verdict.refresh) {
       refreshing = true;

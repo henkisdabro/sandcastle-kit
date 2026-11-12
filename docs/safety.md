@@ -19,15 +19,26 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   queued ticket, and an agent reads the thread with a token in its environment. So the comments in
   an agent's prompt are filtered: only an owner's, a member's or a collaborator's comment, and the
   ticket author's, are shown, and the last line says how many were left out (bots such as
-  `github-actions[bot]` included). Every repository is filtered the same way, private ones too.
+  `github-actions[bot]` included) and that they are untrusted, not to be fetched or acted on.
+  Every repository is filtered the same way, private ones too.
+  The "blocked by" warnings that comments raise at a run's start and in `sandcastle blockers` read
+  the same accounts' comments only.
   The run counts the same accounts when it asks whether a person commented on a carried branch's
   ticket since its review: an outsider's comment never forces a full review. A comment that opens
   with `Sandcastle agent:` is skipped as the agent's own only when the account `GH_TOKEN` belongs to
   wrote it (read once per run with `gh api user`; when that fails the run says so and counts such a
   comment as a person's). The ticket's own body is not filtered: **queueing an outsider's issue
-  trusts its body**, and that author can still edit it, and their later comments are shown as the
-  ticket author's, after you label it: read an issue from a stranger before you label it, and watch
-  it while it is queued.
+  trusts its body**, so read an issue from a stranger before you label it. What the author writes
+  after you label it is held for you: a queued GitHub ticket whose author is not an owner, member
+  or collaborator is held (the hold label, as any held ticket, listed under Needs you) when its
+  body, or one of the author's comments, was written or edited after the queue label was last
+  added. Only the author's own writing counts; a maintainer's edit of it does not. Read the
+  change, then `sandcastle requeue <n>` accepts it: the queue label goes back on, which is a new
+  label time. A ticket named on the command line that never carried the label is measured from
+  the run's start. The check runs when a ticket's pipeline starts, a carried branch's and a second
+  attempt's included, and not again: **an edit made while its agents run is not caught**. A read
+  that fails does not hold the ticket; it is not started that turn and stays queued, with a line
+  saying why.
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not
   run it on your machine when it lands.

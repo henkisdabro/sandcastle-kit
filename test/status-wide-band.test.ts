@@ -14,7 +14,7 @@ const KIT = join(import.meta.dirname, "..");
 
 test("pnpm test runs the status view's scenarios at 80 and again at 180 columns, beside node:test", () => {
   const script: string = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")).scripts.test;
-  assert.match(script, /&& bash test\/suite\.sh node .*--test .*test\/\*\.test\.ts'$/);
+  assert.match(script, /&& bash test\/suite\.sh node .*--test .*\$files'$/);
   const suite = readFileSync(join(KIT, "test", "suite.sh"), "utf8");
   assert.match(suite, /^bash test\/status\.test\.sh >.* &$/m);
   assert.match(suite, /^COLS=180 bash test\/status\.test\.sh >.* &$/m);

@@ -159,8 +159,9 @@ const KIT_COMMENT = /^(?:Sandcastle (?:ran this ticket|held this|could not finis
  * section, so its entries are the `### ` headings under `## Comments` (the kit writes each as `### <date> - sandcastle`).
  * `by` is who wrote each GitHub comment, in the same order.
  */
-const commentEntries = (comments: string[], by?: CommentBy[]): { text: string; heading?: string; by?: CommentBy }[] =>
-  comments.flatMap<{ text: string; heading?: string; by?: CommentBy }>((c, i) => {
+type CommentEntry = { text: string; heading?: string; by?: CommentBy };
+const commentEntries = (comments: string[], by?: CommentBy[]): CommentEntry[] =>
+  comments.flatMap<CommentEntry>((c, i) => {
     if (!/^## Comments\b/m.test(c)) return [{ text: c.trim(), by: by?.[i] }];
     return c
       .split(/^(?=### )/m)
@@ -175,6 +176,23 @@ const commentEntries = (comments: string[], by?: CommentBy[]): { text: string; h
 /** How many comments a ticket has, as `personCommentsSince` counts them. */
 export const commentCount = (comments: string[]): number => commentEntries(comments).length;
 
+/**
+ * What a full review's head record keeps of the comments it read: their count and, when the tracker gives comment
+ * times (GitHub), the latest. Both keys are always present, so a record that had a time and now has none (the
+ * tracker changed) does not keep the stale one.
+ */
+export const seenComments = (ticket: { comments: string[]; commentBy?: CommentBy[] }): { comments: number; commentsAt: string | undefined } => {
+  const entries = commentEntries(ticket.comments, ticket.commentBy);
+  return { comments: entries.length, commentsAt: latestTime(entries) };
+};
+
+/** The latest comment time, when every entry has one (a thread with a gap in its times is read by count). */
+const latestTime = (entries: CommentEntry[]): string | undefined => {
+  const times = entries.map((e) => (e.by?.at ? Date.parse(e.by.at) : NaN));
+  if (!times.length || times.some(Number.isNaN)) return undefined;
+  return entries[times.indexOf(Math.max(...times))].by?.at;
+};
+
 /** Who wrote a GitHub ticket and its comments, and which account the run's token is: what `personCommentsSince` needs to trust a comment. */
 export type CommentTrust = { by?: CommentBy[]; ticketAuthor?: string; tokenUser?: string | null };
 
@@ -186,16 +204,22 @@ export const trustOf = (ticket: { author?: string; commentBy?: CommentBy[] }, to
  * an agent's, which opens with `AGENT_COMMENT_MARKER`. `seen` is the count
  * recorded with a branch's head; none recorded means none can be told, and none is returned.
  *
+ * A count can move back (a comment deleted after the review), which would hide a later trusted comment at an index
+ * below it. So when the head also recorded `seenAt` (the latest comment time it read) and every comment carries its
+ * time (GitHub), the comments past it are those created after `seenAt`, whatever their index. A ticket file's
+ * comments have no times, and a head recorded before this has no `seenAt`: both keep the count.
+ *
  * With `trust` (a GitHub ticket), a comment by an account that is not the repository's owner, member or collaborator,
  * or the ticket's author, is nobody's here, whatever it says: it never forces a review, and an outsider's comment
  * that opens with the marker or like the kit's is not the agent's. A comment that opens with the marker is the agent's only
  * when `tokenUser` wrote it, so with that login unknown it counts as a person's: a full review, never a skipped one.
  */
-export const personCommentsSince = (comments: string[], seen: number | undefined, trust?: CommentTrust): string[] =>
-  seen === undefined
-    ? []
-    : commentEntries(comments, trust?.by)
-        .slice(seen)
+export const personCommentsSince = (comments: string[], seen: number | undefined, trust?: CommentTrust, seenAt?: string): string[] => {
+  if (seen === undefined) return [];
+  const entries = commentEntries(comments, trust?.by);
+  const since = Date.parse(seenAt ?? "");
+  const timed = !Number.isNaN(since) && latestTime(entries) !== undefined;
+  return (timed ? entries.filter((e) => Date.parse(e.by?.at ?? "") > since) : entries.slice(seen))
         .filter((e) => {
           if (e.by && !trustedComment(e.by, trust?.ticketAuthor)) return false;
           if (KIT_COMMENT.test(e.text) || (e.heading ?? "").endsWith(" - sandcastle")) return false;
@@ -204,6 +228,7 @@ export const personCommentsSince = (comments: string[], seen: number | undefined
           return !!e.by && !(!!trust?.tokenUser && e.by.login === trust.tokenUser);
         })
         .map((e) => e.text);
+};
 
 // The one comment a ticket that did not land gets: the conflict (the other
 // ticket and the files), the agents' report, or both - never two comments.

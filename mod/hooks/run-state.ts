@@ -12,6 +12,8 @@ export type Ticket = { state?: string; note?: string; title?: string; order?: nu
 export type Run = Pick<RunRecord, "orchestrator" | "pid" | "session" | "startedAt" | "finishedAt" | "exitCode" | "stage" | "tokens"> & {
   /** The record's `settings.keepWarm` when it is a boolean; absent for an older kit's record, which reads as on (keep-warm.ts). */
   keepWarm?: boolean;
+  /** The record's `settings.turn` when it is a whole number: 1 is the first turn of a `sandcastle run` (the cache refresh starts a new run there). */
+  turn?: number;
   tickets?: Record<string, Ticket>;
 };
 
@@ -105,6 +107,11 @@ const settingOf = (settings: unknown, key: string): boolean | undefined => {
   return typeof value === "boolean" ? value : undefined;
 };
 
+const turnOf = (settings: unknown): number | undefined => {
+  const value = settings && typeof settings === "object" ? (settings as Record<string, unknown>).turn : undefined;
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+};
+
 /** A half-written or foreign file reads as no record. */
 export const parse = (raw: string): Run | undefined => {
   let r: Record<string, unknown>;
@@ -126,6 +133,7 @@ export const parse = (raw: string): Run | undefined => {
     stage: text(r.stage, 40),
     tokens: text(r.tokens, 40),
     keepWarm: settingOf(r.settings, "keepWarm"),
+    turn: turnOf(r.settings),
     tickets: Object.fromEntries(
       // A ticket file's id is a whole slug: cut short, two tickets of one feature would share a key.
       tickets.slice(0, MAX_TICKETS).map(([id, t]) => [text(id, 100) ?? "?", { state: text(t?.state, 24), note: text(t?.note, 100), title: text(t?.title, 100), order: whole(t?.order) }]),

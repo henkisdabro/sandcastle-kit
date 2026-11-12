@@ -4,7 +4,7 @@
 import { type ChildProcess, execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
@@ -16,8 +16,9 @@ import { coreMiss, terminalHost } from "./terminal-host.ts";
 import { openCoreStatus } from "./herdr-core.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, staleBaseParents } from "./sandbox.ts";
 import { protectedPathsNote } from "./guard.ts";
-import { OperatorError, promptExpansionLine } from "./errors.ts";
+import { CheckoutRefusal, OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
+import { redact } from "./worktree-lock.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
 import type { Settled } from "./usage.ts";
@@ -255,13 +256,17 @@ const localConfigHint = (root: string, dirty: string[]): string => {
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
 // An OperatorError, so the CLI prints a message: a stack trace read as a kit bug, and
-// without the file list the operator had to run git status to find a stray lockfile.
+// without the file list the operator had to run git status to find a stray lockfile. A CheckoutRefusal
+// (the base with no commit aside, which `assertBaseHasCommit` shares), so a later autonomy turn can tell
+// a busy checkout from a safety stop and end the run as the turn before it did.
 export const assertCleanBase = (project: Project) => {
   // First: a leftover lock or merge makes the files below read as dirty or clean for no reason a person can see.
   const left = gitLeftovers(project.root);
   if (left.length > 0) {
-    throw new OperatorError(
+    throw new CheckoutRefusal(
       `NOT STARTED: git left something half-done in this repo, and every landing would fail on it:\n${left.map((l) => `  ${l.file} (${l.what})`).join("\n")}\n${leftoverSteps(left)}`,
+      "git left something half-done",
+      left.map((l) => relative(project.root, l.file)),
     );
   }
   // Before the dirty files and the branch name: on a branch with no commit git cannot name the branch either.
@@ -277,14 +282,18 @@ export const assertCleanBase = (project: Project) => {
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
     if (dirty.length > 10) shown.push(`  ... and ${dirty.length - 10} more`);
-    throw new OperatorError(
+    throw new CheckoutRefusal(
       `NOT STARTED: the working tree is dirty. The run merges into it - commit or stash first.\n${shown.join("\n")}${localConfigHint(project.root, dirty)}`,
+      "the working tree is dirty",
+      // `git status --porcelain`'s two status letters and a space, then the path.
+      dirty.map((l) => l.slice(3)),
     );
   }
   const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], project.root);
   if (branch !== project.baseBranch) {
-    throw new OperatorError(
+    throw new CheckoutRefusal(
       `NOT STARTED: expected to be on ${project.baseBranch}, found ${branch}. If ${branch} is your base branch, set baseBranch: "${branch}" in .sandcastle/config.ts.`,
+      `not on ${project.baseBranch} (found ${branch})`,
     );
   }
 };
@@ -471,6 +480,33 @@ export const logExpansionFailure = (logging: LoggingOption | undefined, error: u
   if (line === undefined || logging?.type !== "file" || typeof logging.path !== "string") return;
   try {
     appendFileSync(logging.path, `! error: ${line}\n`);
+  } catch {
+    // A full disk must not hide the crash itself.
+  }
+};
+
+/** The most lines of an agent process's output `logAgentExit` keeps: the end of it is where the cause is. */
+const AGENT_EXIT_LINES = 40;
+
+/**
+ * What a pass whose agent process exited non-zero leaves at the end of its readable log, which otherwise stops at
+ * "Agent started": `! error: <agent> exited with code N`, then the process's output (Sandcastle's error message, the
+ * stderr after its first line), redacted, indented two spaces, the last 40 non-empty lines with a cut line before
+ * them. Nothing for any other error and for a pass with no file log. Called after `passHitLimit` has read the log, so
+ * an agent's own usage-limit line is never pushed out of the lines that check reads.
+ */
+export const logAgentExit = (logging: LoggingOption | undefined, error: unknown): void => {
+  // A prompt expansion's "Command `...` exited with code N:" (empty stderr) is `logExpansionFailure`'s line, not twice.
+  if (logging?.type !== "file" || typeof logging.path !== "string" || promptExpansionLine(error) !== undefined) return;
+  const text = (error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
+  const [first, ...rest] = text.split("\n");
+  if (!/exited with code \d+:\s*$/.test(first)) return;
+  const detail = rest.map((l) => redact(l).trimEnd()).filter((l) => l.trim());
+  const kept = detail.slice(-AGENT_EXIT_LINES);
+  const cut = detail.length - kept.length;
+  const lines = [`! error: ${first.replace(/:\s*$/, "")}`, ...(cut ? [`  [... ${cut} lines cut ...]`] : []), ...kept.map((l) => `  ${l}`)];
+  try {
+    appendFileSync(logging.path, lines.join("\n") + "\n");
   } catch {
     // A full disk must not hide the crash itself.
   }
@@ -699,6 +735,14 @@ const keepKilledRecord = (root: string, file: string) => {
 
 let current: ((code: number | undefined) => void) | undefined;
 let exitHooked = false;
+// The open record's own update: what the run writes after its last turn's summary, into the record the exit finishes.
+let currentUpdate: ((fields: RunRecord) => void) | undefined;
+
+/**
+ * Writes how a run of several turns ended (`drain`) into the open record - the last turn's, which the process's exit
+ * finishes from its copy in memory, so a direct write to run.json would be overwritten. None open, or finished: nothing.
+ */
+export const recordDrain = (drain: NonNullable<RunRecord["drain"]>) => currentUpdate?.({ drain });
 
 /**
  * The ticket slots a run could use, averaged over the time its tickets work at full demand: the share moves as other
@@ -785,6 +829,11 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
     }
   };
   current = finish;
+  currentUpdate = (fields) => {
+    if (finished) return;
+    run = { ...run, ...fields };
+    write();
+  };
   if (!exitHooked) {
     exitHooked = true;
     process.on("exit", (code) => current?.(code));
@@ -1563,8 +1612,10 @@ export type BranchHead = {
   gap?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
-  /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`commentCount`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
+  /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`seenComments`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
   comments?: number;
+  /** The latest creation time among those comments, when the tracker gives times (GitHub): a comment created after it is unseen even when a deleted one moved the count back (`personCommentsSince`). Absent for a ticket file and in a record from before it. */
+  commentsAt?: string;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -1581,7 +1632,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);

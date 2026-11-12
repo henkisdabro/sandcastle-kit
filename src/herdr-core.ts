@@ -141,9 +141,12 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     // the terminal is gone, and the name is what the new view needs. Still taken, the old terminal is the person's
     // to close, and the one line names it - printed only here, for a terminal the kit tried to remove, never for one
     // it leaves alone as a person's.
+    let triedToRemove: string | undefined;
+    const removedLine = (old: string) => `The old status terminal ${old} could not be removed, so this run's status view is unnamed beside it: close it yourself.`;
     const nameIsFree = (old: string) => {
+      triedToRemove = old;
       const free = !get(hc, name);
-      if (!free) console.log(`The old status terminal ${old} could not be removed, so this run's status view is unnamed beside it: close it yourself.`);
+      if (!free) console.log(removedLine(old));
       return free;
     };
     const found = get(hc, name);
@@ -197,13 +200,27 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
       `sandcastle.root=${key}`,
       `sandcastle.instance=${instance}`,
     ];
-    const out = JSON.parse(
-      hc([
-        "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--keep", ...(nameFree ? ["--name", name] : []), "--cwd", root,
-        ...labels.flatMap((l) => ["--label", l]), "--", "env", marker, bin, "status",
-      ]),
-    ) as { address?: unknown };
+    const runArgs = (named: boolean) => [
+      "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--keep", ...(named ? ["--name", name] : []), "--cwd", root,
+      ...labels.flatMap((l) => ["--label", l]), "--", "env", marker, bin, "status",
+    ];
+    // `get` answers undefined on any hc error, so a failed `get` reads as a free name and `run --name` can fail as
+    // taken. Only hc itself throwing is retried, once and unnamed: a `run` that answered (no address, or not JSON)
+    // may have started a terminal the kit cannot address, so it is never run twice.
+    let unnamedLine: string | undefined;
+    let raw: string;
+    try {
+      raw = hc(runArgs(nameFree));
+    } catch (error) {
+      if (!nameFree) throw error;
+      raw = hc(runArgs(false));
+      unnamedLine = triedToRemove
+        ? removedLine(triedToRemove)
+        : `The status view's name ${name} is still taken, so this run's status view is unnamed beside it: close the old one yourself.`;
+    }
+    const out = JSON.parse(raw) as { address?: unknown };
     if (typeof out.address !== "string") throw new Error(`hc run gave no address: ${JSON.stringify(out).slice(0, 120)}`);
+    if (unnamedLine) console.log(unnamedLine);
     started = out.address;
     const address = started;
     writeCoreView(root, { instance, status: address, slots: [] });

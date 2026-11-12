@@ -2,7 +2,7 @@
 // further turn would take, and the level-1 question. The loop itself is in cli.ts.
 import { createInterface } from "node:readline/promises";
 import type { OutcomeEntry } from "../mod/hooks/run-record.ts";
-import { OperatorError } from "./errors.ts";
+import { CheckoutRefusal, OperatorError } from "./errors.ts";
 import type { Facts } from "./report.ts";
 import type { Ticket, Tracker } from "./tracker.ts";
 
@@ -167,6 +167,33 @@ export const conflictedIn = (outcomes: Record<string, OutcomeEntry>, run: string
 
 export const drainLine = (turns: number, landed: number, cause: string): string =>
   `Drain: ${turns} turn${turns === 1 ? "" : "s"}, ${landed} landed, stopped because ${cause}`;
+
+/** The most files a refused turn's cause names; the rest are counted. */
+const CAUSE_FILES = 5;
+
+/**
+ * Why a later turn of the run could not start, as the drain's cause: the checkout refused it (`CheckoutRefusal`: a dirty
+ * tree, the wrong branch, git's leftovers), which ends the run as the turn before it did. Anything else - the `.git`
+ * guard, the git config baseline, a bad label - is a safety stop and gives no cause, so the caller rethrows it.
+ */
+export const turnRefusedCause = (error: unknown, turn: number): string | undefined => {
+  if (!(error instanceof CheckoutRefusal)) return undefined;
+  const shown = error.files.slice(0, CAUSE_FILES);
+  const more = error.files.length - shown.length;
+  const files = shown.length ? ` (${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""})` : "";
+  return `turn ${turn} could not start: ${error.reason}${files}`;
+};
+
+/** What a run that made more than one turn records of its end (the run record's `drain`). */
+export type DrainEnd = { turns: number; landed: number; cause: string };
+
+/**
+ * The line a run's end says of its turns: a drain's `Drain:` line, whatever stopped it; at another level only a later
+ * turn that could not start, as its cause (`Turn 2 could not start: ...`). The loop prints it and the closing summary
+ * shows it from the record, so both read the same.
+ */
+export const turnsEndLine = (level: Level | undefined, end: DrainEnd): string =>
+  level === "drain" ? drainLine(end.turns, end.landed, end.cause) : end.cause.charAt(0).toUpperCase() + end.cause.slice(1);
 
 /**
  * The tickets the queue holds now that no turn of the run had and no blocker holds back: queued

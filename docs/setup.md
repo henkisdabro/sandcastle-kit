@@ -184,6 +184,8 @@ its message with neither a `<followup>` nor an `<unmet>` line has lost it, so th
 review's message for such a sentence (not one that says nothing is left, such as "nothing remains",
 and not text in double quotes or backticks) and, for a merged ticket, gives the sentence a line of
 its own: `Worth a glance - the reviewer's prose may name a gap`.
+A sentence that reports the reviewer's own work ("I added one commit for two gaps"), or says the remaining
+cases are inputs the tool already refuses, is left out of that line.
 It is a guess at a person's wording, so it is not under Needs you, not in the headline's `need you`
 and adds no Next step.
 

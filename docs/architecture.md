@@ -81,7 +81,8 @@ a follow-up an earlier iteration named is still filed. The tag readers and the r
 rules (`oneLine`, `judgeChangelog`, `readFollowUps`, `unmetNote`). A missing report is a value, never a
 throw (a throw would start a second editing review through `reviewWithFallback`). `reportTiming` turns the
 capture's facts into the `report` field of the step's `timings.jsonl` line (`came`, `missing`, `tries`,
-`turns`, and `gapMs`, `silenceMs` and `cutOff` once the completion signal was seen); `pass` leaves it in
+`turns`, and `gapMs`, `silenceMs` and `cutOff` once the completion signal was seen; a Codex pass has no
+`tries` or `turns`, so its entry leaves them out); `pass` leaves it in
 `PipelineContext.reportTimings` and `timed` takes it, the last pass of a step winning
 (`test/report-said.test.ts`, `test/report-schema.test.ts`). The `<report>`/`<blocked>` hand-back, the
 resolver's `<stray>` lines and the repair pass's `<verdict>` stay tags.
@@ -174,7 +175,9 @@ still reach `regate` or stop at two runs.
 After those runs, a ticket gate red that is **load-made** (`loadMade`, `src/gates.ts`: at least one failure,
 every one a test timeout by `onlyTimeouts`, none with exit 124, and the pass's own machine-wide
 `cpuMachineMean` at or above `CPU_PRESSURE_HIGH`, `cpuHigh`; the last run of a `rerunOf` chain is the one
-judged, and the sandbox cgroup's figure never is) gets no repair pass and one full `gate` call instead,
+judged, and the sandbox cgroup's figure never is) gets no repair pass and one more gate run instead,
+from the red gate on (`ctx.regate` with that gate's name, the gates that passed before it spliced in
+front of the run's, as the flake re-run does; with `ctx.regate` unset, one full `gate` call),
 once per attempt and never inside the repair loop, when repair is on and the red is not the forced one.
 Green goes on as green with no re-review; red and load-made again ends the ticket `gate-failed` with
 `loadRed: true` (the ledger's note says to run it again when the machine is quiet); red and not
@@ -532,7 +535,12 @@ the ticket record's `gap`, and for a merged ticket (`gapLines` in `src/report.ts
 `Worth a glance - the reviewer's prose may name a gap: #N "..."` line in the summary's header: it is
 a guess at prose, so it is under neither Needs you nor the headline's `need you`, and adds no Next
 step (approving prose keeps finding phrasings the detector reads as a gap;
-`test/gap-in-prose-false.test.ts`).
+`test/gap-in-prose-false.test.ts`). `gapLines` also leaves out of a note, where it is shown, a sentence
+that reports the reviewer's own work ("I added one commit", unless it also says something remains) or
+that the remaining cases are inputs the tool already refuses; being applied at render time, it covers
+records an older kit wrote. The Needs fixing section groups failing tests by `testKey`: a name with
+` > ` is keyed by the basename of the last word before it plus the title, so one test named with two
+path prefixes is one `Same failing test` line, printed with the first name seen.
 
 A start that took 10 s or more says where its time went: `Start took 64.2 s: blocker reads 31.0 s,
 queue read 12.3 s, versions 9.8 s, docker info 4.1 s, others 7.0 s`, printed as a statement of its
@@ -547,6 +555,14 @@ question)`). The clock writes nothing, and is not a `timings.jsonl` phase, whose
 estimate. A detached run prints the line in its child's `.sandcastle/logs/run-output.log`, not in
 the parent's terminal. A start that returns before the view (empty queue, everything waiting)
 prints none.
+
+**The outsider-edit hold** (`outsiderEdit`, over the tracker's `editedSinceQueued`) is asked once
+per attempt, after `withdrawal` and before a slot or an agent, and never at landing. A GitHub
+ticket whose author is not an owner, member or collaborator is held when the author wrote or
+edited its body, or commented, after the queue label was last added; a ticket that never carried
+the label is measured from the run's start (`TurnOptions.runStart`, the same for every turn, so a
+later turn does not let through an edit made during an earlier one). A read that fails is not a
+hold: the ticket is not started that turn. The files tracker has no outsiders and never holds.
 
 ## `src/landing.ts`
 
@@ -678,7 +694,17 @@ review as `MERGE_STRAYS` (`namedStraysView`, in the `remerge` prompt) and the ga
 (`test/pipeline-named-strays.test.ts`); the full review a person's late comment sends a conflicted
 carried merge to gets them too, in the `review` prompt's `{{KIT_AFTER_REPAIR}}` slot and with its own
 lead-in, since it is shown no combined diff - the cross-review as well
-(`test/carried-late-comment.test.ts`, `test/carried-late-comment-cross.test.ts`)
+(`test/carried-late-comment.test.ts`, `test/carried-late-comment-cross.test.ts`).
+A stray check that cannot run (git older than 2.38, or a git call that failed in a full clone)
+returns `undefined` and the resolution goes on to the review and the gates (fail-open, as decided
+when the check was added); its screen line is said once per process (`said`, never reset), but
+each call also keeps a note for the turn, worded for its cause (`it needs git 2.38 or newer`, or
+`git failed (<first line>)`).
+`mergeCheckGap()` returns the turn's notes - the partial clone's first, then each distinct stray-check
+note, joined with `; ` - so the run record's `mergeUnchecked` and the closing summary's
+`Merge checks:` line carry it on every turn of a drain, and `resetMergeCheckGap()` at the top of a
+turn forgets them all; `sandcastle doctor` warns on git 2.31 to 2.37 (`gitStrayCheckLine`;
+`test/stray-check-unavailable.test.ts`, `test/doctor-git-stray-check.test.ts`)
 
 ## `src/schedule.ts`
 
@@ -2656,6 +2682,10 @@ matches the line; `OUTCOME_STATE` in `src/status-rows.ts` is a `Record<OutcomeKi
 A carried branch's head record (`heads.json`) also keeps `comments`: the ticket's comment count,
 read from the tracker just before a full review's pass starts and recorded with its `reviewed` write
 (`fullReview`), and by no other write.
+On GitHub it keeps `commentsAt` beside it, the latest creation time among those comments (`seenComments`):
+a count can move back when a comment is deleted, which would hide a trusted comment posted after it, so
+`personCommentsSince` takes the comments created after `commentsAt` when every comment carries a time.
+A Markdown ticket file, whose comments have none, and a record from before `commentsAt`, keep the count.
 The gates, a repair, the re-review after a repair and the two narrow reviews (after a conflict
 resolution, after a base merge) keep the count the last full review recorded, so a person's comment
 posted during any of them is still past it at the next carry.
@@ -2926,6 +2956,26 @@ the signal, `unmet`, `changelog`, `followups`, `ungated` - and nothing else. Cla
 validated object as `structured_output` on the stream's `result` line, which the library's parser drops, so
 `reportCapture` keeps it with the timing of the signal and the result line.
 
+The Codex cross-review takes the same switch and the same file (#822). `codexAgent` appends
+`--output-schema /etc/claude-code/report.schema.json` to the library's `codex exec` command, before the
+kit's rate-limit readout suffix (`withOutputSchema` refuses a command of another shape), and wraps
+`parseStreamLine` in `codexReportCapture`, which has `reportCapture`'s four calls and facts. The report is
+the text of the last `item.completed` `agent_message` (the earlier ones are prose), parsed as JSON and
+checked by `reportFrom`; otherwise `no agent message`, `not JSON`, `invalid: <what>`, or, when the stream
+held a `turn.failed`, `failed: <code>` - the `"code":"..."` in its `error.message`, read from anywhere in it
+(`failed: invalid_json_schema` for a schema the API refuses, which fails before any model turn), else the
+message's first 80 characters. The signal sits in the report's own `signal` field, so the library's
+`completionSignal` arms on the JSON message. A pass cut off by the grace window (the signal in prose, then a
+silence, and no valid report at or after it) records `cutOff` with its figures running to the pass's end.
+A valid report followed by a final prose message is missing (`not JSON`), but was not cut off:
+its timing figures end at the last message, since the report did arrive after the signal.
+`reportTiming` and `crossReview`'s line prefer the capture's `failed: ...` reason to the thrown error's text, so
+a refused schema reads `failed: invalid_json_schema` on the timings line, and with the switch on `crossReview`
+says the report schema was on and that a refused schema ends every cross-review while it is. In the review loop
+`reviewGap` skips `gapOf` for a cross-review whose text parses as JSON: it is not prose. The limit: the
+cross-reviewer's `<report>` hand-back is not in its JSON, so for a tracker where agents do not write it, it is
+not posted (the hand-back forms get their own design). `test/report-schema-codex.test.ts` holds all of it.
+
 The same file carries `permissions.deny` for `Monitor`, `ScheduleWakeup`, `CronCreate`,
 `CronDelete`, `CronList` and `RemoteTrigger` (`test/managed-settings-deny.test.ts`), and for the
 tools that cannot work in an unattended sandbox or that write to the shared `.git` unseen by the
@@ -3009,8 +3059,13 @@ the same ticket (`test/gh-retry.test.ts`).
 `comments-view.sh` is the tracker's `COMMENTS_VIEW`: `gh api repos/{owner}/{repo}/issues/N/comments`
 through `gh-retry.sh`, filtered with the image's `jq` to the comments whose `author_association` is
 `OWNER`, `MEMBER` or `COLLABORATOR` or whose author wrote the ticket, printed as `gh issue view N
---comments` prints a comment, and one last line counts those left out. On a public repository a
-stranger's comment would otherwise reach an agent that holds a token (`test/comments-view.test.ts`).
+--comments` prints a comment, and one last line counts those left out and tells the agent not to
+fetch or act on them.
+On a public repository a stranger's comment would otherwise reach an agent that holds a token
+(`test/comments-view.test.ts`).
+`commentOnlyBlocks` (`src/blockers.ts`) reads only the comments `trustedComment` passes, so a
+stranger's "Blocked by" comment puts no warning in front of the operator; a ticket file's comment,
+with no `commentBy`, is read as it is (`test/comment-blocks-trust.test.ts`).
 The run's side is `personCommentsSince` (`src/ledger.ts`): the same trust (`trustedComment`,
 `src/tracker.ts`, from the `author` and per-comment `authorAssociation` the GitHub tracker keeps on a
 `Ticket`) and the agent marker honoured only from `tokenUserOf`'s login, the account `gh api user`
@@ -3021,6 +3076,8 @@ names for `GH_TOKEN`, read once per run and `null` after one printed line when i
 
 One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split`
 ...), against temp repos, made-up records and fake sandboxes.
+`pnpm test` runs them heaviest first, in the order `TEST_SHARD=1/1 node test/shard.ts` prints
+(`test/shard.ts`'s `WEIGHTS`; a file with no weight counts one second and comes last, by name).
 Two preloads (`--import`, from `pnpm test`, `test:shard`, `test:file`, `test:related`,
 `test:weights` and `test/run-shards.sh`) shape every test file's process: `test/hermetic-env.ts`
 gives each the same environment - `TMPDIR` the realpath of `os.tmpdir()` (a macOS `/var/...` against
@@ -3223,12 +3280,19 @@ hour cost about 1.3x the input price against one cold re-write at about 1.25x - 
 `cache 5m · not warmed (a cold restart costs less)`; a main-thread turn after a miss clears it
 (`afterTurn`: one more try at 55 minutes), and a second miss in a run turns the refresh off for it.
 No plan windows (an API key, a gateway) assume nothing: the first refresh's measured read decides.
+A run is a process, not a turn: every autonomy turn of one `sandcastle run` writes a record with a new
+`startedAt` and the same `pid`, so `followRun` keys the run on `pid` (`pid:<n>`; a record with no
+pid keeps `start:<startedAt>`, one run per `startedAt`). A later turn of the same pid (the record's
+`settings.turn` above 1) carries the misses, the last refresh and the floor over; another pid, or a
+record of turn 1 with a new `startedAt` (a reused pid), starts them over. The floor is `Warmth.since`,
+the `startedAt` of the run's first turn that the mod saw, never the current record's: a later turn
+starting does not restart the 55 minutes.
 `settle` records a refresh, and a fork that is not answered (`api-error`, `aborted`) is a miss.
 The band's row is `cache refresh in 12m`, and after a refresh `cache refresh in 55m · last 157k` (what the refresh read); "warm" is not said, since the refresh keeps it so.
 In `register.tsx` a `$.clock.every(60_000)` tick runs while `round` finds a live run this session
 started, followed, or (recording no session) closes; it reads `$.session.usage()`, calls
 `$.model.fork` when `refresh` is set, keeps `Warmth` in `$.state` (`sandcastle.warmth`, which a
-reload keeps and module variables do not; a different run's `startedAt` starts its misses over),
+reload keeps and module variables do not; a different run - another `pid` - starts its misses over, a later turn of the same one does not),
 logs an unanswered fork with `$.ui.log` and draws the row in the `AbovePrompt` band
 (`sandcastle.warm`): `band()` puts it at the end of the title row while it fits there (the tokens go
 first), else on a row of its own lined up with the text beside the castle - flush under the castle it
