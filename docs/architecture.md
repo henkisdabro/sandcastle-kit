@@ -114,7 +114,17 @@ A conflict only in `generated` paths goes through `resolveGenerated`. A failed r
 elsewhere (the base moved after `conflictBefore` read it) or a refused merge is aborted, with a
 line saying so, and the branch is gated as it stands: no agent pass or requeue starts here, and the
 landing's own precheck finds a real conflict. No merge on the `redAtLanding` path (no gate runs),
-nor before the gate run after a repair pass or a fix-board merge. `preRepair` is read after it, so
+nor before the gate run after a repair pass or a fix-board merge.
+The check and the merge run twice for the attempt's first gate run: before the wait for the gates
+slot (setup then runs outside the slot) and again once the slot is granted, because the wait is
+minutes at `maxGates: 1` and the base moves in it. The second pass is the `onSlot` hook the pipeline
+hands its `gate` port, which `runGates` awaits inside the slot before the first gate
+(`GateProgress.onSlot`; `false` stops the run: no gate, the slot freed, a `GateRun` with no gates and
+no failures, never a green one). With no commit on the base since the first merge it answers at once
+after one `rev-list --count`. Otherwise `conflictBefore` is asked again: a conflict stops the run and
+the attempt ends exactly as the check before the wait ends it (`conflict`, found at `gates`); no
+conflict runs `mergeBaseBeforeGates` again, with its undo rules unchanged, and the gates go on. The
+gate runs after a repair pass or a fix wait pass no hook (`test/pipeline-base-merge-at-slot.test.ts`). `preRepair` is read after it, so
 a re-review after a repair covers repair commits only; `touchesOverrun` (three-dot, `--no-merges`)
 and `branchFiles` count the branch's own files, not what the merge brought; the green head record
 is the merged tip. With `land: "merge"` a landed ticket gains an in-branch `Merge <base> into
@@ -719,7 +729,8 @@ state.
   naming only that conflict's tickets).
   The pipeline can requeue too: a branch that no
   longer merges onto the base, by git's own merge on the host after implement (before review) and
-  again before the gates (`conflictBefore` in `createPipeline`; a conflict only in `generated` files
+  again before the gates, and once more when the gates slot is granted if the base moved in the
+  wait (`conflictBefore` in `createPipeline`; a conflict only in `generated` files
   does not count; the merge the pipeline makes in the sandbox just before the gates is not this check, it is `mergeBaseBeforeGates` above), ends its pipeline there and the attempt reports a `conflict` (`Attempted`),
   never a green - the gates vouched for no commit of it - and that conflict goes through the same
   rule as one at landing (`sendBack`); not sent back, it ends as a `conflict` (`Ending`), and sent

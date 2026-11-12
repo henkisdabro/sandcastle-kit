@@ -93,9 +93,12 @@ export type GateProgress = {
   loadWait?: () => void;
   /**
    * The gates slot was granted: called once per grant, inside the slot, before the load-hold line is written and before the
-   * first gate runs - also for a run that starts from a later gate (`from`), which `gate(0)` never reports. A plain call, no value.
+   * first gate runs - also for a run that starts from a later gate (`from`), which `gate(0)` never reports. Awaited, and its
+   * answer decides whether the gates run: `false` stops the run, which runs no gate, gives the slot back and returns a `GateRun`
+   * with no gates and no failures (never a green run, which has a gate per configured gate). Nothing or `true`
+   * goes on, as a hook that only notifies always has (any other value is no answer; a promise is awaited).
    */
-  onSlot?: () => void;
+  onSlot?: () => unknown;
   /** Gate `index` (0-based) starts. */
   gate?: (index: number, name: string) => void;
   /** Each gate's output is appended here as it arrives. */
@@ -300,11 +303,16 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
   };
   return await withSlot("gates", label, () => withContainerCpus(sandbox, progress.cpus, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
-    progress.onSlot?.();
+    const go = await progress.onSlot?.();
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
     if (log && loadHeldMs >= 1000) appendFileSync(log, `# held ${Math.round(loadHeldMs / 1000)}s for machine load\n`);
     if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
+    // The caller said stop once the slot was held (a branch the base moved onto while it waited now conflicts): no gate runs on it.
+    if (go === false) {
+      if (log) appendFileSync(log, "# stopped by the caller once the gates slot was granted: no gate ran\n");
+      return { gates: [], failures: [], waitMs, ...loaded };
+    }
     const began = Date.now();
     const first = await pass(startAt(from));
     const firstMs = Date.now() - began;
