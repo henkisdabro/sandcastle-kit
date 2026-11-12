@@ -1681,6 +1681,8 @@ needs `CHOWN` and `DAC_OVERRIDE`: with `ALL` dropped every such open failed with
 `Failed to create parent directory`.
 `test/sandbox-cap-drop.test.ts` holds the list and reads that root exec in the installed `dist`, so
 a release that drops it says `ALL` may be tried again.
+A project whose setup or gates need a raw socket fails there with `Operation not permitted`
+(`ping` and `traceroute` may, where they cannot fall back to an unprivileged ICMP socket).
 
 **The Codex login in a sandbox.** With `CROSS_REVIEW=1`, `sandboxMounts` mounts in place of
 `~/.codex/auth.json` a copy that `codexSandboxAuth` (`src/sandbox.ts`) builds from the host's text:
@@ -1691,8 +1693,6 @@ removes it. A refresh rotates the refresh token server-side, so copies that each
 by the first sandbox to refresh, leaving the host's login stale. A file that holds no refresh token
 (an API-key sign-in, `tokens` null) or cannot be read or parsed is mounted as before. The host's
 file is only read. `test/codex-auth-copy.test.ts`.
-A project whose setup or gates need a raw socket fails there with `Operation not permitted`
-(`ping` and `traceroute` may, where they cannot fall back to an unprivileged ICMP socket).
 
 **What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
 control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at
