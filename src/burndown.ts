@@ -40,7 +40,7 @@ import { terminalHost } from "./terminal-host.ts";
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, onNoPsi, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
+import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, limitWithSource, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logAgentExit, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordPreflightFailure, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
@@ -3291,6 +3291,26 @@ let guardStopped = false;
 let kitAtStart: string | undefined;
 
 /**
+ * The start line's head. The note on a capped worker count sits before the models and the colon, so it does not read as
+ * the first item of the ticket list: it says which setting holds the sandbox cap, and that gate passes (which leave the
+ * worker count) run beside the workers on their own slots. `cap` is set only when the pool cut the workers below CONCURRENCY.
+ */
+export const startHeadLine = (a: {
+  tickets: number;
+  dependants: number;
+  parked: number;
+  workers: number;
+  dryRun: boolean;
+  models: string;
+  cap?: { concurrency: number; pool: { value: number; source: "env" | "config" | "default"; name: string }; beside: boolean; gateSlots: number };
+}) => {
+  const note = a.cap
+    ? ` (CONCURRENCY=${a.cap.concurrency}, but ${landingSlotNote(a.cap.pool.value, a.cap.beside, a.cap.pool)}; gate passes run beside them on ${a.cap.gateSlots} gate ${a.cap.gateSlots === 1 ? "slot" : "slots"})`
+    : "";
+  return `${a.tickets} ticket(s)${a.dependants ? ` (${a.dependants} start as their blockers land)` : ""}${a.parked ? ` (${a.parked} wait for a file git cannot merge)` : ""}, up to ${a.workers} at a time${a.dryRun ? " [DRY RUN]" : ""}${note} - ${a.models}:`;
+};
+
+/**
  * False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow.
  * `turn.docker` is the start's one `docker info` reading, which the first turn takes over from the
  * runtime check (cli.ts); a turn handed none reads its own.
@@ -3486,8 +3506,15 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // "up to": another project's live run can cut this run's share below it, which the split line under the
   // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
-    `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, up to ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
-      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"), split !== undefined)})` : ""),
+    startHeadLine({
+      tickets: candidates.length,
+      dependants: dependants.length,
+      parked: parked.length,
+      workers,
+      dryRun: DRY_RUN,
+      models: MODELS_LINE,
+      cap: capped ? { concurrency: CONCURRENCY, pool: limitWithSource("sandboxes", process.env, machineSettings()), beside: split !== undefined, gateSlots: limit("gates") } : undefined,
+    }),
   );
   for (const i of candidates) {
     const o = overrides.get(i.id) ?? {};

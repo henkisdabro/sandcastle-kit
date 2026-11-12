@@ -96,6 +96,13 @@ With `USAGE_CHECK=1` a run stops starting tickets before that, once a usage wind
 `USAGE_STOP` percent; with `USAGE_PAUSE` it pauses instead of stopping, and resumes after the
 window's reset ([Pausing a run](running.md#-pausing-a-run)).
 
+The run's start line names the machine-wide sandbox cap when it cuts the workers below
+`CONCURRENCY`: which setting holds the pool (`SANDCASTLE_MAX_SANDBOXES`, `maxSandboxes` in the
+machine settings, or the default of 6), that one slot is kept for landing, and that gate passes run
+beside the workers on the gate slots (`sandcastle size` suggests a figure).
+A ticket in its gates pass is not counted in "up to N at a time", so more than N tickets can be in a
+sandbox at once.
+
 **Capping a run.** `sandcastle cap N` limits the project's live run to N sandbox slots while it
 runs, so another run gets more of the machine; `sandcastle cap off` lifts it, and a bare
 `sandcastle cap` prints the run's demand, share, what it holds and its cap.

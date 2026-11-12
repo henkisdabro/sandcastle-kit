@@ -100,14 +100,26 @@ const SETTING = {
   gates: { env: "SANDCASTLE_MAX_GATES", key: "maxGates", fallback: 2 },
 } as const;
 
-/** A pool's limit from the given environment and machine settings; `limit` is this over the process's own. */
-export const poolLimit = (pool: PoolName, env: Record<string, string | undefined>, machine: Record<string, unknown>): number => {
+/**
+ * A pool's limit with where it came from: the environment variable, the machine settings key or the default.
+ * `name` is the variable or key that applies, so a note can tell an operator what to change.
+ */
+export const limitWithSource = (
+  pool: PoolName,
+  env: Record<string, string | undefined>,
+  machine: Record<string, unknown>,
+): { value: number; source: "env" | "config" | "default"; name: string } => {
   const s = SETTING[pool];
   // Name the setting the value came from: an operator told about an env var
   // they never set looks for the wrong thing.
-  const fromEnv = env[s.env] !== undefined;
-  return wholeNumber(fromEnv ? s.env : s.key, fromEnv ? env[s.env] : (machine[s.key] ?? s.fallback), 1);
+  if (env[s.env] !== undefined) return { value: wholeNumber(s.env, env[s.env], 1), source: "env", name: s.env };
+  if (machine[s.key] != null) return { value: wholeNumber(s.key, machine[s.key], 1), source: "config", name: s.key };
+  return { value: wholeNumber(s.key, s.fallback, 1), source: "default", name: s.key };
 };
+
+/** A pool's limit from the given environment and machine settings; `limit` is this over the process's own. */
+export const poolLimit = (pool: PoolName, env: Record<string, string | undefined>, machine: Record<string, unknown>): number =>
+  limitWithSource(pool, env, machine).value;
 
 export const limit = (pool: PoolName): number => (settings[pool] ??= poolLimit(pool, process.env, machineSettings()));
 

@@ -9,7 +9,7 @@ import { availableParallelism, homedir, totalmem } from "node:os";
 import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
 import { type PeakLine, PRESSURE_WARN_FULL, projectId, readPeaks, SAMPLED } from "./peaks.ts";
-import { poolLimit } from "./pool.ts";
+import { limitWithSource } from "./pool.ts";
 import { readDockerInfo } from "./runtime.ts";
 import { machineSettings, memoryText, USER_CONFIG } from "./sandbox.ts";
 
@@ -391,10 +391,8 @@ export const recommend = (memory: number, cpus: number, peaks: PeakLine[] = [], 
 };
 
 const current = (pool: "sandboxes" | "gates", env: Record<string, string | undefined>, machine: Record<string, unknown>) => {
-  const value = poolLimit(pool, env, machine);
-  const [variable, key] = pool === "sandboxes" ? ["SANDCASTLE_MAX_SANDBOXES", "maxSandboxes"] : ["SANDCASTLE_MAX_GATES", "maxGates"];
-  const source = env[variable] !== undefined ? `environment ${variable}` : machine[key] !== undefined ? "config.json" : "default";
-  return { value, source };
+  const { value, source, name } = limitWithSource(pool, env, machine);
+  return { value, source: source === "env" ? `environment ${name}` : source === "config" ? "config.json" : "default" };
 };
 
 /** The command's output, one line each. Throws an OperatorError when the runtime cannot be asked. */

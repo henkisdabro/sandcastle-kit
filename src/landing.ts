@@ -833,9 +833,19 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
  * while another run is live and a landing is near (`leaseSlot`'s `keep`). `beside` is true when another run is live at the run's start: only
  * the clause that applies is said, as every clause at once read as though another run were live.
  */
-export const landingSlotNote = (pool: number, beside = false) => {
-  const kept = `one of the ${pool} machine-wide sandbox slots is kept for landing`;
-  return beside ? `${kept} - beside another run, for any run's landing, outside every run's share` : kept;
+export const landingSlotNote = (pool: number, beside = false, from?: { source: "env" | "config" | "default"; name: string }) => {
+  if (!from) {
+    const kept = `one of the ${pool} machine-wide sandbox slots is kept for landing`;
+    return beside ? `${kept} - beside another run, for any run's landing, outside every run's share` : kept;
+  }
+  // Where the cap comes from first: the operator who sees "3" needs to know which setting holds it.
+  const head =
+    from.source === "env"
+      ? `${from.name} is ${pool} and one slot is kept for landing`
+      : from.source === "config"
+        ? `${from.name} is ${pool} (machine settings) and one slot is kept for landing`
+        : `the default pool is ${pool} sandboxes and one slot is kept for landing`;
+  return `${head}${beside ? " - beside another run, for any run's landing, outside every run's share" : ""} - \`sandcastle size\` suggests a figure`;
 };
 
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */
