@@ -453,9 +453,12 @@ during the run, under a `### To triage` sub-heading after the rest and counted i
 triage" - as are a dry run's follow-ups, which a real run would file - and a follow-up the kit
 failed to file, which you file by hand and the header counts as "need you"); **Needs fixing** (red,
 conflicted, crashed or unlanded branches, with the files or tests and causes several branches
-share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state** (commits
-not on the upstream - the tickets are closed but the code has not left your machine); and the **Next
-step**.
+share; in a turn the loop follows, a ticket the next turn runs again by itself is not counted as
+needing a fix and is listed last, marked `turn 2 runs it again by itself`); **Runnable now / Still
+blocked** (blockers re-read after landing); **Local state** (commits not on the upstream - the
+tickets are closed but the code has not left your machine); and the **Next step**.
+The `Settings:` line names the concurrency the run ran at (`concurrency 2 of 4 asked` when the
+machine's sandbox cap made it fewer than asked, `concurrency 2` otherwise).
 Under the header's `Settings:` line, a run that showed the plan's usage says where it ended:
 `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going; only the windows the
 readings carry, `week 30%` say), and a cross-review run
