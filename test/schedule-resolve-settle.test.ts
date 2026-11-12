@@ -96,7 +96,7 @@ test("a resolve wait names a branch queued to land apart from a ticket still run
   assert.equal(resolveWaitNote(ref, { for: ["442", "441"], running: ["441"] }), "waits to resolve its conflict until #442 has landed and #441 lands or leaves the run");
 });
 
-test("the run's log says a resolve wait only for its first telling", () => {
+test("the run's log says a resolve wait for its first telling, and again only as a ticket joins its list", () => {
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(source, /if \(c\.first\) o\.say\(`[^`]*\$\{note\}/);
+  assert.match(source, /if \(c\.first \|\| c\.joined\) o\.say\(`[^`]*\$\{note\}/);
 });

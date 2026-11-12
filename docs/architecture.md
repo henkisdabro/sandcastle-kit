@@ -799,7 +799,8 @@ state.
   line says "as seen on the branch before".
   A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
-  is queued to land and no ticket in its gates shares one (`ahead` in `src/schedule.ts`; a ticket
+  is queued to land, no ticket in its gates shares one and no released resolve shares one (`ahead` in
+  `src/schedule.ts`; a ticket
   reaches its gates when `at.gates()` is called, after its review and again before each later gate
   run, and leaves them at a `repair` or `review` juncture, since a repair and the review after it can
   take an hour, or when its attempt ends; `test/schedule-resolve-one-holder.test.ts`). Whenever those tickets started: one still implementing or in review never holds the resolve,
@@ -810,13 +811,34 @@ state.
   hands it to the wait and goes back to the queue, and the ticket is pushed again, first in line,
   once nothing is ahead of it - and is not in the run's demand, and ends at a stop; a pause
   parks it as at the start; the run says `resolve waits` once the list has held for `RESOLVE_SETTLE_MS`
-  (the log line once, a later change only the record's note; a ticket in its gates is worded
-  "lands or leaves the run", a queued branch "has landed"), `resolve queued` when the wait ends (the
+  (the log line on the first telling and again whenever a ticket joins the list, compared with the
+  list it last said, never when one only leaves it - the record's note follows every change; a
+  ticket in its gates or a released resolve is worded "lands or leaves the run", a queued branch
+  "has landed"; the heartbeat names what each resolve waits for), `resolve queued` when the wait ends (the
   record's note says it waits for a free slot, not for the ticket that has landed) and
   `resolve starts` for a wait it said,
   `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`,
   `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`,
-  `test/schedule-resolve-late-holder.test.ts`).
+  `test/schedule-resolve-late-holder.test.ts`, `test/resolve-wait-line.test.ts`).
+  **Fresh starts are held.** While a resolve waits (`offWorker`), a worker does not take a ticket
+  that has not started (queued at `FIRST` or `RELEASED`) whose files (`hold.touched()`) share one
+  with the resolve's own files or the files it conflicted on (`heldFor`): it takes the next queued
+  ticket that is not held, and with only held ones queued it waits as a worker holding for a resolve does (`holdFresh`).
+  A ticket that started before the wait began and reaches its gates during it still holds the
+  resolve until it lands, so the resolve never meets a second conflict from one; the wait is bounded
+  because no ticket that shares its files can start and join the list behind it. A held ticket adds
+  nothing to the run's demand, shows as blocked with
+  `waits for #N to resolve its conflict first (shares <file>)` (`resolve holds`; the resolve sent
+  back first, of several), and starts in its old place in line once the resolve is pushed again or
+  the run starts nothing (`resolve frees`). A requeued ticket or a retake is never held, nor is
+  anything in a dry run (`test/schedule-resolve-fresh-hold.test.ts`).
+  **Released resolves that share a file go one at a time.** A released resolve - queued again at
+  `REQUEUED`, or in its resolve attempt and not yet landed or ended (`releasedResolves`) - counts
+  in `ahead` for every waiting resolve it shares a file with, until it lands or leaves the run. A
+  waiting resolve never counts another waiting one (each would wait for the other), except one sent
+  back earlier whose own wait is over at the same moment: when one landing frees two that share a
+  file, the one sent back first is released and the other waits for its landing
+  (`test/schedule-resolve-one-at-a-time.test.ts`).
   While a resolve waits for queued branches only (none in its gates), a worker that is free does
   not take a ticket that has not started: it waits, with its slot if it holds one (a landing that
   waits for a slot still takes it back), and takes the resolve when it is pushed, else the landing

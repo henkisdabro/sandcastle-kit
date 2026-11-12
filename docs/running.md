@@ -132,7 +132,8 @@ Inside Herdr the run lays it out itself (below), and does not start if it cannot
 The run prints a heartbeat line every five minutes while anything is in flight - tickets working (a
 gates step says when it waits for a gates slot, and counts its time from the first gate), landings
 (a landing says when it waits for a sandbox slot, and counts its time from the slot), sent-back
-tickets waiting to resolve a conflict, and green tickets queued to land (from their gates going
+tickets waiting to resolve a conflict (each with what it waits for: `#10 12m (for #20, #30)`), and
+green tickets queued to land (from their gates going
 green until the landing worker takes them); it also says when the run has waited for a sandbox slot
 longer than a typical issue takes (the wait is the run's, not a ticket's: a pipeline takes its slot
 first, then the ticket first in line) - and the status view flags a sandbox whose log has been quiet
@@ -578,6 +579,10 @@ A queued ticket with a branch from an earlier run builds on that branch:
   the overlap.
   The start names each such file once with its tickets (README.md and CHANGELOG.md, which nearly
   every ticket touches, are one count), and writes every pair to `logs/file-shares.log`.
+- While a ticket sent back after a conflict waits to resolve it, a ticket that has not started and
+  shares a file with it shows as blocked, "waits for #N to resolve its conflict first (shares
+  <file>)", and starts after that resolve; a ticket that shares nothing starts as before.
+  Two resolves that share a file go one at a time, the one sent back first going first.
 - A ticket closed, unqueued or sent to a human mid-run is left alone, and a run that died between
   merging and closing is finished by the next one.
 
