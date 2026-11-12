@@ -2756,10 +2756,22 @@ with every provider's newest reading as `watchUsage` writes one, and `usagePause
 window - of those at or above the threshold that have not reset (`resetsAt` plus
 `USAGE_RESUME_GRACE_SECONDS`, 60, still ahead: a stale reading says nothing of a window open again
 since), the one that resets last, since resuming at an earlier reset would only pause again - and
-holds the pause until a minute after its reset; `limit(usage, provider)` is the pipeline's
+holds the pause until a minute after its reset - of Claude's windows only: a Codex window is the
+cross-review's plan, a second opinion, so `usagePauseFor` leaves it out and `crossReviewSpent()`
+(`crossReviewSpentFor`: the Codex window at or above the threshold that has not reset, the one that
+resets last, over the newest readings `reading` and `limit` last saw) says which one is spent.
+The skip ends at the reset itself, without the Claude pause's minute of grace.
+The pipeline's `crossReviewSkip` port (`burndown()` wires it to `crossReviewSkippedWords`, the
+`cross-review skipped - Codex 5-hour usage 98%, resets 14:05` line, the reset in the status view's
+`resumeClock` form) is asked after the cross-review's juncture, so a pause there that outlasted the window
+is not skipped for it; a spent window skips the pass, prints the line, and the ticket keeps it as
+`crossSkipped` (its head record, so a land-only re-run or a red-gate retry that reuses its review
+still has it, and `logs/run.json`), which
+`src/report.ts` lists on `Landed without a cross-review (Codex plan's limit): #N, #M` for the
+tickets that merged. `test/usage-pause-cross-review.test.ts`. `limit(usage, provider)` is the pipeline's
 `limitPause`, for an agent that hit the limit anyway (`usageLimitPauseFor`: the open window nearest
 to spent, the later reset on a tie, recorded at 100% whatever the last reading said, of the provider
-whose agent it was; nothing when no reading names an open window at `min(threshold, USAGE_RED)`
+whose agent it was - always Claude's, since the cross-review's limit is not waited out; nothing when no reading names an open window at `min(threshold, USAGE_RED)`
 percent or more - a limit message with every window well short of it is some other limit, one
 model's own cap, and days of waiting for the wrong window is worse than the old stop - which is also
 how a run on an API key, or one before its first reading, keeps stopping as it did). `source.read()`
@@ -2772,8 +2784,8 @@ windows then at or above the threshold by provider, window and reset time (`wind
 nothing, and the next window has a new reset time and pauses at the threshold as any.
 The controller is made only when a threshold is set, so a run without one reads the control file as
 before. `burndown()` prints the start line (`usagePauseLine`:
-`Usage pause: at 90%, resumes at the window's reset`, or that the run reads no plan usage and never
-pauses for it), hands `reading` each reading in `watchUsage`'s `write` (a failure there is dropped:
+`Usage pause: at 90%, resumes at the window's reset`, or that the run reads no Claude plan usage and
+never pauses for it), hands `reading` each reading in `watchUsage`'s `write` (a failure there is dropped:
 the next reading asks again), and says each pause and resume once as the scheduler tells them
 (`createPauseHandling`, over injected ports for the record, keep-awake, view and log, so
 `test/pause-handling.test.ts` drives it with fakes).

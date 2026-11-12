@@ -1108,6 +1108,18 @@ const gapLines = (f: Facts, o: Owed, carried: { turn: number; facts: Facts; o: O
   return finds.length ? [`Worth a glance - the reviewer's prose may name a gap: ${finds.join("; ")}`] : [];
 };
 
+/**
+ * The tickets that landed without a cross-review because Codex's plan was at the `USAGE_PAUSE` threshold (`crossSkipped`):
+ * one line of its own, counted nowhere - they landed with one opinion fewer, nothing is owed. The earlier turns' follow, marked with their turn.
+ */
+const crossSkippedLines = (o: Owed, f: Facts, carried: { turn: number; facts: Facts; o: Owed }[]): string[] => {
+  const landed = [
+    ...o.merged.filter((id) => f.tickets[id].crossSkipped).map((id) => `${refOf(id)}`),
+    ...carried.flatMap((c) => c.o.merged.filter((id) => c.facts.tickets[id].crossSkipped).map((id) => `${refOf(id)} (turn ${c.turn})`)),
+  ];
+  return landed.length ? [`Landed without a cross-review (Codex plan's limit): ${landed.join(", ")}`] : [];
+};
+
 // The separator `gapOf` (src/burndown.ts) puts between sentences that were not next to each other.
 const GAP_JOIN = " … ";
 // A sentence boundary as `sentencesOf` (src/burndown.ts) reads it: this file imports only types from there. Quoted text
@@ -1450,6 +1462,7 @@ export const render = (f: Facts, plain = false): string => {
   // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.
   if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
   out.push(...gapLines(f, o, carried));
+  out.push(...crossSkippedLines(o, f, carried));
   if (f.stopped) out.push(f.stopped);
   if (f.setupProblem) out.push(`Stopped starting tickets: ${setupProblemWords(f.setupProblem)}.`);
   if (f.dryRunCheck) out.push(f.dryRunCheck);

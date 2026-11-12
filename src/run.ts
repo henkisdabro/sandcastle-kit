@@ -1632,6 +1632,8 @@ export type BranchHead = {
   ungated?: string;
   /** What a reviewer said of a gap in prose and filed nowhere, carried like `ungated`. */
   gap?: string;
+  /** The line of a cross-review skipped for Codex's plan limit (`cross-review skipped - Codex 5-hour usage 98%, resets 14:05`), carried like `ungated` so a land-only run still tells the summary. */
+  crossSkipped?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
   /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`seenComments`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
@@ -1654,7 +1656,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; crossSkipped?: string; repaired?: string[]; comments?: number; commentsAt?: string }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
