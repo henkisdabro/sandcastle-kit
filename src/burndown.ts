@@ -27,7 +27,7 @@ import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { format } from "node:util";
-import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, resolveAgent, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
@@ -2378,7 +2378,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           return pass({
             name: `resolve-${issue.id}`,
             logging,
-            agent: implAgent(own),
+            agent: resolveAgent(own),
             promptFile: prompts.resolve,
             promptArgs: usedArgs(prompts.resolve, promptArgs),
             maxIterations: project.repair.maxIterations ?? 4,

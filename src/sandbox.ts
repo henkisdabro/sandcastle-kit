@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv, stripVTControlCharacters } from "node:util";
-import { claudeEnv, CROSS_REVIEW } from "./agents.ts";
+import { CACHE_TTL_KEY, claudeEnv, CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
 import { nearest, OperatorError, SetupFailed } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
@@ -1041,9 +1041,10 @@ export const hostTimeZone = (): string | undefined => {
 export const sandboxEnv = (project: Project): Record<string, string> => {
   const TZ = hostTimeZone();
   // A key the agent's own env sets (`claudeEnv`) stays out: Sandcastle refuses every pass whose agent and sandbox name
-  // the same key, and the agent's value, exported before its command, would win anyway.
+  // the same key, and the agent's value, exported before its command, would win anyway. So does the prompt cache TTL a
+  // review or resolve pass sets (`CACHE_TTL_KEY`), even though an implement pass's env does not name it.
   const env = credentials(project);
-  for (const key of Object.keys(claudeEnv())) delete env[key];
+  for (const key of [...Object.keys(claudeEnv()), CACHE_TTL_KEY]) delete env[key];
   return withGitMaintenanceOff({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) });
 };
 

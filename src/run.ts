@@ -1733,26 +1733,66 @@ export const narrowReviewBase = (root: string, base: string, id: string): string
 // a pass is the sum of its iterations.
 // ---------------------------------------------------------------------------
 
-export type Tokens = { input: number; cacheWrite: number; cacheRead: number; output: number };
+// `cacheWrite1h` / `cacheWrite5m`: how `cacheWrite` splits by cache TTL, when Claude's `result` line said so (a 1-hour
+// write bills at 2x input, a 5-minute one at 1.25x). Absent on a Codex pass and on a timings.jsonl line an older kit wrote.
+export type Tokens = { input: number; cacheWrite: number; cacheRead: number; output: number; cacheWrite1h?: number; cacheWrite5m?: number };
 export const NO_TOKENS: Tokens = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
 
-export const addTokens = (a: Tokens, b: Tokens): Tokens => ({
-  input: a.input + b.input,
-  cacheWrite: a.cacheWrite + b.cacheWrite,
-  cacheRead: a.cacheRead + b.cacheRead,
-  output: a.output + b.output,
-});
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+/**
+ * A figure's TTL split: its counts (a missing one 0), `neutral` for a figure that wrote nothing (NO_TOKENS, a Codex pass
+ * with no writes), or `none` for one that wrote with no split at all - which alone drops the split from a sum, so a
+ * total never claims a split it does not have.
+ */
+const splitOf = (t: Tokens): { h1: number; m5: number } | "neutral" | "none" => {
+  const h1 = num(t.cacheWrite1h);
+  const m5 = num(t.cacheWrite5m);
+  if (h1 !== undefined || m5 !== undefined) return { h1: h1 ?? 0, m5: m5 ?? 0 };
+  return t.cacheWrite ? "none" : "neutral";
+};
+
+export const addTokens = (a: Tokens, b: Tokens): Tokens => {
+  const sum = { input: a.input + b.input, cacheWrite: a.cacheWrite + b.cacheWrite, cacheRead: a.cacheRead + b.cacheRead, output: a.output + b.output };
+  const [x, y] = [splitOf(a), splitOf(b)];
+  if (x === "none" || y === "none" || (x === "neutral" && y === "neutral")) return sum;
+  const [p, q] = [x === "neutral" ? { h1: 0, m5: 0 } : x, y === "neutral" ? { h1: 0, m5: 0 } : y];
+  return { ...sum, cacheWrite1h: p.h1 + q.h1, cacheWrite5m: p.m5 + q.m5 };
+};
 
 export const runTokens = (result: unknown): Tokens | undefined => {
   const iterations = (result as { iterations?: { usage?: IterationUsage }[] } | undefined)?.iterations;
   const usages = (Array.isArray(iterations) ? iterations : []).map((i) => i.usage).filter((u): u is IterationUsage => !!u);
   if (!usages.length) return undefined;
   return usages
-    .map((u) => ({ input: u.inputTokens, cacheWrite: u.cacheCreationInputTokens, cacheRead: u.cacheReadInputTokens, output: u.outputTokens }))
+    .map((u): Tokens => {
+      // The split counts `resultUsage` (src/agents.ts) adds; Sandcastle passes the usage object through unchanged.
+      const { cacheCreationEphemeral1hInputTokens: h1, cacheCreationEphemeral5mInputTokens: m5 } = u as { cacheCreationEphemeral1hInputTokens?: unknown; cacheCreationEphemeral5mInputTokens?: unknown };
+      return {
+        input: u.inputTokens,
+        cacheWrite: u.cacheCreationInputTokens,
+        cacheRead: u.cacheReadInputTokens,
+        output: u.outputTokens,
+        ...(num(h1) !== undefined ? { cacheWrite1h: num(h1) } : {}),
+        ...(num(m5) !== undefined ? { cacheWrite5m: num(m5) } : {}),
+      };
+    })
     .reduce(addTokens, NO_TOKENS);
 };
 
-export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
+/** The cache part of a tokens line: what was read, and what was written, with its TTL when the split is known and adds up. */
+const cachePart = (t: Tokens) => {
+  if (!t.cacheWrite) return `${k(t.cacheRead)} read`;
+  const split = splitOf(t);
+  const written = `${k(t.cacheRead)} read, ${k(t.cacheWrite)} written`;
+  if (typeof split === "string" || split.h1 + split.m5 !== t.cacheWrite) return written;
+  if (!split.m5) return `${written} 1h`;
+  if (!split.h1) return `${written} 5m`;
+  return `${written}, ${k(split.h1)} of it 1h`;
+};
+
+// `in` is all input: uncached, written to the cache and read from it.
+export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${cachePart(t)}) / ${k(t.output)} out`;
 /** The status view's run line has no room for the cached share. */
 export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
 /**

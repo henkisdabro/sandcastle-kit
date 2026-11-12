@@ -457,8 +457,15 @@ export const claudeEnv = (): Record<string, string> => ({
   ...(AUTO_COMPACT_WINDOW === undefined ? {} : { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(AUTO_COMPACT_WINDOW) }),
 });
 
-const claude = (model: string, effort: Effort) => {
-  const provider = claudeCode(model, { effort, captureSessions: false, env: claudeEnv() });
+// A review or resolve pass runs with a 5-minute prompt cache: its longest gap between turns is a few minutes, so the
+// 1-hour cache Claude Code chooses on a subscription (a write billed at 2x input, against 1.25x) never paid for itself.
+// An implement or repair pass waits on long test runs, minutes past five, so it keeps Claude Code's own choice.
+// Claude Code 2.1.242 on reads the variable (`5m` or `1h`); an older one ignores it.
+export const CACHE_TTL_KEY = "CLAUDE_CODE_PROMPT_CACHE_TTL";
+const SHORT_CACHE = { [CACHE_TTL_KEY]: "5m" };
+
+const claude = (model: string, effort: Effort, passEnv: Record<string, string> = {}) => {
+  const provider = claudeCode(model, { effort, captureSessions: false, env: { ...claudeEnv(), ...passEnv } });
   const capture = REPORT_SCHEMA ? reportCapture() : undefined;
   const agent = {
     ...provider,
@@ -480,8 +487,28 @@ const claude = (model: string, effort: Effort) => {
   return agent;
 };
 
-type Usage = { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; output_tokens?: number };
-type ModelUsage = { inputTokens?: number; cacheCreationInputTokens?: number; cacheReadInputTokens?: number; outputTokens?: number };
+type Usage = {
+  input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  output_tokens?: number;
+  cache_creation?: { ephemeral_1h_input_tokens?: unknown; ephemeral_5m_input_tokens?: unknown };
+};
+type ModelUsage = {
+  inputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  outputTokens?: number;
+  cacheCreationEphemeral1hInputTokens?: unknown;
+  cacheCreationEphemeral5mInputTokens?: unknown;
+};
+
+const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+/** The cache writes' split by TTL, on the usage object only for a count that is there and numeric (`runTokens` reads it). */
+const splitUsage = (h1: number | undefined, m5: number | undefined) => ({
+  ...(h1 === undefined ? {} : { cacheCreationEphemeral1hInputTokens: h1 }),
+  ...(m5 === undefined ? {} : { cacheCreationEphemeral5mInputTokens: m5 }),
+});
 
 const resultUsage = (line: string) => {
   try {
@@ -489,12 +516,18 @@ const resultUsage = (line: string) => {
     if (r.type !== "result") return undefined;
     const models = Object.values(r.modelUsage ?? {});
     if (models.length) {
-      const sum = (k: keyof ModelUsage) => models.reduce((n, m) => n + (m[k] ?? 0), 0);
+      const sum = (k: "inputTokens" | "cacheCreationInputTokens" | "cacheReadInputTokens" | "outputTokens") => models.reduce((n, m) => n + (m[k] ?? 0), 0);
+      // A split count summed over the models that give it; none of them giving it is no count.
+      const split = (k: "cacheCreationEphemeral1hInputTokens" | "cacheCreationEphemeral5mInputTokens") => {
+        const given = models.map((m) => count(m[k])).filter((n): n is number => n !== undefined);
+        return given.length ? given.reduce((a, b) => a + b, 0) : undefined;
+      };
       return {
         inputTokens: sum("inputTokens"),
         cacheCreationInputTokens: sum("cacheCreationInputTokens"),
         cacheReadInputTokens: sum("cacheReadInputTokens"),
         outputTokens: sum("outputTokens"),
+        ...splitUsage(split("cacheCreationEphemeral1hInputTokens"), split("cacheCreationEphemeral5mInputTokens")),
       };
     }
     const u = r.usage;
@@ -504,6 +537,7 @@ const resultUsage = (line: string) => {
       cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
       cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
       outputTokens: u.output_tokens ?? 0,
+      ...splitUsage(count(u.cache_creation?.ephemeral_1h_input_tokens), count(u.cache_creation?.ephemeral_5m_input_tokens)),
     };
   } catch {
     return undefined;
@@ -557,6 +591,9 @@ export const implementNote = (o: Override) => (o.model || o.effort ? ` [implemen
 
 export const implAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.effort ?? IMPL_EFFORT);
 
+/** The resolve pass's agent: the implementer's model and effort, with the 5-minute prompt cache (`SHORT_CACHE`). */
+export const resolveAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.effort ?? IMPL_EFFORT, SHORT_CACHE);
+
 /**
  * One readable line for an agent that failed. The library's error is "(FiberFailure) AgentError:
  * claude-code exited with code 1:" with the cause on the next line as `[claude-code:<code>] {json}`;
@@ -589,13 +626,13 @@ export const reviewWithFallback = <T>(
   label: string,
   run: (agent: ReturnType<typeof claudeCode>, model: string) => Promise<T>,
 ): Promise<T> =>
-  run(claude(REVIEW_MODEL, REVIEW_EFFORT), REVIEW_MODEL).catch((error) => {
+  run(claude(REVIEW_MODEL, REVIEW_EFFORT, SHORT_CACHE), REVIEW_MODEL).catch((error) => {
     if (REVIEW_MODEL === IMPL_MODEL || promptExpansionLine(error) !== undefined) throw error;
     console.log(
       `${label}: ${REVIEW_MODEL} review failed (${agentFailure(error)}); ` +
         `the agent log's last line has the real cause. Reviewing with ${IMPL_MODEL}.`,
     );
-    return run(claude(IMPL_MODEL, REVIEW_EFFORT), IMPL_MODEL);
+    return run(claude(IMPL_MODEL, REVIEW_EFFORT, SHORT_CACHE), IMPL_MODEL);
   });
 
 // Codex's `exec --json` stream has no rate limits (its events are the thread, the turns and the items), and
