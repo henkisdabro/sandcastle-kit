@@ -102,3 +102,12 @@ test("the line for a REST read names the path whole", async () => {
   assert.equal(blocker.state, "closed");
   assert.deepEqual(said, ["GitHub slow (gh api repos/{owner}/{repo}/issues/3: HTTP 503: Service Unavailable): trying again"]);
 });
+
+test("a 404 of a repository whose name says timeout is tried once: the command line is not gh's answer", async () => {
+  fakeGh(`echo 'HTTP 404: Not Found' >&2\nexit 1`);
+  const { blockerResolver } = await import("../src/blockers.ts");
+  const blocker = await blockerResolver(project, tracker, new Set(), 5000)({ kind: "remote", id: "acme/timeout-lib#3" });
+  assert.equal(blocker.state, "unreadable");
+  assert.equal(calls(), 1);
+  assert.deepEqual(said, []);
+});

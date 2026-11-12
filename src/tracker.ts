@@ -253,7 +253,7 @@ export const GH_READ_RETRY: { waitsMs: number[]; say: (line: string) => void } =
 
 /**
  * `gh` for the reads made during a run: the event loop goes on while gh answers, and a gh that does not answer in
- * `limitMs` is a failed read, not a hang. A transient failure (`TRANSIENT`, judged on the raw message and stderr) is tried
+ * `limitMs` is a failed read, not a hang. A transient failure (`TRANSIENT`, judged on gh's own stderr, else the error's message) is tried
  * again after each of `GH_READ_RETRY.waitsMs`, each try with its own limit; any other failure, and the last, is worded by
  * `refusal`. Reads only: a write is never given to it.
  */
@@ -263,13 +263,12 @@ export const ghAsync = async (args: string[], limitMs: number): Promise<string> 
       return await shAsync("gh", args, limitMs);
     } catch (e) {
       const err = e as { stderr?: unknown; message?: string };
-      const raw = `${String(err.message ?? "")}\n${String(err.stderr ?? "")}`;
+      // gh's own words, else the kit's give-up: a failed exit's message repeats the command line, so a repository or
+      // label named `timeout-...` would make every 404 of it look transient.
+      const raw = String(err.stderr ?? "").trim() || String(err.message ?? "");
       const wait = GH_READ_RETRY.waitsMs[tried];
       if (wait === undefined || !TRANSIENT.test(raw)) return refusal(e, args);
-      if (tried === 0) {
-        const first = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
-        GH_READ_RETRY.say(`GitHub slow (gh ${args.slice(0, 2).join(" ")}: ${first}): trying again`);
-      }
+      if (tried === 0) GH_READ_RETRY.say(`GitHub slow (gh ${args.slice(0, 2).join(" ")}: ${raw.split("\n")[0].slice(0, 200)}): trying again`);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
