@@ -14,7 +14,7 @@
 //
 // More than MOST files is refused unless `--all` is given: a central module (one that hundreds of
 // tests import or name) selects most of the suite, minutes an agent spent before a ticket gate ran
-// the same tests again. The refusal names the files, so the caller can run the few that matter.
+// the same tests again. The refusal names the first SHOWN of them and counts the rest, so the caller can run the few that matter.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
@@ -39,6 +39,8 @@ const exportedNames = (source: string): string[] => {
 };
 
 const MOST = 40;
+// The refusal lists this many; the rest is a count (a central module matches hundreds, all put in the agent's context).
+const SHOWN = 20;
 const all = process.argv.includes("--all");
 const files = process.argv.slice(2).filter((a) => a !== "--all");
 if (files.length === 0) {
@@ -70,7 +72,7 @@ const related = readdirSync(dir)
   .sort();
 
 if (related.length > MOST && !all) {
-  console.error(`${related.length} test files mention ${files.join(", ")} or what it exports - more than an agent should run, and the gates run them all anyway. Run the few that cover your change with \`pnpm test:file <files>\` (the files that import what you changed), or add --all to run every one:\n${related.map((f) => `  ${f}`).join("\n")}`);
+  console.error(`${related.length} test files mention ${files.join(", ")} or what it exports - more than an agent should run, and the gates run them all anyway. Run the few that cover your change with \`pnpm test:file <files>\` (the files that import what you changed), or add --all to run every one:\n${related.slice(0, SHOWN).map((f) => `  ${f}`).join("\n")}\n  ... and ${related.length - SHOWN} more (--all runs them all)`);
   process.exit(3);
 }
 if (related.length === 0) console.error(`No test file mentions ${files.join(", ")} (or what it exports): nothing to run.`);

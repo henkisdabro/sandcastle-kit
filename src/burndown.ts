@@ -356,6 +356,26 @@ export const cutAtWord = (text: string, max: number): string => {
   const space = head.lastIndexOf(" ");
   return `${(space > 0 ? head.slice(0, space) : head).trimEnd()}…`;
 };
+/**
+ * Several agents' notes as one: each trimmed, one trailing "." taken off (an ellipsis keeps its dots) so the "; " joint
+ * does not read ".;", repeats dropped after that (the first one's text stays), and a final "." put back when the last
+ * note ended in a single one.
+ */
+export const joinNotes = (items: string[]): string => {
+  const seen = new Set<string>();
+  const kept: { given: string; body: string }[] = [];
+  for (const raw of items) {
+    const given = raw.trim();
+    if (!given) continue;
+    const body = given.endsWith(".") && !given.endsWith("...") ? given.slice(0, -1) : given;
+    if (seen.has(body)) continue;
+    seen.add(body);
+    kept.push({ given, body });
+  }
+  const last = kept.at(-1)?.given ?? "";
+  const single = last.endsWith(".") && !last.endsWith("..");
+  return kept.map((k) => k.body).join("; ") + (single ? "." : "");
+};
 // The texts of every `<tag>...</tag>` an agent put on lines of its own, in order. A tag named in
 // prose - inside inline code, a fenced block or mid-sentence - is the agent explaining, not
 // reporting, and the lazy match would otherwise run from that mention to the next real closing
@@ -590,12 +610,12 @@ export const saidOf = (text: string, facts?: Pick<ReportFacts, "report" | "outpu
   if (!facts || !report) return { unmet: unmetOf(text), ungated: ungatedOf(text), changelog: changelogScan(text), followups: followUpsOf(text) };
   const earlier = text.endsWith(facts.output) ? text.slice(0, text.length - facts.output.length) : text;
   const items = report.unmet.assessed ? report.unmet.items.flatMap((i) => { const t = oneLine(i.text); return t ? [{ who: i.who, text: t }] : []; }) : [];
-  const unmet = items.length ? unmetNote(items.map((i) => i.text).join("; "), items.some((i) => i.who === "person")) : undefined;
+  const unmet = items.length ? unmetNote(joinNotes(items.map((i) => i.text)), items.some((i) => i.who === "person")) : undefined;
   const ungatedItems = report.ungated.flatMap((u) => oneLine(u) ?? []);
   const changelog = judgeChangelog([...ownLineTags(earlier, "changelog"), ...report.changelog]);
   return {
     unmet,
-    ungated: ungatedItems.length ? cutAtWord(ungatedItems.join("; "), UNGATED_MAX) : undefined,
+    ungated: ungatedItems.length ? cutAtWord(joinNotes(ungatedItems), UNGATED_MAX) : undefined,
     // An empty list is the report's answer `none`, as `<changelog>none</changelog>` is.
     changelog: report.changelog.length ? changelog : { ...changelog, none: true },
     followups: readFollowUps([...ownLineTags(earlier, "followup"), ...report.followups]),
@@ -2658,13 +2678,13 @@ export const createPipeline = (ctx: PipelineContext) => {
       const agentsSaid = () => {
         const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
         return {
-          unmet: left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined,
+          unmet: left.length ? cutAtWord(joinNotes(left), UNGATED_MAX) : undefined,
           implSaid,
           changelog: changelog.length ? [...new Set(changelog)] : undefined,
           changelogDropped: drops.count || undefined,
           changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined,
           changelogNone: (!changelog.length && changelogSaidNone) || undefined,
-          ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+          ungated: ungated.length ? cutAtWord(joinNotes(ungated), UNGATED_MAX) : undefined,
           gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
           crossSkipped,
         };
