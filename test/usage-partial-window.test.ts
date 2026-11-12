@@ -193,6 +193,7 @@ test("a week-only reading beside a full one lines their week cells up", () => {
 test("a week-only reading folds into the summary line when the lane does not fit, and says only its week", () => {
   const plan = draw(snapshotOf([claudeWeek]), 160).find((l) => /^│ plan {2}/.test(l));
   assert.ok(plan, "no plan lane");
-  assert.match(plan, /week ▓▓░░░ 30% · resets Tue 22:00/); // the summary line squeezes a row's padding to one space
+  // The summary line squeezes a row's padding to one space, and the blank 5-hour cell leaves none before the week.
+  assert.match(plan, /^│ plan {2}claude · week ▓▓░░░ 30% · resets Tue 22:00 · \(1m ago\)/);
   assert.doesNotMatch(plan, /5h/);
 });

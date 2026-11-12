@@ -709,9 +709,10 @@ const renderFrame = (snapshot          , table       , { cols, rows, showAll, co
   const summary = (folded        ) =>
     folded
       .map((lane) => {
-        // A row's padding is the band's: one space apart in the line, none leading (after any colour code).
+        // A row's padding is the band's: one space apart in the line, none leading (after any colour code) and none
+        // trailing (a plan reading's blank 5-hour cell would leave `claude  · week`).
         // oxlint-disable-next-line no-control-regex -- the escape byte is what the pattern skips
-        const items = lane.rows.map((r) => r.replace(/ {2,}/g, " ").replace(/^((?:\x1b\[[0-9;]*m)*) /, "$1")).filter((r) => visibleWidth(r) > 0);
+        const items = lane.rows.map((r) => r.replace(/ {2,}/g, " ").replace(/^((?:\x1b\[[0-9;]*m)*) /, "$1").replace(/ $/, "")).filter((r) => visibleWidth(r) > 0);
         return `${c.mute}${lane.name.toLowerCase()}${c.off}  ${items.join(dot)}`;
       })
       .join(`${c.rule} │ ${c.off}`);

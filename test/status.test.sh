@@ -1016,11 +1016,16 @@ has "plan +claude +5h ▓▓▓▓▓ +90% · resets $at5 · week ▓▓▓▓�
 usage_record 14 93 1200
 COLS=160 render "105"
 has "week ▓▓▓▓▓ +93% · resets $atw · \\(20m ago\\)"
-# A percentage past 100 stops at 100; a record with a window that is no number draws no line (the view has nothing to show).
+# A percentage past 100 stops at 100; a window that is no number is not drawn, the other still is (#937), and a
+# record with neither window a number draws no line (the view has nothing to show).
 usage_record 14 250 30
 COLS=160 render "105"
 has "week ▓▓▓▓▓ +100% · resets"
 sed -i.bak 's/"percent": 14/"percent": "lots"/' "$L/run.json"
+COLS=160 render "105"
+has "plan +claude · week ▓▓▓▓▓ +100% · resets $atw"
+hasnt '5h ▓'
+sed -i.bak 's/"percent": 250/"percent": "lots"/' "$L/run.json"
 COLS=160 render "105"
 hasnt 'plan +claude'
 hasnt '5h ▓'

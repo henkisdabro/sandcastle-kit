@@ -2711,7 +2711,8 @@ Codex's is `usageFromCodexEvent(line, at)`, over `usageFromRateLimits(limits, at
 `token_count` event
 (`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1791188474},"secondary":{...10080...}}}}`)
 gives `fiveHour` and `week` by `window_minutes` (300 and 10080), never by position, `used_percent`
-already a percentage and `resets_at` in seconds, and none unless both windows are there (Codex keeps that rule; Claude's one-window events are merged).
+already a percentage and `resets_at` in seconds, and none unless both windows are there (Codex
+keeps that rule; Claude's one-window events are merged).
 `codex exec --json` prints no `rate_limits` (its events are `thread.started`, `turn.*`, `item.*` and
 `error`), and the session that has them is `~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl` inside
 the container (the kit runs Codex with `captureSessions: false`, so none is copied to the host's
