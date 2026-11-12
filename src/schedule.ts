@@ -957,14 +957,17 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
    * `gateWait()`: the attempt now only waits for a gates slot and is about to move its slot to an uncounted lock (its
    * container lives on). True: its worker goes back to the queue while the attempt goes on off it, and the attempt moves the
    * slot; false, when the run already has `gateWaiters` such attempts (or none is allowed): it keeps its slot and its worker, and
-   * waits as before. Asked again at each wait for a gates slot (a gate run after a repair is one), and true again while it is off.
+   * waits as before. Asked again at each wait for a gates slot (a gate run after a repair is one), and true again while it is off (counted
+   * as a waiter again, past the cap).
+   * `gateSlot()`: the attempt's gates slot is granted (`GateProgress.onSlot`). A ticket off its worker leaves the `gateWaiters`
+   * count for its gate run, so the cap counts only tickets still waiting; its sandbox stays on the uncounted lock and its worker free.
    * `retake()`: an attempt off its worker needs a counted sandbox slot again (before an agent pass). It waits as a worker
    * does - concurrency, the run's share, a waiting landing first - and ahead of the tickets that have not started, so the run never has
    * more agent passes than workers; the attempt then holds a worker again, until its next `gateWait` or its end. Resolves with the
    * slot (none without the port, or when the run stops: the pass then runs as the stopped run lets a ticket finish), or
    * with undefined when the run is paused - the attempt parks at a juncture and asks again after the resume. Only after a true `gateWait`.
    */
-  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; retake(): Promise<{ slot?: Slot } | undefined>; resolveWaitMs?: number; slot?: Slot }): Promise<Attempted<G, O>>;
+  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; gateSlot(): void; retake(): Promise<{ slot?: Slot } | undefined>; resolveWaitMs?: number; slot?: Slot }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
   tell(change: Change<G, O, B>): void;
 };
@@ -1575,12 +1578,22 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         running.add(t.id);
         // See `Work.attempt`'s `gateWait` and `retake`.
         const gateWait = () => {
-          if (seat.off) return true;
+          // Off its worker already (its gates slot was granted since, `gateSlot`): it counts again as a waiter, without the cap
+          // check - it cannot go back to a worker without a retake.
+          if (seat.off) {
+            uncounted.add(t.id);
+            return true;
+          }
           if (!work.gateWaiters || uncounted.size >= work.gateWaiters) return false;
           uncounted.add(t.id);
           seat.off = true;
           seat.settle?.();
           return true;
+        };
+        // Its gates slot is granted: the ticket leaves the run's off-count places for the whole gate run, so the cap counts only tickets
+        // still waiting. Its sandbox stays on the uncounted lock and its worker stays free.
+        const gateSlot = () => {
+          if (seat.off) uncounted.delete(t.id);
         };
         const retake = (): Promise<{ slot?: Slot } | undefined> => {
           sync();
@@ -1621,7 +1634,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             }, paused: () => (sync(), pausedSince !== undefined), gates: () => {
               gating.add(t.id);
               landingNear();
-            }, gateWait, retake, ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
+            }, gateWait, gateSlot, retake, ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {

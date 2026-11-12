@@ -1728,6 +1728,13 @@ export const createGateSeat = (ports: { gateWait(): boolean; retake(): Promise<{
       off = true;
       return true;
     },
+    /**
+     * A wait for a gates slot while the ticket is off already (its gates slot was granted, `gateSlot`, and no retake since: a
+     * `regate`): tell the scheduler it waits again, so it counts in the gates limit once more. It holds no lease to move.
+     */
+    waitAgain() {
+      if (off) ports.gateWait();
+    },
     /** A counted slot again; undefined when the run is paused (the caller parks and asks again). None to hold without the port or on a stopped run: the uncounted lock stays. */
     async retake(): Promise<{ slot?: SlotLease } | undefined> {
       asking = true;
@@ -3675,6 +3682,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
   // A ticket's move of its sandbox slot to an uncounted lock (`createGateSeat`), by ticket: told by a ticket gate's wait for a gates slot.
   const gateWaits = new Map<string, () => void>();
+  // Told as a ticket gate's gates slot is granted: the scheduler's `at.gateSlot`, which takes the ticket out of the gates limit's count.
+  const gateSlots = new Map<string, () => void>();
   const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false, thirdOnDisjoint = false, claim?: SlotClaim) => {
     const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
@@ -3689,6 +3698,10 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
         run.ticket(id, { note: "waiting for a gates slot" });
         // A ticket's gates only: a landing's, the base's and the verify's sandbox is a slot the run's end waits on.
         if (!priority) gateWaits.get(id)?.();
+      },
+      // A ticket's gates only (as `wait`): the slot is granted, before the first gate.
+      onSlot: () => {
+        if (!priority) gateSlots.get(id)?.();
       },
       // Held for the machine's CPU pressure before the pass asks for a slot (`LOAD_PAUSE`): the same words in the heartbeat and the
       // ticket's note, and a ticket's own sandbox slot and worker are freed as a wait for a gates slot frees them. The base's and
@@ -3989,7 +4002,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   };
   // One attempt of a ticket (schedule.ts runs it), in the sandbox slot its worker leased (`slot`): the usage check and
   // the tracker's word before it, then its pipeline.
-  const attempt = async (issue: Issue, { last, juncture, paused, gates, gateWait, retake, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; retake(): Promise<{ slot?: SlotLease } | undefined>; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
+  const attempt = async (issue: Issue, { last, juncture, paused, gates, gateWait, gateSlot, retake, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; gates(): void; gateWait(): boolean; gateSlot(): void; retake(): Promise<{ slot?: SlotLease } | undefined>; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
     // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
     // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
     let lease: SlotLease | undefined = slot;
@@ -4019,7 +4032,11 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     // The first wait for a gates slot of a ticket gate (the heartbeat's wait callback): move the slot off the count.
     gateWaits.set(issue.id, () => {
       if (lease && seat.move(lease)) lease = undefined;
+      // Already off with no lease to move (a wait after the gates slot was granted): the scheduler counts it as a waiter again.
+      else seat.waitAgain();
     });
+    // The gates slot is granted (`GateProgress.onSlot`): the ticket leaves the run's off-count places while its gates run.
+    gateSlots.set(issue.id, gateSlot);
     // At its start the ticket gives the slot back for a pause and takes one only once it goes on (below).
     const start: Park = { suspend: async () => give(), resume: async () => {} };
     await pausing.waitOutPause(usagePause !== undefined, paused, (phase) => juncture(phase, start));
@@ -4076,6 +4093,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       } finally {
         give();
         gateWaits.delete(issue.id);
+        gateSlots.delete(issue.id);
         seats.delete(issue.id);
       }
     })().then(
