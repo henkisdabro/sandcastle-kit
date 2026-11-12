@@ -120,11 +120,13 @@ slot (setup then runs outside the slot) and again once the slot is granted, beca
 minutes at `maxGates: 1` and the base moves in it. The second pass is the `onSlot` hook the pipeline
 hands its `gate` port, which `runGates` awaits inside the slot before the first gate
 (`GateProgress.onSlot`; `false` stops the run: no gate, the slot freed, a `GateRun` with no gates and
-no failures, never a green one). With no commit on the base since the first merge it answers at once
-after one `rev-list --count`. Otherwise `conflictBefore` is asked again: a conflict stops the run and
-the attempt ends exactly as the check before the wait ends it (`conflict`, found at `gates`); no
-conflict runs `mergeBaseBeforeGates` again, with its undo rules unchanged, and the gates go on. The
-gate runs after a repair pass or a fix wait pass no hook (`test/pipeline-base-merge-at-slot.test.ts`). `preRepair` is read after it, so
+no failures, never a green one). When the branch already holds the base's tip (the first merge left
+it there and the base did not move) it answers at once after one `rev-list --count`. Otherwise
+`conflictBefore` is asked again: a conflict stops the run and the attempt ends exactly as the check
+before the wait ends it (`conflict`, found at `gates`); no conflict runs `mergeBaseBeforeGates` again,
+with its undo rules unchanged (a first merge that was undone is tried again too), and the gates go on.
+The gate runs after a repair pass or a fix wait pass no hook (`test/pipeline-base-merge-at-slot.test.ts`).
+`preRepair` is read after the merge, so
 a re-review after a repair covers repair commits only; `touchesOverrun` (three-dot, `--no-merges`)
 and `branchFiles` count the branch's own files, not what the merge brought; the green head record
 is the merged tip. With `land: "merge"` a landed ticket gains an in-branch `Merge <base> into
