@@ -878,7 +878,7 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   const stop = count(s.usageStop);
   const items: string[] = [];
   if (level !== undefined) items.push(`autonomy ${level}${turn ? ` (turn ${turn}${cap ? ` of ${cap}` : ""})` : ""}`);
-  // The tickets at once the run ran at, and what it asked for when the machine's cap or its share made it fewer.
+  // The tickets at once the run ran at, and what it asked for when the machine's sandbox cap made it fewer.
   const conc = count(s.concurrency);
   const asked = count(s.asked);
   if (conc !== undefined) items.push(asked !== undefined && asked !== conc ? `concurrency ${conc} of ${asked} asked` : `concurrency ${conc}`);
