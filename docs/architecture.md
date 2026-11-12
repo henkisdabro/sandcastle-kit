@@ -1130,8 +1130,8 @@ pane), agent-state reports, sidebar tokens, the workspace's run summary.
 While the run record holds a plan usage reading, the status pane also carries it as an `sc_usage`
 token (`usageText`: `5h 14% · wk 93%`, then ` ▲` from 75% and ` ■` from 90% on the worse window,
 which the plugin's sidebar row colours with `contains` rules: Herdr's rules match text, not numbers;
-with readings of both providers it is each one's name and weekly window,
-`claude wk 93% · codex wk 16%`, the mark that of the worst window of either, the 5-hour ones
+with readings of both providers it is each one's name and weekly window (its 5-hour window when
+it has no week), `claude wk 93% · codex wk 16%`, the mark that of the worst window of either, the 5-hour ones
 included; nothing is sent before a reading exists): in the run agent's own metadata call with no
 sandbox panes, and with `panes: "all"` (the status pane is no reported agent) in a metadata call of
 its own that is best-effort, so a Herdr that has no use for it cannot turn the view off.
@@ -2690,9 +2690,9 @@ credentials file's path) and the endpoint's HTTP status only. `test/usage-login.
 
 The plan's usage on screen is the same file's second job, and needs none of the above: no
 credential, no request, and it does not depend on `USAGE_CHECK`.
-Claude Code's stream-json output carries `rate_limit_event` lines (about three a pass) with both
-windows' `utilization` (a fraction) and `resetsAt` (seconds since the epoch), and every agent's raw
-stream is already in its `.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` (`agentLogging` in
+Claude Code's stream-json output carries `rate_limit_event` lines (about three a pass) with one or
+both windows' `utilization` (a fraction) and `resetsAt` (seconds since the epoch), and every agent's
+raw stream is already in its `.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` (`agentLogging` in
 `src/run.ts`). `usageFromEvent(line, at)` turns one such line into a `UsageReading` -
 `{ provider: "claude", windows: { fiveHour?, week? }, at }` with each window `{ percent, resetsAt }`,
 the percent a whole number from 0 to 100 - and gives none for a malformed line, another type of line

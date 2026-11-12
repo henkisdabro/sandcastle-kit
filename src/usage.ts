@@ -266,8 +266,8 @@ export const usageStop = async (env: Record<string, string>, readers: LoginReade
 // ---------------------------------------------------------------------------
 // The plan's usage on screen, from the agents' own readings.
 //
-// Claude Code's stream-json output carries `rate_limit_event` lines, about three a pass, with the 5-hour
-// and the weekly window's utilisation and reset time. They are in each agent's raw `.jsonl` sidecar
+// Claude Code's stream-json output carries `rate_limit_event` lines, about three a pass, with one or both
+// windows' utilisation and reset time. They are in each agent's raw `.jsonl` sidecar
 // already (run.ts, `agentLogging`), so unlike the guard's endpoint above they cost no request: the run
 // reads what its agents' logs gained since the last look, keeps the newest reading in the run record
 // (`usage`) and the status view, the Herdr sidebar and the closing summary show it. It needs no

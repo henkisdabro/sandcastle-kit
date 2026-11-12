@@ -167,13 +167,15 @@ const claudeWeek = { provider: "claude", at: NOW - 60, windows: { week: { percen
 const claudeBoth = { provider: "claude", at: NOW - 60, windows: { fiveHour: { percent: 2, resetsAt: NOW + 7200 }, week: { percent: 30, resetsAt: T } } };
 
 test("the status view's plan lane blanks the missing 5-hour cell as wide as the cell the renderer draws, so the week cell stays put", () => {
+  // With no optional models or settings lanes, PLAN fits at the ticket's 160 columns.
+  const laneSnapshot = (usage: unknown[]) => ({ ...snapshotOf(usage), models: "", settings: undefined });
   // The full reading's 5-hour cell, as drawn: `5h   ` + 5 bar cells + `   2%` + ` · resets HH:MM`, 30 wide after `claude `.
-  const full = planCells(draw(snapshotOf([claudeBoth]), 330), 1);
+  const full = planCells(draw(laneSnapshot([claudeBoth]), 160), 1);
   const cell = /^claude (5h {3}[▓░]{5} {3}2% · resets \d\d:\d\d)\s*$/.exec(full[0]!)?.[1];
   assert.ok(cell, JSON.stringify(full));
   assert.equal(visibleWidth(cell), 30);
 
-  const frame = draw(snapshotOf([claudeWeek]), 330);
+  const frame = draw(laneSnapshot([claudeWeek]), 160);
   const [first, second] = planCells(frame, 1);
   assert.match(first!, /^claude {31,}$/, "`claude `, then only spaces");
   assert.equal(first!.slice("claude ".length, "claude ".length + 30), " ".repeat(30));
