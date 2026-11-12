@@ -160,9 +160,39 @@ let released = false;
 export const baseIsTheRunsLine = (base: string) =>
   `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run. Worktrees share .git/config: an upstream for your own branch there (\`git worktree add\` from a remote branch, \`git push -u\`, \`gh pr create\`) is fine, but any other change to it stops the run - a remote, a hook path, an include, or an upstream on ${base} or an agent/issue-* branch.`;
 
-export const keepAwake = async (): Promise<string> => {
+/**
+ * Whether this machine is WSL: Linux with `WSL_DISTRO_NAME` set or "microsoft" in the kernel's
+ * release string. Under WSL, Windows decides when the PC sleeps, so an inhibitor inside the Linux VM
+ * can never keep it awake. Pure over its inputs, so a test gives each.
+ */
+export const isWsl = (platform: string, env: Record<string, string | undefined>, osrelease: () => string): boolean =>
+  platform === "linux" && ((env.WSL_DISTRO_NAME ?? "") !== "" || /microsoft/i.test(osrelease()));
+
+const readOsrelease = (): string => {
+  try {
+    return readFileSync("/proc/sys/kernel/osrelease", "utf8");
+  } catch {
+    return "";
+  }
+};
+
+// The answer a failure or WSL gave this process, so each later turn neither probes the helper nor
+// starts it to wait out the settle and fail the same way. "not found" is not kept: the helper may be
+// installed between turns.
+let remembered: string | undefined;
+
+/** Forgets the remembered keep-awake answer (for tests: the state is the module's). */
+export const resetKeepAwake = () => {
+  remembered = undefined;
+};
+
+export const keepAwake = async (opts?: { wsl?: boolean }): Promise<string> => {
   if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
     return "off - the machine's energy settings apply";
+  }
+  if (remembered !== undefined) return remembered;
+  if (opts?.wsl ?? isWsl(process.platform, process.env, readOsrelease)) {
+    return (remembered = "off - under WSL, Windows decides when the PC sleeps: keep it awake in Windows' power settings");
   }
   const pid = String(process.pid);
   const [cmd, args] =
@@ -173,13 +203,20 @@ export const keepAwake = async (): Promise<string> => {
   // Each turn of a multi-turn run asks again: one inhibitor already holding is the answer, or a later
   // release would end only the newest and the machine would never sleep while paused.
   if (inhibitor && inhibitor.exitCode === null && inhibitor.signalCode === null) return `on (${cmd})`;
-  const child = spawn(cmd, args, { stdio: "ignore" });
+  const child = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
   settling = child;
+  // The helper's own words say why it failed (a polkit refusal, no system bus): the first non-empty line.
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string) => { if (stderr.length < 4096) stderr += chunk; });
+  child.stderr?.on("error", () => {});
   const ended = new Promise<boolean>((resolve) => {
     child.on("error", () => resolve(true));
-    child.on("exit", () => resolve(true));
+    // "close", not "exit": the stderr has been read to its end by then.
+    child.on("close", () => resolve(true));
   });
   child.unref();
+  (child.stderr as unknown as { unref?: () => void } | null)?.unref?.();
   let timer: NodeJS.Timeout | undefined;
   const settled = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), KEEP_AWAKE_SETTLE_MS); });
   const failed = await Promise.race([ended, settled]);
@@ -188,8 +225,12 @@ export const keepAwake = async (): Promise<string> => {
   if (!failed) {
     inhibitor = child;
     released = false;
+    // Nothing reads it from here on; a pipe nobody drains must not hold the helper up.
+    child.stderr?.destroy();
+    return `on (${cmd})`;
   }
-  return failed ? `off - ${cmd} failed` : `on (${cmd})`;
+  const cause = stderr.split("\n").map((l) => l.trim()).find((l) => l !== "");
+  return (remembered = cause ? `off - ${cmd} failed: ${cause}` : `off - ${cmd} failed`);
 };
 
 /**
@@ -209,8 +250,8 @@ export const releaseAwake = () => {
 };
 
 /** Holds the machine awake again when a pause released it, as a resume does. Nothing otherwise. */
-export const holdAwake = async () => {
-  if (released) await keepAwake();
+export const holdAwake = async (opts?: { wsl?: boolean }) => {
+  if (released) await keepAwake(opts);
 };
 
 // Porcelain lines (`XY path`) of everything staged, unstaged or untracked. Not sh(): its trim
