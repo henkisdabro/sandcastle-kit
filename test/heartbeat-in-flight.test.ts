@@ -53,6 +53,7 @@ test("the heartbeat reads the landings in flight and the resolve waits the sched
   assert.match(source, /landing: \[\.\.\.landing\]/);
   assert.match(source, /resolving: \[\.\.\.resolving\]/);
   assert.match(source, /landing\.set\(o\.issue/);
-  assert.match(source, /case "resolve waits":\s+[^\n]*\n\s+if \(!resolving\.has\(c\.id\)\) resolving\.set\(c\.id, Date\.now\(\)\)/);
+  assert.match(source, /case "resolve waits":\s+[^\n]*\n\s+resolving\.set\(c\.id, \{ since: resolving\.get\(c\.id\)\?\.since \?\? Date\.now\(\), for: c\.for \}\)/);
+  assert.match(source, /resolving: \[\.\.\.resolving\]\.map\(\(\[n, w\]\) => \(\{ ref: ref\(n\), since: w\.since, for: w\.for\.map\(ref\) \}\)\)/);
   assert.match(source, /\.\.\.landings, tell,/);
 });

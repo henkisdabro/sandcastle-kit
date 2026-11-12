@@ -66,7 +66,7 @@ import {
   carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, firstAttemptReviewLog, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewCommitLines, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, personCommentsSince, repairWords, seenComments, stoppedLine, trustOf } from "./ledger.ts";
-import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, resolveHoldNote, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -1352,7 +1352,7 @@ const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${
 
 /**
  * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
- * it says one), the sent-back tickets waiting to resolve, the green tickets queued for the landing worker, then the
+ * it says one), the sent-back tickets waiting to resolve (each with what it waits for, `for`, when told), the green tickets queued for the landing worker, then the
  * run's wait for a sandbox slot (`slotWait`, when its oldest open wait began; `createSlotWaits`) once it is longer
  * than a typical issue takes (`typicalMs`; with no history nothing is said, as the estimate says nothing then). The wait
  * is the run's, not a ticket's: a worker leases its slot before it takes a ticket. No line when none of these is in flight.
@@ -1362,7 +1362,7 @@ export const heartbeatLine = (o: {
   clock: string;
   working: { ref: string; phase: string; since: number }[];
   landing?: { ref: string; phase?: string; since: number }[];
-  resolving?: { ref: string; since: number }[];
+  resolving?: { ref: string; since: number; for?: string[] }[];
   queued?: { ref: string; since: number }[];
   slotWait?: number;
   /** What holds the slot wait back, when not a full pool alone: the run's share beside another run, or the slot kept for landing. */
@@ -1373,7 +1373,7 @@ export const heartbeatLine = (o: {
   const parts: string[] = [];
   if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
-  if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}${w.for?.length ? ` (for ${w.for.join(", ")})` : ""}`).join(", ")}`);
   if (o.queued?.length) parts.push(`queued to land: ${o.queued.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
   const why = o.waitsFor === "share" ? " (this run's share beside another run)" : o.waitsFor === "landing" ? " (the pool's last free slot is kept for a landing)" : "";
   if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}${why}`);
@@ -1530,8 +1530,9 @@ export const createHoldRecord = (o: {
           return;
         case "resolve waits": {
           const note = resolveWaitNote(o.ref, c);
-          // Said once: a list that changes later updates the record's note, not the log.
-          if (c.first) o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
+          // Said first, and again when a ticket joins the list (`joined`): a line that named only the first list hid the
+          // tickets that held the resolve after it. One that only leaves the list updates the record's note, not the log.
+          if (c.first || c.joined) o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
           run.ticket(c.id, { note });
           return;
         }
@@ -1541,6 +1542,13 @@ export const createHoldRecord = (o: {
         case "resolve starts":
           o.say(`  ${o.ref(c.id)} resolves its conflict now: the tickets it waited for have landed or left the run`);
           run.ticket(c.id, { note: null });
+          return;
+        case "resolve holds":
+          // Blocked, as a ticket parked behind a file is: it cannot start until the resolve it shares a file with has.
+          run.ticket(c.id, { state: "blocked", note: resolveHoldNote(o.ref, c) });
+          return;
+        case "resolve frees":
+          run.ticket(c.id, { state: "queued", note: null });
       }
     },
   };
@@ -3590,7 +3598,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const active = new Map<string, { phase: string; since: number }>();
   // The heartbeat's other tickets in flight: a landing (its step, once it says one) and a sent-back ticket's wait to resolve (since it was told).
   const landing = new Map<string, { phase?: string; since: number }>();
-  const resolving = new Map<string, number>();
+  const resolving = new Map<string, { since: number; for: string[] }>();
   // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
   const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
@@ -3914,7 +3922,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
       // A landing that has not reported a step yet is merging: an entry with no step read as stuck.
       landing: [...landing].map(([n, l]) => ({ ref: ref(n), phase: l.phase ?? "merging", since: l.since })),
-      resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
+      resolving: [...resolving].map(([n, w]) => ({ ref: ref(n), since: w.since, for: w.for.map(ref) })),
       queued: [...queuedToLand].map(([n, since]) => ({ ref: ref(n), since })),
       slotWait: slotWaits.since,
       ...(slotWaitsFor ? { waitsFor: slotWaitsFor } : {}),
@@ -4326,6 +4334,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   };
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     fixes.told(c);
+    // Its wait is over and it queues for a free slot: the heartbeat names no ticket that has landed, as the record's note does not.
+    if (c.kind === "resolve queued" && resolving.has(c.id)) resolving.set(c.id, { since: resolving.get(c.id)!.since, for: [] });
     switch (c.kind) {
       case "landing":
         // Only the run line: the next landing writes it again.
@@ -4341,8 +4351,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
         ledger.tell(c);
         return holds.tell(run, c);
       case "resolve waits":
-        // The heartbeat's wait counts from the first telling; a later one only changes the list.
-        if (!resolving.has(c.id)) resolving.set(c.id, Date.now());
+        // The heartbeat's wait counts from the first telling; each telling keeps its list, which the heartbeat names.
+        resolving.set(c.id, { since: resolving.get(c.id)?.since ?? Date.now(), for: c.for });
         return holds.tell(run, c);
       case "resolve queued":
         return holds.tell(run, c);

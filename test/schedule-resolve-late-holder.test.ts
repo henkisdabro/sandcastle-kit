@@ -1,6 +1,8 @@
-// A ticket that starts after a sent-back ticket's resolve began to wait, and reaches its gates while that
-// wait is on, holds the resolve until it has landed: whenever a ticket started, past its review it is a
-// gate run and a landing from the base the resolve merges (createSchedule in src/schedule.ts). Driven
+// A ticket that started before a sent-back ticket's resolve began to wait - still implementing then - and
+// reaches its gates while that wait is on, holds the resolve until it has landed: past its review it is a
+// gate run and a landing from the base the resolve merges. A ticket that has not started by then and shares
+// the resolve's files does not start ahead of it (test/schedule-resolve-fresh-hold.test.ts), so the list
+// cannot keep growing (createSchedule in src/schedule.ts). Driven
 // through the scheduler's ports with made-up files and fake work, and burndown.ts's call held by its source.
 // No git, no Docker, no network.
 //
@@ -27,22 +29,22 @@ const until = async (what: string, ok: () => boolean) => {
   assert.ok(ok(), what);
 };
 
-test("a ticket started after a resolve's wait began holds it from its gates until it has landed", async () => {
+test("a ticket implementing when a resolve's wait began holds it from its gates until it has landed", async () => {
   const order: string[] = [];
   const twentyInGates = later();
+  const thirtyStarted = later();
   const run20 = later();
   const gates30 = later();
   const run30 = later();
-  const sentBack = later();
   let conflicted = false;
   const schedule = createSchedule<T, G, string>({
-    // 10, 20 and 30 share a.ts. Two workers: 15 holds the one 10 frees until 10 is sent back, so 10 is taken again
-    // first, goes off to wait for 20, and 30 takes the worker it leaves: 30 starts after the wait began.
-    tickets: [{ id: "10" }, { id: "20" }, { id: "15" }, { id: "30" }],
-    files: { of: (t: T): TicketFiles => ({ all: [t.id === "15" ? "src/other.ts" : "src/a.ts"], unmergeable: [] }) },
+    // 10, 20 and 30 share a.ts, and start together on three workers: 10 conflicts at its landing while 20 is in its gates
+    // and 30 is still implementing, so 10's worker takes it again and it goes off to wait for 20 alone.
+    tickets: [{ id: "10" }, { id: "20" }, { id: "30" }],
+    files: { of: (): TicketFiles => ({ all: ["src/a.ts"], unmergeable: [] }) },
   });
   const running = schedule.run({
-    workers: 2,
+    workers: 3,
     attempt: async (t, at) => {
       order.push(`start ${t.id} #${at.n}`);
       if (t.id === "20") {
@@ -50,11 +52,8 @@ test("a ticket started after a resolve's wait began holds it from its gates unti
         twentyInGates.open();
         await run20.done;
       }
-      if (t.id === "15") {
-        await sentBack.done;
-        await sleep(100);
-      }
-      if (t.id === "30") {
+      if (t.id === "30" && at.n === 1) {
+        thirtyStarted.open();
         // Implementing (no hold on 10) until the test lets it reach its gates.
         await gates30.done;
         at.gates();
@@ -66,6 +65,7 @@ test("a ticket started after a resolve's wait began holds it from its gates unti
     land: async (g) => {
       if (g.issue === "10" && !conflicted) {
         await twentyInGates.done;
+        await thirtyStarted.done;
         conflicted = true;
         return { kind: "conflict", files: ["src/a.ts"], with: [] } satisfies Landed;
       }
@@ -74,14 +74,14 @@ test("a ticket started after a resolve's wait began holds it from its gates unti
     },
     host: { check: async () => {}, failed: undefined },
     tell: (c) => {
-      if (c.kind === "requeued") {
-        order.push(`requeued ${c.id}`);
-        sentBack.open();
-      }
+      if (c.kind === "requeued") order.push(`requeued ${c.id}`);
     },
   });
-  await until("30 starts once 10 waits for 20", () => order.includes("start 30 #1"));
-  assert.ok(order.indexOf("requeued 10") < order.indexOf("start 30 #1"), order.join(" | "));
+  await until("10 is sent back while 30 implements", () => order.includes("requeued 10"));
+  assert.ok(order.indexOf("start 30 #1") < order.indexOf("requeued 10"), order.join(" | "));
+  // 30 is still implementing: 10 waits for 20 alone, and 30 joins its list as it reaches its gates.
+  await sleep(100);
+  assert.equal(order.includes("start 10 #2"), false, order.join(" | "));
   gates30.open();
   await until("30 in its gates", () => order.includes("gates 30"));
   run20.open();
