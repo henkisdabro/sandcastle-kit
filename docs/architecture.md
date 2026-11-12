@@ -1722,6 +1722,25 @@ A failure removes the container (`removeSandboxContainer`: found the same way), 
 close, leaves the worktree for a person and stops the run.
 The worktree stays locked until the run exits, when `unlockAll` releases it with every other lock
 the kit took, so the clean-up command Sandcastle prints for it works as printed.
+
+**A stop removes the run's own scratch worktrees** (`removeOwnScratchOnExit`, `src/guard.ts`; the
+helper `removeScratchWorktrees`, `src/sandbox.ts`, which `cleanProject` shares):
+`gateBase`'s clean-up is a `finally` the signal path never reaches, and on a SIGINT or SIGTERM
+`exitOnSignal` leaves the teardown to the library, which only prints its "To clean up" line.
+`openOrAbandon` records each scratch worktree (a `sandcastle/*` branch's) it makes, and the run's
+exit listener, registered beside `unlockAll` and prepended so the project lock is still held,
+removes those: for each, the container
+(`removeSandboxContainer`), then `worktreeRefusal`'s check, the unlock, `git worktree remove
+--force`, `git branch -D` and `forgetFork`.
+Never an `agent-issue-*` worktree or an `agent/*` branch, and never one the run did not record, so
+an earlier run's leftover stays for `sandcastle clean`.
+Not when the run stopped on the guard (`guardStopped`), and not when the run's `.git` check, taken
+at the exit against the start's reading (the host git's after the base gates), fails: the
+worktree and its branch are then left for a person, as `test/base-gates-stop-leftovers.test.ts`
+holds.
+The library's line is printed before that check, so `reword` hedges it: the run removes the
+worktree on exit unless its `.git` check fails, and `sandcastle clean` does then
+(`test/library-lines.test.ts`, `test/stop-removes-scratch-worktrees.test.ts`).
 The sites: a ticket's pipeline at its end (the settle's check, before the close and no longer after
 it) and at a pause (`HostGit.check`); the gate sandboxes (`gateBase`: the run's `HostGit.check` for
 the mid-run base check and the verify, `sandcastle gates`' own fingerprint, and for the base gates

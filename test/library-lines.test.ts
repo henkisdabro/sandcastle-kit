@@ -8,10 +8,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { reword } from "../src/run.ts";
 
-test("a scratch worktree's clean-up line promises no resume", () => {
+test("a scratch worktree's clean-up line promises no resume, and hedges the run's own removal on its `.git` check", () => {
   assert.equal(
     reword("  To clean up: git worktree remove --force /p/.sandcastle/worktrees/sandcastle-base-gates-1794455819375"),
-    "  To clean up: `sandcastle clean` - a throwaway worktree with no work in it",
+    "  To clean up: the run removes this throwaway worktree on exit unless its `.git` check fails - then `sandcastle clean` does",
   );
 });
 

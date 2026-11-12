@@ -340,6 +340,10 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
   live: `No run is live.`
+  A stop (this, or Ctrl-C) while the base gates or a verify run also removes that run's own
+  throwaway worktree and its `sandcastle/*` branch as the run exits.
+  It keeps them, naming `sandcastle clean`, when the run stopped on the guard or its `.git` check
+  fails at that moment; a leftover of an earlier run is not touched.
 - While a detached run is live, the **status view** closes with the last three lines of
   `run-output.log` under a light rule, so the run's own messages are on screen without a pane of
   their own.
@@ -467,8 +471,8 @@ Then:
   next run re-implement it rather than land the old branch.
 - **Several unlanded branches:** `sandcastle preview` dry-merges them onto the base in landing order
   and names the ones that would conflict, before anything is merged.
-- **Leftovers:** `sandcastle clean` removes leftover worktrees, finished branches, exited sandbox
-  containers and the kit's dangling images.
+- **Leftovers:** `sandcastle clean` removes leftover worktrees (a guard stop's throwaway ones too),
+  finished branches, exited sandbox containers and the kit's dangling images.
   Docker's build cache is not the kit's to prune: `sandcastle doctor` shows its size, and
   `docker builder prune` frees it.
 

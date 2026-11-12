@@ -33,7 +33,7 @@ import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, repairCheck, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart, removeOwnScratchOnExit, type Fingerprint } from "./guard.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { terminalHost } from "./terminal-host.ts";
@@ -3195,6 +3195,10 @@ export const createPipeline = (ctx: PipelineContext) => {
 };
 
 let unlockOnExit = false;
+// What the run's exit does about its scratch worktrees (`removeOwnScratchOnExit`): the turn in progress sets it, with its
+// `.git` check as it stands, and the one exit listener runs it. `guardStopped`: a guard stop leaves them for a person.
+let exitScratch: (() => void) | undefined;
+let guardStopped = false;
 
 // The kit this process loaded, read on the first turn: a later turn of an autonomy run runs the same code, so
 // a kit pulled mid-run must not be named by it.
@@ -3207,7 +3211,12 @@ let kitAtStart: string | undefined;
  */
 export const burndown = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   try {
+    guardStopped = false;
     return await burndownTurn(project, turn);
+  } catch (error) {
+    // The base gates' own stop (a `.git` change) reaches here without `stopLanding`.
+    if (error instanceof GuardStop) guardStopped = true;
+    throw error;
   } finally {
     // The run's one load pause outlives the turn; the turn's hold and its record's listener do not, a throw included.
     setLoadHold(undefined);
@@ -3572,8 +3581,14 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.
+  // Before the run lock's earlier listener too: another run must not start while scratch removal still writes git.
+  // The removal unlocks the worktrees it takes, and `unlockAll` then finds the rest.
+  if (!unlockOnExit) process.prependListener("exit", () => exitScratch?.());
   if (!unlockOnExit) process.on("exit", unlockAll);
   unlockOnExit = true;
+  // The base gates' sandbox, the run's first, is checked against the start's reading; `host` takes over once it exists.
+  let exitFingerprint: Fingerprint = atStart;
+  exitScratch = () => void removeOwnScratchOnExit(project, (when) => assertGitUnchanged(project, exitFingerprint, when), guardStopped);
   // Inside Herdr, the run's own tab: the status view and, with `herdr.panes: "all"`, one pane per
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
@@ -3812,6 +3827,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   Object.assign(summary, { due: true, printed: false });
   // The one writer of host git, and the `.git` fingerprint whose base it moves with its own writes.
   const host = createHostGit(project, gitFingerprint(project));
+  exitFingerprint = host.expected;
   // The `.git` check after a ticket's pipeline that failed, by ticket: its attempt's result carries
   // it to the scheduler as the cause that stops the run (schedule.ts), which no one else may add.
   const tampered = new Map<string, unknown>();
@@ -4431,6 +4447,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     run.update({ stopped: why, paused: undefined, ...(mergeUnchecked && { mergeUnchecked }) });
     // The cause in a few words, for the summary's next step: only a guard stop has one.
     if (safety) run.update({ stoppedWhat: guardWords(error).what });
+    if (safety) guardStopped = true;
     try {
       await fileTheFollowUps(safety ? `${guardWords(error).what}, so nothing more was written to the tracker` : undefined);
     } catch (e) {
