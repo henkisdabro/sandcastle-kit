@@ -17,7 +17,7 @@ const { createHoldRecord } = await import("../src/burndown.ts");
 const { createTailFilter } = await import("../src/run.ts");
 
 const ref = (id: string) => `#${id}`;
-const HEADER = "tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:";
+const HEADER = "tickets that share files; if they conflict at landing, the later one is sent back and its merge resolved (once, or again if another ticket lands while it resolves):";
 
 const hold = () => {
   const said: string[] = [];

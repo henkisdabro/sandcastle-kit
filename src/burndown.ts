@@ -1487,7 +1487,7 @@ export const createHoldRecord = (o: {
     // The count line for the docs files every ticket touches, once.
     for (const line of fileShareSummary(o.ref, pairs).filter((l) => l.endsWith("(not listed)") && !said.has(l))) fresh.push(line);
     if (fresh.length) {
-      o.say(said.size ? "  more tickets that share files:" : "  tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:");
+      o.say(said.size ? "  more tickets that share files:" : "  tickets that share files; if they conflict at landing, the later one is sent back and its merge resolved (once, or again if another ticket lands while it resolves):");
       for (const line of fresh) {
         said.add(line);
         o.say(`    ${line}`);

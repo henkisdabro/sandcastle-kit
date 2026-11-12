@@ -116,7 +116,7 @@ export type TicketFiles = { all: string[]; unmergeable: string[] };
 /** What a ticket waits for: the ticket in flight that has `file`, a file git cannot merge. */
 export type FileWait = { with: string; file: string };
 
-/** Mergeable files two tickets that run together both change; a conflict at landing is sent back once and resolved on the second attempt. */
+/** Mergeable files two tickets that run together both change; a conflict at landing is sent back and resolved on the next attempt (once, or again after a landing that finished while it resolved: #398). */
 export type FileShare = { with: string; files: string[] };
 
 const SHOWN = 3;
@@ -127,7 +127,7 @@ export const fileWaitNote = (ref: (id: string) => string, w: FileWait) => `waits
 
 /** One line per pair that starts together and changes the same mergeable files: the pair list's own line in the file-shares log (`fileShareSummary` is what the start prints). */
 export const fileShareLine = (ref: (id: string) => string, id: string, s: FileShare) =>
-  `${ref(s.with)} and ${ref(id)} both change ${named(s.files)} - if they conflict at landing, the later one is sent back once and its merge resolved`;
+  `${ref(s.with)} and ${ref(id)} both change ${named(s.files)} - if they conflict at landing, the later one is sent back and its merge resolved (once, or again if another ticket lands while it resolves)`;
 
 /** Files nearly every ticket's docs touch: naming the tickets that share one says nothing, so they are counted on one line. */
 const DOC_FILES = ["README.md", "CHANGELOG.md"];

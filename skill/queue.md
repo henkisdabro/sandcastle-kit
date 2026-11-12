@@ -127,7 +127,8 @@ comments, and the gates can prove it.
    A ticket it suggests splitting is one pass the estimate prices as large: offer child tickets, as
    in the triage table above, and ask before creating them.
    A hot file (declared by four or more tickets) needs nothing by itself: the tickets land one at a
-   time, and one that conflicts there is sent back once and its merge resolved. Offer a `Blocked by`
+   time, and one that conflicts there is sent back and its merge resolved (again if another ticket
+   lands while it resolves). Offer a `Blocked by`
    chain only when two of them rewrite the same part of the file (one renames what the other edits),
    or a merged ticket when they are one change split too fine.
 

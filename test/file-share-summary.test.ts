@@ -32,7 +32,7 @@ const start = (files: (id: string) => string[]) => {
 test("twelve tickets sharing two files print one line per file", () => {
   const { said } = start(() => ["src/a.ts", "src/b.ts"]);
   const all = ids.map(ref).join(" ");
-  assert.deepEqual(said, ["tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:", `src/a.ts: ${all}`, `src/b.ts: ${all}`]);
+  assert.deepEqual(said, ["tickets that share files; if they conflict at landing, the later one is sent back and its merge resolved (once, or again if another ticket lands while it resolves):", `src/a.ts: ${all}`, `src/b.ts: ${all}`]);
 });
 
 test("the docs files every ticket touches are one count, and the pair list goes to the log", () => {
@@ -40,7 +40,7 @@ test("the docs files every ticket touches are one count, and the pair list goes 
   assert.deepEqual(said.slice(1), ["src/x.ts: #1 #2 #3", "CHANGELOG.md, README.md: shared by 12 tickets (not listed)"]);
   // 12 tickets: every ticket after the first shares with each earlier one, 66 pairs.
   assert.equal(logged.length, 66);
-  assert.ok(logged.includes("#1 and #2 both change CHANGELOG.md, README.md, src/x.ts - if they conflict at landing, the later one is sent back once and its merge resolved"), logged[0]);
+  assert.ok(logged.includes("#1 and #2 both change CHANGELOG.md, README.md, src/x.ts - if they conflict at landing, the later one is sent back and its merge resolved (once, or again if another ticket lands while it resolves)"), logged[0]);
 });
 
 test("tickets that share nothing print nothing", () => {
