@@ -492,8 +492,8 @@ seeded into `places` as places with their issue ids) and the lines this run's pa
 remerge and repair prompts; empty when there is none, in the pipeline's default arguments, and
 filled by `pass` at every agent pass, so the review sees the implementer's lines), and a line that
 restates one - the same title from the same source ticket (`Seat.key`), or a match under the place
-rules - is a comment on that issue, not a new one (the history keeps no evidence, so an earlier
-filing is met by its title). `test/followup-already-named.test.ts`.
+rules - is a comment on that issue, not a new one (older history entries may lack evidence, so an
+earlier filing is met by its title). `test/followup-already-named.test.ts`.
 The same argument carries two lists about the run's other tickets, appended by `runTicketsView` and
 each left out when empty: "Other tickets in this run" (ref and title of each ticket the turn may
 run, this one left out: the pipeline context's `tickets`, which `burndown()` fills from

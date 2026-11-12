@@ -1093,7 +1093,7 @@ export const createFollowUpBook = (
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
   const byTest = o.byTest ?? new Map<string, string>();
-  // Without the evidence the record never kept, a filing is met by its title: the same one, or a match under the place rules.
+  // Older records may lack evidence, so a filing is met by its title: the same one, or a match under the place rules.
   for (const e of o.earlier ?? []) if (e.id !== undefined) addPlace(places, placeSeat({ title: e.title, evidence: "", from: e.from, phase: e.phase }, o.exists, o.named), e.id);
   const heard: FollowUp[] = [];
   // The same finding as a listed one, in other words: comments on its issue once there is one.
