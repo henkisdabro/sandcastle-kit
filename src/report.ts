@@ -1555,7 +1555,15 @@ export const render = (f: Facts, plain = false): string => {
         groups.push({ first: seen.indexOf(members[0]), name: members[0].name, names: members.map((x) => x.name), who: [...new Set(members.map((x) => x.id))] });
       }
     }
-    return groups.filter((g) => g.who.length > 1).sort((a, b) => a.first - b.first).map((g): [string, string[], string[]] => [g.name, g.who, g.names]);
+    // Two directory groups a basename-only name leads, on the same tickets, would print one line twice: keep one.
+    const line = (g: (typeof groups)[number]) => `${g.name}\n${[...g.who].sort().join(" ")}`;
+    const kept = new Map<string, (typeof groups)[number]>();
+    for (const g of groups.filter((x) => x.who.length > 1).sort((a, b) => a.first - b.first)) {
+      const had = kept.get(line(g));
+      if (had) had.names = [...new Set([...had.names, ...g.names])];
+      else kept.set(line(g), g);
+    }
+    return [...kept.values()].map((g): [string, string[], string[]] => [g.name, g.who, g.names]);
   })();
   const inSameTest = (file: string, who: string[]) => sameTest.some(([, w, names]) => names.some((n) => sameTestName(n.split("::")[0], file)) && who.every((id) => w.includes(id)));
   const sameFile = group((id) => {

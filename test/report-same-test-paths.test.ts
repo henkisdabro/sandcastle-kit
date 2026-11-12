@@ -14,8 +14,9 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { render } = await import("../src/report.ts");
 type Facts = import("../src/report.ts").Facts;
+type Tickets = NonNullable<RunRecord["tickets"]>;
 
-const facts = (tickets: RunRecord["tickets"]): Facts => ({
+const facts = (tickets: Tickets): Facts => ({
   base: "main",
   tracker: "github",
   started: "2026-09-30T06:41:00.000Z",
@@ -32,7 +33,7 @@ const facts = (tickets: RunRecord["tickets"]): Facts => ({
   keptWorktrees: [],
   changed: {},
 });
-const same = (tickets: RunRecord["tickets"]) => render(facts(tickets)).split("\n").filter((l) => l.includes("Same failing test"));
+const same = (tickets: Tickets) => render(facts(tickets)).split("\n").filter((l) => l.includes("Same failing test"));
 const red = (...failing: string[]) => ({ state: "red" as const, failing });
 
 test("two tickets failing one basename in different directories get no Same failing test line", () => {
@@ -58,4 +59,19 @@ test("a ticket failing two directories' files groups with each ticket that fails
     "3": red("pkg/c/index.test.ts > renders"),
   });
   assert.deepEqual(out, ["Same failing test: pkg/a/index.test.ts > renders - on #1 #2. Likely one cause: fix it once."]);
+});
+
+test("a basename-only name that leads two directories' groups on the same tickets is one line", () => {
+  const out = render(
+    facts({
+      "1": red("index.test.ts > renders"),
+      "2": red("index.test.ts > renders"),
+      "3": red("pkg/a/index.test.ts > renders", "pkg/b/index.test.ts > renders"),
+    }),
+  ).split("\n");
+  assert.deepEqual(out.filter((l) => l.includes("Same failing test")), [
+    "Same failing test: index.test.ts > renders - on #1 #2 #3. Likely one cause: fix it once.",
+  ]);
+  assert.equal(out.filter((l) => l.includes("Fix index.test.ts > renders once")).length, 1);
+  assert.ok(!out.some((l) => l.includes("renders, index.test.ts")), "the Next step names the test once");
 });

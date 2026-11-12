@@ -550,12 +550,15 @@ step (approving prose keeps finding phrasings the detector reads as a gap;
 `test/gap-in-prose-false.test.ts`). `gapLines` also leaves out of a note, where it is shown, a sentence
 that reports the reviewer's own work ("I added one commit", unless it also says something remains) or
 that the remaining cases are inputs the tool already refuses; being applied at render time, it covers
-records an older kit wrote. The Needs fixing section groups failing tests by their identity (`testIdentity`): a name with
-` > ` is the basename of the last word before it plus the title, and the word's directory when it has
-one. Two names are one test when both carry a directory and it is the same, or when either has none
+records an older kit wrote.
+The Needs fixing section groups failing tests by their identity (`testIdentity`): a name with ` > `
+is the basename of the last word before it plus the title, and the word's directory when it has one.
+Two names are one test when both carry a directory and it is the same, or when either has none
 (a runner that prints the basename alone), so one test named with two path prefixes is one
-`Same failing test` line, printed with the first name seen, while `pkg/a/index.test.ts > renders` and
-`pkg/b/index.test.ts > renders` are two tests.
+`Same failing test` line, printed with the first name seen, while `pkg/a/index.test.ts > renders`
+and `pkg/b/index.test.ts > renders` are two tests.
+A basename-only name joins the group of each directory; two groups that would print the same line
+on the same tickets are one.
 
 A start that took 10 s or more says where its time went: `Start took 64.2 s: blocker reads 31.0 s,
 queue read 12.3 s, versions 9.8 s, docker info 4.1 s, others 7.0 s`, printed as a statement of its
