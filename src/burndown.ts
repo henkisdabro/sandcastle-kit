@@ -1841,7 +1841,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       throw error;
     }
   };
-  /** The run's `.git` check (`host.check`) before a ticket's sandbox opens. A failure is the ticket's `tampered`, as above, and is thrown. */
+  /** The run's `.git` check (`host.check`) before a ticket's sandbox opens, and before each repair pass in it. A failure is the ticket's `tampered`, as above, and is thrown. */
   const checkGit = async (issue: string, when: string) => {
     try {
       await host.check?.(when);
@@ -3009,8 +3009,13 @@ export const createPipeline = (ctx: PipelineContext) => {
             }
           }
         }
-        seen.add(key);
         if (!forced) fixes.claim(key, issue.id);
+        // A slot of the limit again, after the fix board's wait: no agent pass runs outside `maxSandboxes`.
+        await at?.agent?.();
+        // Check after both waits (the fix board and the counted slot): a host change during either must stop the run
+        // before the repairer reads it as the red's cause and files an "environmental" follow-up.
+        await checkGit(issue.id, `before repairing ${ref(issue.id)}`);
+        seen.add(key);
         repairs++;
         const why = forced ? "test red gate" : `${failure.name} red`;
         console.log(
@@ -3019,8 +3024,6 @@ export const createPipeline = (ctx: PipelineContext) => {
         forced = false;
         const beforePass = sh("git", ["rev-parse", branch], project.root);
         let verdict: ReturnType<typeof repairVerdict>;
-        // A slot of the limit again, after the fix board's wait: no agent pass runs outside `maxSandboxes`.
-        await at?.agent?.();
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
