@@ -1174,16 +1174,19 @@ const codexAuthSource = (): string => {
   }
   const copy = codexSandboxAuth(text);
   if (copy === undefined) return host;
+  // Once a refresh token was found, a failed temp write must never fall back to mounting the host's login.
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-codex-"));
+  const file = join(dir, "auth.json");
+  codexAuthCopy = { dir, file };
+  if (!codexExitHandler) process.on("exit", removeCodexAuthCopy);
+  codexExitHandler = true;
   try {
-    const dir = mkdtempSync(join(tmpdir(), "sandcastle-codex-"));
-    const file = join(dir, "auth.json");
     writeFileSync(file, copy, { mode: 0o600 });
-    if (!codexExitHandler) process.on("exit", removeCodexAuthCopy);
-    codexExitHandler = true;
-    codexAuthCopy = { dir, file };
     return file;
-  } catch {
-    return host;
+  } catch (error) {
+    // A full disk can leave a partial access token on disk before writeFileSync throws.
+    removeCodexAuthCopy();
+    throw error;
   }
 };
 

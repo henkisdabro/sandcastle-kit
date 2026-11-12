@@ -1692,7 +1692,9 @@ without it as signed out). It is written once per run, to a temp directory of th
 removes it. A refresh rotates the refresh token server-side, so copies that each kept it were spent
 by the first sandbox to refresh, leaving the host's login stale. A file that holds no refresh token
 (an API-key sign-in, `tokens` null) or cannot be read or parsed is mounted as before. The host's
-file is only read. `test/codex-auth-copy.test.ts`.
+file is only read. If the temp copy cannot be created or written, config creation fails rather
+than mounting the host's refresh token, and a partial copy is removed.
+`test/codex-auth-copy.test.ts`, `test/codex-auth-copy-failure.test.ts`.
 
 **What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
 control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at

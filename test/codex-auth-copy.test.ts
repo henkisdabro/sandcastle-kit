@@ -15,6 +15,8 @@ process.env.CROSS_REVIEW = "1";
 const home = mkdtempSync(join(tmpdir(), "sandcastle-codexcopy-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+// The suite shares its outer TMPDIR across test files; cleanup must inspect only this run's copies.
+process.env.TMPDIR = home;
 const { sandboxMounts, removeCodexAuthCopy } = await import("../src/sandbox.ts");
 
 const project = { mounts: [] } as unknown as Project;

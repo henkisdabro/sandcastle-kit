@@ -21,6 +21,7 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   its next use failing with "refresh token was already used". Nothing in a sandbox can refresh the login: when
   the access token (10 days) expires mid-run, that sandbox's cross-review fails and the run goes on without it.
   An API-key sign-in holds no refresh token and is copied as it is. Your own `~/.codex/auth.json` is only read.
+  If the temp copy cannot be written, the sandbox config fails rather than exposing the host's refresh token.
 - 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
   `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an
   agent follows them anyway.
