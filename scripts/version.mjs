@@ -17,6 +17,8 @@ const fields = [
   ['herdr/herdr-plugin.toml', /^version = "[^"]+"$/m, `version = "${version}"`],
   ['site/index.html', /<span data-version>[^<]+<\/span>/, `<span data-version>v${version}</span>`],
   ['site/index.html', /"softwareVersion": "[^"]+"/, `"softwareVersion": "${version}"`],
+  // The status demo's logo shows the kit's version after the clock (#919): the release's own, not the one the demo was written in.
+  ['site/js/status.js', /^    version: '[^']+',$/m, `    version: '${version}',`],
   ['README.md', /\[!\[Release\]\([^\n]+?\)\]\([^\n]+?\)/, `[![Release](https://img.shields.io/badge/release-v${version}-8b5cf6?style=flat-square)](https://github.com/henkisdabro/sandcastle-kit/releases/latest)`],
   ['README.md', /\[!\[Node\]\([^\n]+?\)\]\([^\n]+?\)/, `[![Node](https://img.shields.io/badge/node-${node}%2B-5fa04e?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)`],
 ];

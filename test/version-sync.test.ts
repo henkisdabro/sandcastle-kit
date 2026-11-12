@@ -26,13 +26,14 @@ test("a release synchronises public versions, checks drift and leaves history an
   const run = (mode: string) => runNode([join(root, "scripts/version.mjs"), mode], { encoding: "utf8" });
   const stale = run("--check");
   assert.equal(stale.status, 1);
-  for (const path of ["herdr/herdr-plugin.toml", "site/index.html", "README.md", "CHANGELOG.md"]) assert.ok(stale.stderr.includes(path), stale.stderr);
+  for (const path of ["herdr/herdr-plugin.toml", "site/index.html", "site/js/status.js", "README.md", "CHANGELOG.md"]) assert.ok(stale.stderr.includes(path), stale.stderr);
   const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
   writeFileSync(join(root, "CHANGELOG.md"), changelog.replace("## [Unreleased]", "## [Unreleased]\n\n## [9.8.7] - 2026-10-06"));
   assert.equal(run("--write").status, 0);
   assert.equal(run("--check").status, 0);
   assert.match(readFileSync(join(root, "site/index.html"), "utf8"), /<span data-version>v9\.8\.7<\/span>/);
   assert.match(readFileSync(join(root, "site/index.html"), "utf8"), /"softwareVersion": "9\.8\.7"/);
+  assert.match(readFileSync(join(root, "site/js/status.js"), "utf8"), /^    version: '9\.8\.7',$/m);
   assert.match(readFileSync(join(root, "README.md"), "utf8"), /badge\/release-v9\.8\.7-/);
   assert.match(readFileSync(join(root, "README.md"), "utf8"), /badge\/node-24%2B-/);
   assert.deepEqual(JSON.parse(readFileSync(join(root, "package.json"), "utf8")), pkg);
