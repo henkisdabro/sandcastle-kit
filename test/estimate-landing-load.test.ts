@@ -69,12 +69,12 @@ test("the same history at 1 at a time keeps its fast-forward landings", () => {
   assert.doesNotMatch(text!, NO_HISTORY);
 });
 
-test("typicalTimes gives a run at 2 or more the gates figure for its landing gates, and the others today's 0", () => {
+test("typicalTimes gives a run at 2 or more the gates figure for its landing gates, and the others no landing gates at all", () => {
   const p = project(serial());
   assert.equal(typicalTimes(p, [], 2)["landing gates"], 300);
   assert.equal(typicalTimes(p, [], 4)["landing gates"], 300);
-  assert.equal(typicalTimes(p)["landing gates"], 0);
-  assert.equal(typicalTimes(p, [], 1)["landing gates"], 0);
+  assert.equal(typicalTimes(p)["landing gates"], undefined);
+  assert.equal(typicalTimes(p, [], 1)["landing gates"], undefined);
 });
 
 test("a run at concurrency 2 whose landings gated prices a run at 2 from that figure", () => {

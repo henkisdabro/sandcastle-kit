@@ -81,7 +81,7 @@ landing-gate time from a run that ran at one at a time; with no other landing in
 prices every landing after the first as its ticket's own gate time (tickets - 1 of them), and the
 status view's projected end follows the same rule.
 The base gates and verify of the same runs are added on top, as they run before every ticket and
-after the last.
+after the last; a run that skipped its verify counts 0.
 `from N ticket(s)` counts the history tickets that priced the run (those of its models, carried,
 remainder or fresh), not every ticket of the last three runs.
 A ticket's wait for another ticket's fix, like a wait for a gates slot, is left out of its usual

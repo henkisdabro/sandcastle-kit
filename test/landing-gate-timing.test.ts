@@ -84,8 +84,8 @@ test("typicalTimes: the landing gates are a figure of their own, and no part of 
   assert.equal(LANDING_GATES in without, false);
 });
 
-test("typicalTimes: a ticket that landed without a gate counts none, so the median follows the tickets", () => {
-  // One of three tickets has a landing gate, two landed as fast-forwards: the median ticket has none.
+test("typicalTimes: a fast-forward landing is left out, so the landing gates are the median of the landings that ran gates", () => {
+  // One of three tickets has a landing gate, two landed as fast-forwards: the typical landing gates are the one that ran, 5m.
   const root = mkdtempSync(join(TMP, "estimate-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   const lines = ["1", "2", "3"].flatMap((issue) => [
@@ -94,7 +94,7 @@ test("typicalTimes: a ticket that landed without a gate counts none, so the medi
     line({ issue, phase: LANDING, ms: issue === "1" ? 5 * MIN : 1000, ok: true, result: "merged" }),
   ]);
   writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), lines.join("\n") + "\n");
-  assert.equal(typicalTimes({ root, name: "fixture" } as Project)[LANDING_GATES], 0);
+  assert.equal(typicalTimes({ root, name: "fixture" } as Project)[LANDING_GATES], 5 * 60);
 });
 
 test("typicalTimes: a ticket that never landed, or from before landings were timed, is no landing of 0", () => {
@@ -203,10 +203,10 @@ test("status: ends ~HH:MM is the pipelines' end, or the landings in a row when t
   record({ issue: 600 });
   const pipelines = ends();
   assert.ok(pipelines >= 9 && pipelines <= 11, `pipelines end in ${pipelines}m`);
-  // Three tickets not yet landed, 20m of landing gates each, on one worker: an hour.
+  // Three tickets not yet landed, 20m of landing gates each, on one worker: the next landing may be a fast-forward, so two landings' gates, 40m.
   record({ issue: 600, [LANDING_GATES]: 1200 });
   const landings = ends();
-  assert.ok(landings >= 59 && landings <= 61, `landings end in ${landings}m`);
+  assert.ok(landings >= 39 && landings <= 41, `landings end in ${landings}m`);
   // A short landing gate sets no floor above the pipelines.
   record({ issue: 600, [LANDING_GATES]: 60 });
   const short = ends();

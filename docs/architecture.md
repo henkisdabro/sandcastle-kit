@@ -2460,8 +2460,9 @@ scheduling would not tell them apart (`test/estimate-slots.test.ts`).
 The chain, gates and landing bounds sit beside it and the largest wins; the tickets' figure ends
 with one more landing (the last ticket's), and a chain's is each link's pipeline and its landing, as
 a dependant starts only once its blocker has landed.
-The median (and 80th percentile) `base gates` and `verify` lines of the window's runs are added to
-the winner. `from N ticket(s)` is the history tickets that priced some ticket of the run, not the
+The median (and 80th percentile) of each window run's `base gates` and `verify` time (its lines of
+the phase summed; 0 for a run that skipped its verify; a run with no `base gates` line is left out)
+are added to the winner (`test/estimate-verify-skipped.test.ts`). `from N ticket(s)` is the history tickets that priced some ticket of the run, not the
 window's count (`test/estimate-whole-run.test.ts`, which also holds that a ticket's wait for
 another's fix goes into the pipeline context's `waited`, beside the gates-slot waits, and so out of
 the run record's `typical`). `estimate` also takes `limit("gates")` as `detail.gateSlots`: each
@@ -2518,7 +2519,9 @@ them in `sum(land)`, so the gated, landed and serial bounds and the slot note fo
 `typicalTimes(project, extra, slots)` applies the same filter with `slots` of 2 or more (`burndown()`
 passes it where it writes the run record's `typical`): landings of runs recorded at concurrency 1 are
 left out of the `landing gates` median, and with none left it is the window's `gates` figure, so the
-status view's projected end, which reads `typical`, prices them alike. Both read each run's
+status view's projected end, which reads `typical`, prices them alike. The median is over the landings
+that ran gates, not the fast-forwards: a window of fast-forwards only (with `slots` under 2 or not
+given) leaves the key absent, which `runEnds` reads as 0. Both read each run's
 concurrency through `runLoads` (`test/estimate-landing-load.test.ts`).
 A ticket re-run for what an earlier "part of" merge left (`isRemainder`: `mergedPartly` and no
 branch ahead of the base, read once at the start into `remainderAtStart`, handed to `estimate` as
@@ -2553,9 +2556,9 @@ to that many from its older tickets (newest run first, outside the window), the 
 unknown (`test/estimate-model-older.test.ts`).
 A chain's bound sums its own tickets' prices (`detail.chainAt`), so a chain of large tickets is
 bounded above a chain of small ones (`test/estimate-chain-sizes.test.ts`). `typicalTimes` carries
-the same figure as `typical["landing gates"]` (the median ticket's landing gates, in seconds), from
-which the status view takes the later of the pipelines' end and now plus the tickets not yet landed
-times that figure for `ends ~HH:MM` (`test/landing-gate-timing.test.ts`).
+the same figure as `typical["landing gates"]` (the median of the landings that ran gates, in seconds), from
+which the status view takes the later of the pipelines' end and now plus the tickets not yet landed,
+less one (the next landing may be a fast-forward), times that figure for `ends ~HH:MM` (`test/landing-gate-timing.test.ts`).
 
 The demand comes from the scheduler (`src/schedule.ts`): the tickets from their push to the
 pipelines to the end of their attempt, plus one while a green branch waits to land or is landing,
