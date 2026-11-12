@@ -21,7 +21,7 @@ type Level = Parameters<typeof followOnTurn>[0]["level"];
 
 const ticket = (id: string) => ({ id, title: `T${id}`, body: "", comments: [] });
 const fake = (queue: () => string[]) => ({ ref: refOf, queued: () => queue().map(ticket) }) as unknown as Tracker;
-const none = async () => new Set<string>();
+const none = async () => new Map<string, string[]>();
 const facts = (tickets: Facts["tickets"], runnable: string[], over: Partial<Facts> = {}): Facts =>
   ({ base: "main", tracker: "github", started: "t", live: false, dryRun: false, verify: { green: true, line: "" }, gateCount: 1, tickets, runnable, blocked: [], standing: [], keptWorktrees: [], changed: {}, ...over }) as Facts;
 
@@ -31,7 +31,7 @@ const facts = (tickets: Facts["tickets"], runnable: string[], over: Partial<Fact
  */
 const decide = async (o: { level: Level; turn: number; turnFacts: Facts; queue: string[]; inRun: string[]; followedOn?: boolean; held?: string[] }) => {
   const after = afterTurn(o.turnFacts, o.level, o.turn, () => true);
-  const late = (await lateTickets(fake(() => o.queue), new Set(o.inRun), async () => new Set(o.held ?? []))).map((t) => t.id);
+  const late = (await lateTickets(fake(() => o.queue), new Set(o.inRun), async () => new Map((o.held ?? []).map((id) => [id, ["99"]] as const)))).map((t) => t.id);
   return followOnTurn({ level: o.level, turn: o.turn, end: endOf(after), late, followedOn: o.followedOn ?? false });
 };
 

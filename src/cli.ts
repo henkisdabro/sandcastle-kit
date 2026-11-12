@@ -150,7 +150,7 @@ import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
 import { startClock } from "./start-clock.ts";
 import { resolveClickHint } from "./click-hint.ts";
-import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
+import { blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen, turnRefusedCause, turnsEndLine } from "./autonomy.ts";
 import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
@@ -402,9 +402,12 @@ try {
       // The ids of the follow-on turn about to run: a turn that ran them has them in drain.inRun.
       let followOnIds: string[] = [];
       // The tickets queued while the run was live that no turn had and no blocker holds back; unreadable: none, so no follow-on turn.
+      // Each late ticket an open blocker holds, to the ids of its blockers: one that is no ticket of the tracker is named by its label, which no late ticket has, so it holds the ticket out.
+      const heldBy = (tracker: ReturnType<typeof makeTracker>) => async (late: Parameters<typeof openOnQueue>[2]) =>
+        new Map([...(await openOnQueue(project, tracker, late))].map(([id, on]) => [id, on.map((b) => blockerTicket(b) ?? `unread:${refLabel(b)}`)] as const));
       const lateNow = async (tracker: ReturnType<typeof makeTracker>) =>
         queuedAtStart
-          ? lateTickets(tracker, new Set([...queuedAtStart, ...drain.inRun]), async (late) => new Set((await openOnQueue(project, tracker, late)).keys()), scope?.ids)
+          ? lateTickets(tracker, new Set([...queuedAtStart, ...drain.inRun]), heldBy(tracker), scope?.ids)
           : [];
       // Where the loop would end with no work left for it: a follow-on turn for the late tickets, else false and the loop ends as it would.
       const followOn = async (tracker: ReturnType<typeof makeTracker>, turn: number, end: ReturnType<typeof endOf>): Promise<boolean> => {
@@ -534,7 +537,7 @@ try {
         // One more queue read: a ticket queued while the run was live that no turn took (a stop, the cap or the one follow-on turn's limit) waits for the next run.
         const tracker = makeTracker(project);
         const known = queuedAtStart && new Set([...queuedAtStart, ...drain.inRun]);
-        if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()), scope?.ids)) console.log(line);
+        if (known) for (const line of await lateQueueLines(tracker, known, heldBy(tracker), scope?.ids)) console.log(line);
       }
       // A red merged base is a failed run to whoever reads the code (`sandcastle wait`, a harness), at every level.
       // Level 0 gathered no facts: the run record's verify is enough, where gather() would read the tracker again

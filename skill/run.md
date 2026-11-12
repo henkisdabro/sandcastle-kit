@@ -83,7 +83,7 @@ This continues SKILL.md: run its "Before every action" first.
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
      before left conflicted, released, partly done (still queued) or green but not landed; a red ticket is not run again. A ticket queued after
-     the run started (unblocked) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
+     the run started (unblocked, or held only by another such ticket, which then joins as its dependant) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
      (`drain` may repeat it; `2` and `3` take one per run); one a stop leaves unrun waits for the next `sandcastle run`. A drain stops when no ticket is left to
      run again or a stop holds: no progress, the same ticket conflicting, left partly done or failing to land in two
      turns running, a red merged base (not one judged likely load, red twice on test timeouts or a gate far slower than usual: the next turn gates the base again first, and a base that is really red stops it there), a usage limit or a stopped run, 20 turns at most.

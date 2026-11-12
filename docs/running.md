@@ -500,6 +500,8 @@ At `2`, `3` and `drain`, a ticket queued while the run was live (and not held be
 blocker) joins it as a **follow-on turn**: where the run would end because no ticket is left to run
 again, or because `2` or `3` reached its own turn cap, it runs those tickets as one more turn, under
 the same stops and the 20-turn cap.
+A late ticket held only by other late tickets joins the same turn as their dependant, and starts
+when its blocker lands; one held by anything else waits for the next run.
 At `2` and `3` that is at most one follow-on turn per run, even past the level's own cap; at `drain`
 the follow-on turns may repeat, so a ticket queued during one can earn the next.
 A ticket queued after the follow-on turn at `2` or `3` waits for the next `sandcastle run`, and the
