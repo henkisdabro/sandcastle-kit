@@ -105,6 +105,8 @@ export type Snapshot = {
   /** Whether ticket ids link to their logs (OSC 8), and the click hint's modifier. */
   links: boolean;
   clickMod: string;
+  /** The kit's version, shown in the logo after the clock; absent when it could not be read (the logo is then as without it). */
+  version?: string;
   /** Where each source's reading stands; a snapshot without it read every source in full. */
   sources?: Record<SourceName, SourceStatus>;
 };
@@ -874,7 +876,7 @@ const NO_RECORD: RecordPart = { hasRecord: false, record: {} as RunRecord, ticke
  * The snapshot of the readings at `now` (epoch seconds; a redraw passes the clock, so ages count up between
  * refreshes). A source with no value yet draws as empty, and `sources` says which are loading.
  */
-export const snapshotOf = (dir: string, readings: Readings, { env = process.env, terminal = false, now = Math.floor(Date.now() / 1000) }: { env?: NodeJS.ProcessEnv; terminal?: boolean; now?: number } = {}): Snapshot => {
+export const snapshotOf = (dir: string, readings: Readings, { env = process.env, terminal = false, now = Math.floor(Date.now() / 1000), version }: { env?: NodeJS.ProcessEnv; terminal?: boolean; now?: number; version?: string } = {}): Snapshot => {
   const { hasRecord, record, tickets, live, outcomes, logs, tails, worktrees, runOutput, terminals } = readings.record.value ?? NO_RECORD;
   const { base, branches, unpushed } = readings.git.value ?? { base: env.SANDCASTLE_BASE || "", branches: {}, unpushed: 0 };
   const { containers, cpus } = readings.docker.value ?? { containers: {}, cpus: cores ?? 1 };
@@ -924,6 +926,7 @@ export const snapshotOf = (dir: string, readings: Readings, { env = process.env,
     ...(terminals?.length ? { terminals } : {}),
     links: linksOn(env, terminal),
     clickMod: env.SANDCASTLE_CLICK_MOD || "",
+    ...(version ? { version } : {}),
     sources: { record: readings.record.status, git: readings.git.status, docker: readings.docker.status, queue: readings.queue.status, pool: readings.pool.status },
   };
 };
@@ -939,8 +942,22 @@ export const sandcastleDir = (env: NodeJS.ProcessEnv = process.env): string | un
 };
 
 /** Reads every source once, each within its deadline, and the snapshot of what they answered: a one-off frame's. */
-export const readSnapshot = async (dir: string, { env = process.env, terminal = false }: { env?: NodeJS.ProcessEnv; terminal?: boolean } = {}): Promise<Snapshot> => {
+export const readSnapshot = async (dir: string, { env = process.env, terminal = false, version }: { env?: NodeJS.ProcessEnv; terminal?: boolean; version?: string } = {}): Promise<Snapshot> => {
   const sources = createSources(dir, env);
   await sources.refresh();
-  return snapshotOf(dir, sources.readings(), { env, terminal });
+  return snapshotOf(dir, sources.readings(), { env, terminal, version });
+};
+
+/**
+ * The `version` in the kit's own package.json, or undefined when it cannot be read. Read directly rather than
+ * through `kitVersion` (src/upgrading.ts): that imports the sandbox and credentials modules, and asks git for
+ * the commit, which the status view - a light entry - does neither of. The release alone is what the logo shows.
+ */
+export const kitPackageVersion = (): string | undefined => {
+  try {
+    const v: unknown = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+    return typeof v === "string" && v ? v : undefined;
+  } catch {
+    return undefined;
+  }
 };

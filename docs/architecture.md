@@ -1334,6 +1334,9 @@ terminal. `status 0` reads every source once through the same collectors (`readS
 The **layout** has no fixed breakpoints, and no near-miss joints: a lane's rule meets a table bar
 exactly or stays at least 5 columns from every one, and a lane with no such column folds into the
 summary line.
+The logo ends with the kit's version after the clock (`Snapshot.version`, read once at the view's start
+from the kit's `package.json` by `kitPackageVersion`, not through `src/upgrading.ts`, which is heavy;
+unset, the logo is as without it); its width counts in the lanes-beside-it decision.
 The header is the logo and the lanes (GLOSSARY.md) in priority order - RUN (state and start, turn
 and estimated end, tokens, and an API key's spend, red, so it shows at any width), MACHINE, MODELS
 (implement, review, repair; ids without `claude-`), SETTINGS, PLAN (left out without a reading) -
