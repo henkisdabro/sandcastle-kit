@@ -345,8 +345,10 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   A later turn the checkout refused to start (a dirty working tree, a branch that is not the base,
   git's half-done leftovers - another session's edit mid-run, say) ends the run as the turn before it
   did: **0** on a green merged base, 1 on a red one.
-  Its cause is in the closing summary's Run section (`Drain: ...` at `drain`, `Turn 2 could not
-  start: ...` at the other levels), so `sandcastle report` shows it after the run.
+  Its cause is in the closing summary's Run section, so `sandcastle report` shows it after the run.
+  At `drain` the line gives the whole run:
+  `Drain: <N> turns, <HH:MM> to <HH:MM> (<span>), <landed> landed (<#refs>), tokens <in> / <out>, stopped because <cause>`.
+  At the other levels it reads `Turn 2 could not start: ...`.
   Otherwise 1 is a red merged base or a refusal before any turn ran: a refused first turn, and every
   safety stop (the `.git` guard's `NOT STARTED: the shared .git differs ...`, a bad label) at any turn.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
@@ -540,9 +542,16 @@ A turn the checkout refuses to start ends it too, with the cause `turn <N> could
 working tree is dirty (<files>)` (or `not on <base> (found <branch>)`, or `git left something
 half-done (<file>)`).
 A hard cap of 20 turns is the backstop.
-After the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`, and
-keeps the line in the run record, so the closing summary `sandcastle report` prints shows it in its
-Run section.
+After the last turn it prints one line for the whole run, and keeps it in the run record, so the
+closing summary `sandcastle report` prints shows it in its Run section:
+`Drain: <N> turns, <HH:MM> to <HH:MM> (<span>), <landed> landed (<#refs>), tokens <in> / <out>, stopped because <cause>`.
+The times run from turn 1's start to the line's (`sandcastle report` ends at the last turn's finish),
+the refs are the tickets merged in any turn (the first 20, then `and N more`), and the tokens are the
+turns' summed.
+The turns are this run's own, found as the closing summary finds the earlier turns, so an older run in
+the same history is not counted.
+A record an older kit wrote has none of these figures and shows `Drain: <N> turns, <landed> landed,
+stopped because <cause>`.
 
 A drain takes only what its own turns lead to: every turn after the first takes exactly the previous
 turn's re-runnable tickets, never the whole queue.

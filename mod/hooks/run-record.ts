@@ -423,8 +423,10 @@ export type RunRecord = {
    * How a run of several turns ended, on the last turn's record (`recordDrain`, written once the loop ends): at `drain`,
    * whatever stopped it; at levels 1 to 3, only a later turn that could not start (`cause`: `turn 2 could not start: ...`).
    * `turns` is the turns that ran and `landed` what they merged. The closing summary's Run section shows it.
+   * `started`, `ended`, `ids` and `tokens` are the whole run's figures (`drainTotals`: turn 1's start, the end of the line,
+   * the tickets merged in any turn, the turns' tokens summed); an older run's record has none, and its line is the short one.
    */
-  drain?: { turns: number; landed: number; cause: string };
+  drain?: { turns: number; landed: number; cause: string; started?: string; ended?: string; ids?: string[]; tokens?: { input: number; cacheWrite: number; cacheRead: number; output: number } };
   /** Out-of-scope problems agents named in `<followup>` lines, recorded as each arrives: `id` is the ticket filed for triage, absent until it is filed (and for good in a dry run, or when filing `failed`, which a run that stopped on a `.git` change sets without trying). */
   followUps?: { title: string; from: string; phase: string; evidence?: string; fullTitle?: string; id?: string; failed?: string }[];
   /**

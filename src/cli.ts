@@ -151,7 +151,7 @@ import { confirmApiKey } from "./api-key.ts";
 import { startClock } from "./start-clock.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen, turnRefusedCause, turnsEndLine } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainEnd, type DrainTurn, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen, turnRefusedCause, turnsEndLine } from "./autonomy.ts";
 import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
@@ -162,7 +162,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { changelogSince, closingReport, type Facts, findRun, gather, operatorSteps, summary } from "./report.ts";
+import { changelogSince, closingReport, drainTotals, type Facts, findRun, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTicketsFromEnv, parseRunArgs, preflight, readOutcomes, recordDrain, rewordLibraryLines } from "./run.ts";
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
@@ -190,6 +190,15 @@ const recordedVerify = (root: string): Pick<Facts, "verify"> | undefined => {
     return { verify: JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")).verify };
   } catch {
     return undefined;
+  }
+};
+
+/** The whole run's figures for the drain's end line (`drainTotals`), as of now; none when the record cannot be read. */
+const wholeRun = (root: string): Partial<DrainEnd> => {
+  try {
+    return drainTotals(root, JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")), new Date().toISOString());
+  } catch {
+    return {};
   }
 };
 
@@ -529,7 +538,9 @@ try {
       }
       // How the turns ended, said and kept in the last turn's record, so `sandcastle report` shows it after the run.
       if (drain.turns > 0 && (level === "drain" || refusedTurn)) {
-        const end = { turns: drain.turns, landed: drain.landed, cause: drain.cause ?? "the run ended" };
+        const end: DrainEnd = { turns: drain.turns, landed: drain.landed, cause: drain.cause ?? "the run ended" };
+        // The whole run's figures, from this process's own record and history; a drain that reads none keeps the short line.
+        if (level === "drain") Object.assign(end, wholeRun(project.root));
         console.log(turnsEndLine(level, end));
         recordDrain(end);
       }

@@ -1,9 +1,11 @@
 // Autonomy levels: how many turns (runs) one `sandcastle run` may make, which tickets a
 // further turn would take, and the level-1 question. The loop itself is in cli.ts.
 import { createInterface } from "node:readline/promises";
-import { UNCHECKED_NOTE, type OutcomeEntry } from "../mod/hooks/run-record.ts";
+import { UNCHECKED_NOTE, type OutcomeEntry, type RunRecord } from "../mod/hooks/run-record.ts";
 import { CheckoutRefusal, OperatorError } from "./errors.ts";
 import type { Facts } from "./report.ts";
+// From figures.ts, not run.ts: the status view imports this module, and must not load the run's modules.
+import { hhmm, spanOf, tokenBrief } from "./figures.ts";
 import type { Ticket, Tracker } from "./tracker.ts";
 
 /** `drain`: turns until the queue is drained or a stop condition holds, never more than DRAIN_CAP. */
@@ -170,8 +172,27 @@ export const conflictedIn = (outcomes: Record<string, OutcomeEntry>, run: string
     .filter(([, o]) => o?.run === run && o.kind === "conflict")
     .map(([id]) => id);
 
-export const drainLine = (turns: number, landed: number, cause: string): string =>
-  `Drain: ${turns} turn${turns === 1 ? "" : "s"}, ${landed} landed, stopped because ${cause}`;
+/** The most tickets a drain line writes out; the rest are counted. */
+const DRAIN_REFS = 20;
+
+/**
+ * The drain's end line. With the run's figures (`DrainEnd`'s optional fields, absent from an older run's record) it gives
+ * the whole run - its span, the tickets landed and the tokens - so nobody adds the turns' summaries by hand; each part
+ * is left out when its figure is not there.
+ */
+export const drainLine = (turns: number, landed: number, cause: string, whole: Partial<Omit<DrainEnd, "turns" | "landed" | "cause">> = {}): string => {
+  const when = whole.started && whole.ended && Number.isFinite(Date.parse(whole.started)) && Number.isFinite(Date.parse(whole.ended));
+  const ids = whole.ids ?? [];
+  const shown = ids.slice(0, DRAIN_REFS).map((id) => `#${id}`).join(" ");
+  const refs = ids.length ? ` (${shown}${ids.length > DRAIN_REFS ? ` and ${ids.length - DRAIN_REFS} more` : ""})` : "";
+  return [
+    `Drain: ${turns} turn${turns === 1 ? "" : "s"}`,
+    ...(when ? [`${hhmm(whole.started!)} to ${hhmm(whole.ended!)} (${spanOf(Date.parse(whole.ended!) - Date.parse(whole.started!))})`] : []),
+    `${landed} landed${refs}`,
+    ...(whole.tokens ? [`tokens ${tokenBrief(whole.tokens)}`] : []),
+    `stopped because ${cause}`,
+  ].join(", ");
+};
 
 /** The most files a refused turn's cause names; the rest are counted. */
 const CAUSE_FILES = 5;
@@ -190,7 +211,7 @@ export const turnRefusedCause = (error: unknown, turn: number): string | undefin
 };
 
 /** What a run that made more than one turn records of its end (the run record's `drain`). */
-export type DrainEnd = { turns: number; landed: number; cause: string };
+export type DrainEnd = NonNullable<RunRecord["drain"]>;
 
 /**
  * The line a run's end says of its turns: a drain's `Drain:` line, whatever stopped it; at another level only a later
@@ -198,7 +219,7 @@ export type DrainEnd = { turns: number; landed: number; cause: string };
  * shows it from the record, so both read the same.
  */
 export const turnsEndLine = (level: Level | undefined, end: DrainEnd): string =>
-  level === "drain" ? drainLine(end.turns, end.landed, end.cause) : end.cause.charAt(0).toUpperCase() + end.cause.slice(1);
+  level === "drain" ? drainLine(end.turns, end.landed, end.cause, end) : end.cause.charAt(0).toUpperCase() + end.cause.slice(1);
 
 /**
  * The tickets the queue holds now that no turn of the run had and no blocker outside them holds back: queued

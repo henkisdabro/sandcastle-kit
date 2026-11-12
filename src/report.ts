@@ -17,6 +17,7 @@ import { afterTurn, DRAIN_CAP, type DrainEnd, type Level, needsDecision, partial
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenBrief, tokenLine } from "./run.ts";
+import { hhmm, spanOf as span } from "./figures.ts";
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { CPU_PRESSURE_HIGH, PRESSURE_WARN_FULL } from "./peaks.ts";
@@ -801,6 +802,30 @@ export const earlierTurns = (root: string, run: any): any[] => {
 };
 
 /**
+ * The whole run's figures for the drain's end line: turn 1's start, the tickets merged in any turn (turn by turn, in each
+ * record's key order, once each), and the turns' tokens summed from timings.jsonl. The turns are the record and the ones
+ * `earlierTurns` finds before it, so an older run in the same history is not in it. `end` is the caller's: the loop's now,
+ * the report's last `finishedAt`.
+ */
+export const drainTotals = (root: string, run: any, end: string): { started: string; ended: string; ids: string[]; tokens?: Tokens } => {
+  const turns = [...earlierTurns(root, run), run];
+  const ids: string[] = [];
+  for (const turn of turns) {
+    for (const [id, t] of Object.entries(turn.tickets ?? {})) {
+      if ((t as TicketRecord | undefined)?.state === "merged" && !ids.includes(id)) ids.push(id);
+    }
+  }
+  const file = join(root, ".sandcastle/logs/timings.jsonl");
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  let tokens: Tokens | undefined;
+  for (const turn of turns) {
+    const total = tokensFromTimings(text, turn.startedAt)?.total;
+    if (total) tokens = addTokens(tokens ?? NO_TOKENS, total);
+  }
+  return { started: turns[0].startedAt, ended: end, ids, ...(tokens ? { tokens } : {}) };
+};
+
+/**
  * The turn of this run (`run`, the current turn's record) that wrote a head record, from its `run` (the `startedAt` of
  * the turn that wrote it): the matching earlier turn's `settings.turn`, or undefined for a record from an earlier run
  * or from this turn itself. Matched on `startedAt` through the turns `earlierTurns` walks, never on `session`.
@@ -935,12 +960,6 @@ const planLimitLines = (f: Facts, skipped: string[]): string[] => {
     `Paused for usage: the plan's limit stopped the run${resets ? `, resets ${resets}` : ""}; the tickets above are runnable again once the window resets.` +
       (off ? " `USAGE_PAUSE=95` (a percentage, 1 to 100) makes a run wait out the window and carry on." : ""),
   ];
-};
-
-const hhmm = (iso: string) => new Date(iso).toTimeString().slice(0, 5);
-const span = (ms: number) => {
-  const m = Math.round(ms / 60_000);
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 };
 
 /**
@@ -1375,8 +1394,21 @@ const flakyLines = (f: Facts): string[] => {
 // The record's `drain`, or none when any part of it has the wrong type (a file in a repository).
 const drainOf = (d: unknown): DrainEnd | undefined => {
   if (!d || typeof d !== "object") return undefined;
-  const { turns, landed, cause } = d as Record<string, unknown>;
-  return Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause ? { turns: turns as number, landed: landed as number, cause } : undefined;
+  const { turns, landed, cause, started, ended, ids, tokens } = d as Record<string, unknown>;
+  if (!(Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause)) return undefined;
+  // The run's figures are optional and each judged alone: a wrong type drops that figure, not the line.
+  const time = (v: unknown) => (typeof v === "string" && Number.isFinite(Date.parse(v)) ? v : undefined);
+  const t = tokens && typeof tokens === "object" ? (tokens as Record<string, unknown>) : undefined;
+  const counts = t && ["input", "cacheWrite", "cacheRead", "output"].every((key) => typeof t[key] === "number" && Number.isFinite(t[key])) ? (t as Tokens) : undefined;
+  const whole = time(started) && time(ended) ? { started: started as string, ended: ended as string } : {};
+  return {
+    turns: turns as number,
+    landed: landed as number,
+    cause,
+    ...whole,
+    ...(Array.isArray(ids) && ids.every((id) => typeof id === "string") ? { ids: ids as string[] } : {}),
+    ...(counts ? { tokens: { input: counts.input, cacheWrite: counts.cacheWrite, cacheRead: counts.cacheRead, output: counts.output } } : {}),
+  };
 };
 
 /**
@@ -1486,7 +1518,8 @@ export const render = (f: Facts, plain = false): string => {
       `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : f.tokensNote === "unknown" ? " - tokens unknown" : ""}${f.tokensNote === "incomplete" ? " (incomplete)" : ""}`,
     // How the run's turns ended, right under the headline: the run's exit says nothing of it at 0 (a later turn the checkout refused).
-    ...(f.drain ? [turnsEndLine(f.settings?.autonomy, f.drain)] : []),
+    // The end is the last turn's finish when the record has the run's figures: the loop wrote its own clock before the exit finished the record.
+    ...(f.drain ? [turnsEndLine(f.settings?.autonomy, f.drain.started && f.finished ? { ...f.drain, ended: f.finished } : f.drain)] : []),
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
       : f.verify === undefined || f.verify === null
