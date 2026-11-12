@@ -687,7 +687,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     const allowed = new Set(["ISSUE_NUMBER", "TICKET", "TICKET_BODY", "SOURCE_BRANCH", "TARGET_BRANCH"]);
     // The orchestrator fills these for a repair pass. Sandcastle substitutes
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
-    if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
+    if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_RERUN", "GATE_OUTPUT"]) allowed.add(k);
     // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
     // And its final message, which the same prompts hold the place of.
     if (kind === "review" || kind === "rereview" || kind === "remerge") for (const k of ["IMPL_UNMET", "IMPL_SAID"]) allowed.add(k);
