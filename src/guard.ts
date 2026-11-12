@@ -12,7 +12,7 @@ import { DockerAnswerError, ownScratchWorktrees, reapOrphans, recordFork, record
 import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
-import { ownAbsoluteHooksPath, REWRITE_NOTE } from "./lean.ts";
+import { pinnedHooksPath, REWRITE_NOTE, rewrittenHooksPath, trackedHooksPath as trackedHooksDir } from "./hooks-path.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Git hooks on the host. `git merge --no-verify` still runs post-merge, and
@@ -419,7 +419,7 @@ const shown = (value: string | null) => {
 type OwnKey = (key: string, old: (string | null)[], next: (string | null)[], was: Map<string, (string | null)[]>) => string | undefined;
 
 const configChange = (project: Project, before: Fingerprint["config"]["entries"], now: Fingerprint["config"]["entries"], own?: OwnKey) => {
-  if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"], took: [] as string[], ownOnly: false };
+  if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"], took: [] as string[], ownOnly: false, rewrite: undefined as { from: string; to: string } | undefined };
   // A key with no value (`[core] bare`, true) is not one with an empty value (`bare =`, false).
   const values = (entries: string[]) => {
     const by = new Map<string, (string | null)[]>();
@@ -437,10 +437,13 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
   const took: string[] = [];
   let allBenign = true;
   let ownOnly = true;
+  let differing = 0;
+  let rewrite: { from: string; to: string } | undefined;
   for (const key of [...new Set([...was.keys(), ...is.keys()])].sort()) {
     const old = was.get(key) ?? [];
     const next = is.get(key) ?? [];
     if (old.length === next.length && old.every((v, i) => v === next[i])) continue;
+    differing++;
     const upstream = UPSTREAM_KEY.exec(key);
     const valid = next.every((v) => v !== null && (upstream?.[2] === "remote" ? PLAIN_REMOTE.test(v) : /^refs\/\S+$/.test(v)));
     if (upstream && upstream[1] !== project.baseBranch && !AGENT_BRANCH.test(upstream[1]) && valid) benign.push(key);
@@ -452,7 +455,8 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     let word: string;
     // A tracked hooks path turned into its own absolute form names no new program, so both values and the way back are
     // shown: a bare "changed" sent a person hunting the writer for ten tool calls. Anything else keeps its value hidden.
-    const back = !kind && /^core\.hookspath$/i.test(key) && old.length === 1 && next.length === 1 ? rewrittenHooksPath(project, old[0]!, next[0]!) : undefined;
+    const back = /^core\.hookspath$/i.test(key) && old.length === 1 && next.length === 1 ? rewrittenHooksPath(project.root, old[0]!, next[0]!) : undefined;
+    if (back) rewrite = { from: back, to: next[0]! };
     if (back) word = `${name}: ${JSON.stringify(back)} -> ${JSON.stringify(next[0])}, its absolute form. ${REWRITE_NOTE} Restore it with \`git config core.hooksPath ${back}\``;
     else if (!kind && (COMMAND_KEY.test(key) || SECRET_KEY.test(key))) word = `${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`;
     else if (!old.length) word = `${name} added: ${next.map(shown).join(", ")}`;
@@ -461,7 +465,8 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     if (kind) took.push(`${word} - ${kind}`);
     words.push(kind ? `${word} (looks like your own tooling: ${kind})` : word);
   }
-  return { benign: allBenign ? benign : [], words, took, ownOnly };
+  // Only when it is the one key that differs: a second changed key beside it is judged as it always was.
+  return { benign: allBenign ? benign : [], words, took, ownOnly, rewrite: differing === 1 ? rewrite : undefined };
 };
 
 // ---------------------------------------------------------------------------
@@ -589,47 +594,15 @@ const PLAIN_URLS: [string, RegExp][] = [
 /** Whether a remote's URL is plain https or ssh, and which. */
 const plainRemote = (url: string) => PLAIN_URLS.find(([, shape]) => shape.test(url))?.[0];
 
-/**
- * A `core.hooksPath` value that names a directory inside the repository, in a tracked directory: relative, no `..`, not
- * in `.git`, an existing directory whose real path is inside the project's, and the directory or one above it
- * (husky's `.husky/_` is ignored by its own `.gitignore`, in the tracked `.husky/`) holds tracked files. `git ls-files`
- * runs with `core.fsmonitor` off: this runs before the pins, over a config nobody has vetted yet.
- */
-const trackedHooksPath = (project: Project, value: string) => {
-  // oxlint-disable-next-line no-control-regex -- a control character in a path is never a person's own tooling
-  if (!value || value.length > 200 || /[\x00-\x1f\x7f\\]/.test(value) || /^[/~-]/.test(value)) return false;
-  const parts = value.split("/").filter((p) => p && p !== ".");
-  if (!parts.length || parts.some((p) => p === ".." || p.toLowerCase() === ".git") || value.split("/").some((p) => p === ".git")) return false;
-  try {
-    const inside = relative(realpathSync(project.root), realpathSync(join(project.root, ...parts)));
-    if (!inside || inside.startsWith("..") || !lstatSync(join(project.root, ...parts)).isDirectory()) return false;
-    for (let i = 1; i <= parts.length; i++) {
-      const listed = sh("git", ["-c", "core.fsmonitor=false", "ls-files", "-z", "--", `:(literal)${parts.slice(0, i).join("/")}/`], project.root);
-      if (listed) return true;
-    }
-  } catch {
-    // A path that is not there, or a git that cannot list: not a tracked directory.
-  }
-  return false;
-};
-
-/** `old` when `next` is exactly its absolute form in this project and `old` is a tracked hooks directory; else undefined. */
-const rewrittenHooksPath = (project: Project, old: string | null, next: string | null): string | undefined => {
-  if (old === null || next === null || ownAbsoluteHooksPath(project.root, next) === undefined) return undefined;
-  const parts = old.split("/").filter((p) => p && p !== ".").join("/");
-  let real = project.root;
-  try {
-    real = realpathSync(project.root);
-  } catch {
-    /* the root as given */
-  }
-  if (next !== join(project.root, parts) && next !== join(real, parts)) return undefined;
-  return trackedHooksPath(project, old) ? old : undefined;
-};
-
 const ownConfigKey = (project: Project): OwnKey => (key, old, next, was) => {
   const value = next.length === 1 ? next[0] : null;
   if (value === null) return undefined;
+  // The recorded relative path, now exactly its absolute form: the person's own tooling (Claude Code's worktree setup).
+  // Sandboxes are given the relative path through their environment, so nothing is lost by taking it.
+  if (/^core\.hookspath$/i.test(key) && old.length === 1) {
+    const back = rewrittenHooksPath(project.root, old[0]!, value);
+    if (back) return `the exact absolute form of the tracked hooks path \`${back}\``;
+  }
   const remote = /^remote\.(.+)\.url$/i.exec(key);
   if (remote && !old.length) {
     const kind = plainRemote(value);
@@ -637,7 +610,7 @@ const ownConfigKey = (project: Project): OwnKey => (key, old, next, was) => {
     // A new remote is one the record holds no key of (a changed URL on an existing remote is refused, origin included).
     if (kind && ![...was.keys()].some((k) => k.toLowerCase().startsWith(prefix))) return `a new remote at a plain ${kind} URL`;
   }
-  if (/^core\.hookspath$/i.test(key) && trackedHooksPath(project, value)) return "a hooks path in a tracked directory of the repo";
+  if (/^core\.hookspath$/i.test(key) && trackedHooksDir(project.root, value)) return "a hooks path in a tracked directory of the repo";
   return undefined;
 };
 
@@ -779,6 +752,7 @@ export const tookLines = ({ took, retaken }: GitConfigStart) => [
  */
 export const recordGitConfigStart = (project: Project, start: GitConfigStart) => {
   const { took: _took, retaken: _retaken, ...state } = start;
+  acceptedRewrite.delete(project.root);
   writeBaseline(project, { ...state, clean: false });
   for (const line of tookLines(start)) console.log(line);
 };
@@ -789,8 +763,17 @@ export const recordGitConfigStart = (project: Project, start: GitConfigStart) =>
  * next start refuses it: the end never records a state it did not check.
  */
 export const recordGitConfigEnd = (project: Project) => {
-  const { record: was } = readBaseline(project);
-  if (!was) return;
+  const { record: recorded } = readBaseline(project);
+  if (!recorded) return;
+  // The rewrite the guard accepted mid-run is the state the run checked: the record's value moves to it.
+  const accepted = acceptedRewrite.get(project.root);
+  const moved = (entries: string[]) => {
+    const key = (e: string) => e.split("\n")[0];
+    const at = entries.filter((e) => /^core\.hookspath$/i.test(key(e)));
+    if (!accepted || at.length !== 1 || at[0].slice(key(at[0]).length + 1) !== accepted.from) return entries;
+    return entries.map((e) => (e === at[0] ? `${key(e)}\n${accepted.to}` : e)).sort();
+  };
+  const was = { ...recorded, entries: moved(recorded.entries) };
   if (!differences(project, was, programState(project)).parts.length) writeBaseline(project, { ...was, clean: true });
 };
 
@@ -1021,6 +1004,11 @@ const rewrittenWorktrees = (project: Project): string[] => {
     .sort();
 };
 
+// The exact absolute rewrite of a tracked hooks path that `assertGitUnchanged` took mid-run, by project root: the run's
+// expectation moved to it, so `recordGitConfigEnd` compares the record's value moved the same way and records the end
+// clean. Memory only: a state the run did not check is never recorded.
+const acceptedRewrite = new Map<string, { from: string; to: string }>();
+
 // The three are told apart. A changed config can run a command on the host's
 // next git call, so nothing reads the repo after it. A moved base branch is
 // more often a person's own commit (a ticket-file edit, a quick fix) than a
@@ -1035,16 +1023,26 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
   let changed = changedFiles(before.files, now.files, before.modes, now.modes);
   let configWords: string[] = [];
   if (changed.includes(now.config.path)) {
-    const { benign, words } = configChange(project, before.config.entries, now.config.entries);
+    const { benign, words, rewrite } = configChange(project, before.config.entries, now.config.entries);
     configWords = words;
     // No key differs but the bytes do (a comment, spacing, an order across keys): git reads the same
     // config, so nothing to say. Unreadable config (null entries) always has a word.
-    if (benign.length || !words.length) {
+    // The exact absolute rewrite of a tracked hooks path is taken like an upstream: nothing reads the key during the run
+    // (the host's git runs with `core.hooksPath=/dev/null`, the sandboxes with the pinned path), so it runs nothing.
+    if (benign.length || rewrite || !words.length) {
       changed = changed.filter((f) => f !== now.config.path);
       // The new state is the run's expectation from here on, so the line is said once and a later
       // change is judged against it.
       before.files[now.config.path] = now.files[now.config.path];
       before.config = now.config;
+    }
+    if (rewrite) {
+      const seen = acceptedRewrite.get(root);
+      // Said once per run, however many fingerprints (one per pipeline) meet the same change.
+      if (seen?.from !== rewrite.from || seen.to !== rewrite.to) {
+        console.log(`core.hooksPath changed in the shared .git/config ${gatesOnly ? "while the gates ran" : "while sandboxes ran"}: ${JSON.stringify(rewrite.from)} -> ${JSON.stringify(rewrite.to)}, its absolute form. ${REWRITE_NOTE} Sandboxes are given ${JSON.stringify(rewrite.from)} through their environment, so agent commits still run its hooks - ${gatesOnly ? "the gates go on" : "the run goes on"}. Restore it with \`git config core.hooksPath ${rewrite.from}\`.`);
+      }
+      acceptedRewrite.set(root, rewrite);
     }
     if (benign.length) {
       console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config ${gatesOnly ? "while the gates ran" : "while sandboxes ran"}: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - ${gatesOnly ? "the gates go on" : "the run goes on"}.`);
@@ -1505,13 +1503,9 @@ const DEFAULT_PROTECTED = [
 // The tracked directory the local `core.hooksPath` names: its scripts run on the person's own next commit as the
 // defaults' `.husky/` and `.githooks/` do, and the start takes such a path without a question after a clean end.
 const hooksDirProtected = (project: Project): string[] => {
-  let value = "";
-  try {
-    value = sh("git", ["config", "--local", "--get", "core.hooksPath"], project.root).trim();
-  } catch {
-    return [];
-  }
-  if (!trackedHooksPath(project, value)) return [];
+  // The same derivation as the sandboxes' pin: the exact absolute form a worktree tool writes still names the directory.
+  const value = pinnedHooksPath(project.root);
+  if (!value) return [];
   const dir = `${value.split("/").filter((p) => p && p !== ".").join("/")}/`;
   return DEFAULT_PROTECTED.includes(dir) ? [] : [dir];
 };

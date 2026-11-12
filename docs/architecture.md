@@ -1842,6 +1842,27 @@ opened, since a blocking read would hang the whole run.
   opens, before every sandbox closes, before each landing and before each host write; the
   command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
   `core.hooksPath` and `core.fsmonitor` by environment.
+  The one config change a check takes mid-run is the exact absolute rewrite of a tracked hooks path
+  (decided: pin and accept, never restore - the kit never writes `.git/config`, since restoring would
+  make it a writer of the user's config, could race another writer and could hide a window of hookless
+  commits). A worktree tool (Claude Code's worktree setup) resolves a relative `core.hooksPath` and
+  writes `<root>/<path>` into the shared file. `configChange` reports it (`rewrite`) only when
+  `core.hooksPath` is the one key that differs, one value before and one after, and
+  `rewrittenHooksPath` (`src/hooks-path.ts`) returns the old value: the old one is a tracked hooks
+  directory (`trackedHooksPath`) and the new one is exactly `<root>/<old>` (or the real path of the
+  root). `assertGitUnchanged` then prints one line (both values, `REWRITE_NOTE`, the way back, once
+  per run and root) and takes the new state as the expectation, like a benign upstream. Any second
+  changed key, or any other value, stops as ever, with the value hidden. It is safe because nobody
+  reads the key during the run: the host's git runs with `core.hooksPath=/dev/null`
+  (`disableHostGitHooks`) and every sandbox with the pinned path, `pinnedHooksPath` - the local
+  `core.hooksPath` when it passes `trackedHooksPath`, or the relative path `ownAbsoluteHooksPath` names
+  for it when that is a tracked directory; `sandboxEnv` appends it as one more `GIT_CONFIG_*` pair
+  beside the maintenance pairs (command-scope config outranks the file, git 2.31+). `hooksDirProtected`
+  uses the same derivation, so the tracked hooks directory stays protected after the flip. The
+  rewrite the guard accepted is remembered by project root (`acceptedRewrite`), so
+  `recordGitConfigEnd` compares the record with that value moved to the accepted one and records the
+  end clean; a rewrite no check saw is never recorded clean
+  (`test/hooks-path-rewrite.test.ts`, `test/sandbox-hooks-path-pin.test.ts`).
 - The start baseline (`assertGitConfigBaseline`, `recordGitConfigStart`, `recordGitConfigEnd`,
   `src/guard.ts`; `test/guard-start-baseline.test.ts`, and
   `test/guard-start-baseline-coverage.test.ts` for each class of key, `config.worktree`, the hooks
@@ -1910,6 +1931,10 @@ opened, since a blocking read would hang the whole run.
   before it records; the refusal says whether the last run ended cleanly and marks the changes that
   look like a person's own tooling (`looks like your own tooling: ...`) apart from the rest
   (`test/guard-start-own-changes.test.ts`).
+  After a clean end the start also takes a recorded tracked hooks path that is now exactly its
+  absolute form (`ownConfigKey`, through `rewrittenHooksPath`; the same rewrite as above), with a
+  line; after an unclean end it is compared as any other change, and refused with both values and
+  the way back.
   A record left unclean whose keys and files equal the present ones starts: there is nothing to
   name, and a refusal would cost `--accept-git-config` after every Ctrl-C.
   Git may write `extensions.relativeWorktrees` as it adds a worktree (`worktree.useRelativePaths`),
