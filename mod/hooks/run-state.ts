@@ -15,7 +15,7 @@ export type Run = Pick<RunRecord, "orchestrator" | "pid" | "session" | "startedA
   /** The record's `settings.turn` when it is a whole number: 1 is the first turn of a `sandcastle run` (the cache refresh starts a new run there). */
   turn?: number;
   /** What `retriedNextTurn` reads beyond the tickets: the settings' cap, the dry-run and stop marks and the verify facts, each only when it has the shape src/run.ts writes. */
-  retry?: { cap?: number; dryRun?: boolean; stopped?: boolean; verify?: { green?: boolean; likelyLoad?: boolean; notRun?: boolean } };
+  retry?: Pick<RunRecord, "dryRun" | "stopped"> & { cap?: number; verify?: Partial<Pick<NonNullable<RunRecord["verify"]>, "green" | "likelyLoad" | "notRun">> };
   tickets?: Record<string, Ticket>;
 };
 
@@ -123,8 +123,8 @@ const retryOf = (r: Record<string, unknown>): Run["retry"] => {
   return {
     cap: typeof settings.cap === "number" && Number.isInteger(settings.cap) ? settings.cap : undefined,
     dryRun: flag(r.dryRun),
-    stopped: flag(r.stopped),
-    verify: verify ? { green: flag(verify.green), likelyLoad: flag(verify.likelyLoad), notRun: flag(verify.notRun) } : undefined,
+    stopped: text(r.stopped, 100),
+    verify: verify ? { green: flag(verify.green), likelyLoad: flag(verify.likelyLoad), notRun: text(verify.notRun, 100) } : undefined,
   };
 };
 

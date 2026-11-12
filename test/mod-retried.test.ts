@@ -49,7 +49,7 @@ test("the per-ticket lines order a re-run ticket with the later rows", () => {
 });
 
 test("a dry run, a stop or a red base leave the ticket needing you", () => {
-  for (const extra of [{ dryRun: true }, { stopped: true }, { verify: { green: false } }]) {
+  for (const extra of [{ dryRun: true }, { stopped: "main moved" }, { verify: { green: false } }]) {
     assert.deepEqual(needing(record({ turn: 2, cap: 20 }, extra)), ["#2 gate red", "#7 not landed"], JSON.stringify(extra));
   }
   assert.deepEqual(needing(record({ turn: 2, cap: 20 }, { verify: { green: false, likelyLoad: true } })), ["#2 gate red"]);
