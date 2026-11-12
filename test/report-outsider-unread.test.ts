@@ -86,3 +86,13 @@ test("a drain turn may run the unread ticket again, and a usage-limit skip still
   const limited = facts({ "5": { state: "skipped", order: 0, title: "t5", note: "not started: usage at 95%" } });
   assert.match(noRerunCause(limited) ?? "", /^the run stopped early/);
 });
+
+test("the unread ticket gets a Next step, and autonomy 0 names it among the tickets it could run again", () => {
+  const tickets: Record<string, TicketRecord> = {
+    "12": { state: "skipped", order: 0, title: "t12", note: "not started: could not read its edits from GitHub" },
+    "14": { state: "merged", order: 1, title: "t14" },
+  };
+  const out = render(facts(tickets, { settings: { autonomy: 0, turn: 1, cap: 1 } }), true);
+  assert.match(out, /## Next step\n1\. Run again for the 1 ticket\(s\) that never started\./);
+  assert.match(out, /Autonomy 0 makes one turn, and #12 could run again/);
+});

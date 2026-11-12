@@ -869,7 +869,7 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
 
   const lines = [`Settings: ${items.join(" · ")}`, ...usage];
   const again = level === 0 && !f.next ? rerunnable(f) : undefined;
-  const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? [])])] : [];
+  const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? []), ...(again.unchecked ?? [])])] : [];
   if (left.length) {
     lines.push(
       `Autonomy 0 makes one turn, and ${left.map(refOf).join(" ")} could run again: \`AUTONOMY_LEVEL=2\` (or \`drain\`) lets one \`sandcastle run\` take ` +
@@ -1719,7 +1719,9 @@ export const render = (f: Facts, plain = false): string => {
   // Never closed by the kit (the agent may be wrong), and still queued: every later run would pay for it again.
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} ticket(s) this run unblocked: \`sandcastle run\`.`);
-  if (skipped.length && !f.setupProblem) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
+  // A ticket whose outsider-edit read failed never started either, and stays queued: runnable, so it has a step too.
+  const neverStarted = (f.setupProblem ? 0 : skipped.length) + unchecked.length;
+  if (neverStarted) next.push(`Run again for the ${neverStarted} ticket(s) that never started.`);
   if (requeued.length) next.push(`\`sandcastle run\` again for ${list(requeued)}: requeued during this run.`);
   // They keep their queue label, and the next run resumes a kept branch rather than starting over.
   if (parked.length + cut.length + unstarted.length) {
