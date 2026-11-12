@@ -47,6 +47,9 @@ it never waits for one, but it is counted: while it lives the pool can read one 
 So can a ticket whose sandbox only waits for a gates slot: it moves off the sandbox count
 (`maxSandboxes`) while it waits and while its gates then run, so another ticket's agent pass can use
 the slot, and the header still counts its container.
+The status view's MACHINE lane keeps those apart: its sandboxes gauge counts the slots against the
+limit and adds `+N for gates` for the N sandboxes outside it (`sandboxes 3/3 +1 for gates`), the
+same figure the run's start line gives as `1 waiting for a gates slot, outside the limit`.
 Up to `maxGates` tickets per run wait so; a ticket leaves that limit once its gates slot is granted,
 so the next ticket that waits can move off the count too.
 It takes a counted slot again before a repair pass, ahead of tickets that have not started.

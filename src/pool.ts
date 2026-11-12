@@ -298,7 +298,7 @@ export const withLockSync = <T>(file: string, label: string, fn: () => T, timeou
 
 export type SlotLock = { pid: number; run: string; label: string };
 
-/** In the name of a lock outside the count (`uncountSlot`): `<pool>-waiting-<run>-<n>.lock`, so the status view's `<pool>-*.lock` count reads it as it reads a slot. */
+/** In the name of a lock outside the count (`uncountSlot`): `<pool>-waiting-<run>-<n>.lock`, which the status view's slot count (`readPool`) tells apart from a slot. */
 const UNCOUNTED = "-waiting-";
 
 /**
@@ -1097,9 +1097,9 @@ let waiters = 0;
  * none of the limit, so another ticket's agent pass can run meanwhile. Like an extra slot (`withExtraSlot`) it is outside the
  * numbered locks `tryAcquire` takes, is released with the returned lease and at exit, and counts for nothing once its holder
  * is dead (`holderRunning`; the next one taken removes its file). Unlike it, it is not in `members()`' `held` (the shares)
- * and not in `lastFreeSlot`'s count (`liveSlots` leaves it out); `usage()` and the status view's slot count read it, so
- * the live containers can pass the limit by as many as are waiting. The uncounted lock is written before the numbered
- * one is freed, so the sandbox is never unseen. The lease moved is released (a second `release` does nothing).
+ * and not in `lastFreeSlot`'s count (`liveSlots` leaves it out); `usage()` reads it, so the live containers can pass the
+ * limit by as many as are waiting, and the status view counts it apart (`+N for gates`). The uncounted lock is written
+ * before the numbered one is freed, so the sandbox is never unseen. The lease moved is released (a second `release` does nothing).
  */
 export const uncountSlot = (lease: SlotLease, label: string): SlotLease => {
   const from = leased.get(lease);

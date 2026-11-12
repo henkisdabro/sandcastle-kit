@@ -87,12 +87,12 @@ export const drawFrames = (fixture: Fixture, widths: number[], { rows = 400, env
   return drawn;
 };
 
-/** The slots the view's machine lane shows in use against the limit (`3/6`), drawn with `env` (`XDG_CACHE_HOME` says whose slots). */
+/** The slots the view's machine lane shows in use against the limit (`3/6`, with `+1 for gates` when a sandbox waits for a gates slot outside the limit), drawn with `env` (`XDG_CACHE_HOME` says whose slots). */
 export const machineSlots = (fixture: Fixture, env: Record<string, string> = {}): { sandboxes?: string; gates?: string } => {
   const drawn = drawFrame(fixture, { cols: 200, env });
   if (drawn.status !== 0) throw new Error(`the view ended ${drawn.status}: ${drawn.stderr}`);
   const { run } = readFacts(drawn.raw, fixture.root);
-  return { sandboxes: run.sandboxes?.split(" ")[0], gates: run.gates?.split(" ")[0] };
+  return { sandboxes: run.sandboxes, gates: run.gates?.split(" ")[0] };
 };
 
 /** The facts of `fixture`'s frame at `cols` columns. */

@@ -328,7 +328,7 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
     return `${g}${c.head}${used}/${limit}${c.off}`;
   };
   const gateWait = live ? Object.values(snapshot.tickets).filter((t) => t.state === "gates" && typeof t.note === "string" && t.note.startsWith("waiting for")).length : 0;
-  const MAC = [kvl("sandboxes", gauge(snapshot.pool.sandboxes.used, snapshot.pool.sandboxes.limit)), "", ""];
+  const MAC = [kvl("sandboxes", gauge(snapshot.pool.sandboxes.used, snapshot.pool.sandboxes.limit) + (snapshot.pool.sandboxes.outside > 0 ? ` ${c.hot}+${snapshot.pool.sandboxes.outside} for gates${c.off}` : "")), "", ""];
   const demand = text(record.demand);
   const share = text(record.share);
   const cap = text(record.cap);
