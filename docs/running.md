@@ -406,13 +406,19 @@ or a worktree, or `sandcastle stop` the run first.
 **Pausing for the plan's usage.** An unattended run that spends a subscription can run the plan out
 mid-pass, and the week's allowance is the person's own too.
 With `USAGE_PAUSE=90` (or `usagePause: 90` in `.sandcastle/config.ts`; the environment wins) the run
-pauses itself when the 5-hour or the weekly window of a provider it uses reaches that percent, and
+pauses itself when the 5-hour or the weekly window of Claude's plan reaches that percent, and
 **resumes by itself a minute after that window's reset** - a pause of days costs nothing, and the
 keep-awake helper ends as for any pause with nothing in flight.
 It reads the agents' own readings, the numbers of the status view's plan lane, so it needs no
 request and no credential, and it does nothing for a run that shows no plan usage (an API key): the
 start line says either way - `Usage pause: at 90%, resumes at the window's reset`.
 With both windows over the threshold it waits for the one that resets later.
+A Codex window (the cross-review's plan) never pauses the run: the cross-review is a second
+opinion, not a gate, so while a Codex window is at the percent and not yet reset the ticket's
+cross-review is skipped, the run prints `#7: cross-review skipped - Codex 5-hour usage 98%, resets
+14:05` (the weekday and time, `Wed 06:01`, when the reset is not today), and the closing summary
+lists the tickets that landed with one opinion fewer on a line of its own:
+`Landed without a cross-review (Codex plan's limit): #7, #9`.
 The same pause covers the limit itself: an agent that hits it anyway (the log ends with the plan's
 limit message) pauses the run until the reset in place of stopping the queue, and that ticket runs
 the pass again in a fresh sandbox on the resume.
