@@ -392,7 +392,7 @@ export type RunRecord = {
    */
   drain?: { turns: number; landed: number; cause: string };
   /** Out-of-scope problems agents named in `<followup>` lines, recorded as each arrives: `id` is the ticket filed for triage, absent until it is filed (and for good in a dry run, or when filing `failed`, which a run that stopped on a `.git` change sets without trying). */
-  followUps?: { title: string; from: string; phase: string; id?: string; failed?: string }[];
+  followUps?: { title: string; from: string; phase: string; evidence?: string; fullTitle?: string; id?: string; failed?: string }[];
   /**
    * The gates on the merged base. `image`: the tag they ran on, the run's own (built before any ticket landed).
    * `failing`: the tests a red verify named, at most five (`failingMore`: it named others), read from the node:test, pytest, jest and similar output; absent when none were named.

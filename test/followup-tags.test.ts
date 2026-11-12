@@ -150,8 +150,8 @@ test("two sessions' follow-ups become two tickets for triage, each naming its so
   assert.match(made[1].body, /review agent working on #7/);
   assert.deepEqual(made.map((m) => m.near), ["7", "7"]);
   assert.deepEqual(filed, [
-    { title: "run-shards.sh leaves its background shards running on TERM", from: "7", phase: "implement", id: "101" },
-    { title: "full-check.sh Linux leg has no time limit", from: "7", phase: "review", id: "102" },
+    { title: "run-shards.sh leaves its background shards running on TERM", from: "7", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only", id: "101" },
+    { title: "full-check.sh Linux leg has no time limit", from: "7", phase: "review", evidence: "test/full-check.sh:88 runs docker with no timeout", id: "102" },
   ]);
 });
 
@@ -160,7 +160,7 @@ test("a dry run files no follow-up and returns them for the summary to list", as
   const { made, tracker } = recording();
   const listed = await fileFollowUps(tracker, followUps, { dryRun: true, write: direct, exists: anyPath });
   assert.equal(made.length, 0);
-  assert.deepEqual(listed, [{ title: "run-shards.sh leaves its background shards running on TERM", from: "8", phase: "implement" }]);
+  assert.deepEqual(listed, [{ title: "run-shards.sh leaves its background shards running on TERM", from: "8", phase: "implement", evidence: "test/run-shards.sh:40 traps INT only" }]);
 });
 
 test("a follow-up named in prose, in a fenced block or as the echoed placeholder is not filed", async () => {
@@ -187,8 +187,8 @@ test("a filing that fails is kept with its reason, and the rest are still filed"
     { title: "second", evidence: "b", from: "1", phase: "repair" },
   ], { dryRun: false, write: direct, exists: anyPath });
   assert.deepEqual(filed, [
-    { title: "first", from: "1", phase: "review", failed: "gh issue create failed: HTTP 502" },
-    { title: "second", from: "1", phase: "repair", id: "12" },
+    { title: "first", from: "1", phase: "review", evidence: "a", failed: "gh issue create failed: HTTP 502" },
+    { title: "second", from: "1", phase: "repair", evidence: "b", id: "12" },
   ]);
 });
 

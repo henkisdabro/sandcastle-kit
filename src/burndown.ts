@@ -515,6 +515,8 @@ export const addChangelog = (have: string[], text: string | ChangelogScan, narro
 export type FollowUp = {
   title: string;
   evidence: string;
+  /** The title as the agent wrote it, only when `title` was cut to `FOLLOWUP_TITLE_MAX`. */
+  fullTitle?: string;
   from: string;
   phase: string;
   /** Set for a repair pass's line only: the ids of the red run it was given that its title or evidence names (`testsNamed`). Lines naming one test are one issue whichever ticket said them. */
@@ -525,8 +527,20 @@ const testsOfRepair = (phase: string, f: { title: string; evidence: string }, fa
   const tests = phase === "repair" && failing ? testsNamed(`${f.title}\n${f.evidence}`, failing) : [];
   return tests.length ? { tests } : {};
 };
-/** A follow-up as the run record keeps it: `id` is the ticket filed, absent in a dry run (which files nothing) or when filing failed (`failed`). */
-export type FiledFollowUp = { title: string; from: string; phase: string; id?: string; failed?: string };
+/**
+ * A follow-up as the run record keeps it: `id` is the ticket filed, absent in a dry run (which files nothing) or when filing failed (`failed`).
+ * `evidence` (whole, absent when the agent gave none) and `fullTitle` (only when `title` was cut) are what a person filing it by hand
+ * needs from the summary instead of the agents' logs; `title` stays the de-duplication key and the filed issue's title.
+ */
+export type FiledFollowUp = { title: string; from: string; phase: string; evidence?: string; fullTitle?: string; id?: string; failed?: string };
+/** The record's entry for a follow-up heard: the evidence and the uncut title only when there are some. */
+const recordedOf = (f: FollowUp): FiledFollowUp => ({
+  title: f.title,
+  from: f.from,
+  phase: f.phase,
+  ...(f.evidence ? { evidence: f.evidence } : {}),
+  ...(f.fullTitle ? { fullTitle: f.fullTitle } : {}),
+});
 
 // A ticket title is short: a longer one is a paragraph, cut at a word. GitHub refuses more than 256.
 export const FOLLOWUP_TITLE_MAX = 120;
@@ -555,7 +569,8 @@ const readFollowUps = (raws: readonly string[]): Omit<FollowUp, "from" | "phase"
     if (!said || said === "title - one line of evidence") return [];
     const at = titleSplit(said);
     const title = (at > 0 ? said.slice(0, at) : said).trim();
-    return [{ title: cutAtWord(title, FOLLOWUP_TITLE_MAX), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
+    const cut = cutAtWord(title, FOLLOWUP_TITLE_MAX);
+    return [{ title: cut, ...(cut !== title ? { fullTitle: title } : {}), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
   });
 export const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] => readFollowUps(ownLineTags(text, "followup"));
 
@@ -976,7 +991,7 @@ export const fileFollowUps = async (
   for (const f of followUps) {
     const key = titleKey(f.title);
     if (seen.has(key)) continue;
-    const at = { title: f.title, from: f.from, phase: f.phase };
+    const at = recordedOf(f);
     const place = placeSeat(f, o.exists, o.named);
     // A repair's line naming a test another line already got an issue for is about that test, whichever ticket said it.
     const ofTest = o.dryRun ? undefined : f.tests?.map((t) => byTest.get(t)).find((id) => id !== undefined);
@@ -1101,7 +1116,7 @@ export const createFollowUpBook = (
       }
       heard.push(f);
       if (listed.has(key)) return;
-      listed.set(key, { title: f.title, from: f.from, phase: f.phase });
+      listed.set(key, recordedOf(f));
       keep();
     },
     async file(unsafe) {

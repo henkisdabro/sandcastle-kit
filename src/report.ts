@@ -624,9 +624,15 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   const filed = opened.filter((i) => Date.parse(i.createdAt) >= from && Date.parse(i.createdAt) <= to).map((i) => ({ id: String(i.number), title: i.title }));
 
   // The record is a file in a repository: an entry without a title and a source says nothing.
-  const followUps: FiledFollowUp[] = (Array.isArray(run.followUps) ? run.followUps : []).filter(
-    (u: unknown): u is FiledFollowUp => !!u && typeof (u as FiledFollowUp).title === "string" && typeof (u as FiledFollowUp).from === "string" && typeof (u as FiledFollowUp).phase === "string",
-  );
+  const followUps: FiledFollowUp[] = (Array.isArray(run.followUps) ? run.followUps : [])
+    .filter(
+      (u: unknown): u is FiledFollowUp => !!u && typeof (u as FiledFollowUp).title === "string" && typeof (u as FiledFollowUp).from === "string" && typeof (u as FiledFollowUp).phase === "string",
+    )
+    .map((u: FiledFollowUp): FiledFollowUp => {
+      // The evidence and the uncut title are what a person filing it by hand reads in the summary: kept when strings, dropped otherwise.
+      const { evidence, fullTitle, ...rest } = u;
+      return { ...rest, ...(typeof evidence === "string" && evidence ? { evidence } : {}), ...(typeof fullTitle === "string" && fullTitle ? { fullTitle } : {}) };
+    });
 
   // Only this run's: an entry an earlier run wrote says nothing about this run's tickets.
   const outcomes = Object.fromEntries(
@@ -1008,16 +1014,34 @@ const owed = (f: Facts) => {
 };
 type Owed = ReturnType<typeof owed>;
 
-/** One follow-up as a Needs you bullet: filed for triage, whose filing failed, or not filed yet. */
-const followUpLine = (f: Facts, u: FiledFollowUp) => {
+/** The evidence line under a by-hand bullet is cut here: run.json keeps the whole. */
+const FOLLOWUP_EVIDENCE_MAX = 500;
+
+/**
+ * The indented `evidence:` line under a follow-up a person files by hand, cut at `FOLLOWUP_EVIDENCE_MAX` with a `…` and the
+ * path of the ticket's agent logs (run.json holds it whole); none for a follow-up with no evidence, so its bullet is as ever.
+ */
+const evidenceLines = (u: FiledFollowUp): string[] => {
+  const evidence = (u.evidence ?? "").replace(/\s+/g, " ").trim();
+  if (!evidence) return [];
+  const cut = evidence.length > FOLLOWUP_EVIDENCE_MAX;
+  const shown = cut ? `${evidence.slice(0, FOLLOWUP_EVIDENCE_MAX - 1).trimEnd()}…` : evidence;
+  return [`  evidence: ${shown}${cut ? ` (cut short - full text in run.json's followUps and the agents' logs, .sandcastle/logs/agent-issue-${u.from}-*.log)` : ""}`];
+};
+
+/** The title a by-hand bullet shows: the agent's whole, when the recorded one was cut. */
+const handTitle = (u: FiledFollowUp) => u.fullTitle || u.title;
+
+/** One follow-up as Needs you lines: filed for triage, whose filing failed, or not filed yet (a bullet, and its evidence when a person files it). */
+const followUpLine = (f: Facts, u: FiledFollowUp): string[] => {
   const from = `from ${refOf(u.from)} (${u.phase})`;
   return u.id
-    ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
+    ? [`- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`]
     : u.failed
-      ? `- ${u.title} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`
+      ? [`- ${handTitle(u)} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`, ...evidenceLines(u)]
       : f.dryRun
-        ? `- ${u.title} - ${from}: a real run files it for triage`
-        : `- ${u.title} - ${from}: not filed, as the run stopped before it could - file it by hand`;
+        ? [`- ${u.title} - ${from}: a real run files it for triage`]
+        : [`- ${handTitle(u)} - ${from}: not filed, as the run stopped before it could - file it by hand`, ...evidenceLines(u)];
 };
 
 /**
@@ -1029,9 +1053,9 @@ const byHandLines = (f: Facts, us: FiledFollowUp[], turn?: number): string[] => 
   const withheld = (u: FiledFollowUp) => f.followUpsWithheld !== undefined && !u.id && u.failed === f.followUpsWithheld;
   const held = us.filter(withheld);
   return [
-    ...us.filter((u) => !withheld(u)).map((u) => followUpLine(f, u)),
+    ...us.filter((u) => !withheld(u)).flatMap((u) => followUpLine(f, u)),
     ...(held.length ? [`Follow-ups not filed - ${f.followUpsWithheld}${turn ? ` (turn ${turn})` : ""}; file each by hand:`] : []),
-    ...held.map((u) => `- ${u.title} - from ${refOf(u.from)} (${u.phase})`),
+    ...held.flatMap((u) => [`- ${handTitle(u)} - from ${refOf(u.from)} (${u.phase})`, ...evidenceLines(u)]),
   ];
 };
 
@@ -1574,10 +1598,10 @@ export const render = (f: Facts, plain = false): string => {
       // The rest are for triage, under a heading of their own so the headline's `need you` and `to triage` each
       // match a group of bullets.
       ...(toTriage + carriedTriage ? ["### To triage"] : []),
-      ...followUps.filter((u) => triaged(f, u)).map((u) => followUpLine(f, u)),
+      ...followUps.filter((u) => triaged(f, u)).flatMap((u) => followUpLine(f, u)),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
       ...carried.flatMap((c) => [
-        ...fromTurn(c.turn, c.o.followUps.filter((u) => triaged(c.facts, u)).map((u) => followUpLine(c.facts, u))),
+        ...fromTurn(c.turn, c.o.followUps.filter((u) => triaged(c.facts, u)).flatMap((u) => followUpLine(c.facts, u))),
         ...fromTurn(c.turn, (c.facts.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`)),
       ]),
     ],
