@@ -61,7 +61,8 @@ const project = (t: { after: (fn: () => void) => void }, current: object, histor
   git(root, "commit", "-qm", "base");
   const logs = join(root, ".sandcastle/logs");
   mkdirSync(logs, { recursive: true });
-  writeFileSync(join(logs, "run.json"), JSON.stringify(current));
+  // Indented over many lines, as src/run.ts `recordRun` writes it.
+  writeFileSync(join(logs, "run.json"), JSON.stringify(current, null, 2) + "\n");
   writeFileSync(join(logs, "history.jsonl"), history.map((h) => JSON.stringify(h) + "\n").join(""));
   return root;
 };

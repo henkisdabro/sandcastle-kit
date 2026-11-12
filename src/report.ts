@@ -1850,9 +1850,10 @@ export const operatorSteps = async (project: Project) => {
 const knownRecords = (root: string): any[] => {
   const read = (name: string) => {
     const file = join(root, ".sandcastle/logs", name);
-    return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
+    return existsSync(file) ? readFileSync(file, "utf8") : "";
   };
-  return [...read("history.jsonl"), ...read("run.json")].flatMap((text) => parseRecord(text) ?? []);
+  // run.json is one record written indented over many lines (src/run.ts `recordRun`): parsed whole, never by line.
+  return [...read("history.jsonl").split("\n").filter(Boolean), read("run.json")].flatMap((text) => parseRecord(text) ?? []);
 };
 
 /**
