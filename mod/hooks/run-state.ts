@@ -3,7 +3,7 @@
 // view's vocabulary (src/status-rows.ts and src/status-render.ts). The record's types, the ticket states and the
 // tables from state to group and word live in run-record.ts.
 
-import { GROUPS, type Group, isTicketState, type RunRecord, sessionId, WORDS } from "./run-record.ts";
+import { GROUPS, type Group, isTicketState, retriedNextTurn, type RunRecord, sessionId, WORDS } from "./run-record.ts";
 
 /** A ticket as read from a file that may be a stranger's: its state is any short text until `isTicketState` says otherwise. */
 export type Ticket = { state?: string; note?: string; title?: string; order?: number };
@@ -14,6 +14,8 @@ export type Run = Pick<RunRecord, "orchestrator" | "pid" | "session" | "startedA
   keepWarm?: boolean;
   /** The record's `settings.turn` when it is a whole number: 1 is the first turn of a `sandcastle run` (the cache refresh starts a new run there). */
   turn?: number;
+  /** What `retriedNextTurn` reads beyond the tickets: the settings' cap, the dry-run and stop marks and the verify facts, each only when it has the shape src/run.ts writes. */
+  retry?: { cap?: number; dryRun?: boolean; stopped?: boolean; verify?: { green?: boolean; likelyLoad?: boolean; notRun?: boolean } };
   tickets?: Record<string, Ticket>;
 };
 
@@ -112,6 +114,31 @@ const turnOf = (settings: unknown): number | undefined => {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 };
 
+const flag = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined);
+
+// Only the facts `retriedNextTurn` judges, each kept when it is the type the kit writes; a stranger's file carries nothing else into the rule.
+const retryOf = (r: Record<string, unknown>): Run["retry"] => {
+  const settings = r.settings && typeof r.settings === "object" ? (r.settings as Record<string, unknown>) : {};
+  const verify = r.verify && typeof r.verify === "object" ? (r.verify as Record<string, unknown>) : undefined;
+  return {
+    cap: typeof settings.cap === "number" && Number.isInteger(settings.cap) ? settings.cap : undefined,
+    dryRun: flag(r.dryRun),
+    stopped: flag(r.stopped),
+    verify: verify ? { green: flag(verify.green), likelyLoad: flag(verify.likelyLoad), notRun: flag(verify.notRun) } : undefined,
+  };
+};
+
+/**
+ * The ids of the tickets a later autonomy turn will take by itself (`retriedNextTurn`, the rule the status view shares): none
+ * unless the run is live, so a killed run still reads as needing a person.
+ */
+const retried = (run: Run, live: boolean): Set<string> => {
+  const t = Object.fromEntries(tickets(run).map(([id, k]) => [id, { state: k.state, note: k.note }]));
+  const { cap, ...rest } = run.retry ?? {};
+  // `turn` is kept only when positive; a missing one leaves the rule with no turn, so no retry.
+  return retriedNextTurn({ finishedAt: run.finishedAt, exitCode: run.exitCode, settings: { turn: run.turn, cap }, ...rest, tickets: t }, live);
+};
+
 /** A half-written or foreign file reads as no record. */
 export const parse = (raw: string): Run | undefined => {
   let r: Record<string, unknown>;
@@ -134,6 +161,7 @@ export const parse = (raw: string): Run | undefined => {
     tokens: text(r.tokens, 40),
     keepWarm: settingOf(r.settings, "keepWarm"),
     turn: turnOf(r.settings),
+    retry: retryOf(r),
     tickets: Object.fromEntries(
       // A ticket file's id is a whole slug: cut short, two tickets of one feature would share a key.
       tickets.slice(0, MAX_TICKETS).map(([id, t]) => [text(id, 100) ?? "?", { state: text(t?.state, 24), note: text(t?.note, 100), title: text(t?.title, 100), order: whole(t?.order) }]),
@@ -143,23 +171,28 @@ export const parse = (raw: string): Run | undefined => {
 
 const tickets = (run: Run) => Object.entries(run.tickets ?? {});
 
-/** The tickets a person has to act on: `#105 conflict`. */
-export const needing = (run: Run): string[] =>
-  tickets(run)
-    .filter(([, t]) => group(t) === "needs you")
+/** The tickets a person has to act on: `#105 conflict`. A ticket a later turn re-runs (`live` run only) is not one yet. */
+export const needing = (run: Run, live = true): string[] => {
+  const later = retried(run, live);
+  return tickets(run)
+    .filter(([id, t]) => group(t) === "needs you" && !later.has(id))
     .map(([id, t]) => `${ref(id)} ${word(t.state)}`);
+};
 
 /** What the band above the prompt draws from: plain data, so it can live in `$.state`. */
 export type Summary = { name: string; stage: string; counts: number[]; tokens: string };
 
 /** `counts` runs parallel to LEGEND. */
-export const summarise = (run: Run): Summary => ({
+export const summarise = (run: Run, live = true): Summary => {
+  const later = retried(run, live);
+  return {
   name: run.orchestrator ?? "",
   // One process can hold several turns: a finished record with a live process is between two.
   stage: run.finishedAt ? "turn finished" : run.stage && run.stage !== "running" ? run.stage : "",
-  counts: LEGEND.map((g) => tickets(run).filter(([, t]) => group(t) === g.group).length),
+  counts: LEGEND.map((g) => tickets(run).filter(([id, t]) => group(t) === g.group && !(g.group === "needs you" && later.has(id))).length),
   tokens: run.tokens ?? "",
-});
+  };
+};
 
 export type Segment = { text: string; colour: string; bold?: true; count?: number };
 
@@ -204,16 +237,18 @@ export const band = (s: Summary, columns: number, castle: Castle = CASTLE, cache
 
 /** The same summary as one line of text, for `/sandcastle-status`. A run that is over has no stage. */
 export const line = (run: Run, live: boolean): string => {
-  const s = summarise(run);
+  const s = summarise(run, live);
   return [live && s.stage, ...LEGEND.flatMap((g, i) => (s.counts[i] ? [`${g.glyph} ${g.label} ${s.counts[i]}`] : [])), s.tokens].filter(Boolean).join(" · ");
 };
 
 /** One line per ticket, in the status view's order: working first, then what needs a person. */
-export const rows = (run: Run): string[] => {
+export const rows = (run: Run, live = true): string[] => {
+  const later = retried(run, live);
   const place = (t: Ticket) => LEGEND.findIndex((g) => g.group === group(t));
-  const rank = (t: Ticket) => (place(t) < 0 ? LEGEND.length : place(t));
+  // A ticket a later turn re-runs is ordered with the later rows, after merged, as the status view does.
+  const rank = ([id, t]: [string, Ticket]) => (later.has(id) ? LEGEND.length : place(t) < 0 ? LEGEND.length : place(t));
   return tickets(run)
-    .sort(([, a], [, b]) => rank(a) - rank(b) || (a.order ?? 0) - (b.order ?? 0))
+    .sort((a, b) => rank(a) - rank(b) || (a[1].order ?? 0) - (b[1].order ?? 0))
     .map(([id, t]) => `${LEGEND[place(t)]?.glyph ?? "·"} ${ref(id)} ${word(t.state)}${t.note ? ` (${t.note})` : ""}${t.title ? ` - ${t.title}` : ""}`);
 };
 

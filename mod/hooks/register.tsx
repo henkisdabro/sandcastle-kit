@@ -663,7 +663,7 @@ export const register: Register = (on) => {
         [
           ...(roots.length > 1 ? [root] : []),
           `${head} · ${line(run, live)}`,
-          ...rows(run),
+          ...rows(run, live),
           ...(live ? [] : ["`sandcastle report` prints the closing summary."]),
         ].join("\n"),
       );

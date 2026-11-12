@@ -17,6 +17,10 @@ itself, in the status view's castle, glyphs and colours:
 - 🙋 **A pinned line and a notice** when a ticket comes to need a person - a conflict, a red
   gate, a held branch, a crash - naming the tickets. The line stays until they are dealt with or
   the run ends.
+  A `not landed` or `conflict` ticket that a later turn of the live run takes by itself is not
+  raised as needing you, and the band's needs-you count and `/sandcastle-status` leave it out
+  (the per-ticket lines list it with the later rows), as the status view shows it as `later`.
+  A run that was killed has no later turn, so its tickets read as needing you.
 - 🏁 **A prompt when the run ends.** The session where you used `/sandcastle` hears that the run's
   process is gone - after the report, a drained queue, a crash or Ctrl-C, or a run that died seconds
   after it started - and closes the run with the closing summary (the seven sections, or a short
