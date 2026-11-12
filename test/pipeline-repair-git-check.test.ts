@@ -1,5 +1,5 @@
 // The run's `.git` check (`host.check`) runs once more between a red gate and the repair pass, after the fix board's
-// wait and the merge of a landed fix: a change made on the host in the meantime stops the run as the ticket's `tampered`
+// wait, the merge of a landed fix and the counted slot wait: a change made on the host stops the run as the ticket's `tampered`
 // before the repairer reads it as the red's cause. A check that passes goes on to the repair pass as before. The
 // pipeline (`createPipeline`, src/burndown.ts) runs over its faked ports - a temp repo, a host worktree as its sandbox,
 // scripted agents and gate runs. No Docker, model, gh or network.
@@ -18,8 +18,10 @@ import { quietly } from "./quiet.ts";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { createPipeline } = await import("../src/burndown.ts");
+const { attempted, createPipeline } = await import("../src/burndown.ts");
 const { GuardStop } = await import("../src/guard.ts");
+const { gather, render } = await import("../src/report.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type PCtx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
 type Issue = Parameters<ReturnType<typeof createPipeline>>[0];
@@ -153,8 +155,8 @@ const harness = (o: { check: (when: string) => Promise<void> | void; fixes?: unk
     keptWorktrees: [],
     tampered,
   } as unknown as PCtx);
-  const attempt = async () => quietly(() => pipeline(issue));
-  return { events, asked, gates, tampered, attempt };
+  const attempt = async (at?: Parameters<ReturnType<typeof createPipeline>>[1]) => quietly(() => pipeline(issue, at));
+  return { project, events, asked, gates, tampered, attempt };
 };
 
 test("a .git change seen after a red gate runs no repair pass and stops the run as the ticket's tampered", async () => {
@@ -170,6 +172,19 @@ test("a .git change seen after a red gate runs no repair pass and stops the run 
   assert.ok(h.tampered.get(ID) instanceof GuardStop);
   assert.match(String((h.tampered.get(ID) as Error).message), /^STOPPED before repairing #7: /);
   assert.ok(h.asked.includes("before repairing #7"), h.asked.join(" | "));
+
+  // The attempt hands this cause to the scheduler, and the closing summary prints the guard's full stop line.
+  const error = h.tampered.get(ID) as Error;
+  assert.deepEqual(attempted(ID, { status: "rejected", reason: error }, { error }), {
+    kind: "crashed", error, causes: [{ kind: "tampered", error }],
+  });
+  write(h.project.root, ".sandcastle/logs/run.json", JSON.stringify({
+    startedAt: "2026-10-07T00:00:00.000Z",
+    finishedAt: "2026-10-07T01:00:00.000Z",
+    stage: "report", exitCode: 1, pid: 1, tickets: {}, stopped: error.message,
+  }));
+  const log = render(await gather({ ...h.project, tracker: fakeTracker({ kind: "files" }) }, () => undefined), true);
+  assert.ok(log.includes(error.message), log);
 });
 
 test("a .git check that passes goes on to the repair pass as before", async () => {
@@ -179,7 +194,8 @@ test("a .git check that passes goes on to the repair pass as before", async () =
   assert.ok(h.events.includes("repair"), h.events.join(", "));
   assert.equal(h.asked.filter((w) => w === "before repairing #7").length, 1);
   assert.equal(h.tampered.size, 0);
-  assert.notEqual(o.status, "crashed");
+  assert.equal(o.status, "green");
+  assert.equal(o.repairs, 1);
 });
 
 test("a .git change made while the ticket waited for another's fix runs no repair pass", async () => {
@@ -205,6 +221,23 @@ test("a .git change made while the ticket waited for another's fix runs no repai
   h.gates.push(RED);
   await assert.rejects(h.attempt(), (error) => error instanceof GuardStop && /STOPPED before repairing #7:/.test(error.message));
   assert.ok(changed, "the wait did not run");
+  assert.ok(!h.events.includes("repair"), `a repair pass ran: ${h.events.join(", ")}`);
+  assert.ok(h.tampered.get(ID) instanceof GuardStop);
+});
+
+test("a .git change made while the repair waited for a counted sandbox slot runs no repair pass", async () => {
+  let changed = false;
+  const h = harness({
+    check: (when) => {
+      if (changed) throw stop(when);
+    },
+  });
+  h.gates.push(RED, GREEN);
+  await assert.rejects(h.attempt({
+    juncture: async () => {},
+    agent: async () => { changed = true; },
+  }), (error) => error instanceof GuardStop && /STOPPED before repairing #7:/.test(error.message));
+  assert.ok(changed, "the sandbox slot wait did not run");
   assert.ok(!h.events.includes("repair"), `a repair pass ran: ${h.events.join(", ")}`);
   assert.ok(h.tampered.get(ID) instanceof GuardStop);
 });

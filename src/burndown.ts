@@ -3009,12 +3009,13 @@ export const createPipeline = (ctx: PipelineContext) => {
             }
           }
         }
-        // The run's `.git` check, after the fix board's wait and the merge of a landed fix, as the last thing before the pass:
-        // a change made on the host since the gates ran (or during the wait) would otherwise be read by the repair as the
-        // red's cause and filed as "environmental", the guard stopping the run only at the close. A failure is thrown, as at an open.
+        if (!forced) fixes.claim(key, issue.id);
+        // A slot of the limit again, after the fix board's wait: no agent pass runs outside `maxSandboxes`.
+        await at?.agent?.();
+        // Check after both waits (the fix board and the counted slot): a host change during either must stop the run
+        // before the repairer reads it as the red's cause and files an "environmental" follow-up.
         await checkGit(issue.id, `before repairing ${ref(issue.id)}`);
         seen.add(key);
-        if (!forced) fixes.claim(key, issue.id);
         repairs++;
         const why = forced ? "test red gate" : `${failure.name} red`;
         console.log(
@@ -3023,8 +3024,6 @@ export const createPipeline = (ctx: PipelineContext) => {
         forced = false;
         const beforePass = sh("git", ["rev-parse", branch], project.root);
         let verdict: ReturnType<typeof repairVerdict>;
-        // A slot of the limit again, after the fix board's wait: no agent pass runs outside `maxSandboxes`.
-        await at?.agent?.();
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.

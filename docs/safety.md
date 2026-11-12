@@ -166,9 +166,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
 - 🔧 **Checked before every repair pass.** A ticket whose gate went red is repaired in the sandbox
   it is already in, so no open comes between the red and the pass.
   The fingerprint is checked once more as the last thing before the repair pass starts - after any
-  wait for another ticket's fix and the merge of one that landed - so a `.git` change made on your
-  machine meanwhile stops the run there, and the repairer is not asked to explain a red the change
-  caused.
+  wait for another ticket's fix, the merge of one that landed and the wait for a sandbox slot -
+  so a `.git` change made on your machine meanwhile stops the run there, and the repairer is not
+  asked to explain a red the change caused.
 - 🚪 **Checked before every sandbox closes.** Sandcastle's close stops the container, then runs
   `git status` on your machine in the sandbox's worktree, which reads `.git/config` and that
   worktree's record in `.git/worktrees/<name>/`.
