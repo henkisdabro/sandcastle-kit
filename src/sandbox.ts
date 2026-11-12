@@ -12,6 +12,7 @@ import { CACHE_TTL_KEY, claudeEnv, CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
 import { nearest, OperatorError, SetupFailed } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
+import { pinnedHooksPath } from "./hooks-path.ts";
 import { commandOf, KIT_CACHE } from "./live-runs.ts";
 import { kitRunning } from "../mod/hooks/run-live.ts";
 import { withLock } from "./pool.ts";
@@ -1061,15 +1062,15 @@ const CODEX_AUTH = "/home/agent/.codex-host/auth.json";
 // image: no rebuild, and a project layer is covered too.
 export const SANDBOX_GIT_MAINTENANCE_OFF = [["gc.auto", "0"], ["maintenance.auto", "false"]] as const;
 
-/** `env` with the maintenance-off pairs appended after any `GIT_CONFIG_*` pairs it already carries. */
-const withGitMaintenanceOff = (env: Record<string, string>): Record<string, string> => {
+/** `env` with `extra` pairs appended after any `GIT_CONFIG_*` pairs it already carries. */
+const withGitConfig = (env: Record<string, string>, extra: readonly (readonly [string, string])[]): Record<string, string> => {
   const count = Number(env.GIT_CONFIG_COUNT);
   const n = Number.isInteger(count) && count >= 0 ? count : 0;
-  const pairs = SANDBOX_GIT_MAINTENANCE_OFF.flatMap(([key, value], i) => [
+  const pairs = extra.flatMap(([key, value], i) => [
     [`GIT_CONFIG_KEY_${n + i}`, key],
     [`GIT_CONFIG_VALUE_${n + i}`, value],
   ]);
-  return { ...env, ...Object.fromEntries(pairs), GIT_CONFIG_COUNT: String(n + SANDBOX_GIT_MAINTENANCE_OFF.length) };
+  return { ...env, ...Object.fromEntries(pairs), GIT_CONFIG_COUNT: String(n + extra.length) };
 };
 
 // The host's IANA zone name, resolved here and not read from `TZ`: macOS often has none set. A
@@ -1094,7 +1095,11 @@ export const sandboxEnv = (project: Project): Record<string, string> => {
   // review or resolve pass sets (`CACHE_TTL_KEY`), even though an implement pass's env does not name it.
   const env = credentials(project);
   for (const key of [...Object.keys(claudeEnv()), CACHE_TTL_KEY]) delete env[key];
-  return withGitMaintenanceOff({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) });
+  // The project's tracked hooks path, pinned: a worktree tool may rewrite the shared `.git/config` value to its absolute
+  // host form, which does not exist in a container, and command-scope config outranks the file (git 2.31+). The kit
+  // writes nothing to `.git/config`; no tracked hooks path pins nothing.
+  const hooks = pinnedHooksPath(project.root);
+  return withGitConfig({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) }, [...SANDBOX_GIT_MAINTENANCE_OFF, ...(hooks ? [["core.hooksPath", hooks] as const] : [])]);
 };
 
 // Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a

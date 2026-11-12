@@ -26,6 +26,7 @@ import { join, posix, relative, resolve } from "node:path";
 import { IMPL_MODEL, toolsFor } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { dockerRunTimeout } from "./errors.ts";
+import { ownAbsoluteHooksPath, pinnedFor, REWRITE_NOTE } from "./hooks-path.ts";
 import { credentials, sh } from "./sandbox.ts";
 
 export type Item = {
@@ -489,6 +490,15 @@ export const hostHooks = (root: string, names: readonly string[]): string[] => {
  */
 export const hooksPathLines = (value: string, root?: string): string[] => {
   const own = root === undefined ? undefined : ownAbsoluteHooksPath(root, value);
+  // The exact absolute form of a tracked hooks directory: every sandbox is given the relative path through its
+  // environment (`pinnedHooksPath`), so only the config's own value is out of line.
+  const pinned = root === undefined ? undefined : pinnedFor(root, value);
+  if (own && pinned) {
+    return [
+      `core.hooksPath is ${JSON.stringify(value)}, the absolute form of this project's own \`${pinned}\`, which does not exist inside a sandbox. Sandboxes are given \`${pinned}\` through their environment, so agent commits still run its hooks. ${REWRITE_NOTE}`,
+      `-> \`git config core.hooksPath ${pinned}\` puts the config right once no run is live: a live run goes on without it and stops on the change back. The next start takes that change without a question when the last run ended cleanly.`,
+    ];
+  }
   if (own) {
     return [
       `core.hooksPath is ${JSON.stringify(value)}, the absolute form of this project's own \`${own}\`, which does not exist inside a sandbox: git finds no hooks there and agent commits run none. ${REWRITE_NOTE}`,
@@ -501,33 +511,7 @@ export const hooksPathLines = (value: string, root?: string): string[] => {
   ];
 };
 
-/** Why a relative hooks path turns absolute by itself: shared by doctor, `lean`, the base check and the guard's lines. */
-export const REWRITE_NOTE =
-  "This matches a known Claude Code rewrite: its worktree setup writes the absolute form of a relative `core.hooksPath` into the shared `.git/config`.";
-
-/**
- * The relative hooks path an absolute `core.hooksPath` is the host form of: `<root>/<rel>` naming a directory inside the
- * project, outside `.git`. Undefined for any other value, so the lines never name a fix the value does not imply.
- */
-export const ownAbsoluteHooksPath = (root: string, value: string): string | undefined => {
-  if (!value.startsWith("/")) return undefined;
-  let real = root;
-  try {
-    real = realpathSync(root);
-  } catch {
-    /* the root as given */
-  }
-  for (const base of new Set([root, real])) {
-    const rel = relative(base, value);
-    if (!rel || rel.startsWith("..") || rel.startsWith("/") || rel.split("/").some((p) => p.toLowerCase() === ".git")) continue;
-    try {
-      if (lstatSync(join(base, rel)).isDirectory()) return rel;
-    } catch {
-      /* not there: not this project's own directory */
-    }
-  }
-  return undefined;
-};
+export { ownAbsoluteHooksPath, REWRITE_NOTE };
 
 // ---------------------------------------------------------------------------
 // Hook check: can every kept hook run in the image? For each command, in a
