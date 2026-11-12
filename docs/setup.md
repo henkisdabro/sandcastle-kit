@@ -248,6 +248,8 @@ A `core.hooksPath` that is an absolute host path (or climbs out of the project) 
 sandbox has, so git finds no hooks and agent commits run none: `sandcastle doctor`,
 `sandcastle lean` and the base check flag it, naming the value, and the fix is
 `git config core.hooksPath <relative path>`.
+The exact absolute form of a tracked hooks directory (a worktree tool writes it) is a warning only:
+every sandbox is given the relative path through its environment, so agent commits still run the hooks.
 The Codex review does not run Claude Code hooks.
 
 ### Hook tests

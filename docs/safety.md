@@ -108,6 +108,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   of them: a filter, a driver, a transport command, `insteadOf`, a changed URL on an existing remote
   (`origin` included), a removed remote, a remote's `pushurl`, `proxy` or program, a hooks path
   anywhere else, `info/attributes`, and any other hook.
+  The same goes for a tracked hooks path that a worktree tool (Claude Code's worktree setup)
+  rewrote to its exact absolute form: the recorded relative value, now `<project>/<that value>`, is
+  taken with one line.
   After an unclean end (killed, stopped) every change is refused, as before.
   Each refusal says whether the last run ended cleanly, and marks a change that looks like your own
   tooling (`looks like your own tooling: ...`) apart from the rest.
@@ -148,10 +151,24 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   `.merge`) that another worktree gives its own branch (`git worktree add` from a remote branch,
   `git push -u`, `git branch -u`, `gh pr create`) runs no program, so the run prints one line and
   goes on.
+  So does the exact absolute rewrite of a tracked hooks path (a worktree tool writes
+  `<project>/.githooks` over `.githooks`), when it is the only key that differs: the sandboxes run
+  with the relative path pinned (the next bullet), and the host's git with its hooks off.
   Any other change stops it, and the stop names the keys (with old and new values, except for keys
   that run a program or carry credentials, and with any token in a URL hidden): a remote, a hook
   path, an `include`, `rebase` or `pushRemote`, or an upstream on the base or an `agent/issue-*`
   branch.
+- 📌 **Hooks path pin.** A worktree tool (Claude Code's worktree setup) may rewrite a relative
+  `core.hooksPath` in the shared `.git/config` to its absolute form, which does not exist in a
+  container. Every sandbox is given the tracked relative hooks path through its git environment
+  (a command-scope `core.hooksPath`, which outranks the file), so agent commits still run the repo's
+  hooks, and the run's `.git` check takes that exact rewrite, and only that, with one line - a second
+  changed key or any other value still stops it. The kit never writes `.git/config`: nothing is
+  restored, and `git config core.hooksPath <relative path>` puts your own config right once no run
+  is live: a live run goes on without it, and stops on the change back.
+  The hooks directory stays a protected path after the rewrite.
+  An absolute path to an untracked directory, or outside the project, is not pinned: agent commits
+  run no hooks there, and `sandcastle doctor` says so as a FIX.
 - 🛂 **Checked before every sandbox opens.** Sandcastle's open runs git on your machine in the
   project: `git worktree add`, whose checkout writes every file out through the filters
   `.git/config` names, or `git status` in a worktree it reuses (the kit's patch of Sandcastle drops
