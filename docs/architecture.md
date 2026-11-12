@@ -1975,6 +1975,16 @@ one ticket-gate run.
 `createLanding` (`src/schedule.ts`) tells the claim of each push, of each landing that starts and of each that ends
 (`LandPorts.claim`, which `landingWork` makes and hands to `landOne`), and of a stop (`StopWriter.watch`, and the
 scheduler's `noticeStop` for the host's live failure), so `src/schedule.ts` still imports nothing from the pool.
+It is also taken when a ticket's gate run goes green (`GateProgress.green`, called by `runGates` inside its gates
+slot, before the slot is released: `RunClaim.greenGate(id)`), so the slot it frees goes to that landing and not to
+another ticket's gate, whose merge the landing would then make stale.
+That want is per ticket and idempotent (a second green before it is dropped changes nothing); the push (`pushed(id)`)
+turns it into the queued green, and `createLanding`'s `dropped(id)` ends it for an attempt that ends without a push -
+any ending, told in the scheduler's `finally`.
+It is dropped too as the attempt leaves its gates for a repair or a review, or starts another gate run (`at.gates`):
+kept, it held every ticket gate back for that pass at `maxGates: 1`, and the ticket's own gates after it waited
+behind it for ever (`test/pool-claim-green-regate.test.ts`); a green end of the later run takes it again.
+A base, verify or landing gate, a red run and a run stopped for a conflict tell it nothing.
 It is taken at the push when no landing gate is running (a branch queued while one runs is claimed when that gate
 run ends, so with `maxGates` above 1 a spare slot stays free for ticket gates), and never more than one stands.
 `landOne` hands it to `ctx.gate` when its gates begin (`take`) and takes none of its own; the gate's priority wait
@@ -1994,7 +2004,8 @@ in the sandbox slot its pipeline holds, so with that slot the last one free (a p
 while the ticket's gate waited behind the claim, and neither moved (`test/landing-claim-sandbox-wait.test.ts`).
 The claim is kept in this process (`claims`), not in the pool's files, so a crash leaves nothing behind;
 `test/pool-landing-claim-queued.test.ts` (gates limit 1) and `test/pool-landing-claim-queued-spare.test.ts` (2) for
-the run's claim, `test/pool-landing-claim.test.ts`, `test/pool-landing-claim-spare.test.ts` and
+the run's claim, `test/pool-claim-green-gate.test.ts` for the green ticket gate's,
+`test/pool-landing-claim.test.ts`, `test/pool-landing-claim-spare.test.ts` and
 `test/landing-claim-gates.test.ts` for the single claim.
 The priority is kept in this process (`OwnWait`, the entries in `waiting`): every wait of a run is
 this process's, and another run needs only a wait's start - and, for the pool's last free slot,
