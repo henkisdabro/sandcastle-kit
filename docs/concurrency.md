@@ -45,8 +45,10 @@ The base check a run makes mid-run starts its sandbox inside the slot of the tic
 it never waits for one, but it is counted: while it lives the pool can read one past its cap
 (`7/6`).
 So can a ticket whose sandbox only waits for a gates slot: it moves off the sandbox count
-(`maxSandboxes`) while it waits, so another ticket's agent pass can use the slot, and the header
-still counts its container; up to `maxGates` per run.
+(`maxSandboxes`) while it waits and while its gates then run, so another ticket's agent pass can use
+the slot, and the header still counts its container.
+Up to `maxGates` tickets per run wait so; a ticket leaves that limit once its gates slot is granted,
+so the next ticket that waits can move off the count too.
 It takes a counted slot again before a repair pass, ahead of tickets that have not started.
 
 Live runs also split the sandbox slots between them, by **share**.

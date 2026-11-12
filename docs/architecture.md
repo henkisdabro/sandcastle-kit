@@ -1993,7 +1993,8 @@ Unlike one, it is not counted against `maxSandboxes`: `liveSlots` leaves it out,
 take its numbered slot.
 `usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - its name starts
 with `sandboxes-` and ends in `.lock`, which is all that count asks - so other runs and the views see
-every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run.
+every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
+waiting, and as many again whose gates slot was granted (they stay on the lock through their gates).
 `test/gate-wait-frees-sandbox.test.ts`.
 
 **A wait that holds a slot.**
