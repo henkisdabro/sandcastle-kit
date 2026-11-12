@@ -201,23 +201,38 @@ export const turnsEndLine = (level: Level | undefined, end: DrainEnd): string =>
   level === "drain" ? drainLine(end.turns, end.landed, end.cause) : end.cause.charAt(0).toUpperCase() + end.cause.slice(1);
 
 /**
- * The tickets the queue holds now that no turn of the run had and no blocker holds back: queued
+ * The tickets the queue holds now that no turn of the run had and no blocker outside them holds back: queued
  * after the run started, so a turn (which takes the last turn's re-runnable tickets only, never the
- * whole queue) did not take them. `held` names the ones an open blocker holds, which a bare
- * `sandcastle run` would not start either. `scope` is a named run's own tickets: one the operator
- * left out is not late for it. Unreadable queue: none, as the lines are a courtesy and a follow-on turn needs a reading.
+ * whole queue) did not take them. `held` maps each late ticket an open blocker holds to the ids of its open blockers
+ * (a blocker that cannot be read is an id no late ticket has), which a bare `sandcastle run` would not start either.
+ * A held ticket whose blockers are all among the tickets returned joins them, in a chain until nothing changes: the
+ * turn names it, so `burndown` holds it as a dependant and starts it when its blocker lands. Queue order, whatever order
+ * they joined in. `scope` is a named run's own tickets: one the operator left out is not late for it. Unreadable
+ * queue: none, as the lines are a courtesy and a follow-on turn needs a reading.
  */
 export const lateTickets = async (
   tracker: Tracker,
   inRun: ReadonlySet<string>,
-  held: (queue: Ticket[]) => Promise<ReadonlySet<string>>,
+  held: (queue: Ticket[]) => Promise<ReadonlyMap<string, readonly string[]>>,
   scope?: ReadonlySet<string>,
 ): Promise<Ticket[]> => {
   try {
     const late = tracker.queued(false).filter((t) => !inRun.has(t.id) && (!scope || scope.has(t.id)));
     if (late.length === 0) return [];
-    const blocked = await held(late);
-    return late.filter((t) => !blocked.has(t.id));
+    const blockers = await held(late);
+    const taken = new Set(late.filter((t) => !blockers.has(t.id)).map((t) => t.id));
+    // No turn without an unheld ticket: a held one waits for a blocker nothing in this turn lands.
+    if (taken.size === 0) return [];
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const t of late) {
+        const on = blockers.get(t.id);
+        if (taken.has(t.id) || !on || on.length === 0 || !on.every((b) => taken.has(b))) continue;
+        taken.add(t.id);
+        grew = true;
+      }
+    }
+    return late.filter((t) => taken.has(t.id));
   } catch {
     return [];
   }
@@ -227,7 +242,7 @@ export const lateTickets = async (
 export const lateQueueLines = async (
   tracker: Tracker,
   inRun: ReadonlySet<string>,
-  held: (queue: Ticket[]) => Promise<ReadonlySet<string>>,
+  held: (queue: Ticket[]) => Promise<ReadonlyMap<string, readonly string[]>>,
   scope?: ReadonlySet<string>,
 ): Promise<string[]> => (await lateTickets(tracker, inRun, held, scope)).map((t) => `${tracker.ref(t.id)} was queued after this run started: \`sandcastle run\` takes it`);
 

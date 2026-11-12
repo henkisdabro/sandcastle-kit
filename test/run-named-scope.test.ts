@@ -67,7 +67,7 @@ test("a ticket in the scope that is closed or unknown keeps its id as typed", ()
 
 test("the drain's late-queue lines name no ticket outside a named run's scope", async () => {
   const known = new Set(["shop-01"]);
-  const none = async () => new Set<string>();
+  const none = async () => new Map<string, string[]>();
   assert.deepEqual(await lateQueueLines(tracker, known, none, scope()), ["shop-02 was queued after this run started: `sandcastle run` takes it", "shop-03 was queued after this run started: `sandcastle run` takes it"]);
   assert.equal((await lateQueueLines(tracker, known, none)).length, 4);
 });
@@ -76,7 +76,7 @@ test("the run loop hands every turn the operator's list, and burndown applies it
   const cli = readFileSync(join(KIT, "src/cli.ts"), "utf8");
   assert.match(cli, /const operatorList = namedTicketsFromEnv\(\)\.list;/);
   assert.match(cli, /burndown\(project, \{ settings, turn, \.\.\.\(scope \? \{ scope \} : \{\}\)/);
-  assert.match(cli, /async \(late\) => new Set\(\(await openOnQueue\(project, tracker, late\)\)\.keys\(\)\), scope\?\.ids\)/);
+  assert.match(cli, /heldBy\(tracker\), scope\?\.ids\)/);
   const burndown = readFileSync(join(KIT, "src/burndown.ts"), "utf8");
   assert.match(burndown, /const whole = named\.list \? wholeQueue\(tracker, queued, scope\) : queued;/);
 });
