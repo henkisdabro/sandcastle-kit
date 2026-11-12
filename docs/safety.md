@@ -11,7 +11,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   cannot push, and that it can see the repository: a fine-grained token whose Repository access
   leaves the repo out gets a FIX there, and `sandcastle run` refuses the same way before any sandbox
   starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
-  without the kit's tokens, and a token value in gate output is replaced with `<redacted>`.
+  without the kit's tokens, and a token value in gate output is replaced with `<redacted>`. So is
+  a token of Codex's login (`~/.codex/auth.json`, mounted read-only when `CROSS_REVIEW=1`) in the
+  output a crashed agent's log and crash note show.
 - 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
   `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an
   agent follows them anyway.
