@@ -8,6 +8,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { reword } from "../src/run.ts";
 
+test("a scratch worktree's clean-up line promises no resume", () => {
+  assert.equal(
+    reword("  To clean up: git worktree remove --force /p/.sandcastle/worktrees/sandcastle-base-gates-1794455819375"),
+    "  To clean up: `sandcastle clean` - a throwaway worktree with no work in it",
+  );
+});
+
 test("a resumed branch is not reported as a failed fetch", () => {
   assert.equal(
     reword("Could not fetch from origin (reusing worktree at /p/.sandcastle/worktrees/agent-issue-57 as-is, branch 'agent/issue-57')"),

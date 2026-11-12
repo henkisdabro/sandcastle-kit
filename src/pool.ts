@@ -633,7 +633,8 @@ export const startLines = (split: { share: number; free: number }, others: Neigh
     const waits = others.flatMap((n) => (n.wait === undefined ? [] : [n.wait]));
     const first = waits.length ? `, the first likely in ~${approx(Math.min(...waits))}` : "";
     const finish = `as ${holders.map((n) => `${name(n)}'s`).join(" and ")} tickets finish${first}`;
-    const tail = split.free >= split.share ? "it starts at once" : split.free > 0 ? `it starts with ${slotsOf(split.free)} now and takes the rest ${finish}` : `it starts ${finish}`;
+    // A share of 0 with nothing free is a wait, not a start: `0 >= 0` once told the person it started at once.
+    const tail = split.share > 0 && split.free >= split.share ? "it starts at once" : split.free > 0 ? `it starts with ${slotsOf(split.free)} now and takes the rest ${finish}` : `it starts ${finish}`;
     const kept = landing ? " (one of the pool's slots is kept for any run's landing)" : "";
     lines.push(`${live}: this run's share is ${split.share}${kept}; ${tail}`);
   }
@@ -1119,7 +1120,16 @@ export const withExtraSlot = async <T>(pool: PoolName, label: string, fn: () => 
 };
 
 /** "sandboxes 3/6 · gates 1/2" - live slots only; the status view counts them the same way. */
-export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool, undefined, true).length}/${limit(pool)}`).join(" · ");
+// A sandbox waiting for its gates slot is moved off the count (`uncountSlot`), so the figure can pass the limit
+// ("sandboxes 4/3"): say how many of it are waiting, or the line reads as a broken limit.
+export const usage = () =>
+  (["sandboxes", "gates"] as const)
+    .map((pool) => {
+      const all = liveSlots(pool, undefined, true).length;
+      const waiting = all - liveSlots(pool).length;
+      return `${pool} ${all}/${limit(pool)}${waiting > 0 ? ` (${waiting} waiting for a gates slot, outside the limit)` : ""}`;
+    })
+    .join(" · ");
 
 /** One live run's demand, share and cap, as `sandcastle cap` shows them. */
 export type Standing = { project: string; demand: number; share: number; held: number; concurrency: number; cap?: number };

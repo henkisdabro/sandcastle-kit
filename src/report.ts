@@ -283,7 +283,10 @@ const earlierKeptWorktrees = (project: Project, run: any, tickets: Record<string
   for (const { path, branch } of entries) {
     if (mine.has(resolve(root, path)) || !existsSync(path)) continue;
     const issue = /^agent-issue-(.+)$/.exec(basename(path))?.[1];
-    if (live && (!issue || issue in tickets || branch?.startsWith("sandcastle/"))) continue;
+    // A run that ended with no `keptWorktrees` (a guard's stop or `sandcastle stop` before the close wrote it) kept its own
+    // tickets' worktrees as a live one does: they once read as "kept by earlier runs".
+    const unrecorded = !Array.isArray(run.keptWorktrees);
+    if ((live || unrecorded) && (!issue || issue in tickets || branch?.startsWith("sandcastle/"))) continue;
     let merged = false;
     try {
       merged = !!branch && branchFinished(project, branch);
@@ -1304,8 +1307,14 @@ export const render = (f: Facts, plain = false): string => {
   const requeued = ids(["queued"]).filter((id) => !!f.tickets[id].requeued);
   // The gates on the base were red before any agent ran: nothing was attempted,
   // and the queue is untouched. Said first, as nothing below it is news.
+  // A person's stop (`sandcastle stop`, Ctrl-C) or a kill while the base gates waited for a slot is no red base: it once
+  // headed the summary "red on main" and named a gates log no gate had written.
   const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
-    !Object.values(f.tickets).some((t) => t.started);
+    !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
+  // Refused by its preflight (a rejected credential, an unknown model): no sandbox started, so the headline says that, and
+  // an estimate it never began against is no news. The cause is the run's own last lines, which the record does not keep.
+  const preflightFailed = f.stage === "preflight" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
+    !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
   // Ended before its summary (Ctrl-C, a crash, kill -9): its tickets mid-work were
   // counted as attempted and listed nowhere, under a headline that said "finished".
   const early = !baseRed && !f.stopped && !f.live &&
@@ -1360,7 +1369,7 @@ export const render = (f: Facts, plain = false): string => {
   out.push(
     baseRed
       ? `${h("## 🏁 Run", "## Run")} stopped: red on ${f.base} before any agent ran - nothing was started`
-      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : preflightFailed ? `NOT STARTED: preflight failed (exit ${f.exitCode}) - no sandbox started; its cause is the run's last lines (.sandcastle/logs/run-output.log for a detached run)` : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
@@ -1393,7 +1402,7 @@ export const render = (f: Facts, plain = false): string => {
     const at = typeof f.settings?.loadPause === "number" ? `at or over ${f.settings.loadPause}%, ` : "";
     out.push(`Load pause: gate passes waited ${span(f.loadPause.heldMs)} in all for the machine's CPU pressure (${at}some avg60)${f.loadPause.gaveUp ? " - gave up after 30 min, so later gate passes ran under load" : ""}`);
   }
-  out.push(...estimateLines(f, end));
+  if (!preflightFailed) out.push(...estimateLines(f, end));
   out.push(...flakyLines(f));
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {

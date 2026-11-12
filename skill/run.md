@@ -148,14 +148,18 @@ This continues SKILL.md: run its "Before every action" first.
    With no such note in SKILL.md's text (and none seen earlier in the session), the detached run
    is not your own process, so your harness never tells you it finished. Right after starting it, run `sandcastle wait` as a background command your
    harness reports back on when it exits (`run_in_background` in Claude Code): it blocks while the
-   run is live, then prints the closing summary and exits with the run's exit code (1 when the merged base ended red: do not push it). A harness caps
+   run is live, then prints the closing summary and exits with the run's exit code. Exit 1 is any end that was not clean - a red merged base (do not push it), the
+   guard's stop, `sandcastle stop`, a refused preflight - so read the summary's `## 🏁` headline for which, never the code alone. A harness caps
    a background command (Claude Code: 30 minutes by default, 2 hours at most - pass
    `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
    timeout it exits 124 with the run untouched, which is no result - start the same
    `sandcastle wait` again. N is how long `sandcastle wait N` waits for the run to end; once it
    has ended, `wait` reads the tracker again to print the closing summary, which takes longer with
    many blocked tickets, so the harness's own timeout needs room above N. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
-   user asks, and `sandcastle wait` then shows how it ended. To hold the run without losing work
+   user asks, and `sandcastle wait` then shows how it ended: keep its output (never `>/dev/null`), since a stopped run
+   prints no summary of its own, and `sandcastle report` shows it only until the next run starts. That summary is the
+   close: when the mod's end prompt for the same run arrives afterwards, acknowledge it in one line rather than
+   closing the run twice. To hold the run without losing work
    (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
    agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
    when the user asks (pause.md), and `sandcastle wait` keeps waiting through a pause.

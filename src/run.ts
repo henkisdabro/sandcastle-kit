@@ -74,6 +74,9 @@ export const exitOnSignal = () => {
 // kit's to clean, which a hand-run `git worktree remove` bypasses.
 const REWORDED: [RegExp, string][] = [
   [/^Could not fetch from origin \(reusing worktree at (.+) as-is, branch '(.+)'\)$/, "Resuming branch '$2' in its kept worktree ($1)"],
+  // A scratch worktree (`sandcastle-base-gates-<time>`, a verify's) holds no branch's work and no run resumes it: a stop
+  // while one was open once promised the next run would.
+  [/^( *)To clean up: git worktree remove --force .*\/sandcastle-[^/]+$/, "$1To clean up: `sandcastle clean` - a throwaway worktree with no work in it"],
   [/^( *)To clean up: git worktree remove --force .+$/, "$1To clean up: `sandcastle clean` - or leave it, and the next `sandcastle run` resumes it"],
 ];
 export const reword = (line: string) => REWORDED.reduce((l, [re, to]) => l.replace(re, to), line);
@@ -323,9 +326,22 @@ const ask = (cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
 // (never the value), since finding a stale token cost a field report about ten tool calls.
 const AUTH_REJECTION = /\b401\b|authenticat|invalid.*(api.key|token)|oauth|400 \(no body\)/i;
 
+// What Codex's own CLI prints when the host's ChatGPT login is stale or rotated away ("refresh token was already used").
+const CODEX_LOGIN = /refresh token|could not be refreshed|log ?in again|sign in again|not logged in|\b401\b/i;
+
+/**
+ * A failed `codex exec` probe's output as one reason: its tracing lines (an ISO time first) dropped, a line it printed
+ * twice kept once, the last three left, so the 300-character cut never falls on a repeat or a log line.
+ */
+export const codexReply = (out: string): string => {
+  const lines = out.split("\n").map((l) => l.trim()).filter((l) => l && !/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(l));
+  return [...new Set(lines)].slice(-3).join(" ").slice(0, 300);
+};
+
 export const preflightFailure = (
   failures: { model: string; reply: string }[],
   credential: { key: string; file: string } | undefined,
+  codexModel?: string,
 ): string => {
   const same = failures.every((f) => f.reply === failures[0]!.reply);
   const lines = same
@@ -336,6 +352,10 @@ export const preflightFailure = (
       `The credential was likely rejected: ${credential.key} from ${credential.file}. ` +
         `Make a new one (\`claude setup-token\` for a subscription) and replace that value in ${credential.file}.`,
     );
+  }
+  // The Codex probe runs on the host's ChatGPT login, so its fix is a new login there, not a token file.
+  if (codexModel && failures.some((f) => f.model === codexModel && CODEX_LOGIN.test(f.reply))) {
+    lines.push("The host's Codex login was likely rejected: sign in again on this machine (`codex logout && codex login`), or run without CROSS_REVIEW.");
   }
   return `NOT STARTED: Preflight failed - no sandbox started:\n  ${lines.join("\n  ")}`;
 };
@@ -384,14 +404,14 @@ export const preflight = async (project: Project, image: string, extra: { model:
         "codex",
         ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-m", CROSS_REVIEW_MODEL, "Reply OK"],
         { cwd: tmpdir() },
-      ).then((r) => (r.ok ? undefined : { model: CROSS_REVIEW_MODEL, reply: r.out.split("\n").slice(-3).join(" ").slice(0, 300) })),
+      ).then((r) => (r.ok ? undefined : { model: CROSS_REVIEW_MODEL, reply: codexReply(r.out) })),
     );
   }
   const failures = (await Promise.all(probes)).filter((f): f is { model: string; reply: string } => f !== undefined);
   if (failures.length) {
     // The hint names the Claude credential; a Codex reply comes from the host's ChatGPT login, not that file.
     const claudeOnly = failures.every((f) => f.model !== CROSS_REVIEW_MODEL);
-    throw new OperatorError(preflightFailure(failures, claudeOnly ? credentialSource(project) : undefined));
+    throw new OperatorError(preflightFailure(failures, claudeOnly ? credentialSource(project) : undefined, CROSS_REVIEW ? CROSS_REVIEW_MODEL : undefined));
   }
   console.log(`Preflight ok: ${MODELS_LINE}`);
 };

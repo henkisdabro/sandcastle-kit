@@ -30,7 +30,7 @@ test("a lease moved to the uncounted lock lets a third lease take a numbered slo
   const waiting = uncountSlot(first, "alpha #1 gates");
   await until(() => third !== undefined, "the third lease to take the freed numbered slot");
 
-  assert.equal(usage(), "sandboxes 3/2 · gates 0/1");
+  assert.equal(usage(), "sandboxes 3/2 (1 waiting for a gates slot, outside the limit) · gates 0/1");
   assert.equal(members().find((m) => m.run === RUN_ID)?.held, 2, "the run's held count is the numbered slots");
   assert.equal(mine(), 2);
   assert.deepEqual(liveSlots("sandboxes", undefined, true).map((l) => l.label).sort(), ["alpha #1 gates", "alpha #2", "alpha #3"]);
@@ -38,7 +38,7 @@ test("a lease moved to the uncounted lock lets a third lease take a numbered slo
 
   // The first lease is spent: releasing it again frees nothing of the third's.
   first.release();
-  assert.equal(usage(), "sandboxes 3/2 · gates 0/1");
+  assert.equal(usage(), "sandboxes 3/2 (1 waiting for a gates slot, outside the limit) · gates 0/1");
 
   waiting.release();
   assert.equal(usage(), "sandboxes 2/2 · gates 0/1", "released, the uncounted lock leaves the reading");
@@ -57,7 +57,7 @@ test("an uncounted lock is no part of the run's shares or the slot kept for land
   const waiting = uncountSlot(first, "alpha #1 gates");
   assert.equal(members().find((m) => m.run === RUN_ID)?.held, 0);
   const second = await leaseSlot("sandboxes", "alpha #2", undefined, POLL, undefined, false, true);
-  assert.equal(usage(), "sandboxes 2/2 · gates 0/1");
+  assert.equal(usage(), "sandboxes 2/2 (1 waiting for a gates slot, outside the limit) · gates 0/1");
   assert.equal(members().find((m) => m.run === RUN_ID)?.held, 1);
   waiting.release();
   second.release();
@@ -72,7 +72,7 @@ test("a dead holder's uncounted lock counts for nothing, and the next one taken 
 
   const waiting = uncountSlot(first, "alpha #1 gates");
   assert.equal(existsSync(dead), false, "swept by the next uncounted lock taken");
-  assert.equal(usage(), "sandboxes 1/2 · gates 0/1");
+  assert.equal(usage(), "sandboxes 1/2 (1 waiting for a gates slot, outside the limit) · gates 0/1");
   waiting.release();
   assert.deepEqual(locks(), []);
 });
