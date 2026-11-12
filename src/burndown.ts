@@ -518,6 +518,11 @@ export type FollowUp = {
   /** Set for a repair pass's line only: the ids of the red run it was given that its title or evidence names (`testsNamed`). Lines naming one test are one issue whichever ticket said them. */
   tests?: string[];
 };
+/** A repair pass's follow-up tagged with the tests of the red run it names (`testsNamed`); nothing for another pass or no match. */
+const testsOfRepair = (phase: string, f: { title: string; evidence: string }, failing: readonly string[] | undefined): { tests?: string[] } => {
+  const tests = phase === "repair" && failing ? testsNamed(`${f.title}\n${f.evidence}`, failing) : [];
+  return tests.length ? { tests } : {};
+};
 /** A follow-up as the run record keeps it: `id` is the ticket filed, absent in a dry run (which files nothing) or when filing failed (`failed`). */
 export type FiledFollowUp = { title: string; from: string; phase: string; id?: string; failed?: string };
 
@@ -2101,10 +2106,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               const facts = capture?.read();
               if (facts) ctx.reportTimings?.set(issue.id, reportTiming(facts));
               const said = saidOf(r.stdout ?? "", facts);
-              for (const f of said.followups) {
-                const tests = phase === "repair" && told.failing ? testsNamed(`${f.title}\n${f.evidence}`, told.failing) : [];
-                ctx.followUps?.push({ ...f, from: issue.id, phase, ...(tests.length && { tests }) });
-              }
+              for (const f of said.followups) ctx.followUps?.push({ ...f, from: issue.id, phase, ...testsOfRepair(phase, f, told.failing) });
               return Object.assign(r, { said });
             });
           // The kernel kills the largest process, usually a test the agent started, not the agent: the pass goes on, and the
