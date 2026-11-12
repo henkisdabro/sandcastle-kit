@@ -1841,7 +1841,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       throw error;
     }
   };
-  /** The run's `.git` check (`host.check`) before a ticket's sandbox opens. A failure is the ticket's `tampered`, as above, and is thrown. */
+  /** The run's `.git` check (`host.check`) before a ticket's sandbox opens, and before each repair pass in it. A failure is the ticket's `tampered`, as above, and is thrown. */
   const checkGit = async (issue: string, when: string) => {
     try {
       await host.check?.(when);
