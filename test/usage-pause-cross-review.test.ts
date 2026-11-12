@@ -34,7 +34,8 @@ let n = 0;
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const GREEN: GateRun = { gates: [{ name: "test", pass: true }], failures: [] };
 
-const NOW = Math.floor(Date.now() / 1000);
+// Local noon keeps the same-day case away from midnight, on every timezone and test date.
+const NOW = Math.floor(new Date(2026, 10, 12, 12, 0).getTime() / 1000);
 const HOUR = 3600;
 const DAY = 24 * HOUR;
 const pad = (x: number) => String(x).padStart(2, "0");
@@ -132,7 +133,7 @@ const fixture = (usage: PlanUsage[], threshold: number | undefined) => {
       ? {
           crossReviewSkip: () => {
             const spent = pause.crossReviewSpent();
-            return spent && crossReviewSkippedWords(spent);
+            return spent && crossReviewSkippedWords(spent, new Date(NOW * 1000));
           },
         }
       : {}),

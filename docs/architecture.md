@@ -2720,12 +2720,14 @@ since), the one that resets last, since resuming at an earlier reset would only 
 holds the pause until a minute after its reset - of Claude's windows only: a Codex window is the
 cross-review's plan, a second opinion, so `usagePauseFor` leaves it out and `crossReviewSpent()`
 (`crossReviewSpentFor`: the Codex window at or above the threshold that has not reset, the one that
-resets last, over the newest readings `reading` and `limit` last saw) says which one is spent. The
-pipeline's `crossReviewSkip` port (`burndown()` wires it to `crossReviewSkippedWords`, the
+resets last, over the newest readings `reading` and `limit` last saw) says which one is spent.
+The skip ends at the reset itself, without the Claude pause's minute of grace.
+The pipeline's `crossReviewSkip` port (`burndown()` wires it to `crossReviewSkippedWords`, the
 `cross-review skipped - Codex 5-hour usage 98%, resets 14:05` line, the reset in the status view's
 `resumeClock` form) is asked after the cross-review's juncture, so a pause there that outlasted the window
 is not skipped for it; a spent window skips the pass, prints the line, and the ticket keeps it as
-`crossSkipped` (its head record, so a land-only re-run still has it, and `logs/run.json`), which
+`crossSkipped` (its head record, so a land-only re-run or a red-gate retry that reuses its review
+still has it, and `logs/run.json`), which
 `src/report.ts` lists on `Landed without a cross-review (Codex plan's limit): #N, #M` for the
 tickets that merged. `test/usage-pause-cross-review.test.ts`. `limit(usage, provider)` is the pipeline's
 `limitPause`, for an agent that hit the limit anyway (`usageLimitPauseFor`: the open window nearest

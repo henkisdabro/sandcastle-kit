@@ -889,7 +889,8 @@ export type CrossReviewSpent = { window: UsagePaused["window"]; percent: number;
  * `threshold` that have not reset yet, the one that resets last. The run skips the cross-review meanwhile instead of pausing.
  */
 export const crossReviewSpentFor = (usage: PlanUsage[], threshold: number, now: number): CrossReviewSpent | undefined => {
-  const over = openWindows(usage, now, "codex").filter((w) => w.percent >= threshold);
+  // The pause's minute of grace does not apply to an optional pass: once the window resets, it can run again.
+  const over = openWindows(usage, now, "codex").filter((w) => w.percent >= threshold && w.resetsAt > now);
   const last = over.reduce<OpenWindow | undefined>((a, b) => (a && a.resetsAt >= b.resetsAt ? a : b), undefined);
   return last && { window: last.window, percent: last.percent, resetsAt: last.resetsAt };
 };

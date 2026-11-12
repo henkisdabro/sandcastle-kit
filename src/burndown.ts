@@ -2761,6 +2761,8 @@ export const createPipeline = (ctx: PipelineContext) => {
 
         // Only a base merge since the last completed review: review the merge, not the branch.
         const since = narrowReviewBase(project.root, base, issue.id);
+        // A red-gate retry can reuse its review too: no new cross-review ran to replace the earlier skip.
+        if (since !== undefined) crossSkipped = readHeads(project.root)[issue.id]?.crossSkipped;
         if (since !== undefined && since === sh("git", ["rev-parse", branch], project.root)) {
           console.log(`${ref(issue.id)}: nothing new since its review at ${since.slice(0, 7)} - no review; the gates decide.`);
         } else if (since !== undefined) {
