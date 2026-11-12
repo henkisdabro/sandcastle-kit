@@ -90,7 +90,7 @@ export type Snapshot = {
   containers: Record<string, ContainerFact>;
   /** The host's cores, against which a container's CPU is shown. */
   cpus: number;
-  pool: { sandboxes: { used: number; limit: string }; gates: { used: number; limit: string } };
+  pool: { sandboxes: { used: number; outside: number; limit: string }; gates: { used: number; limit: string } };
   /** The queue's tickets, in version order; `error` says why it could not be read (and then it is empty). */
   queue: { tickets: QueueFact[]; error?: string };
   /** Commits on the base that its upstream lacks, by the last fetch. */
@@ -677,9 +677,13 @@ export const readPool = async (env: NodeJS.ProcessEnv, signal: AbortSignal): Pro
     }
     alive.set(pid, command !== undefined ? isKit(command) : exists);
   }
-  const used = (pool: string) => [...owners].filter(([f, pid]) => f.startsWith(`${pool}-`) && alive.get(pid)).length;
+  // `<pool>-waiting-<run>-<n>.lock` is a sandbox moved off the count while it waits for, and then holds, a gates slot
+  // (src/pool.ts `uncountSlot`): counted apart, so the gauge keeps to the limit as the run's start line does.
+  const live = (pool: string) => [...owners].filter(([f, pid]) => f.startsWith(`${pool}-`) && alive.get(pid));
+  const outside = (pool: string) => live(pool).filter(([f]) => f.startsWith(`${pool}-waiting-`)).length;
+  const used = (pool: string) => live(pool).length - outside(pool);
   return {
-    sandboxes: { used: used("sandboxes"), limit: env.SANDCASTLE_MAX_SANDBOXES || "6" },
+    sandboxes: { used: used("sandboxes"), outside: outside("sandboxes"), limit: env.SANDCASTLE_MAX_SANDBOXES || "6" },
     gates: { used: used("gates"), limit: env.SANDCASTLE_MAX_GATES || "2" },
   };
 };
@@ -880,7 +884,7 @@ export const snapshotOf = (dir: string, readings: Readings, { env = process.env,
   const { hasRecord, record, tickets, live, outcomes, logs, tails, worktrees, runOutput, terminals } = readings.record.value ?? NO_RECORD;
   const { base, branches, unpushed } = readings.git.value ?? { base: env.SANDCASTLE_BASE || "", branches: {}, unpushed: 0 };
   const { containers, cpus } = readings.docker.value ?? { containers: {}, cpus: cores ?? 1 };
-  const pool = readings.pool.value ?? { sandboxes: { used: 0, limit: env.SANDCASTLE_MAX_SANDBOXES || "6" }, gates: { used: 0, limit: env.SANDCASTLE_MAX_GATES || "2" } };
+  const pool = readings.pool.value ?? { sandboxes: { used: 0, outside: 0, limit: env.SANDCASTLE_MAX_SANDBOXES || "6" }, gates: { used: 0, limit: env.SANDCASTLE_MAX_GATES || "2" } };
   const queue = { tickets: readings.queue.value ?? [], ...(readings.queue.error ? { error: readings.queue.error } : {}) };
 
   let settings: SettingsFact | undefined;
