@@ -814,10 +814,14 @@ export type RunClaim = {
   /**
    * A ticket gate went green and still holds its gates slot: the run wants a claim from now on, as if the green were queued, so
    * the slot it frees goes to that landing and not to another ticket gate. One pending want per ticket: a second call for the
-   * same `id` (a repair, load or fix-wait re-gate that goes green again) changes nothing.
+   * same `id` before it is dropped changes nothing.
    */
   greenGate(id: string): void;
-  /** That attempt ended without pushing its branch to the landing queue (red later, a forced red, a stop, a crash, a hold): its pending want goes, and the claim with it unless another stands. A push or an `id` with none pending does nothing. */
+  /**
+   * That attempt ended without pushing its branch to the landing queue (red later, a stop, a crash, a hold), or left its gates for a
+   * repair or a review, or gates again: its pending want goes, and the claim with it unless another stands. Kept, it would hold the
+   * attempt's own later gate run back for ever. A push or an `id` with none pending does nothing.
+   */
   greenDropped(id: string): void;
   /** A green branch was queued: `id`'s pending want, if any, becomes the queued one (a branch pushed with no gate run, carried or land-only, has none and leaves the others'). */
   pushed(id?: string): void;

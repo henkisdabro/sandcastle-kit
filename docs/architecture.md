@@ -1961,9 +1961,12 @@ scheduler's `noticeStop` for the host's live failure), so `src/schedule.ts` stil
 It is also taken when a ticket's gate run goes green (`GateProgress.green`, called by `runGates` inside its gates
 slot, before the slot is released: `RunClaim.greenGate(id)`), so the slot it frees goes to that landing and not to
 another ticket's gate, whose merge the landing would then make stale.
-That want is per ticket and idempotent (a re-gate of the same attempt that goes green again changes nothing); the
-push (`pushed(id)`) turns it into the queued green, and `createLanding`'s `dropped(id)` ends it for an attempt that
-ends without a push - any ending, told in the scheduler's `finally`.
+That want is per ticket and idempotent (a second green before it is dropped changes nothing); the push (`pushed(id)`)
+turns it into the queued green, and `createLanding`'s `dropped(id)` ends it for an attempt that ends without a push -
+any ending, told in the scheduler's `finally`.
+It is dropped too as the attempt leaves its gates for a repair or a review, or starts another gate run (`at.gates`):
+kept, it held every ticket gate back for that pass at `maxGates: 1`, and the ticket's own gates after it waited
+behind it for ever (`test/pool-claim-green-regate.test.ts`); a green end of the later run takes it again.
 A base, verify or landing gate, a red run and a run stopped for a conflict tell it nothing.
 It is taken at the push when no landing gate is running (a branch queued while one runs is claimed when that gate
 run ends, so with `maxGates` above 1 a spare slot stays free for ticket gates), and never more than one stands.
