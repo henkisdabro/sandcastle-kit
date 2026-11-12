@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { keepAwake } = await import("../src/run.ts");
+const { keepAwake, resetKeepAwake } = await import("../src/run.ts");
 
 const cmd = process.platform === "darwin" ? "caffeinate" : "systemd-inhibit";
 
@@ -30,7 +30,8 @@ const withShim = async (body: string) => {
   process.env.PATH = `${bin}:${saved.PATH}`;
   process.env.KEEP_AWAKE = "1";
   try {
-    return await keepAwake();
+    resetKeepAwake();
+    return await keepAwake({ wsl: false });
   } finally {
     process.env.PATH = saved.PATH;
     if (saved.KEEP_AWAKE === undefined) delete process.env.KEEP_AWAKE;
@@ -39,7 +40,7 @@ const withShim = async (body: string) => {
 };
 
 test("an inhibitor that fails at once is reported off, not on", async () => {
-  assert.equal(await withShim('echo "Failed to connect to system scope bus" >&2; exit 1'), `off - ${cmd} failed`);
+  assert.equal(await withShim('echo "Failed to connect to system scope bus" >&2; exit 1'), `off - ${cmd} failed: Failed to connect to system scope bus`);
 });
 
 test("an inhibitor that keeps running is reported on", async () => {
@@ -52,7 +53,8 @@ test("no inhibitor on PATH is reported off - not found", async () => {
   process.env.PATH = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
   process.env.KEEP_AWAKE = "1";
   try {
-    assert.equal(await keepAwake(), `off - ${cmd} not found`);
+    resetKeepAwake();
+    assert.equal(await keepAwake({ wsl: false }), `off - ${cmd} not found`);
   } finally {
     process.env.PATH = saved.PATH;
     if (saved.KEEP_AWAKE === undefined) delete process.env.KEEP_AWAKE;

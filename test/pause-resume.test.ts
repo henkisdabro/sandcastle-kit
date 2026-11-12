@@ -28,7 +28,7 @@ for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)
 const { createPipeline } = await import("../src/burndown.ts");
 const { createSchedule } = await import("../src/schedule.ts");
 const { PAUSE_FILE, readPause, waitForRun } = await import("../src/detach.ts");
-const { holdAwake, keepAwake, releaseAwake } = await import("../src/run.ts");
+const { holdAwake, keepAwake, releaseAwake, resetKeepAwake } = await import("../src/run.ts");
 const { lineText, runCounts, spaceText } = await import("../src/herdr.ts");
 const { render } = await import("../src/report.ts");
 type Change = import("../src/schedule.ts").Change<G, string, string>;
@@ -482,7 +482,10 @@ test("a paused run with nothing in flight lets the machine sleep, and the resume
   };
   const pids = () => (existsSync(pidFile) ? readFileSync(pidFile, "utf8").split("\n").filter(Boolean).map(Number) : []);
   try {
-    assert.match(await keepAwake(), /^on \(/);
+    // Not the WSL answer, whatever machine this runs on: the helper is what the test is about.
+    const helper = { wsl: false };
+    resetKeepAwake();
+    assert.match(await keepAwake(helper), /^on \(/);
     await until(() => pids().length === 1, "the inhibitor to start");
     const first = pids()[0]!;
     assert.ok(alive(first));
@@ -490,21 +493,21 @@ test("a paused run with nothing in flight lets the machine sleep, and the resume
     await until(() => !alive(first), "the inhibitor to end on the pause");
     // Released once: a second call, or a resume that finds nothing released, starts nothing.
     releaseAwake();
-    await holdAwake();
+    await holdAwake(helper);
     await until(() => pids().length === 2, "the inhibitor to start again on the resume");
     assert.ok(alive(pids()[1]!));
-    await holdAwake();
+    await holdAwake(helper);
     await sleep(50);
     assert.equal(pids().length, 2, "a resume that finds the machine already held starts no second inhibitor");
     // A later turn of a multi-turn run asks again: the inhibitor holding is the answer, not a second one.
-    assert.match(await keepAwake(), /^on \(/);
+    assert.match(await keepAwake(helper), /^on \(/);
     await sleep(50);
     assert.equal(pids().length, 2, "a turn's keepAwake while one inhibitor holds starts no second");
     // And a pause releases the one that holds, so the machine can sleep.
     releaseAwake();
     await until(() => !alive(pids()[1]!), "the inhibitor to end on the second pause");
     // A pause that comes while a resume's inhibitor is still settling ends that one too.
-    const settlingAwake = holdAwake();
+    const settlingAwake = holdAwake(helper);
     await until(() => pids().length === 3, "the resume's inhibitor to start");
     releaseAwake();
     await settlingAwake;

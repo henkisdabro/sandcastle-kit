@@ -637,8 +637,16 @@ A machine that goes to sleep pauses every sandbox mid-task, so by default a run 
 until the run ends - `caffeinate -i` on macOS, `systemd-inhibit` on Linux - and prints
 `Keep awake: on` when it starts. The display can still turn off and the screen still locks. The
 helper is tied to the run's process, so it stops when the run ends, crashes or is killed. If the
-helper is missing, or fails as soon as it starts (`systemd-inhibit` with no system bus, as in WSL
-without systemd or a container), the line says `off` and why, and the run goes on without it.
+helper is missing, or fails as soon as it starts (`systemd-inhibit` with no system bus, as in a
+container, or a polkit refusal), the line says `off` and gives the helper's own error, its first
+line of output (`off - systemd-inhibit failed: Failed to inhibit: Access denied`), and the run
+goes on without it. A failure is remembered for the rest of the run, so later turns do not start
+the helper again.
+
+Under WSL the kit does not try the helper: Windows decides when the PC sleeps, and an inhibitor
+inside the Linux VM cannot keep it awake. The line says `off - under WSL, Windows decides when the
+PC sleeps`. Keep the PC awake in Windows' power settings (Settings, System, Power: set "Screen and
+sleep" to never sleep while plugged in) for the length of an unattended run.
 
 - **One run on your energy settings:** `KEEP_AWAKE=0 sandcastle run`.
 - **Always:** `"keepAwake": false` in your [personal settings](configuration.md#personal-settings).
