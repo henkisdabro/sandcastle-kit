@@ -18,7 +18,7 @@ const at = (needle: string | RegExp, from = 0) => {
 
 test("the run header prints before the blocker lines it heads", () => {
   const body = at("export const burndown = ");
-  const header = at("ticket(s)${dependants.length", body);
+  const header = at(/console\.log\(\s*startHeadLine\(\{/, body);
   const waits = at("waits for ${w.on.join", body);
   // The wait lines are said by one helper, called after the header and before the shared-file lines.
   assert.equal(src.slice(body).split("waits for ${w.on.join").length - 1, 1, "one place prints the wait lines");

@@ -52,7 +52,7 @@ test("the start plan names each ticket whose Touches line names a held path, and
 test("burndown() says the plan lines under the run header, before the wait lines", () => {
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   const body = src.indexOf("export const burndown = ");
-  const header = src.indexOf("ticket(s)${dependants.length", body);
+  const header = src.indexOf("startHeadLine({", body);
   const plan = src.indexOf("protectedPlanLines(project, candidates, ref)", body);
   const waits = src.indexOf("sayWaits(new Set(dependants.map((d) => d.id)));\n  holds.start(schedule.start);", header);
   assert.ok(header > body && plan > header && waits > plan, "the plan lines print after the header and before the wait lines");
