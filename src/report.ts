@@ -775,7 +775,10 @@ const earlierTurns = (root: string, run: any): any[] => {
   const turn = run.settings?.turn;
   const file = join(root, ".sandcastle/logs/history.jsonl");
   if (!Number.isInteger(turn) || turn < 2 || !existsSync(file)) return [];
-  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean).reverse();
+  const all = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  // From this turn's own line, not the end of the file: a run that is not history's newest has later runs after it.
+  const own = all.findLastIndex((text) => (parseRecord(text) as any)?.startedAt === run.startedAt);
+  const lines = (own === -1 ? all : all.slice(0, own)).reverse();
   const found: any[] = [];
   for (const text of lines) {
     const record = parseRecord(text) as any;
@@ -822,9 +825,8 @@ const carriedTurns = async (project: Project, run: any, probe: Probe, opened: Op
   return carried;
 };
 
-/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. */
-export const gather = async (project: Project, probe: Probe = commandOf): Promise<Facts> => {
-  const run = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"));
+/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. `run` is the record to report: run.json's by default. */
+export const gather = async (project: Project, probe: Probe = commandOf, run: any = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"))): Promise<Facts> => {
   const opened = openedIssues(project);
   const facts = await gatherTurn(project, run, probe, opened);
   const carried = await carriedTurns(project, run, probe, opened);
@@ -1844,10 +1846,34 @@ export const operatorSteps = async (project: Project) => {
   return text.slice(text.lastIndexOf("## "));
 };
 
-/** The summary for the project's last recorded run. */
-export const closingReport = async (project: Project, turn?: { level: Level; turn: number }) => {
-  if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
-  const facts = await gather(project);
+/** Every run record the project holds, oldest first: history.jsonl's lines, then run.json's. */
+const knownRecords = (root: string): any[] => {
+  const read = (name: string) => {
+    const file = join(root, ".sandcastle/logs", name);
+    return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
+  };
+  return [...read("history.jsonl"), ...read("run.json")].flatMap((text) => parseRecord(text) ?? []);
+};
+
+/**
+ * The record `sandcastle report --run <pid|startedAt>` names: the one whose `startedAt` is `value`, else the latest one of
+ * that pid (every turn of a run shares its process's pid, and pids are reused, so the newest record is the run's last turn).
+ * An unknown value is an `OperatorError` listing the latest 10 runs.
+ */
+export const findRun = (root: string, value: string): any => {
+  const records = knownRecords(root);
+  const found = records.findLast((r: any) => r.startedAt === value) ?? (/^\d+$/.test(value) ? records.findLast((r: any) => String(r.pid) === value) : undefined);
+  if (found) return found;
+  const seen = new Set<string>();
+  const latest = records.reverse().filter((r: any) => (seen.has(r.startedAt) ? false : !!seen.add(r.startedAt))).slice(0, 10);
+  const lines = latest.map((r: any) => `  pid ${r.pid ?? "?"}  started ${r.startedAt ?? "?"}${Number.isInteger(r.settings?.turn) ? `  (turn ${r.settings.turn})` : ""}`);
+  throw new OperatorError(`No run recorded with pid or start time \`${value}\`.${lines.length ? `\nThe latest ${lines.length} run(s) it knows:\n${lines.join("\n")}` : "\nNo run is recorded yet."}`);
+};
+
+/** The summary for the project's last recorded run, or for `run`'s record (`sandcastle report --run`). */
+export const closingReport = async (project: Project, turn?: { level: Level; turn: number }, run?: any) => {
+  if (!run && !existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
+  const facts = await gather(project, commandOf, run);
   summary.printed = true;
   if (!Object.keys(facts.tickets).length) return "The last run predates the per-ticket record; its report is in the run pane's output.";
   // NO_COLOR counts as set only when non-empty (no-color.org).

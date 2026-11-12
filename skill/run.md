@@ -204,10 +204,12 @@ This continues SKILL.md: run its "Before every action" first.
    from a pane scrape. The mod's end prompt names the run that ended by its pid and start time
    (`pid 4242, started 14:05`). When the report prints a run that started at another time, or says
    `still running`, the named run was replaced by a later one in the same project, which the
-   report now shows: do not close that one. Close the named run from its own closing summary - the
-   newest `.sandcastle/logs/archive/run-output-*.log` for a detached run (the file is renamed there
-   when the next detached run starts), or its line in `.sandcastle/logs/history.jsonl` - say in the
-   hand-back that it was replaced, and leave the live run to the end prompt of its own. With `autonomy` set, one `sandcastle run` can hold several turns, each
+   report now shows: do not close that one. Close the named run from its own closing summary:
+   `sandcastle report --run <pid>` (or `--run <startedAt>`, the start time exactly as
+   `.sandcastle/logs/history.jsonl` records it) builds it from that run's record, with the git state and
+   blockers as they are now - a run that was stopped or killed printed none of its own. A detached
+   run that did end normally also left one in the newest `.sandcastle/logs/archive/run-output-*.log`
+   (the file is renamed there when the next detached run starts). Say in the hand-back that it was replaced, and leave the live run to the end prompt of its own. With `autonomy` set, one `sandcastle run` can hold several turns, each
    printing its own closing summary, and `sandcastle report` (like `sandcastle wait`) shows the
    last one's, which carries what the earlier turns left for a person: their held branches,
    partly done remainders, checks by hand, gaps and follow-ups, each line ending `(turn N)`, with
