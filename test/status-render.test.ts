@@ -74,7 +74,7 @@ const SNAPSHOT: Snapshot = {
   branches: {},
   containers: {},
   cpus: 8,
-  pool: { sandboxes: { used: 2, limit: "3" }, gates: { used: 1, limit: "1" } },
+  pool: { sandboxes: { used: 2, outside: 0, limit: "3" }, gates: { used: 1, limit: "1" } },
   queue: { tickets: [] },
   unpushed: 0,
   settings: { from: "live", settings: { autonomy: "drain", turn: 1, cap: 20, repair: 1, concurrency: 2, asked: 4, crossReview: false, usageGuard: false } },
@@ -319,5 +319,18 @@ test("the legend's notes are whole at every breakpoint and a sample of widths fr
     const notes = frame.slice(frame.findLastIndex((l) => /^├[─┴]+┤$/.test(l)) + 1, -1);
     assert.ok(notes.some((l) => l.includes("time = in state")), `${cols} columns: ${notes.join("\n")}`);
     for (const l of notes) assert.ok(!l.includes("…"), `${cols} columns: a note is cut: ${l}`);
+  }
+});
+
+test("the sandboxes row adds the sandboxes outside the limit as +N for gates, at any width, and the gates row is as before", async () => {
+  const { readFacts } = await import("./status-run.ts");
+  const at = (outside: number, cols: number) =>
+    readFacts(draw(cols, 400, { snapshot: { ...SNAPSHOT, pool: { sandboxes: { used: 3, outside, limit: "3" }, gates: SNAPSHOT.pool.gates } } }).join("\n"), SNAPSHOT.root).run;
+  for (const cols of [60, 100, 200, 330]) {
+    assert.equal(at(1, cols).sandboxes, "3/3 +1 for gates", `${cols} columns`);
+    assert.equal(at(2, cols).sandboxes, "3/3 +2 for gates", `${cols} columns`);
+    assert.equal(at(0, cols).sandboxes, "3/3", `${cols} columns`);
+    // A summary line cuts the gates row where the longer sandboxes row pushes it, so the figure is compared.
+    assert.equal(at(1, cols).gates?.split(" ")[0], at(0, cols).gates?.split(" ")[0], `${cols} columns`);
   }
 });

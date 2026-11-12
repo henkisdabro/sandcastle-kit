@@ -57,7 +57,7 @@ const snapshot = (group: Record<string, unknown>): Snapshot => ({
   now: NOW, root: "/home/user/project", dir: "/home/user/project/.sandcastle", name: "project", base: "main", hasRecord: true,
   record: { startedAt: "2026-10-12T11:00:00Z", stage: "running" },
   tickets: {}, live: true, outcomes: {}, logs: [], tails: {}, worktrees: [], branches: {}, containers: {}, cpus: 8,
-  pool: { sandboxes: { used: 1, limit: "3" }, gates: { used: 0, limit: "1" } },
+  pool: { sandboxes: { used: 1, outside: 0, limit: "3" }, gates: { used: 0, limit: "1" } },
   queue: { tickets: [] }, unpushed: 0,
   settings: { from: "live", settings: group },
   models: "implement claude-sonnet-5-5/high · review claude-opus-5-5/high",

@@ -58,7 +58,7 @@ const SNAPSHOT: Snapshot = {
   branches: {},
   containers: {},
   cpus: 8,
-  pool: { sandboxes: { used: 2, limit: "3" }, gates: { used: 0, limit: "1" } },
+  pool: { sandboxes: { used: 2, outside: 0, limit: "3" }, gates: { used: 0, limit: "1" } },
   queue: { tickets: [] },
   unpushed: 0,
   models: "",
