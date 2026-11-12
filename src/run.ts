@@ -1077,6 +1077,14 @@ export const firstSlotWait = (project: Project, record: RunRecord, nowMs = Date.
   return left.length ? Math.min(...left) : undefined;
 };
 
+/** Local `HH:MM` of an ISO time: the closing summary's and the drain line's one way to say a time. */
+export const hhmm = (iso: string) => new Date(iso).toTimeString().slice(0, 5);
+/** A length of time in whole minutes (`20m`, `2h 22m`), as the closing summary and the drain line say it. */
+export const spanOf = (ms: number) => {
+  const m = Math.round(ms / 60_000);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+};
+
 const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
 
 /**
