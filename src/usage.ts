@@ -300,8 +300,10 @@ const windowOf = (value: unknown): PlanWindow | undefined => {
 
 /**
  * The reading a Claude Code `rate_limit_event` stream line holds, or undefined for any other line, a
- * malformed one, or an event without both windows. `at` is when the kit read the line, in seconds since
- * the epoch: the stream carries no time of its own, and an agent's clock is not the host's.
+ * malformed one, or an event with no well-formed window. `windows` holds only the windows the event carries
+ * (Claude Code 2.1.322 writes the weekly one alone; `mergeReading` keeps the other from an earlier event).
+ * `at` is when the kit read the line, in seconds since the epoch: the stream carries no time of its own,
+ * and an agent's clock is not the host's.
  */
 export const usageFromEvent = (line: string, at: number): UsageReading | undefined => {
   if (!line.includes("rate_limit_event")) return undefined;
@@ -315,7 +317,21 @@ export const usageFromEvent = (line: string, at: number): UsageReading | undefin
   const windows = event.rate_limit_info?.unifiedWindows;
   const fiveHour = windowOf(windows?.five_hour);
   const week = windowOf(windows?.seven_day);
-  return fiveHour && week ? { provider: "claude", windows: { fiveHour, week }, at } : undefined;
+  if (!fiveHour && !week) return undefined;
+  return { provider: "claude", windows: { ...(fiveHour && { fiveHour }), ...(week && { week }) }, at };
+};
+
+/**
+ * `next`, with each window it lacks taken from `prev`: an event that carries one window says nothing against
+ * the other, which stays what the last event that had it said until it resets (the rule `openWindows` uses, so
+ * a window that is open again since is not kept). `at` is `next.at`.
+ */
+export const mergeReading = (prev: UsageReading | undefined, next: UsageReading, now: number): UsageReading => {
+  if (!prev || prev.provider !== next.provider) return next;
+  const open = (w: PlanWindow | undefined) => (w && w.resetsAt + USAGE_RESUME_GRACE_SECONDS > now ? w : undefined);
+  const fiveHour = next.windows.fiveHour ?? open(prev.windows.fiveHour);
+  const week = next.windows.week ?? open(prev.windows.week);
+  return { provider: next.provider, windows: { ...(fiveHour && { fiveHour }), ...(week && { week }) }, at: next.at };
 };
 
 // Codex's own windows. `used_percent` is already a percentage (42.0 is 42%), `window_minutes` says which
@@ -331,7 +347,7 @@ const codexWindowOf = (value: unknown): (PlanWindow & { minutes: number }) | und
 };
 
 /**
- * The reading a Codex `rate_limits` object holds, or undefined without both windows. The windows are told
+ * The reading a Codex `rate_limits` object holds, or undefined without both windows (the one rule Codex keeps). The windows are told
  * apart by their length (`window_minutes`: 300 and 10080), never by position: `primary` is the 5-hour one
  * today, but nothing promises that for every plan. `at` is when the kit read it, in seconds since the epoch.
  */
@@ -379,7 +395,7 @@ const USAGE_READERS: Record<UsageProvider, (line: string, at: number) => UsageRe
 };
 export const USAGE_PROVIDERS = Object.keys(USAGE_READERS) as UsageProvider[];
 
-/** A run record's `usage` entry, checked: the record is a file in a repository, so only well-formed numbers pass. `windows` and `at` are dropped together when either is wrong. */
+/** A run record's `usage` entry, checked: the record is a file in a repository, so only well-formed numbers pass. A window that is wrong is dropped; `windows` and `at` are dropped together when neither window is valid or `at` is wrong. */
 export const readPlanUsage = (value: unknown): PlanUsage | undefined => {
   const u = value as { provider?: unknown; windows?: { fiveHour?: unknown; week?: unknown } | null; at?: unknown } | null | undefined;
   const provider = USAGE_PROVIDERS.find((p) => p === u?.provider);
@@ -392,7 +408,9 @@ export const readPlanUsage = (value: unknown): PlanUsage | undefined => {
   };
   const fiveHour = pct(u?.windows?.fiveHour);
   const week = pct(u?.windows?.week);
-  return fiveHour && week && typeof u?.at === "number" && Number.isFinite(u.at) ? { provider, windows: { fiveHour, week }, at: u.at } : { provider };
+  return (fiveHour || week) && typeof u?.at === "number" && Number.isFinite(u.at)
+    ? { provider, windows: { ...(fiveHour && { fiveHour }), ...(week && { week }) }, at: u.at }
+    : { provider };
 };
 
 /** A run record's whole `usage`, checked: a list with one entry per provider, or the one object an older kit wrote. Entries that are no reading of a known provider are left out. */
@@ -551,6 +569,8 @@ export const watchUsage = ({
   let started = 0;
   let lastWrite = -Infinity;
   const pending = new Map<UsageProvider, UsageReading>();
+  // The last reading of each provider, merged: an event that carries one window keeps the other from this.
+  const last = new Map<UsageProvider, UsageReading>();
   // Tickets whose live figure changed since it was last written.
   const changed = new Set<string>();
   let stopped = false;
@@ -629,7 +649,8 @@ export const watchUsage = ({
             if (tail.owner !== undefined && tail.pass > tail.settled) countTokens(tail, line);
             for (const provider of providers) {
               const reading = USAGE_READERS[provider](line, at);
-              if (reading) readings.set(provider, reading);
+              // Two events of one pass may each carry one window: the later one keeps the other's.
+              if (reading) readings.set(provider, mergeReading(readings.get(provider), reading, at));
             }
           }
         }
@@ -657,7 +678,13 @@ export const watchUsage = ({
           }
         })
         .sort((a, b) => a.mtime - b.mtime);
-      for (const g of found) for (const [provider, reading] of g.readings) pending.set(provider, reading);
+      for (const g of found) {
+        for (const [provider, reading] of g.readings) {
+          const merged = mergeReading(last.get(provider), reading, at);
+          last.set(provider, merged);
+          pending.set(provider, merged);
+        }
+      }
     } catch {
       /* no logs directory yet */
     }
@@ -764,7 +791,8 @@ const ageWords = (seconds: number) => {
 const recordedLine = (u: UsageReading, now: number) => {
   const window = (label: string, w: PlanWindow) =>
     w.resetsAt > now ? `${label} ${w.percent}% - resets ${resumeClock(w.resetsAt)}` : `${label} reset since (was ${w.percent}%)`;
-  return `Plan usage (${u.provider === "codex" ? "Codex" : "Claude"}): ${window("5h", u.windows.fiveHour)} · ${window("week", u.windows.week)} (read ${ageWords(now - u.at)}, from the run record)`;
+  const shown = [u.windows.fiveHour && window("5h", u.windows.fiveHour), u.windows.week && window("week", u.windows.week)].filter(Boolean).join(" · ");
+  return `Plan usage (${u.provider === "codex" ? "Codex" : "Claude"}): ${shown} (read ${ageWords(now - u.at)}, from the run record)`;
 };
 
 /**
@@ -859,7 +887,9 @@ const openWindows = (usage: PlanUsage[], now: number, provider?: UsageProvider):
     !u.windows || (provider && u.provider !== provider)
       ? []
       : (["fiveHour", "week"] as const).flatMap((window) => {
-          const { percent, resetsAt } = u.windows![window];
+          const w = u.windows![window];
+          if (!w) return [];
+          const { percent, resetsAt } = w;
           return resetsAt + USAGE_RESUME_GRACE_SECONDS > now ? [{ provider: u.provider, window, percent, resetsAt }] : [];
         }),
   );

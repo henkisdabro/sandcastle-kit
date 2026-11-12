@@ -59,7 +59,7 @@ test("a reading of Codex's alone is named, and a list with no reading is no toke
   assert.equal(usageText([{ provider: "claude" }, reading("codex", 30, 16)]), "codex wk 16%");
   assert.equal(usageText([{ provider: "claude" }, { provider: "codex" }]), undefined);
   assert.equal(usageText([]), undefined);
-  assert.equal(usageText([reading("claude", Number.NaN, 5), reading("codex", 30, Number.NaN)]), undefined);
+  assert.equal(usageText([reading("claude", Number.NaN, Number.NaN), reading("codex", Number.NaN, Number.NaN)]), undefined);
 });
 
 test("the status pane's sc_usage token carries both providers once the record's list has a reading", () => {

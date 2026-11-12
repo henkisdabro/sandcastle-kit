@@ -29,6 +29,7 @@ Start `sandcastle run` in a Herdr TUI pane and the run lays out its own view:
   the plan's usage as an `$sc_usage` token (`5h 14% · wk 93% ■`; `▲` from 75%, `■` from 90%, which the plugin's sidebar row colours amber and red, and nothing is sent before an agent has
   reported one). With cross-review on a ChatGPT plan the token joins both providers' weekly windows
   (`claude wk 93% · codex wk 16% ■`), the mark that of the worst window of either.
+  A reading with one window prints it alone (`wk 30%`, `5h 14%`).
 - 🧱 **A pane per sandbox, if you want them.** `herdr: { panes: "all" }` in `.sandcastle/config.ts`
   (or `SANDBOX_PANES=all` for one run; the variable wins) stacks one pane per concurrent sandbox
   on the right of the status view, named after its ticket and following that sandbox's log

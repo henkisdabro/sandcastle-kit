@@ -410,7 +410,7 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
     if (lastRow >= 0 && mark === "last run") SET[lastRow] = `${SET[lastRow]} ${c.gry}(last run)${c.off}`;
   }
 
-  // PLAN: a live run's plan usage, both windows of each provider with a reading; left out without one.
+  // PLAN: a live run's plan usage, each window a provider's reading carries; left out without one.
   const PLAN: string[] = [];
   if (live) {
     const settingsGroup = record.settings && typeof record.settings === "object" ? record.settings : {};
@@ -425,7 +425,10 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
       const pw = num(u.windows?.week?.percent);
       const rw = num(u.windows?.week?.resetsAt);
       const at = num(u.at);
-      if (p5 === undefined || r5 === undefined || pw === undefined || rw === undefined || at === undefined) continue;
+      // A reading may carry one window (Claude Code writes the weekly one alone): the other is a blank cell as wide as it would be.
+      const five = p5 !== undefined && r5 !== undefined ? { percent: p5, resetsAt: r5 } : undefined;
+      const week = pw !== undefined && rw !== undefined ? { percent: pw, resetsAt: rw } : undefined;
+      if ((!five && !week) || at === undefined) continue;
       const age = Math.max(now - at, 0);
       // A stale reading is greyed, its age beside it.
       const grey = age > USAGE_STALE_SECONDS;
@@ -436,7 +439,12 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
         if (pct > 0 && filled === 0) filled = 1;
         return `${c.mute}${label.padEnd(4)}${c.off} ${tone}${rep("▓", filled)}${c.gry}${rep("░", 5 - filled)}${c.off} ${tone}${String(pct).padStart(3)}%${c.off} ${c.mute}· resets ${resets}${c.off}`;
       };
-      readings.push([`${c.mute}${u.provider.padEnd(6)}${c.off} ${window("5h", p5, hhmm(r5))}`, window("week", pw, `${WEEKDAYS[local(rw).getDay()]} ${hhmm(rw)}`), `${c.mute}(${ago(age)} ago)${c.off}`]);
+      const weekResets = (w: number) => `${WEEKDAYS[local(w).getDay()]} ${hhmm(w)}`;
+      // The blank is measured from the cell the renderer draws, never counted by hand.
+      const blank = (cell: string) => rep(" ", visibleWidth(cell));
+      const fiveCell = five ? window("5h", five.percent, hhmm(five.resetsAt)) : blank(window("5h", 0, hhmm(0)));
+      const weekCell = week ? window("week", week.percent, weekResets(week.resetsAt)) : blank(window("week", 0, weekResets(0)));
+      readings.push([`${c.mute}${u.provider.padEnd(6)}${c.off} ${fiveCell}`, weekCell, `${c.mute}(${ago(age)} ago)${c.off}`]);
     }
     // One provider takes a row for each window; two take a row each.
     if (readings.length === 1) PLAN.push(readings[0]![0]!, `${rep(" ", 7)}${readings[0]![1]}`, `${rep(" ", 7)}${readings[0]![2]}`);

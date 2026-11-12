@@ -2694,17 +2694,24 @@ Claude Code's stream-json output carries `rate_limit_event` lines (about three a
 windows' `utilization` (a fraction) and `resetsAt` (seconds since the epoch), and every agent's raw
 stream is already in its `.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` (`agentLogging` in
 `src/run.ts`). `usageFromEvent(line, at)` turns one such line into a `UsageReading` -
-`{ provider: "claude", windows: { fiveHour, week }, at }` with each window `{ percent, resetsAt }`,
+`{ provider: "claude", windows: { fiveHour?, week? }, at }` with each window `{ percent, resetsAt }`,
 the percent a whole number from 0 to 100 - and gives none for a malformed line, another type of line
-or an event without both windows; the kit stamps `at` itself (seconds, when it read the line: the
+or an event with no well-formed window; the kit stamps `at` itself (seconds, when it read the line: the
 stream has no time of its own and an agent's clock is not the host's).
 The reading is keyed by `provider`, and `USAGE_READERS` holds one reader per provider, so a later
 provider adds one function there and the record's `usage` already names whose it is.
+Each window of a reading is optional (Claude Code 2.1.322 writes the weekly one alone in every pass).
+A window the agents' events do not carry is kept from the last event that had it, or, with none, not
+shown and not judged: `mergeReading(prev, next, now)` takes each window `next` lacks from `prev`
+until its reset plus `USAGE_RESUME_GRACE_SECONDS` (the rule `openWindows` uses), and `watchUsage` writes
+the merge of its last reading with each new one; `readPlanUsage` keeps an entry with one valid window;
+the usage pause, the summary, the Herdr token and the status view's plan lane use the windows present
+(a missing cell is blank, as wide as the one the renderer draws).
 Codex's is `usageFromCodexEvent(line, at)`, over `usageFromRateLimits(limits, at)`: a session's
 `token_count` event
 (`{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1791188474},"secondary":{...10080...}}}}`)
 gives `fiveHour` and `week` by `window_minutes` (300 and 10080), never by position, `used_percent`
-already a percentage and `resets_at` in seconds, and none unless both windows are there.
+already a percentage and `resets_at` in seconds, and none unless both windows are there (Codex keeps that rule; Claude's one-window events are merged).
 `codex exec --json` prints no `rate_limits` (its events are `thread.started`, `turn.*`, `item.*` and
 `error`), and the session that has them is `~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl` inside
 the container (the kit runs Codex with `captureSessions: false`, so none is copied to the host's
