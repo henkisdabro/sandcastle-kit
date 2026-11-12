@@ -108,11 +108,13 @@ the closing summary's `Settings:` line.
 take `--api-key` as well.
 Red only on a terminal and without `NO_COLOR`; the words say it either way.
 
-When the machine-wide sandbox cap holds the run below `CONCURRENCY`, the first line says so before the models,
-and where the cap comes from:
-`10 ticket(s), up to 2 at a time (CONCURRENCY=4, but maxSandboxes is 3 (machine settings) and one slot is kept for landing - \`sandcastle size\` suggests a figure; gate passes run beside them on 2 gate slots) - implement ...:`.
-The cap is `SANDCASTLE_MAX_SANDBOXES`, else `maxSandboxes` in the machine settings, else the default pool of 6.
-"Up to 2 at a time" counts tickets in an agent pass; a ticket in its gates pass leaves that count and runs on a gate slot.
+When the machine-wide sandbox cap holds the run below `CONCURRENCY`, the first line says so before
+the models, and where the cap comes from:
+``10 ticket(s), up to 2 at a time (CONCURRENCY=4, but maxSandboxes is 3 (machine settings) and one slot is kept for landing - `sandcastle size` suggests a figure; gate passes run beside them on 2 gate slots) - implement ...:``.
+The cap is `SANDCASTLE_MAX_SANDBOXES`, else `maxSandboxes` in the machine settings, else the
+default pool of 6.
+"Up to 2 at a time" counts tickets in an agent pass; a ticket in its gates pass leaves that count
+and runs on a gate slot.
 
 When another run is live and holds or wants sandbox slots, the start also says how the machine is
 split, before the estimate:
