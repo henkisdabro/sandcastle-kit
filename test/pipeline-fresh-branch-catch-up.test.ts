@@ -202,7 +202,8 @@ test("a branch with a commit of its own is left as it is", async () => {
   h.agents.impl = implementing("seven.txt", "seven\n");
   const own = () => git(h.root, "rev-parse", BRANCH);
   const { lines } = await h.attempt();
-  assert.ok(!lines.some((l) => l.includes("brought to main's tip")), lines.join("\n"));
+  // Not even tried: git would refuse a fast-forward of a branch that diverged, so only the count says it was never attempted.
+  assert.ok(!lines.some((l) => l.includes("when its sandbox opened")), lines.join("\n"));
   assert.equal(h.state.setupRuns, 0);
   // The carried branch's own base merge (later in the pipeline) is not this fast-forward: its commit stays in the history.
   assert.ok(h.atImplement[0]?.files.includes("own.txt"));
