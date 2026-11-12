@@ -1089,7 +1089,7 @@ const hooksCovered = (root: string, key: string) => {
 // runs them, so a landing's or verify's record (gates alone) leaves the next base check its hook checks, which a
 // commit that changed a hook file would otherwise have skipped - unless `noteGreenCommit` finds the record before it
 // covered them and no file they read changed.
-// `run` is this process: a skip says "verified this run" only for a record this run wrote. Not the run record's
+// `run` is this process: a skip says "gated this run" only for a record this run wrote. Not the run record's
 // `startedAt`, which every autonomy turn writes afresh, so a drain turn never knew its own run's verify.
 const THIS_RUN = `${process.pid}@${Math.round(Date.now() - process.uptime() * 1000)}`;
 // `proof` is the commit that result is of, whose gates proved it (a ticket's `#427`, "the base check", "verify") and
@@ -1348,7 +1348,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const gatesGreen = cached && baseCacheHit(project.root, key);
   if (gatesGreen) {
     const commit = sh("git", ["rev-parse", "--short", base]);
-    const seen = recordedRun(project.root) === THIS_RUN ? `green at ${commit} already (verified this run)` : "green at this commit and image before";
+    const seen = recordedRun(project.root) === THIS_RUN ? `green at ${commit} already (gated this run)` : "green at this commit and image before";
     if (hooksCovered(project.root, key)) {
       console.log(`Gates on ${base}: ${seen} - not re-run.`);
       return;

@@ -995,22 +995,23 @@ export const redNote = (red: { with: string[]; gates?: string[]; failing?: strin
  * earlier `sandcastle run`. Saying "earlier run" of this run's own first attempt sent operators
  * looking for a run that never existed.
  */
-export const carriedFrom = (requeued: boolean) => (requeued ? "its first attempt" : "an earlier run");
+export type From = boolean | { turn: number };
+export const carriedFrom = (from: From) => (typeof from === "object" ? `turn ${from.turn}` : from ? "its first attempt" : "an earlier run");
 
 /** `who` is the tracker's own ref for the ticket. The line for a branch at the head it was reviewed and gated green on, or past it by merge commits only. */
-export const greenCarriedLine = (who: string, head: string, requeued: boolean, lateComment = false) =>
-  `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(requeued)} - ` + (lateComment ? LATE_COMMENT : "no implement or full review; the gates decide.");
+export const greenCarriedLine = (who: string, head: string, from: From, lateComment = false) =>
+  `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(from)} - ` + (lateComment ? LATE_COMMENT : "no implement or full review; the gates decide.");
 
 /** What a carried branch's line says when a person commented on its ticket after the review: no implementer, but the full review runs. */
 const LATE_COMMENT = "a comment since its review - full review (no implement); the gates decide.";
 
 /** The line for a branch reviewed at a head and stopped before any gate result (red results are not this): the gates run, not an implementer. */
-export const reviewedCarriedLine = (who: string, head: string, requeued: boolean, lateComment = false) =>
-  `${who}: reviewed at ${head.slice(0, 7)} in ${carriedFrom(requeued)}, no gate result since - ` + (lateComment ? LATE_COMMENT : "no implement or full review; the gates decide.");
+export const reviewedCarriedLine = (who: string, head: string, from: From, lateComment = false) =>
+  `${who}: reviewed at ${head.slice(0, 7)} in ${carriedFrom(from)}, no gate result since - ` + (lateComment ? LATE_COMMENT : "no implement or full review; the gates decide.");
 
 /** The line for the base merged into a carried branch, cleanly or with its generated files regenerated. */
-export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
-  `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(requeued)}` +
+export const carriedMergeLine = (who: string, base: string, behind: number, from: From, regenerated?: { files: string[]; regen: string[] }) =>
+  `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(from)}` +
   (regenerated ? `; regenerated ${regenerated.files.join(", ")} with ${regenerated.regen.map((c) => `\`${c}\``).join(", ")}.` : ".");
 
 /** The line for a carried branch re-created on the base's tip because the base it merged was rewritten after (`rebuildOnBase`). */
@@ -1064,7 +1065,7 @@ export const firstAttemptIdleRepairs = (results: readonly PromiseSettledResult<{
 };
 
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its reviewed branch" (reviewed, never gated green), "its branch from ...". */
-export const carriedBranch = (landOnly: boolean, requeued: boolean, reviewedOnly = false) => (landOnly ? (reviewedOnly ? "its reviewed branch" : "its green branch") : `its branch from ${carriedFrom(requeued)}`);
+export const carriedBranch = (landOnly: boolean, from: From, reviewedOnly = false) => (landOnly ? (reviewedOnly ? "its reviewed branch" : "its green branch") : `its branch from ${carriedFrom(from)}`);
 
 /** A conflict the requeue-once rule would have sent back, had the run not stopped starting tickets: "with #1: a.txt; would have been retried, but the run had stopped starting tickets". Its files are this conflict's own. */
 export const unretriedLine = (c: { files: string[]; with: string[] }) => `${conflictLine(c)}; would have been retried, but the run had stopped starting tickets`;
