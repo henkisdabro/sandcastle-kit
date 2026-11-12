@@ -4,7 +4,7 @@
 //   pnpm test:file test/notes-join.test.ts
 
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -52,4 +52,14 @@ test("a report's unmet items come out as one note", () => {
   const text = "done";
   const said = saidOf(text, { report: reportOf({ unmet: { assessed: true, items: [{ who: "agent", text: "Do A." }, { who: "agent", text: "Do B." }] } }), output: text });
   assert.equal(said.unmet, "Do A; Do B.");
+});
+
+// The pipeline's `agentsSaid` joins the implementer's and the reviewers' notes across passes: a
+// pipeline test needs a whole faked harness, so its two joins are held by their source.
+test("the notes said across passes are joined by joinNotes too", () => {
+  const source = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  const said = source.slice(source.indexOf("const agentsSaid = () => {"));
+  const body = said.slice(0, said.indexOf("\n      };"));
+  assert.match(body, /unmet: left\.length \? cutAtWord\(joinNotes\(left\), UNGATED_MAX\)/);
+  assert.match(body, /ungated: ungated\.length \? cutAtWord\(joinNotes\(ungated\), UNGATED_MAX\)/);
 });
