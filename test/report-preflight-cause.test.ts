@@ -14,7 +14,7 @@ import { KIT } from "./cli-spawn.ts";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { render } = await import("../src/report.ts");
-const { preflightFailure, recordPreflightFailure } = await import("../src/run.ts");
+const { recordPreflightFailure } = await import("../src/run.ts");
 
 const base = {
   base: "main",
@@ -41,21 +41,17 @@ test("a refused preflight's cause is in the run headline", () => {
 });
 
 test("two model lines and the credential hint show in the headline, without the repeated NOT STARTED line", () => {
-  const message = preflightFailure(
-    [
-      { model: "model-a", reply: "unknown model" },
-      { model: "model-b", reply: "not allowed" },
-    ],
-    { key: "CLAUDE_CODE_OAUTH_TOKEN", file: "/home/user/.config/sandcastle-kit/.env" },
-  );
-  const same = preflightFailure([{ model: "model-a", reply: "401 invalid authentication credentials" }], { key: "ANTHROPIC_API_KEY", file: "/home/user/.env" });
-  const out = render({ ...base, preflightFailure: message + "\n  extra line a third line would not reach\n  fourth" } as never);
-  assert.match(out, /model-a: unknown model\n {2}model-b: not allowed\n {2}extra line a third line would not reach\n/);
-  assert.doesNotMatch(out, /fourth/);
+  const message = [
+    "NOT STARTED: Preflight failed - no sandbox started:",
+    "  model-a: 401 invalid authentication credentials",
+    "  model-b: authentication failed",
+    "  The credential was likely rejected: ANTHROPIC_API_KEY from /home/user/.env.",
+    "  fourth cause line is omitted",
+  ].join("\n");
+  const out = render({ ...base, preflightFailure: message } as never);
+  assert.match(out, /^## 🏁 Run NOT STARTED: preflight failed \(exit 1\) - no sandbox started:\n {2}model-a: 401 invalid authentication credentials\n {2}model-b: authentication failed\n {2}The credential was likely rejected: ANTHROPIC_API_KEY from \/home\/user\/\.env\.$/m);
+  assert.doesNotMatch(out, /fourth cause line|its cause is the run's last lines/);
   assert.equal((out.match(/NOT STARTED/g) ?? []).length, 1);
-  const hint = render({ ...base, preflightFailure: same } as never);
-  assert.match(hint, /model-a: 401 invalid authentication credentials\n {2}The credential was likely rejected: ANTHROPIC_API_KEY from \/home\/user\/\.env\./);
-  assert.equal((hint.match(/NOT STARTED/g) ?? []).length, 1);
 });
 
 test("a record without the field keeps the pointer to the run's last lines", () => {
