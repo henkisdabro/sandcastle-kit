@@ -151,7 +151,9 @@ run.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees with
 the run.
-Its header is the logo and the **lanes** beside it: RUN (the stage, `turn 2/3` - the turn out of the
+Its header is the logo - the project, its base, the clock and, in the muted colour after the clock, the
+version of the kit that is drawing (`v0.24.0`; none if the kit's `package.json` cannot be read) -
+and the **lanes** beside it: RUN (the stage, `turn 2/3` - the turn out of the
 level's cap, none for level 1, which asks after every turn: `turn 2` - and the tokens spent),
 MACHINE (the pool's sandboxes and gates), MODELS (each pass's model, and the repair attempts a
 ticket gets after a red gate: `repair 1`, or a greyed `○ repair` with `repair.attempts: 0`),

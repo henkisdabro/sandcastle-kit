@@ -30,7 +30,7 @@ import { fit, visibleWidth } from "./status-grid.ts";
 import { palette, renderFrame } from "./status-render.ts";
 import { keysOf } from "./status-keys.ts";
 import { ticketRows } from "./status-rows.ts";
-import { createSources, readSnapshot, sandcastleDir, snapshotOf } from "./status-snapshot.ts";
+import { createSources, kitPackageVersion, readSnapshot, sandcastleDir, snapshotOf } from "./status-snapshot.ts";
 import { inHerdr1 } from "./terminal-host.ts";
 import { coreRecords } from "./herdr-core.ts";
 
@@ -137,7 +137,7 @@ const RESIZE_SETTLE_MS = 150;
  */
 const FIRST_PAINT_MS = 150;
 
-const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: boolean, terminal: boolean) => {
+const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: boolean, terminal: boolean, version: string | undefined) => {
   const n = Number(interval);
   const waitMs = (Number.isFinite(n) && n > 0 ? n : 10) * 1000;
   let framesLeft = env.STATUS_FRAMES ? Number(env.STATUS_FRAMES) || 0 : undefined;
@@ -184,7 +184,7 @@ const live = (dir: string, env: NodeJS.ProcessEnv, interval: string, showAll: bo
     let body: string;
     let said = "";
     try {
-      const snapshot = snapshotOf(dir, r, { env, terminal });
+      const snapshot = snapshotOf(dir, r, { env, terminal, version });
       body = liveBody(renderFrame(snapshot, ticketRows(snapshot), { ...size, showAll, colours }), size.cols);
       // Only what changed: a paint that redraws the same run says nothing to the core.
       said = records?.update(snapshot) ?? "";
@@ -333,10 +333,12 @@ const main = async (): Promise<number | undefined> => {
     process.stderr.write(`status: ${resolve(env.SANDCASTLE_PROJECT || process.cwd(), ".sandcastle")}: No such file or directory\n`);
     return 1;
   }
+  // Read once at the start: the version of the kit that is drawing, shown in the logo.
+  const version = kitPackageVersion();
   const argv = process.argv.slice(2);
   if (argv.includes("--json")) {
     // One reading with no terminal, as `status 0` into a pipe: no links unless SANDCASTLE_LINKS says so.
-    const snapshot = await readSnapshot(dir, { env, terminal: false });
+    const snapshot = await readSnapshot(dir, { env, terminal: false, version });
     // The shape is `Table` exactly as `ticketRows` returns it - { rows, counts, partly, later }, nothing added, renamed
     // or wrapped. Other views (an app mod, #866) read that type, so a change to `Row` is a change to this output.
     process.stdout.write(JSON.stringify(ticketRows(snapshot)) + "\n");
@@ -350,10 +352,10 @@ const main = async (): Promise<number | undefined> => {
   // A one-off frame prints every row; a refreshing one fits the pane unless asked for "all".
   const showAll = (show || (once ? "all" : "collapse")) === "all";
   if (!once) {
-    live(dir, env, interval, showAll, terminal);
+    live(dir, env, interval, showAll, terminal, version);
     return undefined;
   }
-  const snapshot = await readSnapshot(dir, { env, terminal });
+  const snapshot = await readSnapshot(dir, { env, terminal, version });
   const colours = palette(!env.NO_COLOR && terminal, env.COLORTERM === "truecolor" || env.COLORTERM === "24bit");
   const size = paneSize(env);
   const frame = renderFrame(snapshot, ticketRows(snapshot), { ...size, showAll, colours });

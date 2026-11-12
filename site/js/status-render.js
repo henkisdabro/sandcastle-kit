@@ -471,6 +471,8 @@ const renderFrame = (snapshot          , table       , { cols, rows, showAll, co
 
   const unpushed = snapshot.unpushed > 0 ? ` ${c.hot}↑${snapshot.unpushed} unpushed${c.off}` : "";
   const clock = hhmmss(now);
+  // The kit's version after the clock, divided as the clock is from the base, in the muted colour so the clock stays the accent.
+  const ver = snapshot.version ? `  ${c.rule}·${c.off}  ${c.mute}v${snapshot.version}${c.off}` : "";
   const logoRows = (n       )           => {
     const name = snapshot.name;
     const lg =
@@ -478,9 +480,9 @@ const renderFrame = (snapshot          , table       , { cols, rows, showAll, co
         ? [
             ` ${c.moon}▄ ▄ ▄${c.off} ${c.star}+${c.off}   ${c.bold}${c.moon}s a n d c a s t l e${c.off} ${c.night}- k i t${c.off}  ${c.star}·   +   ·${c.off}`,
             ` ${c.dusk}█████${c.off}     ${c.head}${name}${c.off}`,
-            ` ${c.deep}██▀██${c.off} ${c.star}·${c.off}   ${c.mute}base${c.off} ${c.accent}${snapshot.base}${c.off}${unpushed}  ${c.rule}·${c.off}  ${c.accent}${clock}${c.off}`,
+            ` ${c.deep}██▀██${c.off} ${c.star}·${c.off}   ${c.mute}base${c.off} ${c.accent}${snapshot.base}${c.off}${unpushed}  ${c.rule}·${c.off}  ${c.accent}${clock}${c.off}${ver}`,
           ]
-        : [`${c.bold}${c.moon}sandcastle-kit${c.off}  ${c.head}${name}${c.off}  ${c.mute}base${c.off} ${c.accent}${snapshot.base}${c.off}${unpushed}  ${c.rule}·${c.off}  ${c.accent}${clock}${c.off}`];
+        : [`${c.bold}${c.moon}sandcastle-kit${c.off}  ${c.head}${name}${c.off}  ${c.mute}base${c.off} ${c.accent}${snapshot.base}${c.off}${unpushed}  ${c.rule}·${c.off}  ${c.accent}${clock}${c.off}${ver}`];
     // Each padded to the widest, so centring keeps the castle's shape.
     const m = Math.max(...lg.map(visibleWidth));
     return lg.map((l) => align(l, m));
