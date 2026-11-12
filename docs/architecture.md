@@ -1842,7 +1842,7 @@ opened, since a blocking read would hang the whole run.
   opens, before every sandbox closes, before each landing and before each host write; the
   command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
   `core.hooksPath` and `core.fsmonitor` by environment.
-  The one config change a check takes mid-run is the exact absolute rewrite of a tracked hooks path
+  A check also takes the exact absolute rewrite of a tracked hooks path mid-run
   (decided: pin and accept, never restore - the kit never writes `.git/config`, since restoring would
   make it a writer of the user's config, could race another writer and could hide a window of hookless
   commits). A worktree tool (Claude Code's worktree setup) resolves a relative `core.hooksPath` and

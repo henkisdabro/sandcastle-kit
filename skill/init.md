@@ -83,8 +83,10 @@ This continues SKILL.md: run its "Before every action" first.
      sandbox. If one is a guard the project relies on, propose moving it into
      `.claude/settings.json`.
    - Git hooks (`core.hooksPath`, `.husky`) run on every agent commit inside the sandbox. Check
-     that what they call is in the image and that none pushes or deploys. A `core.hooksPath` that
-     is absolute (or outside the project) does not exist in the sandbox: set a relative one.
+     that what they call is in the image and that none pushes or deploys. The kit pins a tracked
+     relative `core.hooksPath` in each sandbox, including when a worktree tool rewrites it to its
+     absolute host form. Other absolute paths (or paths outside the project) do not exist in the
+     sandbox: set a relative one once no run is live.
      A hook installer (husky, `pre-commit install`, `lefthook install`) in `setup` installs nothing
      in a sandbox, which cannot write its `.git/config` or `.git/hooks`: install the hooks on the
      host only and drop the installer from `setup`. No setup step may write repo config either
