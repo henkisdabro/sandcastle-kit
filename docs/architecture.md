@@ -367,11 +367,15 @@ The per-ticket summary line (`ticketTime`) labels three figures: `work 19m + 8m 
 Work is `took` less `waited`, the waiting is `waited`, and the landing is the landing's elapsed
 (its own wait for a gates slot included), kept per ticket from the landing port's `timed` callback
 and shown only for a ticket that merged.
-A conflicted ticket's resolve wait is in none of the three.
-A sent-back ticket's resolve wait, which also comes before the pipeline, is handed in as
+A sent-back ticket's resolve wait is part of the waiting.
+It comes before the pipeline and is handed in as
 `at.resolveWaitMs`, and the first `setup` step takes it as `timed`'s `queuedMs`: `withQueued`
-(`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`, and not to `waited`, since `took`
-never held it.
+(`src/gates.ts`) adds it to that line's `waitMs`, outside `ms`. `took` never held it, so the pipeline adds
+it to both `took` and `waited` (`addResolveWait` in `src/burndown.ts`): the ticket's summary line keeps its
+work figure and shows the wait as `+ Nm waiting`. The report reads the same wait from the `waitMs` of the
+`setup` lines (`TimeLost.resolveWaitMs`, absent when none) as its own cause in `Largest causes measured`:
+`Nm with sent-back tickets waiting to resolve, summed over tickets`
+(`test/report-requeue-count.test.ts`).
 
 **Sandbox CPUs** (`sandboxCpus` in `src/sandbox.ts`): one function decides a sandbox's
 `docker run --cpus` from its kind - a `ticket`'s (the VM's CPUs divided by the run's concurrency) or
@@ -662,6 +666,12 @@ The ticket ledger: one place that turns each ending (`src/schedule.ts`) into eve
   merge check, `landing`), which the closing summary's `Landed on a second attempt` line words from
   the run record (`test/requeue-where.test.ts`); a record from before that has no place and reads
   "after a conflict".
+  Every send-back's line is kept in the ticket's `requeues` list, in order (`requeued` stays the last
+  line, and goes null when its attempt never began): a ticket can be sent back twice (`sendBack` allows a
+  second when the colliding landing finished after the resolve began). The summary gates on `requeued`,
+  counts attempts as `requeues.length + 1` and says `Landed on a second attempt`, `... third attempt` or
+  `Landed after N attempts` (four or more), one line per count, tickets with the same reasons in one
+  parenthesis (`test/report-requeue-count.test.ts`); a record without `requeues` has one send-back, in `requeued`.
   A second collision's note names the tickets of both attempts (`describe`). `landOne` writes no
   verdict, so a requeued ticket whose second attempt never began has nothing to undo: it is recorded
   from the ending the scheduler makes of it (its first landing, or withdrawn - then said as not

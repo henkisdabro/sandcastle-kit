@@ -1595,6 +1595,16 @@ export const ticketTime = (tookMs: number | undefined, waitedMs = 0, landingMs?:
   return parts.length ? ` ${parts.join(", ")}` : "";
 };
 
+/**
+ * A sent-back ticket's resolve wait lies before its attempt, outside the pipeline's `took`: it goes into both `took` (the
+ * ticket's time) and `waited` (the part of it that is no work), so `ticketTime` shows the work unchanged and the waiting grown.
+ */
+export const addResolveWait = (took: Map<string, number>, waited: Map<string, number>, issue: string, resolveWaitMs: number | undefined): void => {
+  if (!(typeof resolveWaitMs === "number" && resolveWaitMs > 0)) return;
+  took.set(issue, (took.get(issue) ?? 0) + resolveWaitMs);
+  waited.set(issue, (waited.get(issue) ?? 0) + resolveWaitMs);
+};
+
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
 // `sandboxId`: the container's name (Sandcastle 0.14.0 on), which the CPU limit and the stop before a close address it by.
 export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close" | "sandboxId">;
@@ -2107,6 +2117,7 @@ export const createPipeline = (ctx: PipelineContext) => {
     };
 
     const started = Date.now();
+    addResolveWait(took, waited, issue.id, at?.resolveWaitMs);
     releaseBranchWorktree(branch, project.root);
     // From here the agent commits to the branch, and the setup may cut it from the base again: the `.git` check lets it move.
     host.begin(branch);
