@@ -80,7 +80,7 @@ test("a green verify is the base the next turn's check does not gate again, thou
     const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
     assert.ok(!ran(lines), lines.join("\n"));
     const at = git(root, "rev-parse", "--short", "main");
-    assert.equal(skipped(lines), `Gates on main: green at ${at} already (verified this run) - gates not re-run; running the hook tests and the git-hook probe in a sandbox, before any agent starts ...`);
+    assert.equal(skipped(lines), `Gates on main: green at ${at} already (gated this run) - gates not re-run; running the hook tests and the git-hook probe in a sandbox, before any agent starts ...`);
     assert.ok(probed(root), "the git-hook probe ran");
   });
 });
@@ -106,7 +106,7 @@ test("the base check's own record skips the gates and the hook checks both", asy
     // A verify at the same commit adds nothing the record lacked, and takes nothing from it.
     await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
     const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
-    assert.match(skipped(lines) ?? "", /already \(verified this run\) - not re-run\.$/);
+    assert.match(skipped(lines) ?? "", /already \(gated this run\) - not re-run\.$/);
     assert.equal(probed(root), false);
   });
 });
@@ -280,13 +280,13 @@ test("a landing whose gates went red tells no commit", async () => {
 });
 
 // Each autonomy turn writes a fresh run record with its own `startedAt`, which the kit passes as the
-// run id: a skip keyed on it never said "verified this run" in a later turn.
+// run id: a skip keyed on it never said "gated this run" in a later turn.
 test("a later turn's check knows the verify an earlier turn of the same run passed", async () => {
   const root = makeProject("check-red");
   await inProject(root, async (project, plan) => {
     await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "turn-1"));
     const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "turn-2"));
-    assert.match(skipped(lines) ?? "", /already \(verified this run\)/);
+    assert.match(skipped(lines) ?? "", /already \(gated this run\)/);
     // A record another process wrote (`sandcastle gates` by hand, an earlier run) is only "before".
     const file = join(root, ".sandcastle/.run/base-gates.json");
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), run: "another" }) + "\n");
