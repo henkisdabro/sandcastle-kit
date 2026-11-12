@@ -4075,7 +4075,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     const outsider = await outsiderEdit(tracker, issue.id, turn?.runStart ?? Date.parse(runId));
     if (outsider?.kind === "unread") {
       console.log(`${ref(issue.id)}: ${outsider.why}.`);
-      return { kind: "not begun", why: { kind: "withdrawn", reason: outsider.why } };
+      return { kind: "not begun", why: { kind: "unchecked", reason: outsider.why } };
     }
     const parkable = (park?: Park): Park => ({
       suspend: async () => {

@@ -30,7 +30,13 @@ export const autonomyLevel = (env: string | undefined, config: unknown): Level =
 
 /** `partial`: merged tickets with a criterion left undone, still queued, whose remainder an agent can do. */
 /** `unlanded`: green branches whose landing did not happen (a sandbox that would not open, a branch that moved); the next turn lands the recorded head. */
-export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: string[]; unlanded?: string[] };
+export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: string[]; unlanded?: string[]; unchecked?: string[] };
+
+/**
+ * The note of a ticket whose outsider-edit read failed (#893): not started, still queued, and the run did not stop for it.
+ * Here, not in the ledger that writes it, so the drain can tell it from a ticket the run's stop left unstarted.
+ */
+export const UNCHECKED_NOTE = "not started: could not read its edits from GitHub";
 
 /**
  * What `unmetOf` (src/burndown.ts) puts in front of an `<unmet who="person">` line: the agent's explicit
@@ -71,7 +77,7 @@ export const noRerunCause = (facts: Facts): string | undefined => {
   // Red twice, and judged the machine's load (`likelyLoad`): not a reason to stop. The next turn gates the base first (`mustGateBase`).
   if (facts.verify?.green === false && !(facts.verify.likelyLoad === true && !facts.verify.notRun)) return facts.verify.notRun ? "the merged base could not be re-gated" : "the merged base is red";
   // A usage limit leaves no `stopped`, only skipped tickets whose note names it.
-  const skipped = Object.values(facts.tickets).find((t) => t.state === "skipped");
+  const skipped = Object.values(facts.tickets).find((t) => t.state === "skipped" && t.note !== UNCHECKED_NOTE);
   if (skipped) return `the run stopped early (${skipped.note?.replace(/^not started: /, "") || "tickets were not started"})`;
   return undefined;
 };
@@ -98,11 +104,13 @@ export const partialRerunnable = (facts: Facts): string[] =>
 export const rerunnable = (facts: Facts): Rerun | undefined => {
   if (noRerunCause(facts)) return undefined;
   const tickets = Object.entries(facts.tickets);
+  const unchecked = tickets.filter(([, t]) => t.state === "skipped" && t.note === UNCHECKED_NOTE).map(([id]) => id);
   return {
     conflicted: tickets.filter(([, t]) => t.state === "conflict").map(([id]) => id),
     unblocked: facts.runnable,
     partial: partialRerunnable(facts),
     unlanded: tickets.filter(([, t]) => t.state === "not landed").map(([id]) => id),
+    ...(unchecked.length && { unchecked }),
   };
 };
 
@@ -111,7 +119,7 @@ export const turnCap = (level: Level): number | undefined => (level === 0 ? 1 : 
 
 /** `turn` is the number of the turn that just ended (1-based). */
 export const nextTurn = (level: Level, turn: number, again: Rerun | undefined): "stop" | "ask" | "run" | "cap" => {
-  if (!again || level === 0 || again.conflicted.length + again.unblocked.length + (again.partial?.length ?? 0) + (again.unlanded?.length ?? 0) === 0) return "stop";
+  if (!again || level === 0 || again.conflicted.length + again.unblocked.length + (again.partial?.length ?? 0) + (again.unlanded?.length ?? 0) + (again.unchecked?.length ?? 0) === 0) return "stop";
   if (level === 1) return "ask";
   return turn < turnCap(level)! ? "run" : "cap";
 };
@@ -255,12 +263,13 @@ export const followOnTurn = (a: { level: Level; turn: number; end: LoopEnd | und
 };
 
 export const rerunList = (again: Rerun, ref: (id: string) => string): string => {
-  const all = [...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? [])].map(ref).join(", ");
+  const all = [...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? []), ...(again.unchecked ?? [])].map(ref).join(", ");
   const parts = [
     again.conflicted.length ? `conflicted: ${again.conflicted.map(ref).join(", ")}` : "",
     again.unblocked.length ? `unblocked: ${again.unblocked.map(ref).join(", ")}` : "",
     again.partial?.length ? `partly done: ${again.partial.map(ref).join(", ")}` : "",
     again.unlanded?.length ? `not landed: ${again.unlanded.map(ref).join(", ")}` : "",
+    again.unchecked?.length ? `not checked: ${again.unchecked.map(ref).join(", ")}` : "",
   ].filter(Boolean);
   return `${all} (${parts.join("; ")})`;
 };
@@ -283,8 +292,8 @@ export const stillOpen = (tracker: Tracker) => (id: string): boolean => {
 export const afterTurn = (facts: Facts, level: Level, turn: number, open: (id: string) => boolean) => {
   const again = rerunnable(facts);
   if (!again) return undefined;
-  const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open), partial: (again.partial ?? []).filter(open), unlanded: (again.unlanded ?? []).filter(open) };
-  return { left, ids: [...left.conflicted, ...left.unblocked, ...left.partial!, ...left.unlanded!], verdict: nextTurn(level, turn, left) };
+  const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open), partial: (again.partial ?? []).filter(open), unlanded: (again.unlanded ?? []).filter(open), unchecked: (again.unchecked ?? []).filter(open) };
+  return { left, ids: [...left.conflicted, ...left.unblocked, ...left.partial!, ...left.unlanded!, ...left.unchecked!], verdict: nextTurn(level, turn, left) };
 };
 
 /** undefined without reading when the input is not a terminal: a pipe, CI or `nohup` never blocks. Default No. */

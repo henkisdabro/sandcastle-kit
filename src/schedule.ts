@@ -569,6 +569,8 @@ export type Conflict = { files: string[]; with: string[]; found?: "review" | "ga
 
 /** The tracker took the ticket back (closed, unqueued, marked for a human) before an attempt began. */
 export type Withdrawn = { kind: "withdrawn"; reason: string };
+/** The outsider-edit read failed: nothing is known of the ticket, so it is not started this turn and stays queued - not withdrawn, not a stop. */
+export type Unchecked = { kind: "unchecked"; reason: string };
 
 /** What one attempt reports: how its pipeline ended, and any cause it found to stop the run. */
 export type Attempted<G, O> =
@@ -590,7 +592,7 @@ export type Attempted<G, O> =
   /** Its pipeline ran, then the `.git` check after it failed: the run stops. */
   | { kind: "stopped"; cause: StopCause }
   /** The check before it found a usage limit, or the tracker withdrew the ticket: nothing ran. */
-  | { kind: "not begun"; why: StopCause | Withdrawn };
+  | { kind: "not begun"; why: StopCause | Withdrawn | Unchecked };
 
 /**
  * What a juncture throws to a ticket parked by a pause when the run stops before the pause ends: the
@@ -626,7 +628,7 @@ export type Ending<G, O> =
   /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
   | { kind: "stopped"; cause: StopCause | undefined; finished: boolean; green?: G }
   /** `cutShort`: its agent began and died of the plan's limit (`why` is that limit) - nothing failed, and it is runnable again. */
-  | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string }; cutShort?: true }
+  | { kind: "not begun"; why: StopCause | Withdrawn | Unchecked | { kind: "refused label"; reason: string }; cutShort?: true }
   /** Parked at a juncture of a paused run when the run stopped: it never resumed, its branch holds every commit and the next run picks it up. */
   | { kind: "parked"; cause: StopCause | undefined }
   /** Still parked behind a file git cannot merge, or held for a blocker, when the run ended. */
@@ -1415,7 +1417,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const last = () => stop.startsNothing || (pipelines.size - retaking === 0 && !waits.waitsForFlight && !hold?.size);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
-      const notBegun = (t: T, why: StopCause | Withdrawn) => {
+      const notBegun = (t: T, why: StopCause | Withdrawn | Unchecked) => {
         const back = sentBack.get(t.id);
         sentBack.delete(t.id);
         if (!back) return end(t.id, { kind: "not begun", why });
@@ -1645,7 +1647,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             r = { kind: "crashed", error };
           }
           if (r.kind === "not begun") {
-            if (r.why.kind !== "withdrawn") stop.add(r.why);
+            if (r.why.kind !== "withdrawn" && r.why.kind !== "unchecked") stop.add(r.why);
             return await notBegun(t, r.why);
           }
           sentBack.delete(t.id);
