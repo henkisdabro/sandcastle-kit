@@ -3,15 +3,16 @@
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv, stripVTControlCharacters } from "node:util";
 import { CACHE_TTL_KEY, claudeEnv, CROSS_REVIEW } from "./agents.ts";
 import { projectRepo, type Project } from "./config.ts";
 import { nearest, OperatorError, SetupFailed } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
+import { pinnedHooksPath } from "./hooks-path.ts";
 import { commandOf, KIT_CACHE } from "./live-runs.ts";
 import { kitRunning } from "../mod/hooks/run-live.ts";
 import { withLock } from "./pool.ts";
@@ -526,6 +527,55 @@ export const projectWorktrees = (project: Project): { path: string; branch: stri
 export const branchFinished = (project: Project, branch: string): boolean =>
   branch.startsWith("sandcastle/") || !sh("git", ["cherry", project.baseBranch, branch], project.root).split("\n").some((l) => l.startsWith("+"));
 
+/** Whether a worktree is one of the kit's scratch ones: the base gates', a verify's, a landing's (`.sandcastle/worktrees/sandcastle-*`). A ticket's is `agent-issue-*`. */
+const isScratchWorktree = (path: string) => basename(path).startsWith("sandcastle-");
+
+/**
+ * The scratch worktrees this process opened (`openOrAbandon`, guard.ts, records each as it is made), by the path git
+ * lists. What a run's exit removes: never an earlier run's, which a guard stop may have left for a person.
+ */
+const openedScratch = new Set<string>();
+export const recordScratchWorktree = (path: string): void => void openedScratch.add(path);
+export const ownScratchWorktrees = (): ReadonlySet<string> => openedScratch;
+
+/**
+ * Removes the scratch worktrees under `.sandcastle/worktrees/sandcastle-*` and their `sandcastle/*` branches. They hold
+ * no work and no run resumes them. Never an `agent-issue-*` worktree or an `agent/*` branch. For each worktree: its
+ * container is removed, `refuse` (guard.ts, `worktreeRefusal`) is asked - one it names is left as it stands, with the
+ * reason - then it is unlocked, `git worktree remove --force` and `git branch -D` run, and the branch's fork forgotten.
+ * `only` limits it to those paths (a run's own, `ownScratchWorktrees`). Call with the project's run lock held, and
+ * inside the host git mutex when a run's other host git is live.
+ */
+export const removeScratchWorktrees = (
+  project: Project,
+  refuse?: (worktree: string) => string | undefined,
+  only?: ReadonlySet<string>,
+): { removed: string[]; branches: string[]; left: { path: string; branch?: string; reason: string }[] } => {
+  const removed: string[] = [];
+  const branches: string[] = [];
+  const left: { path: string; branch?: string; reason: string }[] = [];
+  for (const { path, branch } of projectWorktrees(project)) {
+    if (!isScratchWorktree(path) || (only && !only.has(path))) continue;
+    removeSandboxContainer(path);
+    // Every git command below reads config the worktree's records name, and a sandbox can write them.
+    const reason = refuse?.(path);
+    if (reason) {
+      left.push({ path, ...(branch ? { branch } : {}), reason });
+      continue;
+    }
+    // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
+    unlockWorktree(path, project.root);
+    sh("git", ["worktree", "remove", "--force", path], project.root);
+    removed.push(path);
+    if (branch?.startsWith("sandcastle/")) {
+      sh("git", ["branch", "-D", branch], project.root);
+      forgetFork(project.root, branch);
+      branches.push(branch);
+    }
+  }
+  return { removed, branches, left };
+};
+
 /**
  * `sandcastle clean`: removes the worktrees under `.sandcastle/worktrees/` and deletes the agent
  * branches that are finished (and, with `all`, the unmerged ones too). Call only while holding
@@ -540,10 +590,12 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
   reapOrphans(project);
   const containers = removeExitedSandboxes(project);
   const images = removeDanglingImages();
-  const entries = projectWorktrees(project);
-  const worktrees: string[] = [];
-  const left: CleanResult["left"] = [];
-  for (const { path, branch } of entries) {
+  const scratch = removeScratchWorktrees(project, refuse);
+  const worktrees: string[] = [...scratch.removed];
+  const left: CleanResult["left"] = [...scratch.left];
+  const deleted: CleanResult["deleted"] = scratch.branches.map((branch) => ({ branch, unmerged: false }));
+  for (const { path, branch } of projectWorktrees(project)) {
+    if (isScratchWorktree(path)) continue;
     // Every git command below reads config the worktree's records name, and a sandbox can write them: one the guard
     // refuses is left as it stands for a person, and the others go on. A directory already gone has nothing to read.
     const reason = refuse?.(path);
@@ -551,14 +603,12 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
       left.push({ path, ...(branch ? { branch } : {}), reason });
       continue;
     }
-    // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
     unlockWorktree(path, cwd);
     sh("git", ["worktree", "remove", "--force", path], cwd);
     worktrees.push(path);
   }
   sh("git", ["worktree", "prune"], cwd);
   const base = project.baseBranch;
-  const deleted: CleanResult["deleted"] = [];
   const kept: CleanResult["kept"] = [];
   // Git refuses to delete a branch a worktree has checked out, and the worktree is not to be touched.
   const held = new Set(left.map((l) => l.branch));
@@ -997,10 +1047,12 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
 // The sandbox
 // ---------------------------------------------------------------------------
 
-// The cross-family review signs in with the host's ChatGPT login. The file is
-// mounted read-only and copied, so a token refresh inside a container never
-// writes back to the host. preflight() refreshes the host login first, which
-// keeps the copies from needing a refresh of their own.
+// The cross-family review signs in with the host's ChatGPT login. A sandbox gets a copy with the refresh token
+// blanked (`codexSandboxAuth`), mounted read-only and copied in by the ready hook, so nothing in a container can
+// refresh the login or write back to the host. preflight() does not refresh the host login: its probe refreshes only
+// inside Codex's own 5-minute window before the access token expires, and `codex login` cannot force one. A copy that
+// kept the refresh token would be spent by every sandbox that crossed that point at once (a refresh rotates the token
+// server-side), leaving the host's copy stale. Blanked, a refresh attempt fails in that sandbox only.
 const CODEX_AUTH = "/home/agent/.codex-host/auth.json";
 
 // An agent's commit or merge ends by starting `git maintenance run --auto` (from git 2.29), which
@@ -1012,15 +1064,15 @@ const CODEX_AUTH = "/home/agent/.codex-host/auth.json";
 // image: no rebuild, and a project layer is covered too.
 export const SANDBOX_GIT_MAINTENANCE_OFF = [["gc.auto", "0"], ["maintenance.auto", "false"]] as const;
 
-/** `env` with the maintenance-off pairs appended after any `GIT_CONFIG_*` pairs it already carries. */
-const withGitMaintenanceOff = (env: Record<string, string>): Record<string, string> => {
+/** `env` with `extra` pairs appended after any `GIT_CONFIG_*` pairs it already carries. */
+const withGitConfig = (env: Record<string, string>, extra: readonly (readonly [string, string])[]): Record<string, string> => {
   const count = Number(env.GIT_CONFIG_COUNT);
   const n = Number.isInteger(count) && count >= 0 ? count : 0;
-  const pairs = SANDBOX_GIT_MAINTENANCE_OFF.flatMap(([key, value], i) => [
+  const pairs = extra.flatMap(([key, value], i) => [
     [`GIT_CONFIG_KEY_${n + i}`, key],
     [`GIT_CONFIG_VALUE_${n + i}`, value],
   ]);
-  return { ...env, ...Object.fromEntries(pairs), GIT_CONFIG_COUNT: String(n + SANDBOX_GIT_MAINTENANCE_OFF.length) };
+  return { ...env, ...Object.fromEntries(pairs), GIT_CONFIG_COUNT: String(n + extra.length) };
 };
 
 // The host's IANA zone name, resolved here and not read from `TZ`: macOS often has none set. A
@@ -1045,7 +1097,11 @@ export const sandboxEnv = (project: Project): Record<string, string> => {
   // review or resolve pass sets (`CACHE_TTL_KEY`), even though an implement pass's env does not name it.
   const env = credentials(project);
   for (const key of [...Object.keys(claudeEnv()), CACHE_TTL_KEY]) delete env[key];
-  return withGitMaintenanceOff({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) });
+  // The project's tracked hooks path, pinned: a worktree tool may rewrite the shared `.git/config` value to its absolute
+  // host form, which does not exist in a container, and command-scope config outranks the file (git 2.31+). The kit
+  // writes nothing to `.git/config`; no tracked hooks path pins nothing.
+  const hooks = pinnedHooksPath(project.root);
+  return withGitConfig({ ...env, ...AGENT_COMMITTER, ...(TZ && { TZ }) }, [...SANDBOX_GIT_MAINTENANCE_OFF, ...(hooks ? [["core.hooksPath", hooks] as const] : [])]);
 };
 
 // Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a
@@ -1057,26 +1113,80 @@ export const MANAGED_SETTINGS = "/etc/claude-code";
 export const sandboxMounts = (project: Project) => [
   ...project.mounts,
   { hostPath: join(KIT, "container"), sandboxPath: MANAGED_SETTINGS, readonly: true },
-  ...(CROSS_REVIEW
-    ? (hideCodexCredentials(), [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }])
-    : []),
+  ...(CROSS_REVIEW ? [{ hostPath: codexAuthSource(), sandboxPath: CODEX_AUTH, readonly: true }] : []),
 ];
+
+/**
+ * The host's Codex login as a sandbox gets it: the same JSON with `tokens.refresh_token` set to `""`. The key stays
+ * (Codex reads a file without it as signed out) and an empty string parses and works while the access token is
+ * valid. Undefined when the file needs no rewrite - not JSON, an API-key sign-in (`tokens` null) or no
+ * `tokens.refresh_token` - because it then holds no refresh token to rotate.
+ */
+const codexSandboxAuth = (hostText: string): string | undefined => {
+  try {
+    const login = JSON.parse(hostText);
+    const tokens = login && typeof login === "object" ? login.tokens : undefined;
+    if (!tokens || typeof tokens !== "object" || !("refresh_token" in tokens)) return undefined;
+    tokens.refresh_token = "";
+    return `${JSON.stringify(login, null, 2)}\n`;
+  } catch {
+    return undefined;
+  }
+};
+
+// The run's one copy: written on the first sandbox's config, in a directory of the run's own, and removed at its
+// exit so no live access token stays under the temp directory.
+let codexAuthCopy: { dir: string; file: string } | undefined;
+let codexExitHandler = false;
+
+/** Removes the run's copy of the Codex login, if one was written. The run's exit handler; never throws. */
+export const removeCodexAuthCopy = () => {
+  const copy = codexAuthCopy;
+  codexAuthCopy = undefined;
+  if (!copy) return;
+  try {
+    rmSync(copy.dir, { recursive: true, force: true });
+  } catch {
+    // An exit handler has no one to tell.
+  }
+};
 
 // The mounted Codex login holds tokens `credentials()` never registers, so a crashed Codex pass whose
 // output echoes one would write it into the agent log and the crash note unredacted. Every string in
-// the file, nested ones too, goes to `hideFromGates`. A file that is missing, unreadable or not JSON
-// registers nothing: the mount is made as before.
-const hideCodexCredentials = () => {
+// the host's file, nested ones too, goes to `hideFromGates`. A file that is missing, unreadable or not JSON
+// registers nothing and is mounted as before (`~/.codex/auth.json` itself, read-only).
+const codexAuthSource = (): string => {
+  const host = "~/.codex/auth.json";
+  if (codexAuthCopy) return codexAuthCopy.file;
+  let text: string;
   try {
+    text = readFileSync(join(homedir(), ".codex", "auth.json"), "utf8");
     const found: string[] = [];
     const walk = (value: unknown) => {
       if (typeof value === "string") found.push(value);
       else if (value && typeof value === "object") Object.values(value).forEach(walk);
     };
-    walk(JSON.parse(readFileSync(join(homedir(), ".codex", "auth.json"), "utf8")));
+    walk(JSON.parse(text));
     hideFromGates(found);
   } catch {
     // Nothing to register; the mount does not depend on it.
+    return host;
+  }
+  const copy = codexSandboxAuth(text);
+  if (copy === undefined) return host;
+  // Once a refresh token was found, a failed temp write must never fall back to mounting the host's login.
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-codex-"));
+  const file = join(dir, "auth.json");
+  codexAuthCopy = { dir, file };
+  if (!codexExitHandler) process.on("exit", removeCodexAuthCopy);
+  codexExitHandler = true;
+  try {
+    writeFileSync(file, copy, { mode: 0o600 });
+    return file;
+  } catch (error) {
+    // A full disk can leave a partial access token on disk before writeFileSync throws.
+    removeCodexAuthCopy();
+    throw error;
   }
 };
 

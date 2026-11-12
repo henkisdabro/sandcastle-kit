@@ -33,7 +33,7 @@ import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, repairCheck, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart, removeOwnScratchOnExit, type Fingerprint } from "./guard.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { terminalHost } from "./terminal-host.ts";
@@ -43,7 +43,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logAgentExit, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordPreflightFailure, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -57,7 +57,7 @@ import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
-import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
+import { createPauseHandling, createUsagePause, crossReviewSkippedWords, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { execGate, lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -127,6 +127,8 @@ type Outcome = {
   unmet?: string;
   /** What a reviewer said in prose about a gap it filed neither as a `<followup>` nor as an `<unmet>` line (`gapOf`), for the closing summary. */
   gap?: string;
+  /** The cross-review was skipped for Codex's plan limit: the line said, for the closing summary. */
+  crossSkipped?: string;
 };
 
 /**
@@ -1726,6 +1728,11 @@ export type PipelineContext = {
    * when that is, and the limit stops the queue as it does without the setting.
    */
   limitPause?: (phase: string) => boolean;
+  /**
+   * With `USAGE_PAUSE` set: the cross-review is skipped while Codex's plan window is at the threshold (it is a second
+   * opinion, and the run does not pause for Codex). The line to say, `cross-review skipped - Codex 5-hour usage 98%, resets 14:05`, or undefined while the plan is open.
+   */
+  crossReviewSkip?: () => string | undefined;
   /** Worktrees Sandcastle kept for their uncommitted files. */
   keptWorktrees: { issue: string; path: string }[];
   /** The `.git` check that failed after a ticket's pipeline, by ticket: its attempt stops the run with it. */
@@ -1868,7 +1875,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       throw error;
     }
   };
-  /** The run's `.git` check (`host.check`) before a ticket's sandbox opens. A failure is the ticket's `tampered`, as above, and is thrown. */
+  /** The run's `.git` check (`host.check`) before a ticket's sandbox opens, and before each repair pass in it. A failure is the ticket's `tampered`, as above, and is thrown. */
   const checkGit = async (issue: string, when: string) => {
     try {
       await host.check?.(when);
@@ -2018,7 +2025,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }) => {
+  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; crossSkipped?: string; repaired?: string[]; comments?: number; commentsAt?: string }) => {
     if (dryRun) return;
     try {
       // `comments` is given only by the full review, read just before its pass starts (`fullReview`): a person's comment
@@ -2606,6 +2613,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       const ungated: string[] = landOnly ? [readHeads(project.root)[issue.id]?.ungated ?? ""].filter(Boolean) : [];
       // What reviewers said of a gap in prose and filed nowhere (`gapOf`).
       const gaps: string[] = landOnly ? [readHeads(project.root)[issue.id]?.gap ?? ""].filter(Boolean) : [];
+      // The line of a cross-review skipped for Codex's plan limit (`ctx.crossReviewSkip`): a land-only branch's stands from its head record, a full review sets it afresh.
+      let crossSkipped: string | undefined = landOnly ? readHeads(project.root)[issue.id]?.crossSkipped : undefined;
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
@@ -2642,6 +2651,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           changelogNone: (!changelog.length && changelogSaidNone) || undefined,
           ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
           gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
+          crossSkipped,
         };
       };
       // The full review of the branch, as the first attempt's: the implementer's word is shown (`implSaid`), and
@@ -2667,7 +2677,12 @@ export const createPipeline = (ctx: PipelineContext) => {
           () => reviewModel,
         );
         if (CROSS_REVIEW) await juncture("cross-review");
-        const cross = CROSS_REVIEW
+        // Asked after the juncture: a pause there may have lasted until Codex's window reset. The cross-review is a second
+        // opinion, so a spent Codex plan skips it and the ticket lands with one opinion fewer, said here and in the summary.
+        const skipWords = CROSS_REVIEW ? ctx.crossReviewSkip?.() : undefined;
+        crossSkipped = skipWords;
+        if (skipWords) console.log(`${ref(issue.id)}: ${skipWords}`);
+        const cross = CROSS_REVIEW && !skipWords
           ? await timed(
               issue.id,
               "cross-review",
@@ -2773,6 +2788,8 @@ export const createPipeline = (ctx: PipelineContext) => {
 
         // Only a base merge since the last completed review: review the merge, not the branch.
         const since = narrowReviewBase(project.root, base, issue.id);
+        // A red-gate retry can reuse its review too: no new cross-review ran to replace the earlier skip.
+        if (since !== undefined) crossSkipped = readHeads(project.root)[issue.id]?.crossSkipped;
         if (since !== undefined && since === sh("git", ["rev-parse", branch], project.root)) {
           console.log(`${ref(issue.id)}: nothing new since its review at ${since.slice(0, 7)} - no review; the gates decide.`);
         } else if (since !== undefined) {
@@ -3036,8 +3053,13 @@ export const createPipeline = (ctx: PipelineContext) => {
             }
           }
         }
-        seen.add(key);
         if (!forced) fixes.claim(key, issue.id);
+        // A slot of the limit again, after the fix board's wait: no agent pass runs outside `maxSandboxes`.
+        await at?.agent?.();
+        // Check after both waits (the fix board and the counted slot): a host change during either must stop the run
+        // before the repairer reads it as the red's cause and files an "environmental" follow-up.
+        await checkGit(issue.id, `before repairing ${ref(issue.id)}`);
+        seen.add(key);
         repairs++;
         const why = forced ? "test red gate" : `${failure.name} red`;
         console.log(
@@ -3046,8 +3068,6 @@ export const createPipeline = (ctx: PipelineContext) => {
         forced = false;
         const beforePass = sh("git", ["rev-parse", branch], project.root);
         let verdict: ReturnType<typeof repairVerdict>;
-        // A slot of the limit again, after the fix board's wait: no agent pass runs outside `maxSandboxes`.
-        await at?.agent?.();
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
@@ -3160,9 +3180,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       const head = sh("git", ["rev-parse", branch], project.root);
-      const { unmet: unmetNote, implSaid: implSaidNote, changelog: changelogNote, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
+      const { unmet: unmetNote, implSaid: implSaidNote, changelog: changelogNote, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote, crossSkipped: crossSkippedNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) await noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: drops.count || undefined, changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote });
+      if (!gated.failure && !unreviewed) await noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: drops.count || undefined, changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote, crossSkipped: crossSkippedNote });
       // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
       else if (gated.failure) await noteHead(issue.id, branch, { red: head });
       return {
@@ -3186,6 +3206,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         unreviewed,
         ungated: ungatedNote,
         gap: gapNote,
+        crossSkipped: crossSkippedNote,
         changelog: changelogNote,
         changelogDropped: drops.count || undefined,
         changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined,
@@ -3219,6 +3240,10 @@ export const createPipeline = (ctx: PipelineContext) => {
 };
 
 let unlockOnExit = false;
+// What the run's exit does about its scratch worktrees (`removeOwnScratchOnExit`): the turn in progress sets it, with its
+// `.git` check as it stands, and the one exit listener runs it. `guardStopped`: a guard stop leaves them for a person.
+let exitScratch: (() => void) | undefined;
+let guardStopped = false;
 
 // The kit this process loaded, read on the first turn: a later turn of an autonomy run runs the same code, so
 // a kit pulled mid-run must not be named by it.
@@ -3231,7 +3256,12 @@ let kitAtStart: string | undefined;
  */
 export const burndown = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   try {
+    guardStopped = false;
     return await burndownTurn(project, turn);
+  } catch (error) {
+    // The base gates' own stop (a `.git` change) reaches here without `stopLanding`.
+    if (error instanceof GuardStop) guardStopped = true;
+    throw error;
   } finally {
     // The run's one load pause outlives the turn; the turn's hold and its record's listener do not, a throw included.
     setLoadHold(undefined);
@@ -3596,8 +3626,14 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.
+  // Before the run lock's earlier listener too: another run must not start while scratch removal still writes git.
+  // The removal unlocks the worktrees it takes, and `unlockAll` then finds the rest.
+  if (!unlockOnExit) process.prependListener("exit", () => exitScratch?.());
   if (!unlockOnExit) process.on("exit", unlockAll);
   unlockOnExit = true;
+  // The base gates' sandbox, the run's first, is checked against the start's reading; `host` takes over once it exists.
+  let exitFingerprint: Fingerprint = atStart;
+  exitScratch = () => void removeOwnScratchOnExit(project, (when) => assertGitUnchanged(project, exitFingerprint, when), guardStopped);
   // Inside Herdr, the run's own tab: the status view and, with `herdr.panes: "all"`, one pane per
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
@@ -3728,7 +3764,13 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     const labelled = candidates.filter((i) => overrides.get(i.id)?.model === model).map((i) => ref(i.id));
     return { model, from: `label model:${model} on ${labelled.join(", ")}` };
   });
-  await timed("", "preflight", () => preflight(project, image, extraModels));
+  try {
+    await timed("", "preflight", () => preflight(project, image, extraModels));
+  } catch (e) {
+    // The refusal is printed once, by the command; the record keeps its cause for a summary asked for later.
+    recordPreflightFailure(run, e);
+    throw e;
+  }
   const env = credentials(project);
   // The guard's reading is the one settings field a turn may change: it is recorded as a fact beside the setting, when it is lost or back.
   let readingNoted = usageReadingLost();
@@ -3752,8 +3794,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     ...(showsPlanUsage({ apiKey: !!spend, oauthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN, models: passModels }) ? [{ provider: "claude" as const }] : []),
     ...(showsCodexUsage({ crossReview: CROSS_REVIEW, apiKey: !!env.CODEX_API_KEY, auth: CROSS_REVIEW ? readCodexAuth() : undefined }) ? [{ provider: "codex" as const }] : []),
   ];
-  // `USAGE_PAUSE`: the run takes the soft pause itself when a window of one of those providers reaches the
-  // threshold or an agent hits the limit, and resumes after the window's reset (src/usage.ts, `createUsagePause`).
+  // `USAGE_PAUSE`: the run takes the soft pause itself when a window of Claude's plan reaches the threshold or
+  // an agent hits the limit, and resumes after the window's reset; a spent Codex window skips the cross-review
+  // instead (src/usage.ts, `createUsagePause`).
   const usagePause =
     settings.usagePause === undefined
       ? undefined
@@ -3836,6 +3879,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   Object.assign(summary, { due: true, printed: false });
   // The one writer of host git, and the `.git` fingerprint whose base it moves with its own writes.
   const host = createHostGit(project, gitFingerprint(project));
+  exitFingerprint = host.expected;
   // The `.git` check after a ticket's pipeline that failed, by ticket: its attempt's result carries
   // it to the scheduler as the cause that stops the run (schedule.ts), which no one else may add.
   const tampered = new Map<string, unknown>();
@@ -4145,11 +4189,16 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     waited,
     ...(usagePause
       ? {
-          limitPause: (phase: string) => {
+          crossReviewSkip: () => {
+            const spent = usagePause.crossReviewSpent();
+            return spent && crossReviewSkippedWords(spent);
+          },
+          limitPause: () => {
             try {
               // The pass's last readings are in its log already: the newest of them says which window ran out, not the one up to 15 s old.
               usageWatch?.poll(true);
-              return usagePause.limit([...planUsage], phase === "cross-review" ? "codex" : "claude");
+              // Claude's only: a pass that hit its limit is never the cross-review (it is skipped, above), and Codex's windows never pause the run.
+              return usagePause.limit([...planUsage], "claude");
             } catch {
               // A pause that cannot be written leaves the limit to stop the run, as it does without the setting.
               return false;
@@ -4302,6 +4351,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
           ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),
+          ...(value.crossSkipped ? { crossSkipped: value.crossSkipped } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.changelogDropped ? { changelogDropped: value.changelogDropped } : {}),
           ...(value.changelogNone ? { changelogNone: true } : {}),
@@ -4455,6 +4505,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     run.update({ stopped: why, paused: undefined, ...(mergeUnchecked && { mergeUnchecked }) });
     // The cause in a few words, for the summary's next step: only a guard stop has one.
     if (safety) run.update({ stoppedWhat: guardWords(error).what });
+    if (safety) guardStopped = true;
     try {
       await fileTheFollowUps(safety ? `${guardWords(error).what}, so nothing more was written to the tracker` : undefined);
     } catch (e) {

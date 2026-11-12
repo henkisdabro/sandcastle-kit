@@ -808,8 +808,9 @@ export const usageCommand = async ({
 // USAGE_PAUSE: wait out a plan window instead of running into it.
 //
 // With `USAGE_PAUSE=<percent>` (or `usagePause` in the project config) the run takes the soft pause of
-// `sandcastle pause` itself when a window of a provider it uses reaches the threshold, or when an agent hits the
-// limit anyway, and resumes by itself a minute after that window's reset. It reads the same agent readings the
+// `sandcastle pause` itself when a window of Claude's plan reaches the threshold, or when an agent hits the
+// limit anyway, and resumes by itself a minute after that window's reset. A Codex window at the threshold never
+// pauses the run: the cross-review it pays for is skipped instead (`crossReviewSpentFor`). It reads the same agent readings the
 // status view shows (`watchUsage`), so it needs no request and no credential. The pause is the control file
 // `sandcastle pause` writes (src/detach.ts), with the cause in it: that is what lets a person's `sandcastle
 // resume` end it early, and a person's `sandcastle pause` take it over so the timer never undoes it.
@@ -829,9 +830,11 @@ export const parseUsagePause = (value: string | undefined, config?: unknown): nu
 
 /** The start line for the pause: what it waits for, and what it cannot do when the run shows no plan usage (an API key, no Claude model). */
 export const usagePauseLine = (percent: number, providers: UsageProvider[]) =>
-  providers.length
+  providers.includes("claude")
     ? `Usage pause: at ${percent}%, resumes at the window's reset`
-    : `Usage pause: at ${percent}%, but this run reads no plan usage (it needs a subscription token and a Claude model, or Codex cross-review on a ChatGPT plan), so it never pauses for it`;
+    : providers.length
+      ? `Usage pause: at ${percent}%, but only Claude's windows pause the run, and this run reads none (it needs a subscription token and a Claude model): a Codex window at the threshold skips the cross-review instead`
+      : `Usage pause: at ${percent}%, but this run reads no plan usage (it needs a subscription token and a Claude model, or Codex cross-review on a ChatGPT plan), so it never pauses for it`;
 
 /** What a usage pause says it waits for, in the status view's words: `weekly usage 95%`, `5-hour usage 93%`, with `Codex` first for Codex's windows. */
 export const usagePauseWords = (p: Pick<UsagePaused, "provider" | "window" | "percent">) =>
@@ -872,10 +875,29 @@ const windowKey = (w: { provider: UsageProvider; window: UsagePaused["window"]; 
  * after it. Undefined when no window is. `skip` leaves out the windows a person resumed through.
  */
 export const usagePauseFor = (usage: PlanUsage[], threshold: number, now: number, skip: (w: OpenWindow) => boolean = () => false): UsagePaused | undefined => {
-  const over = openWindows(usage, now).filter((w) => w.percent >= threshold && !skip(w));
+  // Claude's windows only: Codex's plan is the cross-review's, a second opinion the pipeline skips (`crossReviewSpentFor`), never a reason to idle the run.
+  const over = openWindows(usage, now, "claude").filter((w) => w.percent >= threshold && !skip(w));
   const last = over.reduce<OpenWindow | undefined>((a, b) => (a && a.resetsAt >= b.resetsAt ? a : b), undefined);
   return last && pausedFor(last);
 };
+
+/** The Codex window that keeps the cross-review from running: at or over the threshold and not reset yet. */
+export type CrossReviewSpent = { window: UsagePaused["window"]; percent: number; resetsAt: number };
+
+/**
+ * The Codex window a cross-review would run into, or undefined when its plan is open: of the windows at or above
+ * `threshold` that have not reset yet, the one that resets last. The run skips the cross-review meanwhile instead of pausing.
+ */
+export const crossReviewSpentFor = (usage: PlanUsage[], threshold: number, now: number): CrossReviewSpent | undefined => {
+  // The pause's minute of grace does not apply to an optional pass: once the window resets, it can run again.
+  const over = openWindows(usage, now, "codex").filter((w) => w.percent >= threshold && w.resetsAt > now);
+  const last = over.reduce<OpenWindow | undefined>((a, b) => (a && a.resetsAt >= b.resetsAt ? a : b), undefined);
+  return last && { window: last.window, percent: last.percent, resetsAt: last.resetsAt };
+};
+
+/** The line a skipped cross-review prints and the ticket keeps: `cross-review skipped - Codex 5-hour usage 98%, resets 14:05`. The reset is the status view's form (`resumeClock`). */
+export const crossReviewSkippedWords = (spent: CrossReviewSpent, now = new Date()) =>
+  `cross-review skipped - ${usagePauseWords({ provider: "codex", ...spent })}, resets ${resumeClock(spent.resetsAt, now)}`;
 
 /**
  * The pause for an agent that hit the limit: the open window nearest to spent (the later reset when two tie,
@@ -923,6 +945,8 @@ export type UsagePauseControl = {
   source: { read(): StandingPause | undefined };
   /** A new reading arrived (`usage`: the newest of each provider): pauses the run when a window is at the threshold. Returns the pause asked for. */
   reading(usage: PlanUsage[]): UsagePaused | undefined;
+  /** The Codex window the cross-review would run into (the newest readings), or undefined: the cross-review is skipped while it is, and the run does not pause. */
+  crossReviewSpent(): CrossReviewSpent | undefined;
   /** An agent of `provider` hit the limit: pauses the run until the window resets, true; false when no reading says when that is, and the limit stops the run as before. */
   limit(usage: PlanUsage[], provider?: UsageProvider): boolean;
 };
@@ -967,6 +991,7 @@ export const createUsagePause = (threshold: number, ports: UsagePausePorts): Usa
       if (pause) ports.hold(pause, now);
       return pause;
     },
+    crossReviewSpent: () => crossReviewSpentFor(latest, threshold, seconds()),
     limit: (usage, provider) => {
       const standing = observe();
       latest = usage;

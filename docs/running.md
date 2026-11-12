@@ -340,6 +340,10 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
   live: `No run is live.`
+  A stop (this, or Ctrl-C) while the base gates or a verify run also removes that run's own
+  throwaway worktree and its `sandcastle/*` branch as the run exits.
+  It keeps them, naming `sandcastle clean`, when the run stopped on the guard or its `.git` check
+  fails at that moment; a leftover of an earlier run is not touched.
 - While a detached run is live, the **status view** closes with the last three lines of
   `run-output.log` under a light rule, so the run's own messages are on screen without a pane of
   their own.
@@ -402,13 +406,19 @@ or a worktree, or `sandcastle stop` the run first.
 **Pausing for the plan's usage.** An unattended run that spends a subscription can run the plan out
 mid-pass, and the week's allowance is the person's own too.
 With `USAGE_PAUSE=90` (or `usagePause: 90` in `.sandcastle/config.ts`; the environment wins) the run
-pauses itself when the 5-hour or the weekly window of a provider it uses reaches that percent, and
+pauses itself when the 5-hour or the weekly window of Claude's plan reaches that percent, and
 **resumes by itself a minute after that window's reset** - a pause of days costs nothing, and the
 keep-awake helper ends as for any pause with nothing in flight.
 It reads the agents' own readings, the numbers of the status view's plan lane, so it needs no
 request and no credential, and it does nothing for a run that shows no plan usage (an API key): the
 start line says either way - `Usage pause: at 90%, resumes at the window's reset`.
 With both windows over the threshold it waits for the one that resets later.
+A Codex window (the cross-review's plan) never pauses the run: the cross-review is a second
+opinion, not a gate, so while a Codex window is at the percent and not yet reset the ticket's
+cross-review is skipped, the run prints `#7: cross-review skipped - Codex 5-hour usage 98%, resets
+14:05` (the weekday and time, `Wed 06:01`, when the reset is not today), and the closing summary
+lists the tickets that landed with one opinion fewer on a line of its own:
+`Landed without a cross-review (Codex plan's limit): #7, #9`.
 The same pause covers the limit itself: an agent that hits it anyway (the log ends with the plan's
 limit message) pauses the run until the reset in place of stopping the queue, and that ticket runs
 the pass again in a fresh sandbox on the resume.
@@ -467,8 +477,8 @@ Then:
   next run re-implement it rather than land the old branch.
 - **Several unlanded branches:** `sandcastle preview` dry-merges them onto the base in landing order
   and names the ones that would conflict, before anything is merged.
-- **Leftovers:** `sandcastle clean` removes leftover worktrees, finished branches, exited sandbox
-  containers and the kit's dangling images.
+- **Leftovers:** `sandcastle clean` removes leftover worktrees (a guard stop's throwaway ones too),
+  finished branches, exited sandbox containers and the kit's dangling images.
   Docker's build cache is not the kit's to prune: `sandcastle doctor` shows its size, and
   `docker builder prune` frees it.
 

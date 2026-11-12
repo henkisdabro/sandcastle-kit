@@ -38,3 +38,7 @@ test("no help flag, no help", () => {
   assert.ok(!wantsHelp(["run", "170", "--note", "help"]));
   assert.ok(!wantsHelp([]));
 });
+
+test("report's help names --run", () => {
+  assert.match(helpFor("report"), /report --run PID\|STARTED_AT/);
+});

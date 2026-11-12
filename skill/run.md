@@ -41,8 +41,8 @@ This continues SKILL.md: run its "Before every action" first.
      with the host's Claude Code login, read-only, else that token; a `claude setup-token` token gets
      HTTP 403 and cannot use the guard, and `sandcastle doctor --verify` shows which credential it
      would use and whose plan that is). Or `USAGE_PAUSE=90`, which has the run pause itself when a
-     plan window reaches that percent and resume by itself after the window's reset (a pause a person can
-     end with `sandcastle resume`); it reads the agents' own readings, so it needs no credential.
+     Claude plan window reaches that percent and resume by itself after the window's reset (a pause a person can
+     end with `sandcastle resume`; only a Claude window pauses the run - a Codex window at the percent skips the cross-review instead); it reads the agents' own readings, so it needs no credential.
    - **Load pause.** On by default: a run holds each gate pass, before it takes its gates slot, while the
      machine's CPU pressure (`some` `avg60`; on macOS an estimate from the load average) is at or over 60%,
      releases after 2 minutes under it, and holds at most 30 minutes in all per run. Agent passes go on, so a
@@ -204,10 +204,12 @@ This continues SKILL.md: run its "Before every action" first.
    from a pane scrape. The mod's end prompt names the run that ended by its pid and start time
    (`pid 4242, started 14:05`). When the report prints a run that started at another time, or says
    `still running`, the named run was replaced by a later one in the same project, which the
-   report now shows: do not close that one. Close the named run from its own closing summary - the
-   newest `.sandcastle/logs/archive/run-output-*.log` for a detached run (the file is renamed there
-   when the next detached run starts), or its line in `.sandcastle/logs/history.jsonl` - say in the
-   hand-back that it was replaced, and leave the live run to the end prompt of its own. With `autonomy` set, one `sandcastle run` can hold several turns, each
+   report now shows: do not close that one. Close the named run from its own closing summary:
+   `sandcastle report --run <pid>` (or `--run <startedAt>`, the start time exactly as
+   `.sandcastle/logs/history.jsonl` records it) builds it from that run's record, with the git state and
+   blockers as they are now - a run that was stopped or killed printed none of its own. A detached
+   run that did end normally also left one in the newest `.sandcastle/logs/archive/run-output-*.log`
+   (the file is renamed there when the next detached run starts). Say in the hand-back that it was replaced, and leave the live run to the end prompt of its own. With `autonomy` set, one `sandcastle run` can hold several turns, each
    printing its own closing summary, and `sandcastle report` (like `sandcastle wait`) shows the
    last one's, which carries what the earlier turns left for a person: their held branches,
    partly done remainders, checks by hand, gaps and follow-ups, each line ending `(turn N)`, with

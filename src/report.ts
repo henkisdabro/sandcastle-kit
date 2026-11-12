@@ -168,6 +168,8 @@ export type Facts = {
   followUps?: FiledFollowUp[];
   /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
   stage?: string;
+  /** The run record's `preflightFailure`: why the preflight refused the run (its message, as the command printed it). */
+  preflightFailure?: string;
   exitCode?: number | null;
   /** Each base gate's verdict, when the run stopped on red base gates. */
   baseGates?: { gate: string; ok: boolean }[];
@@ -720,6 +722,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     filed: filed.filter((i) => !followUps.some((u) => u.id === i.id)),
     followUps,
     stage: run.stage,
+    preflightFailure: typeof run.preflightFailure === "string" ? run.preflightFailure : undefined,
     exitCode: run.exitCode,
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
@@ -775,7 +778,10 @@ const earlierTurns = (root: string, run: any): any[] => {
   const turn = run.settings?.turn;
   const file = join(root, ".sandcastle/logs/history.jsonl");
   if (!Number.isInteger(turn) || turn < 2 || !existsSync(file)) return [];
-  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean).reverse();
+  const all = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  // From this turn's own line, not the end of the file: a run that is not history's newest has later runs after it.
+  const own = all.findLastIndex((text) => (parseRecord(text) as any)?.startedAt === run.startedAt);
+  const lines = (own === -1 ? all : all.slice(0, own)).reverse();
   const found: any[] = [];
   for (const text of lines) {
     const record = parseRecord(text) as any;
@@ -822,9 +828,8 @@ const carriedTurns = async (project: Project, run: any, probe: Probe, opened: Op
   return carried;
 };
 
-/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. */
-export const gather = async (project: Project, probe: Probe = commandOf): Promise<Facts> => {
-  const run = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"));
+/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. `run` is the record to report: run.json's by default. */
+export const gather = async (project: Project, probe: Probe = commandOf, run: any = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"))): Promise<Facts> => {
   const opened = openedIssues(project);
   const facts = await gatherTurn(project, run, probe, opened);
   const carried = await carriedTurns(project, run, probe, opened);
@@ -1108,6 +1113,18 @@ const gapLines = (f: Facts, o: Owed, carried: { turn: number; facts: Facts; o: O
   return finds.length ? [`Worth a glance - the reviewer's prose may name a gap: ${finds.join("; ")}`] : [];
 };
 
+/**
+ * The tickets that landed without a cross-review because Codex's plan was at the `USAGE_PAUSE` threshold (`crossSkipped`):
+ * one line of its own, counted nowhere - they landed with one opinion fewer, nothing is owed. The earlier turns' follow, marked with their turn.
+ */
+const crossSkippedLines = (o: Owed, f: Facts, carried: { turn: number; facts: Facts; o: Owed }[]): string[] => {
+  const landed = [
+    ...o.merged.filter((id) => f.tickets[id].crossSkipped).map((id) => `${refOf(id)}`),
+    ...carried.flatMap((c) => c.o.merged.filter((id) => c.facts.tickets[id].crossSkipped).map((id) => `${refOf(id)} (turn ${c.turn})`)),
+  ];
+  return landed.length ? [`Landed without a cross-review (Codex plan's limit): ${landed.join(", ")}`] : [];
+};
+
 // The separator `gapOf` (src/burndown.ts) puts between sentences that were not next to each other.
 const GAP_JOIN = " … ";
 // A sentence boundary as `sentencesOf` (src/burndown.ts) reads it: this file imports only types from there. Quoted text
@@ -1321,6 +1338,16 @@ const drainOf = (d: unknown): DrainEnd | undefined => {
   return Number.isInteger(turns) && Number.isInteger(landed) && typeof cause === "string" && cause ? { turns: turns as number, landed: landed as number, cause } : undefined;
 };
 
+/**
+ * The cause a refused preflight left in the run record: its message without the first line (which repeats the headline,
+ * `NOT STARTED: Preflight failed - ...`), cut to three lines. A record without one gives none, and the headline keeps its pointer.
+ */
+const preflightCause = (message: string | undefined): string[] => {
+  const lines = (message ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines[0] && /^NOT STARTED:/i.test(lines[0])) lines.shift();
+  return lines.slice(0, 3);
+};
+
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
@@ -1347,9 +1374,10 @@ export const render = (f: Facts, plain = false): string => {
   const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
     !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
   // Refused by its preflight (a rejected credential, an unknown model): no sandbox started, so the headline says that, and
-  // an estimate it never began against is no news. The cause is the run's own last lines, which the record does not keep.
+  // an estimate it never began against is no news. The cause is the record's `preflightFailure`; a record from before it kept one points at the run's last lines.
   const preflightFailed = f.stage === "preflight" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
     !f.stoppedBy && !f.killed && !Object.values(f.tickets).some((t) => t.started);
+  const cause = preflightFailed ? preflightCause(f.preflightFailure) : [];
   // Ended before its summary (Ctrl-C, a crash, kill -9): its tickets mid-work were
   // counted as attempted and listed nowhere, under a headline that said "finished".
   const early = !baseRed && !f.stopped && !f.live &&
@@ -1404,7 +1432,7 @@ export const render = (f: Facts, plain = false): string => {
   out.push(
     baseRed
       ? `${h("## 🏁 Run", "## Run")} stopped: red on ${f.base} before any agent ran - nothing was started`
-      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : preflightFailed ? `NOT STARTED: preflight failed (exit ${f.exitCode}) - no sandbox started; its cause is the run's last lines (.sandcastle/logs/run-output.log for a detached run)` : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : preflightFailed ? (cause.length ? `NOT STARTED: preflight failed (exit ${f.exitCode}) - no sandbox started:` : `NOT STARTED: preflight failed (exit ${f.exitCode}) - no sandbox started; its cause is the run's last lines (.sandcastle/logs/run-output.log for a detached run)`) : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}${cause.map((l) => `\n  ${l}`).join("")}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
@@ -1450,6 +1478,7 @@ export const render = (f: Facts, plain = false): string => {
   // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.
   if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
   out.push(...gapLines(f, o, carried));
+  out.push(...crossSkippedLines(o, f, carried));
   if (f.stopped) out.push(f.stopped);
   if (f.setupProblem) out.push(`Stopped starting tickets: ${setupProblemWords(f.setupProblem)}.`);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
@@ -1844,10 +1873,35 @@ export const operatorSteps = async (project: Project) => {
   return text.slice(text.lastIndexOf("## "));
 };
 
-/** The summary for the project's last recorded run. */
-export const closingReport = async (project: Project, turn?: { level: Level; turn: number }) => {
-  if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
-  const facts = await gather(project);
+/** Every run record the project holds, oldest first: history.jsonl's lines, then run.json's. */
+const knownRecords = (root: string): any[] => {
+  const read = (name: string) => {
+    const file = join(root, ".sandcastle/logs", name);
+    return existsSync(file) ? readFileSync(file, "utf8") : "";
+  };
+  // run.json is one record written indented over many lines (src/run.ts `recordRun`): parsed whole, never by line.
+  return [...read("history.jsonl").split("\n").filter(Boolean), read("run.json")].flatMap((text) => parseRecord(text) ?? []);
+};
+
+/**
+ * The record `sandcastle report --run <pid|startedAt>` names: the one whose `startedAt` is `value`, else the latest one of
+ * that pid (every turn of a run shares its process's pid, and pids are reused, so the newest record is the run's last turn).
+ * An unknown value is an `OperatorError` listing the latest 10 runs.
+ */
+export const findRun = (root: string, value: string): any => {
+  const records = knownRecords(root);
+  const found = records.findLast((r: any) => r.startedAt === value) ?? (/^\d+$/.test(value) ? records.findLast((r: any) => String(r.pid) === value) : undefined);
+  if (found) return found;
+  const seen = new Set<string>();
+  const latest = records.reverse().filter((r: any) => (seen.has(r.startedAt) ? false : !!seen.add(r.startedAt))).slice(0, 10);
+  const lines = latest.map((r: any) => `  pid ${r.pid ?? "?"}  started ${r.startedAt ?? "?"}${Number.isInteger(r.settings?.turn) ? `  (turn ${r.settings.turn})` : ""}`);
+  throw new OperatorError(`No run recorded with pid or start time \`${value}\`.${lines.length ? `\nThe latest ${lines.length} run(s) it knows:\n${lines.join("\n")}` : "\nNo run is recorded yet."}`);
+};
+
+/** The summary for the project's last recorded run, or for `run`'s record (`sandcastle report --run`). */
+export const closingReport = async (project: Project, turn?: { level: Level; turn: number }, run?: any) => {
+  if (!run && !existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
+  const facts = await gather(project, commandOf, run);
   summary.printed = true;
   if (!Object.keys(facts.tickets).length) return "The last run predates the per-ticket record; its report is in the run pane's output.";
   // NO_COLOR counts as set only when non-empty (no-color.org).

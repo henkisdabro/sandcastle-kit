@@ -912,6 +912,8 @@ state.
   run, but the off-count place goes to the next ticket that waits. Every wait for a gates slot of a ticket gate asks, not
   only the first (a gate run after a repair does); one that is still off its worker (no retake since) counts again without
   the cap check (`at.gateWait()` is true), as it cannot go back to a worker without a retake.
+  The status view's `readPool` counts the `-waiting-` locks apart (`pool.sandboxes.outside`): the MACHINE lane's
+  sandboxes row draws `used/limit` from the counted slots and adds `+N for gates`. `test/status-pool-outside.test.ts`.
   `test/gate-slot-uncounted.test.ts`.
   A red ticket takes a counted slot again just before its repair pass (and the review after it), not at the result: through
   a fix-board wait it stays on the uncounted lock (a waiter that holds a worker stops waiting on it meanwhile: the fix board
@@ -1688,6 +1690,18 @@ a release that drops it says `ALL` may be tried again.
 A project whose setup or gates need a raw socket fails there with `Operation not permitted`
 (`ping` and `traceroute` may, where they cannot fall back to an unprivileged ICMP socket).
 
+**The Codex login in a sandbox.** With `CROSS_REVIEW=1`, `sandboxMounts` mounts in place of
+`~/.codex/auth.json` a copy that `codexSandboxAuth` (`src/sandbox.ts`) builds from the host's text:
+the same JSON with `tokens.refresh_token` set to `""` (the key stays, since Codex reads a file
+without it as signed out). It is written once per run, to a temp directory of the run's own, and
+`removeCodexAuthCopy` (the run's `process` exit handler, which `src/run.ts` runs on a stop too)
+removes it. A refresh rotates the refresh token server-side, so copies that each kept it were spent
+by the first sandbox to refresh, leaving the host's login stale. A file that holds no refresh token
+(an API-key sign-in, `tokens` null) or cannot be read or parsed is mounted as before. The host's
+file is only read. If the temp copy cannot be created or written, config creation fails rather
+than mounting the host's refresh token, and a partial copy is removed.
+`test/codex-auth-copy.test.ts`, `test/codex-auth-copy-failure.test.ts`.
+
 **What Sandcastle guards, what the kit guards.** From 0.14.0 Sandcastle mounts a sandbox's git
 control files read-only - the common `config`, `hooks/` and `info/` (which it creates on the host at
 each start, hence an empty `hooks/` reading as absent, above), the worktree's `.git` file and its
@@ -1728,6 +1742,25 @@ A failure removes the container (`removeSandboxContainer`: found the same way), 
 close, leaves the worktree for a person and stops the run.
 The worktree stays locked until the run exits, when `unlockAll` releases it with every other lock
 the kit took, so the clean-up command Sandcastle prints for it works as printed.
+
+**A stop removes the run's own scratch worktrees** (`removeOwnScratchOnExit`, `src/guard.ts`; the
+helper `removeScratchWorktrees`, `src/sandbox.ts`, which `cleanProject` shares):
+`gateBase`'s clean-up is a `finally` the signal path never reaches, and on a SIGINT or SIGTERM
+`exitOnSignal` leaves the teardown to the library, which only prints its "To clean up" line.
+`openOrAbandon` records each scratch worktree (a `sandcastle/*` branch's) it makes, and the run's
+exit listener, registered beside `unlockAll` and prepended so the project lock is still held,
+removes those: for each, the container
+(`removeSandboxContainer`), then `worktreeRefusal`'s check, the unlock, `git worktree remove
+--force`, `git branch -D` and `forgetFork`.
+Never an `agent-issue-*` worktree or an `agent/*` branch, and never one the run did not record, so
+an earlier run's leftover stays for `sandcastle clean`.
+Not when the run stopped on the guard (`guardStopped`), and not when the run's `.git` check, taken
+at the exit against the start's reading (the host git's after the base gates), fails: the
+worktree and its branch are then left for a person, as `test/base-gates-stop-leftovers.test.ts`
+holds.
+The library's line is printed before that check, so `reword` hedges it: the run removes the
+worktree on exit unless its `.git` check fails, and `sandcastle clean` does then
+(`test/library-lines.test.ts`, `test/stop-removes-scratch-worktrees.test.ts`).
 The sites: a ticket's pipeline at its end (the settle's check, before the close and no longer after
 it) and at a pause (`HostGit.check`); the gate sandboxes (`gateBase`: the run's `HostGit.check` for
 the mid-run base check and the verify, `sandcastle gates`' own fingerprint, and for the base gates
@@ -1826,9 +1859,34 @@ opened, since a blocking read would hang the whole run.
   `info/` on the host at every sandbox start to mount them read-only, and in a repository that had
   none the new directory stopped the run at its first sandbox, `test/guard-empty-hooks-root.test.ts`),
   and compared before every sandbox
-  opens, before every sandbox closes, before each landing and before each host write; the
+  opens, before every sandbox closes, before each landing, before each repair pass (`checkGit` in
+  the pipeline's repair loop, after the fix board's wait, the merge of a landed fix and the wait for
+  a counted sandbox slot, so a change made on the host in between is the ticket's `tampered` and
+  not a red a repair concludes is
+  "environmental"; `test/pipeline-repair-git-check.test.ts`) and before each host write; the
   command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
   `core.hooksPath` and `core.fsmonitor` by environment.
+  A check also takes the exact absolute rewrite of a tracked hooks path mid-run
+  (decided: pin and accept, never restore - the kit never writes `.git/config`, since restoring would
+  make it a writer of the user's config, could race another writer and could hide a window of hookless
+  commits). A worktree tool (Claude Code's worktree setup) resolves a relative `core.hooksPath` and
+  writes `<root>/<path>` into the shared file. `configChange` reports it (`rewrite`) only when
+  `core.hooksPath` is the one key that differs, one value before and one after, and
+  `rewrittenHooksPath` (`src/hooks-path.ts`) returns the old value: the old one is a tracked hooks
+  directory (`trackedHooksPath`) and the new one is exactly `<root>/<old>` (or the real path of the
+  root). `assertGitUnchanged` then prints one line (both values, `REWRITE_NOTE`, the way back, once
+  per run and root) and takes the new state as the expectation, like a benign upstream. Any second
+  changed key, or any other value, stops as ever, with the value hidden. It is safe because nobody
+  reads the key during the run: the host's git runs with `core.hooksPath=/dev/null`
+  (`disableHostGitHooks`) and every sandbox with the pinned path, `pinnedHooksPath` - the local
+  `core.hooksPath` when it passes `trackedHooksPath`, or the relative path `ownAbsoluteHooksPath` names
+  for it when that is a tracked directory; `sandboxEnv` appends it as one more `GIT_CONFIG_*` pair
+  beside the maintenance pairs (command-scope config outranks the file, git 2.31+). `hooksDirProtected`
+  uses the same derivation, so the tracked hooks directory stays protected after the flip. The
+  rewrite the guard accepted is remembered by project root (`acceptedRewrite`), so
+  `recordGitConfigEnd` compares the record with that value moved to the accepted one and records the
+  end clean; a rewrite no check saw is never recorded clean
+  (`test/hooks-path-rewrite.test.ts`, `test/sandbox-hooks-path-pin.test.ts`).
 - The start baseline (`assertGitConfigBaseline`, `recordGitConfigStart`, `recordGitConfigEnd`,
   `src/guard.ts`; `test/guard-start-baseline.test.ts`, and
   `test/guard-start-baseline-coverage.test.ts` for each class of key, `config.worktree`, the hooks
@@ -1897,6 +1955,10 @@ opened, since a blocking read would hang the whole run.
   before it records; the refusal says whether the last run ended cleanly and marks the changes that
   look like a person's own tooling (`looks like your own tooling: ...`) apart from the rest
   (`test/guard-start-own-changes.test.ts`).
+  After a clean end the start also takes a recorded tracked hooks path that is now exactly its
+  absolute form (`ownConfigKey`, through `rewrittenHooksPath`; the same rewrite as above), with a
+  line; after an unclean end it is compared as any other change, and refused with both values and
+  the way back.
   A record left unclean whose keys and files equal the present ones starts: there is nothing to
   name, and a refusal would cost `--accept-git-config` after every Ctrl-C.
   Git may write `extensions.relativeWorktrees` as it adds a worktree (`worktree.useRelativePaths`),
@@ -2085,9 +2147,9 @@ taken.
 Unlike one, it is not counted against `maxSandboxes`: `liveSlots` leaves it out, so it is not in
 `members()`' `held` (the shares) nor in `lastFreeSlot`'s count, and a waiting ticket's agent pass can
 take its numbered slot.
-`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - its name starts
-with `sandboxes-` and ends in `.lock`, which is all that count asks - so other runs and the views see
-every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
+`usage()` (`liveSlots(pool, seen, true)`) and the status view's slot count read it - the view's
+`readPool` counts it apart by its `-waiting-` (`pool.sandboxes.outside`, drawn `+N for gates`) - so
+other runs and the views see every live sandbox, and `usage()` can read `sandboxes 3/2` with two waiters: up to `maxGates` per run
 waiting, and as many again whose gates slot was granted (they stay on the lock through their gates).
 `test/gate-wait-frees-sandbox.test.ts`.
 
@@ -2700,10 +2762,22 @@ with every provider's newest reading as `watchUsage` writes one, and `usagePause
 window - of those at or above the threshold that have not reset (`resetsAt` plus
 `USAGE_RESUME_GRACE_SECONDS`, 60, still ahead: a stale reading says nothing of a window open again
 since), the one that resets last, since resuming at an earlier reset would only pause again - and
-holds the pause until a minute after its reset; `limit(usage, provider)` is the pipeline's
+holds the pause until a minute after its reset - of Claude's windows only: a Codex window is the
+cross-review's plan, a second opinion, so `usagePauseFor` leaves it out and `crossReviewSpent()`
+(`crossReviewSpentFor`: the Codex window at or above the threshold that has not reset, the one that
+resets last, over the newest readings `reading` and `limit` last saw) says which one is spent.
+The skip ends at the reset itself, without the Claude pause's minute of grace.
+The pipeline's `crossReviewSkip` port (`burndown()` wires it to `crossReviewSkippedWords`, the
+`cross-review skipped - Codex 5-hour usage 98%, resets 14:05` line, the reset in the status view's
+`resumeClock` form) is asked after the cross-review's juncture, so a pause there that outlasted the window
+is not skipped for it; a spent window skips the pass, prints the line, and the ticket keeps it as
+`crossSkipped` (its head record, so a land-only re-run or a red-gate retry that reuses its review
+still has it, and `logs/run.json`), which
+`src/report.ts` lists on `Landed without a cross-review (Codex plan's limit): #N, #M` for the
+tickets that merged. `test/usage-pause-cross-review.test.ts`. `limit(usage, provider)` is the pipeline's
 `limitPause`, for an agent that hit the limit anyway (`usageLimitPauseFor`: the open window nearest
 to spent, the later reset on a tie, recorded at 100% whatever the last reading said, of the provider
-whose agent it was; nothing when no reading names an open window at `min(threshold, USAGE_RED)`
+whose agent it was - always Claude's, since the cross-review's limit is not waited out; nothing when no reading names an open window at `min(threshold, USAGE_RED)`
 percent or more - a limit message with every window well short of it is some other limit, one
 model's own cap, and days of waiting for the wrong window is worse than the old stop - which is also
 how a run on an API key, or one before its first reading, keeps stopping as it did). `source.read()`
@@ -2716,8 +2790,8 @@ windows then at or above the threshold by provider, window and reset time (`wind
 nothing, and the next window has a new reset time and pauses at the threshold as any.
 The controller is made only when a threshold is set, so a run without one reads the control file as
 before. `burndown()` prints the start line (`usagePauseLine`:
-`Usage pause: at 90%, resumes at the window's reset`, or that the run reads no plan usage and never
-pauses for it), hands `reading` each reading in `watchUsage`'s `write` (a failure there is dropped:
+`Usage pause: at 90%, resumes at the window's reset`, or that the run reads no Claude plan usage and
+never pauses for it), hands `reading` each reading in `watchUsage`'s `write` (a failure there is dropped:
 the next reading asks again), and says each pause and resume once as the scheduler tells them
 (`createPauseHandling`, over injected ports for the record, keep-awake, view and log, so
 `test/pause-handling.test.ts` drives it with fakes).

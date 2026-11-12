@@ -12,8 +12,16 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   leaves the repo out gets a FIX there, and `sandcastle run` refuses the same way before any sandbox
   starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
   without the kit's tokens, and a token value in gate output is replaced with `<redacted>`. So is
-  a token of Codex's login (`~/.codex/auth.json`, mounted read-only when `CROSS_REVIEW=1`) in the
+  a token of Codex's login (`~/.codex/auth.json`, read when `CROSS_REVIEW=1`) in the
   output a crashed agent's log and crash note show.
+  Of that login, a sandbox gets the access token and the ID token but **not the refresh token**: with
+  `CROSS_REVIEW=1` each sandbox is handed a read-only copy of `auth.json` whose `tokens.refresh_token` is
+  blank, written once per run to a temp directory and removed when the run ends. A refresh rotates
+  the token server-side, so sandboxes that each refreshed with the host's would leave the host's copy stale and
+  its next use failing with "refresh token was already used". Nothing in a sandbox can refresh the login: when
+  the access token (10 days) expires mid-run, that sandbox's cross-review fails and the run goes on without it.
+  An API-key sign-in holds no refresh token and is copied as it is. Your own `~/.codex/auth.json` is only read.
+  If the temp copy cannot be written, the sandbox config fails rather than exposing the host's refresh token.
 - 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
   `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an
   agent follows them anyway.
@@ -108,6 +116,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   of them: a filter, a driver, a transport command, `insteadOf`, a changed URL on an existing remote
   (`origin` included), a removed remote, a remote's `pushurl`, `proxy` or program, a hooks path
   anywhere else, `info/attributes`, and any other hook.
+  The same goes for a tracked hooks path that a worktree tool (Claude Code's worktree setup)
+  rewrote to its exact absolute form: the recorded relative value, now `<project>/<that value>`, is
+  taken with one line.
   After an unclean end (killed, stopped) every change is refused, as before.
   Each refusal says whether the last run ended cleanly, and marks a change that looks like your own
   tooling (`looks like your own tooling: ...`) apart from the rest.
@@ -148,10 +159,24 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   `.merge`) that another worktree gives its own branch (`git worktree add` from a remote branch,
   `git push -u`, `git branch -u`, `gh pr create`) runs no program, so the run prints one line and
   goes on.
+  So does the exact absolute rewrite of a tracked hooks path (a worktree tool writes
+  `<project>/.githooks` over `.githooks`), when it is the only key that differs: the sandboxes run
+  with the relative path pinned (the next bullet), and the host's git with its hooks off.
   Any other change stops it, and the stop names the keys (with old and new values, except for keys
   that run a program or carry credentials, and with any token in a URL hidden): a remote, a hook
   path, an `include`, `rebase` or `pushRemote`, or an upstream on the base or an `agent/issue-*`
   branch.
+- 📌 **Hooks path pin.** A worktree tool (Claude Code's worktree setup) may rewrite a relative
+  `core.hooksPath` in the shared `.git/config` to its absolute form, which does not exist in a
+  container. Every sandbox is given the tracked relative hooks path through its git environment
+  (a command-scope `core.hooksPath`, which outranks the file), so agent commits still run the repo's
+  hooks, and the run's `.git` check takes that exact rewrite, and only that, with one line - a second
+  changed key or any other value still stops it. The kit never writes `.git/config`: nothing is
+  restored, and `git config core.hooksPath <relative path>` puts your own config right once no run
+  is live: a live run goes on without it, and stops on the change back.
+  The hooks directory stays a protected path after the rewrite.
+  An absolute path to an untracked directory, or outside the project, is not pinned: agent commits
+  run no hooks there, and `sandcastle doctor` says so as a FIX.
 - 🛂 **Checked before every sandbox opens.** Sandcastle's open runs git on your machine in the
   project: `git worktree add`, whose checkout writes every file out through the filters
   `.git/config` names, or `git status` in a worktree it reuses (the kit's patch of Sandcastle drops
@@ -163,6 +188,12 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   `sandcastle land` and `sandcastle gates`, against a reading each takes as it starts - and a change
   stops the run with nothing opened.
   What remains is the moment between that check and Sandcastle's own git calls.
+- 🔧 **Checked before every repair pass.** A ticket whose gate went red is repaired in the sandbox
+  it is already in, so no open comes between the red and the pass.
+  The fingerprint is checked once more as the last thing before the repair pass starts - after any
+  wait for another ticket's fix, the merge of one that landed and the wait for a sandbox slot -
+  so a `.git` change made on your machine meanwhile stops the run there, and the repairer is not
+  asked to explain a red the change caused.
 - 🚪 **Checked before every sandbox closes.** Sandcastle's close stops the container, then runs
   `git status` on your machine in the sandbox's worktree, which reads `.git/config` and that
   worktree's record in `.git/worktrees/<name>/`.

@@ -75,8 +75,9 @@ export const exitOnSignal = () => {
 const REWORDED: [RegExp, string][] = [
   [/^Could not fetch from origin \(reusing worktree at (.+) as-is, branch '(.+)'\)$/, "Resuming branch '$2' in its kept worktree ($1)"],
   // A scratch worktree (`sandcastle-base-gates-<time>`, a verify's) holds no branch's work and no run resumes it: a stop
-  // while one was open once promised the next run would.
-  [/^( *)To clean up: git worktree remove --force .*\/sandcastle-[^/]+$/, "$1To clean up: `sandcastle clean` - a throwaway worktree with no work in it"],
+  // while one was open once promised the next run would. The run removes its own on exit (`removeOwnScratchOnExit`), but
+  // this line comes before that exit's `.git` check, so it says so with the case where it does not.
+  [/^( *)To clean up: git worktree remove --force .*\/sandcastle-[^/]+$/, "$1To clean up: the run removes this throwaway worktree on exit unless its `.git` check fails - then `sandcastle clean` does"],
   [/^( *)To clean up: git worktree remove --force .+$/, "$1To clean up: `sandcastle clean` - or leave it, and the next `sandcastle run` resumes it"],
 ];
 export const reword = (line: string) => REWORDED.reduce((l, [re, to]) => l.replace(re, to), line);
@@ -360,6 +361,20 @@ export const preflightFailure = (
   return `NOT STARTED: Preflight failed - no sandbox started:\n  ${lines.join("\n  ")}`;
 };
 
+/**
+ * A refused preflight's message into the run record, before `burndown()` rethrows it: the command prints the text once,
+ * and an agent closing the run later had no way to learn the cause from the record. Never throws: a record that cannot
+ * be written must not hide the refusal.
+ */
+export const recordPreflightFailure = (record: { update: (fields: RunRecord) => void }, error: unknown): void => {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    record.update({ preflightFailure: message });
+  } catch {
+    // The refusal itself still reaches the caller.
+  }
+};
+
 // `extra` is a model only some tickets ask for (a label), with where it came from.
 export const preflight = async (project: Project, image: string, extra: { model: string; from: string }[] = []) => {
   // Before any probe, and with preflight skipped too: without Codex on the host every ticket's
@@ -397,8 +412,9 @@ export const preflight = async (project: Project, image: string, extra: { model:
       : undefined;
   });
   if (CROSS_REVIEW) {
-    // On the HOST, not in the image: this also refreshes the host's ChatGPT
-    // login, which every sandbox then copies (see sandboxConfig).
+    // On the HOST, not in the image: it proves the host's ChatGPT login works. It refreshes that login only inside
+    // Codex's own 5-minute window before the access token expires, so the sandboxes' copies do not rely on it:
+    // they carry no refresh token at all (see `codexSandboxAuth` in src/sandbox.ts).
     probes.push(
       ask(
         "codex",
@@ -1630,6 +1646,8 @@ export type BranchHead = {
   ungated?: string;
   /** What a reviewer said of a gap in prose and filed nowhere, carried like `ungated`. */
   gap?: string;
+  /** The line of a cross-review skipped for Codex's plan limit (`cross-review skipped - Codex 5-hour usage 98%, resets 14:05`), carried like `ungated` so a land-only run still tells the summary. */
+  crossSkipped?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
   /** The ticket's comment count read just before the last full review's pass, written with its `reviewed` (`seenComments`): a person's comment beyond it was never read by a review, so a carried branch gets the full one. */
@@ -1652,7 +1670,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; crossSkipped?: string; repaired?: string[]; comments?: number; commentsAt?: string }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);

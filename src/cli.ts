@@ -53,6 +53,11 @@
 //                    credits, not a plan. Exits 1 when the usage is unknown; no model calls
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
+//   report --run PID|STARTED_AT
+//                    the summary of one recorded run, found in logs/history.jsonl or run.json by
+//                    its start time or its pid (the latest turn of that pid); for a run that was
+//                    stopped or replaced before it printed one. Unknown: exits 1 and lists the
+//                    latest 10 runs. Local git state and blockers as they are now
 //   report --changelog [--since REF]
 //                    every ticket that landed in runs started after REF (default: the latest
 //                    tag, else all history), across runs, with the agents' suggested changelog
@@ -157,7 +162,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { changelogSince, closingReport, type Facts, gather, operatorSteps, summary } from "./report.ts";
+import { changelogSince, closingReport, type Facts, findRun, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTicketsFromEnv, parseRunArgs, preflight, readOutcomes, recordDrain, rewordLibraryLines } from "./run.ts";
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
@@ -636,6 +641,14 @@ try {
         const since = at === -1 ? undefined : args[at + 1];
         if (at !== -1 && (!since || since.startsWith("--"))) throw new OperatorError("`--since` takes a git ref: `sandcastle report --changelog --since v1.2.0`.");
         console.log(changelogSince(await loadProject(root), since));
+        break;
+      }
+      const at = args.indexOf("--run");
+      if (at !== -1) {
+        const value = args[at + 1];
+        if (!value || value.startsWith("--")) throw new OperatorError("`--run` takes a pid or a start time: `sandcastle report --run 4242`.");
+        const project = await loadProject(root);
+        console.log(await closingReport(project, undefined, findRun(project.root, value)));
         break;
       }
       console.log(await closingReport(await loadProject(root)));

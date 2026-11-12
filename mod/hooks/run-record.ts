@@ -175,6 +175,8 @@ export type TicketRecord = {
   ungated?: string;
   /** A sentence a reviewer left in prose naming a gap it filed neither as a `<followup>` nor as an `<unmet>` line; a merged ticket with one needs a person. */
   gap?: string;
+  /** The cross-review was skipped because Codex's plan window was at the `USAGE_PAUSE` threshold: the line said (`cross-review skipped - Codex 5-hour usage 98%, resets 14:05`). A merged ticket with one is listed in the closing summary. */
+  crossSkipped?: string;
   /** Changelog lines the implementer and reviewer asked for (`changelog: true`), each starting Added:, Changed:, Fixed: or Upgrading:. */
   changelog?: string[];
   /** How many `<changelog>` tags were no changelog line (too long, a list, a commit sha) and were left out of `changelog`. */
@@ -297,6 +299,8 @@ export type RunRecord = {
   waiting?: { issue: string; on: string[] }[];
   /** What the run line shows while the run is live. */
   stage?: string;
+  /** The message a refused preflight threw (the one the command printed), written before the error is rethrown: the closing summary's headline shows its cause. Absent unless the preflight refused the run. */
+  preflightFailure?: string;
   concurrency?: number;
   /**
    * How loaded the run was, kept in the history line so the estimate prices a run from earlier runs of a similar load:
