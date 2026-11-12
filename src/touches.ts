@@ -97,30 +97,56 @@ const git = (root: string, args: string[]) =>
   spawnSync("git", args, { cwd: root, maxBuffer: 256 * 1024 * 1024 });
 
 /**
+ * The commit `ref` names, or undefined. A full sha is returned as it is, with no git call: a pass
+ * that resolves the base once hands the sha on, and `expandTouches` and `unmergeableFiles` then
+ * spawn nothing to resolve it again.
+ */
+export const commitOf = (root: string, ref: string): string | undefined => {
+  if (/^[0-9a-f]{40}$/.test(ref)) return ref;
+  const r = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  return r.status === 0 ? r.stdout.toString("utf8").trim() : undefined;
+};
+
+// The file names of a commit's tree, from one `git ls-tree -r`, kept per commit like `sizesAt`'s
+// sizes: a start expands every queued ticket's `Touches:` line against the same base, and the tree of
+// a large repository is read once, not once per ticket.
+const KEPT_TREES = 4;
+const treeCache = new Map<string, string[]>();
+
+const namesAt = (root: string, sha: string): string[] => {
+  const key = `${root}\0${sha}`;
+  const hit = treeCache.get(key);
+  if (hit) return hit;
+  const r = git(root, ["ls-tree", "-r", "--name-only", "-z", sha]);
+  if (r.status !== 0) return [];
+  const names = r.stdout.toString("utf8").split("\0").filter(Boolean);
+  treeCache.set(key, names);
+  for (const old of [...treeCache.keys()].slice(0, Math.max(0, treeCache.size - KEPT_TREES))) treeCache.delete(old);
+  return names;
+};
+
+/**
  * The files at `ref` these patterns name. A plain path matches itself, or everything under it
  * when it is a directory. A plain path that matches nothing is kept as written - a new file can
  * still overlap - but a glob that matches nothing is dropped, as there is no file to name.
  */
 export const expandTouches = (root: string, ref: string, patterns: string[]): string[] => {
-  const r = git(root, ["ls-tree", "-r", "--name-only", "-z", ref]);
-  const tree = r.status === 0 ? r.stdout.toString("utf8").split("\0").filter(Boolean) : [];
-  const out: string[] = [];
-  const add = (f: string) => {
-    if (!out.includes(f)) out.push(f);
-  };
+  const sha = commitOf(root, ref);
+  const tree = sha ? namesAt(root, sha) : [];
+  const out = new Set<string>();
   for (const raw of patterns) {
     const pattern = normalise(raw);
     if (!pattern) continue;
     if (isGlob(pattern)) {
       const re = globToRegExp(pattern);
-      tree.filter((f) => re.test(f)).forEach(add);
+      for (const f of tree) if (re.test(f)) out.add(f);
       continue;
     }
     const hits = tree.filter((f) => covers(pattern, f));
-    if (hits.length) hits.forEach(add);
-    else add(pattern.replace(/\/$/, ""));
+    if (hits.length) for (const f of hits) out.add(f);
+    else out.add(pattern.replace(/\/$/, ""));
   }
-  return out;
+  return [...out];
 };
 
 /** Where a sentence ends on a line: `. `, `; `, `? `, `! ` or the end of the line. A dot inside a path does not end one. */
@@ -171,12 +197,11 @@ export const missingTouches = (root: string, ref: string, body: string): string[
 // name: the base branch moves as tickets land, and a ref name would keep serving the old tree. A
 // few are kept, as a run reads the base's tip and a ticket's head at most.
 const sizeCache = new Map<string, Map<string, number>>();
-const KEPT_TREES = 4;
 
 const sizesAt = (root: string, ref: string): Map<string, number> | undefined => {
-  const sha = /^[0-9a-f]{40}$/.test(ref) ? { status: 0, stdout: Buffer.from(ref) } : git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
-  if (sha.status !== 0) return undefined;
-  const key = `${root}\0${sha.stdout.toString("utf8").trim()}`;
+  const sha = commitOf(root, ref);
+  if (!sha) return undefined;
+  const key = `${root}\0${sha}`;
   const hit = sizeCache.get(key);
   if (hit) return hit;
   const tree = git(root, ["ls-tree", "-r", "-l", "-z", key.slice(root.length + 1)]);

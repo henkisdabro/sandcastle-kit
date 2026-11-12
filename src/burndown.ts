@@ -68,7 +68,7 @@ import {
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, personCommentsSince, repairWords, seenComments, stoppedLine, trustOf } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, isDocFile, resolveHoldNote, sharesByFile, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
-import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
+import { commitOf, expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
 
 // Where they lived before landing.ts and ledger.ts; callers and tests still import them from here.
@@ -1316,34 +1316,61 @@ export const openOnQueue = async (project: Project, tracker: Tracker, whole: Iss
  * the three dots would list everything the rewrite moved, so it is the files its own commits changed
  * (the pipeline re-creates it from those commits).
  */
-export const branchFiles = (root: string, base: string, id: string): string[] => {
+export const branchFiles = (root: string, base: string, id: string): string[] => branchRead(root, base, id).files;
+
+/** The branch's files and its tip (undefined for no branch), from one reading. */
+const branchRead = (root: string, base: string, id: string): { files: string[]; tip?: string } => {
   try {
     const branch = `agent/issue-${id}`;
-    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    const tip = sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
     if (staleBaseParents(base, branch, root).length) {
-      return [...new Set(sh("git", ["log", "--no-merges", "--no-renames", "--name-only", "--format=", "-z", ...ownRange(base, branch, root)], root).split("\0").filter(Boolean))];
+      return { tip, files: [...new Set(sh("git", ["log", "--no-merges", "--no-renames", "--name-only", "--format=", "-z", ...ownRange(base, branch, root)], root).split("\0").filter(Boolean))] };
     }
-    return sh("git", ["diff", "--no-renames", "--name-only", "-z", `${base}...${branch}`], root).split("\0").filter(Boolean);
+    return { tip, files: sh("git", ["diff", "--no-renames", "--name-only", "-z", `${base}...${branch}`], root).split("\0").filter(Boolean) };
   } catch {
-    return [];
+    return { files: [] };
   }
 };
 
-/** What a ticket will change: its branch's files and its `Touches:` line (src/touches.ts), and which of them git cannot merge. */
+// What each reading of a ticket's files was made from: its branch's tip and the base commit. The
+// base matters as well as the tip because `unmergeableFiles` reads sizes at the base, so a minified
+// file the base gained since changes the unmergeable set of a branch that did not move.
+const readFrom = new WeakMap<TicketFiles, string>();
+const sourceOf = (base: string, tip: string | undefined) => `${base}\0${tip ?? ""}`;
+
+/**
+ * What a ticket will change: its branch's files and its `Touches:` line (src/touches.ts), and which of them git cannot merge.
+ * The base is resolved to a commit once here, so the reads below name it by sha and spawn nothing to resolve it again.
+ */
 export const ticketFiles = (project: Project, ticket: Issue): TicketFiles => {
-  const base = project.baseBranch;
-  const all = [...new Set([...branchFiles(project.root, base, ticket.id), ...expandTouches(project.root, base, parseTouches(ticket.body ?? ""))])];
-  return { all, unmergeable: unmergeableFiles(project.root, base, all, project.generated ?? []) };
+  const base = commitOf(project.root, project.baseBranch) ?? project.baseBranch;
+  const { files, tip } = branchRead(project.root, base, ticket.id);
+  const all = [...new Set([...files, ...expandTouches(project.root, base, parseTouches(ticket.body ?? ""))])];
+  const read = { all, unmergeable: unmergeableFiles(project.root, base, all, project.generated ?? []) };
+  readFrom.set(read, sourceOf(base, tip));
+  return read;
 };
 
 /**
  * A ticket in flight changes files its first reading did not see: its branch gains a lockfile
  * change after the start. Adds the branch's files now to what was read, and recomputes which of
- * them git cannot merge. One `git diff` and, for the sizes, one cached tree read.
+ * them git cannot merge. A reading made from the same branch tip and base commit as `files` is
+ * returned as it is: nothing it was made from has moved, so two git reads would find the same. The
+ * check is two `rev-parse`; when the tip or the base moved, one `git diff` and, for the sizes, one cached tree read.
  */
 export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles): TicketFiles => {
-  const all = [...new Set([...files.all, ...branchFiles(project.root, project.baseBranch, ticket.id)])];
-  return { all, unmergeable: unmergeableFiles(project.root, project.baseBranch, all, project.generated ?? []) };
+  const base = commitOf(project.root, project.baseBranch) ?? project.baseBranch;
+  let tip: string | undefined;
+  try {
+    tip = sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/agent/issue-${ticket.id}`], project.root);
+  } catch {
+    tip = undefined;
+  }
+  if (readFrom.get(files) === sourceOf(base, tip)) return files;
+  const all = [...new Set([...files.all, ...branchRead(project.root, base, ticket.id).files])];
+  const read = { all, unmergeable: unmergeableFiles(project.root, base, all, project.generated ?? []) };
+  readFrom.set(read, sourceOf(base, tip));
+  return read;
 };
 
 /** A typical issue's length in ms, from `typicalTimes`' seconds; undefined with no history. */
