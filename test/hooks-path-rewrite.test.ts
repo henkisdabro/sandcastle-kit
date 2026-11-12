@@ -49,6 +49,16 @@ test("mid-run: the exact absolute form of the tracked hooks path is taken with o
   assert.deepEqual(again.lines, [], "the new state is the expectation: a second check says nothing");
 });
 
+test("mid-run: the change back stops a live run, so the line says to restore once the run has ended", async () => {
+  const { project, git, root } = repo();
+  const before = gitFingerprint(project);
+  git("config", "core.hooksPath", join(root, ".githooks"));
+  const { lines } = await quietly(() => assertGitUnchanged(project, before, "before landing"));
+  assert.match(lines[0], /git config core\.hooksPath \.githooks` once the run has ended/);
+  git("config", "core.hooksPath", ".githooks");
+  assert.match(stopLine(project, before), /core\.hookspath changed/);
+});
+
 test("mid-run: the rewrite with a second key changed beside it still stops, naming both keys", () => {
   const { project, git, root } = repo();
   const before = gitFingerprint(project);

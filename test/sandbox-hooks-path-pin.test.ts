@@ -81,7 +81,7 @@ test("the lines for the project's own absolute tracked path say sandboxes are gi
   const tracked = hooksPathLines(join(root, ".githooks"), root).join("\n");
   assert.doesNotMatch(tracked, /agent commits run none/);
   assert.match(tracked, /Sandboxes are given `\.githooks` through their environment, so agent commits still run its hooks/);
-  assert.match(tracked, /git config core\.hooksPath \.githooks/);
+  assert.match(tracked, /git config core\.hooksPath \.githooks` puts the config right once no run is live/);
   const untracked = hooksPathLines(join(root, "untracked-dir"), root).join("\n");
   assert.match(untracked, /agent commits run none/);
   assert.match(untracked, /git config core\.hooksPath untracked-dir/);

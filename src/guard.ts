@@ -1040,7 +1040,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       const seen = acceptedRewrite.get(root);
       // Said once per run, however many fingerprints (one per pipeline) meet the same change.
       if (seen?.from !== rewrite.from || seen.to !== rewrite.to) {
-        console.log(`core.hooksPath changed in the shared .git/config ${gatesOnly ? "while the gates ran" : "while sandboxes ran"}: ${JSON.stringify(rewrite.from)} -> ${JSON.stringify(rewrite.to)}, its absolute form. ${REWRITE_NOTE} Sandboxes are given ${JSON.stringify(rewrite.from)} through their environment, so agent commits still run its hooks - ${gatesOnly ? "the gates go on" : "the run goes on"}. Restore it with \`git config core.hooksPath ${rewrite.from}\`.`);
+        console.log(`core.hooksPath changed in the shared .git/config ${gatesOnly ? "while the gates ran" : "while sandboxes ran"}: ${JSON.stringify(rewrite.from)} -> ${JSON.stringify(rewrite.to)}, its absolute form. ${REWRITE_NOTE} Sandboxes are given ${JSON.stringify(rewrite.from)} through their environment, so agent commits still run its hooks - ${gatesOnly ? "the gates go on" : "the run goes on"}. Restore it with \`git config core.hooksPath ${rewrite.from}\` once ${gatesOnly ? "the gates have" : "the run has"} ended: the change back stops a live one.`);
       }
       acceptedRewrite.set(root, rewrite);
     }

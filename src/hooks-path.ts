@@ -12,10 +12,12 @@ import { join, relative } from "node:path";
 export const REWRITE_NOTE =
   "This matches a known Claude Code rewrite: its worktree setup writes the absolute form of a relative `core.hooksPath` into the shared `.git/config`.";
 
-// Not `sh` from src/sandbox.ts, which imports this file: a plain read, no output, an error as `undefined`.
+// Not `sh` from src/sandbox.ts, which imports this file: a plain read, no output, an error as `undefined`. The buffer is
+// `sh`'s: the `ls-files` of a hooks path's top directory can pass Node's 1 MiB default in a large repo, and an overflow
+// would read as "not tracked".
 const git = (root: string, args: string[]): string | undefined => {
   try {
-    return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 256 * 1024 * 1024 }).trim();
   } catch {
     return undefined;
   }

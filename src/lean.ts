@@ -496,7 +496,7 @@ export const hooksPathLines = (value: string, root?: string): string[] => {
   if (own && pinned) {
     return [
       `core.hooksPath is ${JSON.stringify(value)}, the absolute form of this project's own \`${pinned}\`, which does not exist inside a sandbox. Sandboxes are given \`${pinned}\` through their environment, so agent commits still run its hooks. ${REWRITE_NOTE}`,
-      `-> \`git config core.hooksPath ${pinned}\` puts the config right; the run goes on without it, and the next start takes that change without a question when the last run ended cleanly.`,
+      `-> \`git config core.hooksPath ${pinned}\` puts the config right once no run is live: a live run goes on without it and stops on the change back. The next start takes that change without a question when the last run ended cleanly.`,
     ];
   }
   if (own) {
