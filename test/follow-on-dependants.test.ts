@@ -41,6 +41,6 @@ test("a held ticket with no blocker named stays out", async () => {
 });
 
 test("the closing lines name every late ticket the turn would take", async () => {
-  const lines = await lateQueueLines(fake(["1", "3", "4", "2"]), new Set(), heldBy({ 3: ["1"], 4: ["1"] }));
-  assert.deepEqual(lines, ["1", "3", "4", "2"].map((id) => `#${id} was queued after this run started: \`sandcastle run\` takes it`));
+  const lines = await lateQueueLines(fake(["3", "1", "4", "2"]), new Set(), heldBy({ 3: ["1"], 4: ["1"] }));
+  assert.deepEqual(lines, ["3", "1", "4", "2"].map((id) => `#${id} was queued after this run started: \`sandcastle run\` takes it`));
 });
