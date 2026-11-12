@@ -57,7 +57,7 @@ import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
-import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
+import { createPauseHandling, createUsagePause, crossReviewSkippedWords, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { execGate, lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -127,6 +127,8 @@ type Outcome = {
   unmet?: string;
   /** What a reviewer said in prose about a gap it filed neither as a `<followup>` nor as an `<unmet>` line (`gapOf`), for the closing summary. */
   gap?: string;
+  /** The cross-review was skipped for Codex's plan limit: the line said, for the closing summary. */
+  crossSkipped?: string;
 };
 
 /**
@@ -1699,6 +1701,11 @@ export type PipelineContext = {
    * when that is, and the limit stops the queue as it does without the setting.
    */
   limitPause?: (phase: string) => boolean;
+  /**
+   * With `USAGE_PAUSE` set: the cross-review is skipped while Codex's plan window is at the threshold (it is a second
+   * opinion, and the run does not pause for Codex). The line to say, `cross-review skipped - Codex 5-hour usage 98%, resets 14:05`, or undefined while the plan is open.
+   */
+  crossReviewSkip?: () => string | undefined;
   /** Worktrees Sandcastle kept for their uncommitted files. */
   keptWorktrees: { issue: string; path: string }[];
   /** The `.git` check that failed after a ticket's pipeline, by ticket: its attempt stops the run with it. */
@@ -1991,7 +1998,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[]; comments?: number; commentsAt?: string }) => {
+  const noteHead = async (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; crossSkipped?: string; repaired?: string[]; comments?: number; commentsAt?: string }) => {
     if (dryRun) return;
     try {
       // `comments` is given only by the full review, read just before its pass starts (`fullReview`): a person's comment
@@ -2579,6 +2586,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       const ungated: string[] = landOnly ? [readHeads(project.root)[issue.id]?.ungated ?? ""].filter(Boolean) : [];
       // What reviewers said of a gap in prose and filed nowhere (`gapOf`).
       const gaps: string[] = landOnly ? [readHeads(project.root)[issue.id]?.gap ?? ""].filter(Boolean) : [];
+      // The line of a cross-review skipped for Codex's plan limit (`ctx.crossReviewSkip`): a land-only branch's stands from its head record, a full review sets it afresh.
+      let crossSkipped: string | undefined = landOnly ? readHeads(project.root)[issue.id]?.crossSkipped : undefined;
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
@@ -2615,6 +2624,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           changelogNone: (!changelog.length && changelogSaidNone) || undefined,
           ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
           gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
+          crossSkipped,
         };
       };
       // The full review of the branch, as the first attempt's: the implementer's word is shown (`implSaid`), and
@@ -2640,7 +2650,12 @@ export const createPipeline = (ctx: PipelineContext) => {
           () => reviewModel,
         );
         if (CROSS_REVIEW) await juncture("cross-review");
-        const cross = CROSS_REVIEW
+        // Asked after the juncture: a pause there may have lasted until Codex's window reset. The cross-review is a second
+        // opinion, so a spent Codex plan skips it and the ticket lands with one opinion fewer, said here and in the summary.
+        const skipWords = CROSS_REVIEW ? ctx.crossReviewSkip?.() : undefined;
+        crossSkipped = skipWords;
+        if (skipWords) console.log(`${ref(issue.id)}: ${skipWords}`);
+        const cross = CROSS_REVIEW && !skipWords
           ? await timed(
               issue.id,
               "cross-review",
@@ -3136,9 +3151,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       const head = sh("git", ["rev-parse", branch], project.root);
-      const { unmet: unmetNote, implSaid: implSaidNote, changelog: changelogNote, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
+      const { unmet: unmetNote, implSaid: implSaidNote, changelog: changelogNote, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote, crossSkipped: crossSkippedNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) await noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: drops.count || undefined, changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote });
+      if (!gated.failure && !unreviewed) await noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: drops.count || undefined, changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined, changelogNone: changelogNoneNote, ungated: ungatedNote, gap: gapNote, crossSkipped: crossSkippedNote });
       // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
       else if (gated.failure) await noteHead(issue.id, branch, { red: head });
       return {
@@ -3162,6 +3177,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         unreviewed,
         ungated: ungatedNote,
         gap: gapNote,
+        crossSkipped: crossSkippedNote,
         changelog: changelogNote,
         changelogDropped: drops.count || undefined,
         changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined,
@@ -4137,11 +4153,16 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     waited,
     ...(usagePause
       ? {
-          limitPause: (phase: string) => {
+          crossReviewSkip: () => {
+            const spent = usagePause.crossReviewSpent();
+            return spent && crossReviewSkippedWords(spent);
+          },
+          limitPause: () => {
             try {
               // The pass's last readings are in its log already: the newest of them says which window ran out, not the one up to 15 s old.
               usageWatch?.poll(true);
-              return usagePause.limit([...planUsage], phase === "cross-review" ? "codex" : "claude");
+              // Claude's only: a pass that hit its limit is never the cross-review (it is skipped, above), and Codex's windows never pause the run.
+              return usagePause.limit([...planUsage], "claude");
             } catch {
               // A pause that cannot be written leaves the limit to stop the run, as it does without the setting.
               return false;
@@ -4294,6 +4315,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
           ...(value.outside?.tests.length ? { flaky: value.outside.tests } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.gap ? { gap: value.gap } : {}),
+          ...(value.crossSkipped ? { crossSkipped: value.crossSkipped } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.changelogDropped ? { changelogDropped: value.changelogDropped } : {}),
           ...(value.changelogNone ? { changelogNone: true } : {}),

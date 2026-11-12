@@ -811,3 +811,33 @@ test("the start line says the setting, and says when the run has no plan usage t
   assert.equal(usagePauseLine(75, ["claude", "codex"]), "Usage pause: at 75%, resumes at the window's reset");
   assert.match(usagePauseLine(90, []), /^Usage pause: at 90%, but this run reads no plan usage .*so it never pauses for it$/);
 });
+
+// ---------------------------------------------------------------------------
+// Codex's plan is the cross-review's, a second opinion: its window never pauses the run.
+// ---------------------------------------------------------------------------
+
+test("Codex at 98% with Claude at 11% at a threshold of 90 pauses nothing, and Claude at 95% still pauses", () => {
+  const codexSpent = reading([98, FIVE_RESET], [20, WEEK_RESET], T0, "codex");
+  const claudeOpen = reading([11, FIVE_RESET], [11, WEEK_RESET], T0, "claude");
+  assert.equal(usagePauseFor([codexSpent, claudeOpen], 90, T0), undefined);
+  const { root, pause } = world(90);
+  assert.equal(pause.reading([codexSpent, claudeOpen]), undefined);
+  assert.equal(readPause(root, PID, T0), undefined, "no control file was written");
+  const claudeSpent = reading([95, FIVE_RESET], [11, WEEK_RESET], T0, "claude");
+  assert.deepEqual(usagePauseFor([codexSpent, claudeSpent], 90, T0), { cause: "usage", provider: "claude", window: "fiveHour", percent: 95, resumesAt: FIVE_RESET + 60 });
+});
+
+test("the usage pause says whether Codex's window keeps the cross-review from running, until that window resets", () => {
+  const { clock, pause } = world(90);
+  assert.equal(pause.crossReviewSpent(), undefined, "no reading yet");
+  pause.reading([reading([98, FIVE_RESET], [20, WEEK_RESET], T0, "codex"), reading([11, FIVE_RESET], [11, WEEK_RESET])]);
+  assert.deepEqual(pause.crossReviewSpent(), { window: "fiveHour", percent: 98, resetsAt: FIVE_RESET });
+  clock.seconds = FIVE_RESET + 60;
+  assert.equal(pause.crossReviewSpent(), undefined, "the window is open again");
+  pause.reading([reading([89, FIVE_RESET + 5 * HOUR], [20, WEEK_RESET], T0, "codex")]);
+  assert.equal(pause.crossReviewSpent(), undefined, "below the threshold");
+});
+
+test("a run that reads only Codex's plan says a Codex window skips the cross-review rather than pausing", () => {
+  assert.match(usagePauseLine(90, ["codex"]), /^Usage pause: at 90%, but only Claude's windows pause the run, and this run reads none .*skips the cross-review instead$/);
+});
