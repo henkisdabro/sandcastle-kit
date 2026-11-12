@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv, stripVTControlCharacters } from "node:util";
 import { CACHE_TTL_KEY, claudeEnv, CROSS_REVIEW } from "./agents.ts";
@@ -526,6 +526,55 @@ export const projectWorktrees = (project: Project): { path: string; branch: stri
 export const branchFinished = (project: Project, branch: string): boolean =>
   branch.startsWith("sandcastle/") || !sh("git", ["cherry", project.baseBranch, branch], project.root).split("\n").some((l) => l.startsWith("+"));
 
+/** Whether a worktree is one of the kit's scratch ones: the base gates', a verify's, a landing's (`.sandcastle/worktrees/sandcastle-*`). A ticket's is `agent-issue-*`. */
+const isScratchWorktree = (path: string) => basename(path).startsWith("sandcastle-");
+
+/**
+ * The scratch worktrees this process opened (`openOrAbandon`, guard.ts, records each as it is made), by the path git
+ * lists. What a run's exit removes: never an earlier run's, which a guard stop may have left for a person.
+ */
+const openedScratch = new Set<string>();
+export const recordScratchWorktree = (path: string): void => void openedScratch.add(path);
+export const ownScratchWorktrees = (): ReadonlySet<string> => openedScratch;
+
+/**
+ * Removes the scratch worktrees under `.sandcastle/worktrees/sandcastle-*` and their `sandcastle/*` branches. They hold
+ * no work and no run resumes them. Never an `agent-issue-*` worktree or an `agent/*` branch. For each worktree: its
+ * container is removed, `refuse` (guard.ts, `worktreeRefusal`) is asked - one it names is left as it stands, with the
+ * reason - then it is unlocked, `git worktree remove --force` and `git branch -D` run, and the branch's fork forgotten.
+ * `only` limits it to those paths (a run's own, `ownScratchWorktrees`). Call with the project's run lock held, and
+ * inside the host git mutex when a run's other host git is live.
+ */
+export const removeScratchWorktrees = (
+  project: Project,
+  refuse?: (worktree: string) => string | undefined,
+  only?: ReadonlySet<string>,
+): { removed: string[]; branches: string[]; left: { path: string; branch?: string; reason: string }[] } => {
+  const removed: string[] = [];
+  const branches: string[] = [];
+  const left: { path: string; branch?: string; reason: string }[] = [];
+  for (const { path, branch } of projectWorktrees(project)) {
+    if (!isScratchWorktree(path) || (only && !only.has(path))) continue;
+    removeSandboxContainer(path);
+    // Every git command below reads config the worktree's records name, and a sandbox can write them.
+    const reason = refuse?.(path);
+    if (reason) {
+      left.push({ path, ...(branch ? { branch } : {}), reason });
+      continue;
+    }
+    // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
+    unlockWorktree(path, project.root);
+    sh("git", ["worktree", "remove", "--force", path], project.root);
+    removed.push(path);
+    if (branch?.startsWith("sandcastle/")) {
+      sh("git", ["branch", "-D", branch], project.root);
+      forgetFork(project.root, branch);
+      branches.push(branch);
+    }
+  }
+  return { removed, branches, left };
+};
+
 /**
  * `sandcastle clean`: removes the worktrees under `.sandcastle/worktrees/` and deletes the agent
  * branches that are finished (and, with `all`, the unmerged ones too). Call only while holding
@@ -540,10 +589,12 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
   reapOrphans(project);
   const containers = removeExitedSandboxes(project);
   const images = removeDanglingImages();
-  const entries = projectWorktrees(project);
-  const worktrees: string[] = [];
-  const left: CleanResult["left"] = [];
-  for (const { path, branch } of entries) {
+  const scratch = removeScratchWorktrees(project, refuse);
+  const worktrees: string[] = [...scratch.removed];
+  const left: CleanResult["left"] = [...scratch.left];
+  const deleted: CleanResult["deleted"] = scratch.branches.map((branch) => ({ branch, unmerged: false }));
+  for (const { path, branch } of projectWorktrees(project)) {
+    if (isScratchWorktree(path)) continue;
     // Every git command below reads config the worktree's records name, and a sandbox can write them: one the guard
     // refuses is left as it stands for a person, and the others go on. A directory already gone has nothing to read.
     const reason = refuse?.(path);
@@ -551,14 +602,12 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
       left.push({ path, ...(branch ? { branch } : {}), reason });
       continue;
     }
-    // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
     unlockWorktree(path, cwd);
     sh("git", ["worktree", "remove", "--force", path], cwd);
     worktrees.push(path);
   }
   sh("git", ["worktree", "prune"], cwd);
   const base = project.baseBranch;
-  const deleted: CleanResult["deleted"] = [];
   const kept: CleanResult["kept"] = [];
   // Git refuses to delete a branch a worktree has checked out, and the worktree is not to be touched.
   const held = new Set(left.map((l) => l.branch));
