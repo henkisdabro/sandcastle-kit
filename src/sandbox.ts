@@ -1057,9 +1057,27 @@ export const sandboxMounts = (project: Project) => [
   ...project.mounts,
   { hostPath: join(KIT, "container"), sandboxPath: MANAGED_SETTINGS, readonly: true },
   ...(CROSS_REVIEW
-    ? [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }]
+    ? (hideCodexCredentials(), [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }])
     : []),
 ];
+
+// The mounted Codex login holds tokens `credentials()` never registers, so a crashed Codex pass whose
+// output echoes one would write it into the agent log and the crash note unredacted. Every string in
+// the file, nested ones too, goes to `hideFromGates`. A file that is missing, unreadable or not JSON
+// registers nothing: the mount is made as before.
+const hideCodexCredentials = () => {
+  try {
+    const found: string[] = [];
+    const walk = (value: unknown) => {
+      if (typeof value === "string") found.push(value);
+      else if (value && typeof value === "object") Object.values(value).forEach(walk);
+    };
+    walk(JSON.parse(readFileSync(join(homedir(), ".codex", "auth.json"), "utf8")));
+    hideFromGates(found);
+  } catch {
+    // Nothing to register; the mount does not depend on it.
+  }
+};
 
 // Sandcastle runs the ready hooks all at once, so this one races the project's setup: written to
 // git's XDG global file rather than `~/.gitconfig`, it never meets a setup step's `git config
