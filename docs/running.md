@@ -215,9 +215,12 @@ TOKENS, the figure a person watching the plan's allowance needs, and below 92 no
 **The plan's usage.** A run does not have to guess how close it is to the plan's allowance.
 While the sandboxes spend a subscription (`CLAUDE_CODE_OAUTH_TOKEN`, no `ANTHROPIC_API_KEY`) and at
 least one of implement, review and repair runs on a Claude model, a **plan** lane in the header
-shows both windows of the plan - the 5-hour one and the week - with each one's bar, percentage and
-reset time, and how long ago the reading was:
+shows the windows the reading carries - the 5-hour one, the week, or both - with each one's bar,
+percentage and reset time, and how long ago the reading was:
 `claude 5h ▓░░░░ 14% · resets 18:10 · week ▓▓▓▓▓ 93% · resets Wed 06:00 · (2m ago)`.
+A window the agents' events do not carry (Claude Code 2.1.322 writes the week alone) is kept from the
+last event that had it until it resets, or, with none, not shown and not judged: its cell is blank,
+as wide as it would be, so the others do not move.
 A window is in the normal colour below 75%, amber from 75% and red from 90%; a reading older than 15
 minutes (no agent has reported since) is greyed, its age beside it.
 Until the first agent reports the lane is left out.
@@ -251,9 +254,9 @@ Codex's `primary` and `secondary`.
 in the sandbox's `~/.codex/sessions` and goes with it: it is never copied to the host's `~/.codex`),
 and the run reads that line from the pass's `.jsonl` like Claude's: the line updates when a
 cross-review pass ends, not during it.
-The Herdr token joins the providers' weekly windows, `claude wk 93% · codex wk 16%`; the closing
-summary's `Plan usage` line is Claude's, and a run with a Codex reading adds a `Codex plan usage`
-line beside it.
+The Herdr token joins the providers' weekly windows (the 5-hour window for a reading with no week),
+`claude wk 93% · codex wk 16%`; the closing summary's `Plan usage` line is Claude's, and a run with a
+Codex reading adds a `Codex plan usage` line beside it.
 
 | State | Means |
 |---|---|
@@ -414,6 +417,8 @@ It reads the agents' own readings, the numbers of the status view's plan lane, s
 request and no credential, and it does nothing for a run that shows no plan usage (an API key): the
 start line says either way - `Usage pause: at 90%, resumes at the window's reset`.
 With both windows over the threshold it waits for the one that resets later.
+It judges the windows the readings have: a window the agents' events do not carry is kept from the
+last event that had it, or, with none, not judged.
 A Codex window (the cross-review's plan) never pauses the run: the cross-review is a second
 opinion, not a gate, so while a Codex window is at the percent and not yet reset the ticket's
 cross-review is skipped, the run prints `#7: cross-review skipped - Codex 5-hour usage 98%, resets
@@ -452,7 +457,8 @@ share); **Runnable now / Still blocked** (blockers re-read after landing); **Loc
 not on the upstream - the tickets are closed but the code has not left your machine); and the **Next
 step**.
 Under the header's `Settings:` line, a run that showed the plan's usage says where it ended:
-`Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going), and a cross-review run
+`Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going; only the windows the
+readings carry, `week 30%` say), and a cross-review run
 with a Codex reading adds `Codex plan usage at the end:` in the same shape.
 A run more than twice off its start estimate (or under half) gets an `Against the estimate:` line,
 and a slow one `Largest causes measured:` under it (time paused, time beside another run, slot

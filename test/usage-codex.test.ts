@@ -61,7 +61,7 @@ test("a rate_limits object parses to the reading by the windows' lengths, 300 an
   assert.deepEqual(usageFromRateLimits({ ...LIMITS, primary: LIMITS.secondary, secondary: LIMITS.primary }, 1791190000), READING);
   // A fraction rounds to the nearest percent, and a window past its limit stops at 100.
   const w = usageFromRateLimits({ primary: { used_percent: 42.4, window_minutes: 300, resets_at: 1 }, secondary: { used_percent: 130, window_minutes: 10080, resets_at: 2 } }, 1)?.windows;
-  assert.deepEqual([w?.fiveHour.percent, w?.week.percent], [42, 100]);
+  assert.deepEqual([w?.fiveHour?.percent, w?.week?.percent], [42, 100]);
 });
 
 test("rate_limits without both windows of those lengths, or with a window that is no reading, give none", () => {
@@ -173,7 +173,7 @@ test("the newest session is the pass's, and its last non-empty rate_limits is th
     { name: "2026-10-05T23-15-13-new", lines: [tokenCount({ ...LIMITS, primary: { ...LIMITS.primary, used_percent: 55 } }, 3), tokenCount(null, 4)], mtime: 2000 },
   ]);
   const w = usageFromCodexEvent(runPass(home).lines.at(-1) ?? "", 1)?.windows;
-  assert.deepEqual([w?.fiveHour.percent, w?.week.percent], [55, 16]);
+  assert.deepEqual([w?.fiveHour?.percent, w?.week?.percent], [55, 16]);
 });
 
 test("no session, no limits in it, or limits only quoted in a file the reviewer read: no extra line, and the pass is as it was", () => {
@@ -259,7 +259,7 @@ test("each provider's newest reading is its own: a later Claude pass does not re
   clock.ms += 20_000;
   cross.say(codexLines(25), 8_000);
   watch.poll();
-  assert.deepEqual(written.map((r) => [r.provider, r.windows?.fiveHour.percent]), [["codex", 25]]);
+  assert.deepEqual(written.map((r) => [r.provider, r.windows?.fiveHour?.percent]), [["codex", 25]]);
 });
 
 test("a run that does not show Codex's usage reads none of it, whatever its agents print", () => {
@@ -323,7 +323,7 @@ test("a record's usage reads back as a list of well-formed entries, the object a
   assert.deepEqual(readPlanUsages([claude, READING]), [claude, READING]);
   assert.deepEqual(readPlanUsages(claude), [claude]);
   assert.deepEqual(readPlanUsages([{ provider: "claude" }, { provider: "codex" }]), [{ provider: "claude" }, { provider: "codex" }]);
-  assert.deepEqual(readPlanUsage({ ...READING, windows: { fiveHour: { percent: "lots", resetsAt: 1 }, week: READING.windows.week } }), { provider: "codex" });
+  assert.deepEqual(readPlanUsage({ ...READING, windows: { fiveHour: { percent: "lots", resetsAt: 1 }, week: { percent: "lots", resetsAt: 2 } } }), { provider: "codex" });
   assert.deepEqual(readPlanUsages([claude, 3, "codex", null, { provider: "other", windows: claude.windows }, [1]]), [claude]);
   for (const junk of [undefined, null, "claude", 3, {}, []]) assert.deepEqual(readPlanUsages(junk), [], JSON.stringify(junk));
 });

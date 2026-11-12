@@ -262,8 +262,8 @@ This continues SKILL.md: run its "Before every action" first.
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
       Under it, the `Settings:` line names the run's settings, a `Plan usage at the end:` line
-      (a run on a subscription) gives the plan's 5-hour and weekly usage as the last agent
-      reported it, a `Codex plan usage at the end:` line (a cross-review run on a ChatGPT plan)
+      (a run on a subscription) gives the plan windows present in the latest merged reading,
+      a `Codex plan usage at the end:` line (a cross-review run on a ChatGPT plan)
       gives Codex's the same way, and a line after them may name the switch that would have helped
       (`AUTONOMY_LEVEL=2` for a level-0 run that left tickets it could run again; a usage guard
       that had no reading, so the run was not guarded): relay them unchanged, and name only the

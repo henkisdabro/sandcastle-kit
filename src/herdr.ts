@@ -344,17 +344,21 @@ export const USAGE_MARKS = { normal: "", amber: " ▲", red: " ■" } as const;
 
 /**
  * The status pane's `sc_usage` token, and the mark of the worst window's band (`USAGE_MARKS`) after it. One
- * provider's reading, Claude's, is `5h 14% · wk 93%`; with another provider's too, each is its name and its
- * weekly window, `claude wk 93% · codex wk 16%` (the sidebar's row is narrow), and the mark is the worst of every
+ * provider's reading, Claude's, is `5h 14% · wk 93%` (`wk 30%` or `5h 14%` when it has one window); with another
+ * provider's too, each is its name and its weekly window (its 5-hour window when it has no week), `claude wk 93% · codex wk 16%` (the sidebar's row is narrow), and the mark is the worst of every
  * window of both. Undefined until a reading exists, and for a record whose readings are not well-formed:
  * the token is then not sent at all.
  */
 export const usageText = (usage: PlanUsage[] | PlanUsage | undefined): string | undefined => {
   const readings = readPlanUsages(usage).flatMap((u) => (u.windows ? [{ provider: u.provider, ...u.windows }] : []));
-  if (!readings.length) return undefined;
-  const worst = Math.max(...readings.flatMap((r) => [r.fiveHour.percent, r.week.percent]));
+  const percents = readings.flatMap((r) => [r.fiveHour?.percent, r.week?.percent].filter((p): p is number => p !== undefined));
+  if (!percents.length) return undefined;
+  const worst = Math.max(...percents);
   const [only] = readings;
-  const text = readings.length === 1 && only.provider === "claude" ? `5h ${only.fiveHour.percent}% · wk ${only.week.percent}%` : readings.map((r) => `${r.provider} wk ${r.week.percent}%`).join(" · ");
+  // A reading may carry one window (Claude Code writes the weekly one alone): each prints what it has, a week before a 5-hour window.
+  const lone = readings.length === 1 && only.provider === "claude" ? [only.fiveHour && `5h ${only.fiveHour.percent}%`, only.week && `wk ${only.week.percent}%`] : [];
+  const each = readings.flatMap((r) => (r.week ? [`${r.provider} wk ${r.week.percent}%`] : r.fiveHour ? [`${r.provider} 5h ${r.fiveHour.percent}%`] : []));
+  const text = lone.length ? lone.filter(Boolean).join(" · ") : each.join(" · ");
   return `${text}${USAGE_MARKS[usageBand(worst)]}`;
 };
 
