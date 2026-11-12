@@ -723,7 +723,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     // A FIX: git finds no hooks in a sandbox with this value, and nothing else says so.
     const outsideHooks = hooksPathOutside(repoRoot);
     if (outsideHooks) {
-      const [what, fix] = hooksPathLines(outsideHooks);
+      const [what, fix] = hooksPathLines(outsideHooks, repoRoot);
       check(false, what, fix.replace(/^-> /, ""));
     }
     // A warning, never a FIX: the rules are the project's own, and only a person can say which to move.

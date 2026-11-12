@@ -37,6 +37,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- A `core.hooksPath` turned into the absolute form of the project's own hooks directory, as Claude
+  Code's worktree setup writes it into the shared `.git/config`, is now named in the guard's stop,
+  the start's refusal and doctor's line, with both values and `git config core.hooksPath <the
+  relative value>` as the way back. The guard still writes nothing itself, and any other change
+  keeps its value hidden.
 - A run stopped by a person (or killed) while its base gates waited for a slot is now summarised as
   stopped, not as "red on main before any agent ran" with a gates log that no gate wrote.
 - A run its preflight refused now heads its summary "NOT STARTED: preflight failed" and points at

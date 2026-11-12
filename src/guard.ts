@@ -12,6 +12,7 @@ import { DockerAnswerError, reapOrphans, recordFork, removeSandboxContainer, sh,
 import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
+import { ownAbsoluteHooksPath, REWRITE_NOTE } from "./lean.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Git hooks on the host. `git merge --no-verify` still runs post-merge, and
@@ -449,7 +450,11 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     if (!kind) ownOnly = false;
     // A hooks path that is the person's own shows its value: it is a path of the repo, not a program.
     let word: string;
-    if (!kind && (COMMAND_KEY.test(key) || SECRET_KEY.test(key))) word = `${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`;
+    // A tracked hooks path turned into its own absolute form names no new program, so both values and the way back are
+    // shown: a bare "changed" sent a person hunting the writer for ten tool calls. Anything else keeps its value hidden.
+    const back = !kind && /^core\.hookspath$/i.test(key) && old.length === 1 && next.length === 1 ? rewrittenHooksPath(project, old[0]!, next[0]!) : undefined;
+    if (back) word = `${name}: ${JSON.stringify(back)} -> ${JSON.stringify(next[0])}, its absolute form. ${REWRITE_NOTE} Restore it with \`git config core.hooksPath ${back}\``;
+    else if (!kind && (COMMAND_KEY.test(key) || SECRET_KEY.test(key))) word = `${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`;
     else if (!old.length) word = `${name} added: ${next.map(shown).join(", ")}`;
     else if (!next.length) word = `${name} removed (was ${old.map(shown).join(", ")})`;
     else word = `${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`;
@@ -606,6 +611,20 @@ const trackedHooksPath = (project: Project, value: string) => {
     // A path that is not there, or a git that cannot list: not a tracked directory.
   }
   return false;
+};
+
+/** `old` when `next` is exactly its absolute form in this project and `old` is a tracked hooks directory; else undefined. */
+const rewrittenHooksPath = (project: Project, old: string | null, next: string | null): string | undefined => {
+  if (old === null || next === null || ownAbsoluteHooksPath(project.root, next) === undefined) return undefined;
+  const parts = old.split("/").filter((p) => p && p !== ".").join("/");
+  let real = project.root;
+  try {
+    real = realpathSync(project.root);
+  } catch {
+    /* the root as given */
+  }
+  if (next !== join(project.root, parts) && next !== join(real, parts)) return undefined;
+  return trackedHooksPath(project, old) ? old : undefined;
 };
 
 const ownConfigKey = (project: Project): OwnKey => (key, old, next, was) => {

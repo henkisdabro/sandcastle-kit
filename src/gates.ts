@@ -483,7 +483,7 @@ export const runGitHookProbe = async (sandbox: Parameters<typeof execGate>[0]): 
 /** The base check's lines for a `core.hooksPath` that does not exist inside a sandbox (`hooksPathOutside`); none when it does. */
 export const hooksPathWarning = (root: string): string[] => {
   const value = hooksPathOutside(root);
-  return value ? hooksPathLines(value).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
+  return value ? hooksPathLines(value, root).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
 };
 
 /**
