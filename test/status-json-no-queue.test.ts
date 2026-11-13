@@ -10,6 +10,9 @@ import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { palette, renderFrame } from "../src/status-render.ts";
+import { ticketRows } from "../src/status-rows.ts";
+import { readSnapshot, sandcastleDir } from "../src/status-snapshot.ts";
 import { buildFixture, NOW, queueFile, type Fixture } from "./status-fixture.ts";
 import { spawnStatus, viewEnv } from "./status-run.ts";
 
@@ -84,6 +87,24 @@ test("status --json --no-queue --frame has queueRead in the table and no could-n
     assert.ok(!JSON.stringify(doc.frame).includes("could not read"), "a skipped queue is not a failed one");
     assert.ok(!JSON.stringify(doc.frame).includes("queue: loading"));
     assert.equal(queueCalls(fixture), 0);
+  } finally {
+    fixture.stop();
+  }
+});
+
+test("a reading without the queue is unavailable with no error, and its frame draws no queue note", async () => {
+  const fixture = buildFixture("live", mkdtempSync(join(TMP, "snapshot-")));
+  try {
+    const env = viewEnv(fixture);
+    const dir = sandcastleDir(env);
+    assert.ok(dir, "the fixture has a .sandcastle");
+    const snapshot = await readSnapshot(dir, { env, terminal: false, queue: false });
+    assert.equal(snapshot.sources?.queue, "unavailable");
+    assert.equal(snapshot.queue.error, undefined, "a skipped queue is not a failed one");
+    assert.deepEqual(snapshot.queue.tickets, []);
+    assert.equal(queueCalls(fixture), 0);
+    const frame = renderFrame(snapshot, ticketRows(snapshot), { cols: 180, rows: 400, showAll: true, colours: palette(false, false) });
+    assert.ok(!frame.includes("queue: "), "the terminal frame draws a queue note for a skipped queue");
   } finally {
     fixture.stop();
   }
