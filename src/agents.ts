@@ -60,10 +60,19 @@ export const CROSS_REVIEW_MODEL = process.env.CROSS_REVIEW_MODEL ?? "gpt-6-astra
 const CROSS_REVIEW_EFFORT = CROSS.on ? CROSS.effort : "high";
 
 /**
- * REPORT_SCHEMA=1: Claude passes and the Codex cross-review also return a schema-validated report (`container/report.schema.json`), which a pass's
- * readers prefer to the own-line tags. Off, a run is what it was before: the same command, the same readers, no timings field.
+ * Claude passes and the Codex cross-review also return a schema-validated report (`container/report.schema.json`), which a pass's
+ * readers prefer to the own-line tags. On unless `REPORT_SCHEMA=0` (an environment variable only, the way out for one release, until the
+ * tag fallback goes): then a run is what it was before #820 - the same command, the same readers, no timings field.
  */
-export const REPORT_SCHEMA = process.env.REPORT_SCHEMA === "1";
+export const REPORT_SCHEMA = process.env.REPORT_SCHEMA !== "0";
+
+/**
+ * The grace window, in seconds, the library gives a Claude pass between its completion signal and its `result` line, set on every
+ * pass's `sandbox.run` options (`pass`, `src/burndown.ts`) so a library default moving never moves it. It is the library's own
+ * `DEFAULT_COMPLETION_TIMEOUT_SECONDS`: #821 saw at most 2.3 s between a pass's `StructuredOutput` call and its `result` line (a Codex
+ * pass ends on its report), and a longer silence would lose the report.
+ */
+export const COMPLETION_TIMEOUT_SECONDS = 60;
 
 export let IMPL_MODEL: string;
 export let REVIEW_MODEL: string;
@@ -433,9 +442,9 @@ export const codexReportCapture = (now: () => number = Date.now): ReportCapture 
   };
 };
 
-// One capture per agent made with REPORT_SCHEMA=1, found from the agent object a pass was given.
+// One capture per agent made while the report schema is on, found from the agent object a pass was given.
 const captures = new WeakMap<object, ReportCapture>();
-/** The capture of the agent a pass was given: none with REPORT_SCHEMA off. */
+/** The capture of the agent a pass was given: none with REPORT_SCHEMA=0. */
 export const passReport = (agent: object): ReportCapture | undefined => captures.get(agent);
 
 // Session capture is off: Sandcastle would otherwise copy every sandbox
@@ -683,7 +692,7 @@ export const crossReview = async <T>(
     const reason = passReport(agent)?.read().missing;
     const cause = reason?.startsWith("failed: ") ? reason.slice("failed: ".length) : agentFailure(error);
     console.log(
-      `${label}: ${CROSS_REVIEW_MODEL} cross-review failed with REPORT_SCHEMA=1 (${cause}); continuing without it - if Codex refused the report schema, every cross-review fails while the switch is on.`,
+      `${label}: ${CROSS_REVIEW_MODEL} cross-review failed with the report schema on (${cause}); continuing without it - if Codex refused the report schema, every cross-review fails until REPORT_SCHEMA=0 is set.`,
     );
     return undefined;
   }

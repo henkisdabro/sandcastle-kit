@@ -77,8 +77,9 @@ on the branch and the base
 What a Claude pass said of its work is read once, in `pass`, by `saidOf(text, facts?)`: the pass's
 `unmet`, `ungated`, changelog read and follow-ups, which `pass` hands back as the result's `said` and every
 reader (the review loop, the narrow reviews, the implementer, `noteChangelog`, `gapOf`'s guard) takes from
-there. With no report (`REPORT_SCHEMA` off, or none came valid) it reads the whole text for the own-line tags
-as it always did. With the report (`REPORT_SCHEMA=1`, `src/agents.ts`) the report stands for the pass's
+there. With no report (`REPORT_SCHEMA=0`, or none came valid) it reads the whole text for the own-line tags
+as it always did. With the report (on unless `REPORT_SCHEMA=0`, `src/agents.ts`; the switch is an
+environment variable only and goes with the tag fallback) the report stands for the pass's
 last iteration - `unmet` and `ungated` are its alone - and the iterations before it, the text with the
 last iteration's output taken off its end, are still read for their `<changelog>` and `<followup>` tags, so
 a follow-up an earlier iteration named is still filed. The tag readers and the report's items share their
@@ -3146,7 +3147,7 @@ them - that would be a second parser for any shell, and the host's check of `.gi
 the repo.
 Needs bash and `jq` in the image.
 
-`report.schema.json` is the shape of the report a Claude pass returns with `REPORT_SCHEMA=1`
+`report.schema.json` is the shape of the report a Claude pass returns unless `REPORT_SCHEMA=0`
 (`--json-schema`, `claude()` in `src/agents.ts`, which reads the file on the host and puts it, compact, on
 the command; the mount keeps a copy where a pass can read it, and no image rebuild follows an edit). Codex
 strict mode is the dialect: every object has `additionalProperties: false` and `required` naming every
@@ -3165,13 +3166,17 @@ checked by `reportFrom`; otherwise `no agent message`, `not JSON`, `invalid: <wh
 held a `turn.failed`, `failed: <code>` - the `"code":"..."` in its `error.message`, read from anywhere in it
 (`failed: invalid_json_schema` for a schema the API refuses, which fails before any model turn), else the
 message's first 80 characters. The signal sits in the report's own `signal` field, so the library's
-`completionSignal` arms on the JSON message. A pass cut off by the grace window (the signal in prose, then a
+`completionSignal` arms on the JSON message. The grace window is `COMPLETION_TIMEOUT_SECONDS` (`src/agents.ts`,
+60 s, the library's own default), set on every pass's `sandbox.run` options in `pass` so a library default moving
+never moves it: #821 saw at most 2.3 s between a pass's `StructuredOutput` call and its `result` line.
+A pass cut off by the grace window (the signal in prose, then a
 silence, and no valid report at or after it) records `cutOff` with its figures running to the pass's end.
 A valid report followed by a final prose message is missing (`not JSON`), but was not cut off:
 its timing figures end at the last message, since the report did arrive after the signal.
 `reportTiming` and `crossReview`'s line prefer the capture's `failed: ...` reason to the thrown error's text, so
-a refused schema reads `failed: invalid_json_schema` on the timings line, and with the switch on `crossReview`
-says the report schema was on and that a refused schema ends every cross-review while it is. In the review loop
+a refused schema reads `failed: invalid_json_schema` on the timings line, and with the report on (unless
+`REPORT_SCHEMA=0`) `crossReview` says the report schema was on and that a refused schema ends every cross-review
+until `REPORT_SCHEMA=0` is set. In the review loop
 `reviewGap` skips `gapOf` for a cross-review whose text parses as JSON: it is not prose. The limit: the
 cross-reviewer's `<report>` hand-back is not in its JSON, so for a tracker where agents do not write it, it is
 not posted (the hand-back forms get their own design). `test/report-schema-codex.test.ts` holds all of it.

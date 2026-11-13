@@ -212,6 +212,8 @@ A run starts in a project, on its base branch, with a clean tree:
 4. **Landing** - a green branch is merged into the local base branch and its ticket closed; a branch that touches hooks (hook-runner config included), CI or install scripts is held for a person.
 5. **The end** - the merged base is gated once more, and the closing summary says what merged, what is red and what needs you. Nothing is pushed.
 
+Each agent pass ends in a report checked against a schema (the signal, the unmet criteria, the changelog lines, the follow-ups), which the kit reads in place of tags in the agent's prose; a pass whose report did not come is read from its tags as before. `REPORT_SCHEMA=0` turns the report off for one release ([configuration](docs/configuration.md)).
+
 A green gate run proves only that the configured gate commands passed on that branch - no more than those commands check. Whether the change does what the ticket asked is the review agent's job, which is why every branch is reviewed before it is gated.
 
 The gates also run in the Linux sandbox, so a green run proves Linux only. A branch can still be red on macOS or Windows (BSD tools, bash 3.2, shell shims and terminal flags differ), and landing does not check that: it gates in the same Linux sandbox. A project that ships to macOS or Windows can add a CI job on that OS, or run its gates on the host before pushing.

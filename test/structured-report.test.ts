@@ -411,7 +411,7 @@ test("a cross-review that throws after its pass is swallowed, finding and all; o
       }),
     );
     assert.equal(thrown.result, undefined, "crossReview returns nothing: the finding the pass produced is gone");
-    assert.ok(thrown.lines.some((l) => /cross-review failed \(report failed the schema check\); continuing without it/.test(l)));
+    assert.ok(thrown.lines.some((l) => /cross-review failed with the report schema on \(report failed the schema check\); continuing without it/.test(l)));
 
     const returned = await silent(() =>
       crossReview("T-1", async () => {

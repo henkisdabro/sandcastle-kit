@@ -219,7 +219,7 @@ test("the pass records whether its report came, and timed puts it on the step's 
 
 test("REPORT_SCHEMA is read once in agents.ts and scrubbed from the tests' environment", () => {
   const agents = readFileSync(join(import.meta.dirname, "../src/agents.ts"), "utf8");
-  assert.match(agents, /export const REPORT_SCHEMA = process\.env\.REPORT_SCHEMA === "1";/);
+  assert.match(agents, /export const REPORT_SCHEMA = process\.env\.REPORT_SCHEMA !== "0";/);
   assert.match(readFileSync(join(import.meta.dirname, "hermetic-env.ts"), "utf8"), /"REPORT_SCHEMA"/);
   assert.match(readFileSync(join(import.meta.dirname, "../src/cli.ts"), "utf8"), /CROSS_REVIEW, REPORT_SCHEMA,/);
 });
