@@ -61,9 +61,15 @@ export const lineText = (name: string, c: RunCounts, share?: number) =>
  */
 export type RunState = "none" | "running" | "paused" | "finished" | "ended";
 export type RunFacts = { state: RunState; startedAt?: string; finishedAt?: string; counts: RunCounts; line: string };
-export const runFacts = (s: { root: string; hasRecord: boolean; live: boolean; record: RunRecord; tickets: Record<string, TicketRecord> }): RunFacts => {
+export const runFacts = (
+  s: { root: string; hasRecord: boolean; live: boolean; record: RunRecord; tickets: Record<string, TicketRecord> },
+  // The view's own groups (`ticketRows`' counts): a ticket the record has implementing whose log went quiet is
+  // `stalled` there, needing a person, so the line beside the table says what its legend says.
+  view?: { working: number; "needs you": number },
+): RunFacts => {
   const paused = s.live && !!s.record.paused && typeof s.record.paused === "object";
-  const counts = runCounts(s.tickets, paused, retriedNextTurn({ ...s.record, tickets: s.tickets }, s.live));
+  const recorded = runCounts(s.tickets, paused, retriedNextTurn({ ...s.record, tickets: s.tickets }, s.live));
+  const counts = view ? { ...recorded, working: view.working, needsYou: view["needs you"] } : recorded;
   const finishedAt = typeof s.record.finishedAt === "string" ? s.record.finishedAt : undefined;
   const state: RunState = !s.hasRecord ? "none" : paused ? "paused" : s.live ? "running" : finishedAt ? "finished" : "ended";
   const name = typeof s.record.orchestrator === "string" && s.record.orchestrator ? s.record.orchestrator : basename(s.root);

@@ -33,6 +33,12 @@ test("runFacts: none, running, paused, finished and ended, with the tab bar's li
   assert.equal(ended.line, "shop 1/3 · 1 working · 1 needs you");
 });
 
+test("runFacts with the view's counts: a stalled ticket the record has implementing needs you in the line too", () => {
+  const facts = runFacts({ ...base, record: { orchestrator: "shop" }, tickets }, { working: 0, "needs you": 2 });
+  assert.equal(facts.line, "shop 1/3 · 2 needs you");
+  assert.deepEqual([facts.counts.working, facts.counts.needsYou, facts.counts.merged, facts.counts.total], [0, 2, 1, 3]);
+});
+
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-run-facts-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 
@@ -46,6 +52,7 @@ test("status --json --frame carries the run's facts beside the table and the fra
       assert.ok(doc.table && doc.frame, "the table and the frame stay");
       assert.equal(doc.run.state, state, kind);
       assert.match(doc.run.line, /\d+\/\d+/);
+      assert.equal(doc.run.counts.needsYou, doc.table.counts["needs you"], `${kind}: the line agrees with the legend`);
     } finally {
       fixture.stop();
     }

@@ -349,7 +349,7 @@ const main = async (): Promise<number | undefined> => {
     // The shape is `Table` exactly as `ticketRows` returns it - { rows, counts, partly, later }, nothing added, renamed
     // or wrapped. Other views (an app mod, #866) read that type, so a change to `Row` is a change to this output.
     const table = ticketRows(snapshot);
-    process.stdout.write(JSON.stringify(argv.includes("--frame") ? { table, frame: frameFacts(snapshot, table, snapshot.now), run: runFacts(snapshot) } : table) + "\n");
+    process.stdout.write(JSON.stringify(argv.includes("--frame") ? { table, frame: frameFacts(snapshot, table, snapshot.now), run: runFacts(snapshot, table.counts) } : table) + "\n");
     return 0;
   }
   const [interval = "10", show] = argv;
