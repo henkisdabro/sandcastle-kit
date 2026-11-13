@@ -54,6 +54,7 @@
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+import "./mod-resolve.ts";
 
 /** The settings and credential names `src/` reads from the environment that no prefix below covers. */
 export const SCRUBBED = [

@@ -14,10 +14,10 @@
 import { atom, read, update } from "claude-code";
 import type { EngineInterface, Register } from "claude-code";
 
-import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
-import { kitRunning } from "./run-live.ts";
-import { activity, afterTurn, followRun, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
-import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, heldRelease, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
+import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state";
+import { kitRunning } from "./run-live";
+import { activity, afterTurn, followRun, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm";
+import { afterRead, afterVersionRead, type Choice, choiceAfter, dismissalEnded, due, heldRelease, type Mark, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, parseVersionEntry, parseVersionFacts, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */

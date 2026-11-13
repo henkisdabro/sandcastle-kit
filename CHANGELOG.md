@@ -35,6 +35,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   longer start it again. Resuming a run now restores keep-awake. (#943)
 - Notes the agents give for a person to check are joined without a stray full stop before each
   semicolon, and a repeat that differs only by its full stop is dropped. (#945)
+- The Claude Code mod passes `claude plugin validate --strict` on Claude Code 2.1.323 again: its
+  hooks import each other without the `.ts` extension, which strict validation now refuses. (#948)
 
 ### Changed
 

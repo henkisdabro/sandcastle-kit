@@ -286,7 +286,9 @@ test("the mod validates, and calls only what docs/claude-mod.md says", { skip },
   // docs/claude-mod.md prints both lists, as `claude plugin validate` does.
   const readme = read("docs", "claude-mod.md");
   assert.ok(readme.includes(`❯ ./register.tsx calls: ${CALLS.join(", ")}\n`), "docs/claude-mod.md lists the calls");
-  assert.ok(readme.includes(`❯ ${notes.find((n) => n.startsWith("./register.tsx hooks: "))}\n`), "docs/claude-mod.md lists the hooks");
+  // Claude Code 2.1.323 ends the line with ` (default matcher key: plugin)`, which names no hook.
+  const hooks = notes.find((n) => n.startsWith("./register.tsx hooks: "))?.replace(/ \(default matcher key: [^)]*\)$/, "");
+  assert.ok(readme.includes(`❯ ${hooks}\n`), "docs/claude-mod.md lists the hooks");
 });
 
 test("the mod's own tests pass", { skip }, (t) => {
