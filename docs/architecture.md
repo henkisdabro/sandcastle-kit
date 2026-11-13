@@ -1323,7 +1323,13 @@ A split whose answer was lost (a timeout, output that is not JSON) may still hav
 the layout is read before and after it: the one new `sandcastle` pane of this project is adopted,
 more than one are closed.
 The split focuses the new pane; the keyboard goes back to the pane that had it before the split
-(`herdr-app status`), so a run started in a tab in the background does not bring it forward.
+(`herdr-app status`), so a run started in a tab in the background does not bring it forward; when
+the app cannot say which pane had it, to the caller's.
+The props also carry `run` (the instance), which the mod ignores: it marks a pane a run opened.
+A split the app completes only after its answer timed out is recorded nowhere, so every start (the
+same instance's next turn too) closes this project's panes with a `run` prop that the record does
+not name (`closeStrayPanes`): the run lock means one run owns the project.
+A pane a person opened by hand has no `run` prop and stays.
 `herdr-app ls` lists only terminals: a mod pane and its props are read from the core's `herdr-app`
 document (`hc connect`, `doc.get`; `modPanesIn`).
 The pane is recorded as `pane` in `core-view.json` and, like the status terminal, outlives the run

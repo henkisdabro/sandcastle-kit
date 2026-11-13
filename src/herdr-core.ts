@@ -17,7 +17,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
-import { appCliPorts, type AppPorts } from "./herdr-app.ts";
+import { appCliPorts, type AppPorts, type ModPane } from "./herdr-app.ts";
 import { real } from "./live-runs.ts";
 import { clear, record, windowTitle } from "./osc7501.ts";
 import type { CoreTerminal } from "./terminal-host.ts";
@@ -138,11 +138,18 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
   try {
     const previous = readCoreView(root);
     // An autonomy run's next turn: the view the first turn opened is already this run's.
-    if (previous?.instance === instance && previous.status && runsStatusView(get(hc, previous.status))) return previous.status;
+    // A stray mod pane comes only from a split, which a start tries in the app with the mod current: only such a
+    // start, or one after a run that had a pane, reads the app's layout for one.
+    const sweep = !!previous?.pane || (inApp(caller) && app.modCurrent(kit));
+    if (previous?.instance === instance && previous.status && runsStatusView(get(hc, previous.status))) {
+      if (sweep) closeStrayPanes(root, previous.pane, app);
+      return previous.status;
+    }
     // The mod pane on record goes, as the status terminal does below - an earlier run's, or this run's own whose
     // status terminal is gone: this start opens its own beside its caller, and a pane left open would be orphaned.
     if (previous?.pane) closeRecordedPane(root, previous.pane, app);
-    pane = appPane(root, caller, kit, app);
+    if (sweep) closeStrayPanes(root, undefined, app);
+    pane = appPane(root, caller, kit, app, instance);
 
     // The project's status terminal from an earlier run: a view still running is stopped first, and what is left - a
     // bare shell (Ctrl-C leaves a `--keep` terminal one only when the view dies by the signal) or a finished terminal
@@ -262,6 +269,9 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
   }
 };
 
+/** A caller the app shows: its terminal carries the app's `herdr.space` and `herdr.tab` labels. */
+const inApp = (caller: CoreTerminal) => !!caller.labels["herdr.space"] && !!caller.labels["herdr.tab"];
+
 /** This project's `sandcastle` mod panes in the app's layout; undefined when the layout cannot be read. */
 const projectPanes = (root: string, app: AppPorts): Set<string> | undefined => {
   try {
@@ -286,6 +296,28 @@ const closeRecordedPane = (root: string, pane: string, app: AppPorts) => {
 };
 
 /**
+ * Closes every mod pane a run opened for this project (its `run` prop) but `keep`: a split the app completed after
+ * its answer timed out is recorded nowhere, and the run lock means one run owns the project, so no other run's pane
+ * is live. A pane a person opened by hand has no `run` prop and stays; an unreadable layout closes nothing.
+ */
+const closeStrayPanes = (root: string, keep: string | undefined, app: AppPorts) => {
+  let panes: ModPane[];
+  try {
+    panes = app.modPanes();
+  } catch {
+    return;
+  }
+  for (const p of panes) {
+    if (p.project !== root || !p.run || p.pane === keep) continue;
+    try {
+      app.close(p.pane);
+    } catch {
+      /* closed meanwhile, or no window */
+    }
+  }
+};
+
+/**
  * The Herdr app's mod pane, split beside the caller's pane, or undefined for the terminal view: the caller is not in
  * the app (no `herdr.*` labels, or no pane in a running window), or the mod is not current (doctor not `ok`), or the
  * split failed - said in one line, as the run goes on with the terminal view. The mod reads the run through this
@@ -294,20 +326,21 @@ const closeRecordedPane = (root: string, pane: string, app: AppPorts) => {
  * A split whose answer was lost (a timeout, output that is not JSON) may still have made the pane: the one new pane
  * of this project's in the layout is adopted, and more than one are closed, so no pane is left that nothing records.
  * The split focuses the new pane; the keyboard goes back to whatever pane had it, so a run started in a tab in the
- * background does not bring that tab forward.
+ * background does not bring that tab forward - or, when the app cannot say which had it, to the caller's.
+ * The props carry `run` (the instance), which marks the pane as a run's for `closeStrayPanes`; the mod ignores it.
  */
-export const appPane = (root: string, caller: CoreTerminal, kit: string, app: AppPorts): string | undefined => {
-  if (!caller.labels["herdr.space"] || !caller.labels["herdr.tab"]) return undefined;
+export const appPane = (root: string, caller: CoreTerminal, kit: string, app: AppPorts, instance = RUN_INSTANCE): string | undefined => {
+  if (!inApp(caller)) return undefined;
   let focused: string | undefined;
   let pane: string | undefined;
   try {
     if (!app.modCurrent(kit)) return undefined;
     const beside = app.paneOf(caller.address);
     if (!beside) return undefined;
-    focused = app.focused();
+    focused = app.focused() ?? beside;
     const before = projectPanes(root, app);
     try {
-      pane = app.split(beside, { project: root, command: [join(kit, "bin/sandcastle"), "status", "--json", "--frame"] });
+      pane = app.split(beside, { project: root, command: [join(kit, "bin/sandcastle"), "status", "--json", "--frame"], run: instance });
     } catch (error) {
       const made = before ? [...(projectPanes(root, app) ?? [])].filter((p) => !before.has(p)) : [];
       if (made.length === 1) pane = made[0];
