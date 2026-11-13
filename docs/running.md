@@ -527,6 +527,21 @@ A ticket queued after the follow-on turn at `2` or `3` waits for the next `sandc
 closing lines name it.
 Levels `0` and `1` take no follow-on turn.
 
+A re-run turn at `2`, `3` or `drain` also **tops up** the slots its re-runs leave free: the re-runs
+come first and always run, then the late, unheld tickets join in queue order (with their late
+dependants, which start as their blockers land), up to the run's effective concurrency less the
+re-runs, under the run's named tickets and the 20-turn cap.
+Its start line names both groups:
+`Autonomy level drain: running again (turn 2 of at most 20): re-running #4 (conflicted: #4); topping up with #9, #10, queued after this run started.`
+A late ticket beyond the free slots waits for the next turn or a follow-on turn, as before.
+A top-up adds no turn, so at `2` and `3` it does not use up the run's one follow-on turn, which is
+still there for a ticket queued after the last turn starts.
+A late ticket that shares with a re-run a file git cannot merge waits behind it on the file hold, as
+any two tickets of a turn do, and a conflict at landing is sent back as usual.
+The closing summary and the drain's end line count a top-up ticket that lands as landed in that
+turn, like any other; one that fails is re-runnable next turn like any other ticket.
+Level `1` asks about the re-runs only and tops nothing up.
+
 `autonomy: "drain"` (or `AUTONOMY_LEVEL=drain`) keeps taking turns until no ticket is left to run
 again, for a queue that needs more turns than `3` gives - a ticket that conflicts across turns, and
 the tickets waiting on it.
@@ -534,7 +549,7 @@ A `Blocked by` chain whose links are all queued needs no extra turn: each ticket
 run once its last blocker lands.
 A red ticket is not run again.
 After every turn it checks five stops and prints the one that holds as a line naming the cause: **no
-progress** (the turn landed nothing and released nothing), **the same ticket conflicting in two
+progress** (the turn's re-runs landed nothing and released nothing), **the same ticket conflicting in two
 turns running** (named, read from `.sandcastle/logs/outcomes.json`), **the same ticket left partly
 done in two turns running** (named), **a red merged base** (one judged likely load does not stop it:
 the next turn gates the base first), and **a usage limit or a stopped run**.
@@ -554,7 +569,11 @@ A record an older kit wrote has none of these figures and shows `Drain: <N> turn
 stopped because <cause>`.
 
 A drain takes only what its own turns lead to: every turn after the first takes exactly the previous
-turn's re-runnable tickets, never the whole queue.
+turn's re-runnable tickets, never the whole queue, and tops the slots they leave free up with late
+tickets.
+The stops judge a turn on its re-runs alone: a top-up ticket landing is no progress of theirs, so a
+stuck re-run cannot hide behind new work, and a top-up ticket's failure is a first one, compared from
+the turn that re-runs it.
 A ticket queued after the run started is taken as a follow-on turn when the drain would otherwise
 end (also after the no-progress stop, which is about re-running the same tickets, and a late ticket
 is new work; never after another stop).

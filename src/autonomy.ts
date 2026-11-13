@@ -223,25 +223,29 @@ export const turnsEndLine = (level: Level | undefined, end: DrainEnd): string =>
 
 /**
  * The tickets the queue holds now that no turn of the run had and no blocker outside them holds back: queued
- * after the run started, so a turn (which takes the last turn's re-runnable tickets only, never the
- * whole queue) did not take them. `held` maps each late ticket an open blocker holds to the ids of its open blockers
+ * after the run started, so a turn (which takes the last turn's re-runnable tickets, and late ones only into the slots
+ * they leave free) did not take them. `held` maps each late ticket an open blocker holds to the ids of its open blockers
  * (a blocker that cannot be read is an id no late ticket has), which a bare `sandcastle run` would not start either.
  * A held ticket whose blockers are all among the tickets returned joins them, in a chain until nothing changes: the
  * turn names it, so `burndown` holds it as a dependant and starts it when its blocker lands. Queue order, whatever order
- * they joined in. `scope` is a named run's own tickets: one the operator left out is not late for it. Unreadable
- * queue: none, as the lines are a courtesy and a follow-on turn needs a reading.
+ * they joined in. `scope` is a named run's own tickets: one the operator left out is not late for it. `limit`: the most
+ * unheld tickets taken, the first in queue order (a re-run turn's free slots, `topUpSlots`); their dependants join them
+ * uncounted, as each starts in the slot its blocker's landing frees. Unreadable queue: none, as the lines are a courtesy
+ * and a follow-on turn needs a reading.
  */
 export const lateTickets = async (
   tracker: Tracker,
   inRun: ReadonlySet<string>,
   held: (queue: Ticket[]) => Promise<ReadonlyMap<string, readonly string[]>>,
   scope?: ReadonlySet<string>,
+  limit = Infinity,
 ): Promise<Ticket[]> => {
+  if (limit <= 0) return [];
   try {
     const late = tracker.queued(false).filter((t) => !inRun.has(t.id) && (!scope || scope.has(t.id)));
     if (late.length === 0) return [];
     const blockers = await held(late);
-    const taken = new Set(late.filter((t) => !blockers.has(t.id)).map((t) => t.id));
+    const taken = new Set(late.filter((t) => !blockers.has(t.id)).slice(0, limit).map((t) => t.id));
     // No turn without an unheld ticket: a held one waits for a blocker nothing in this turn lands.
     if (taken.size === 0) return [];
     for (let grew = true; grew; ) {
@@ -293,6 +297,42 @@ export const followOnTurn = (a: { level: Level; turn: number; end: LoopEnd | und
   if (a.end === undefined || a.end === "stop" || a.late.length === 0) return false;
   if (a.turn >= DRAIN_CAP) return false;
   return a.level === "drain" || !a.followedOn;
+};
+
+/**
+ * How many late tickets a re-run turn tops up with: the run's effective concurrency less the turn's re-runs, at `2`, `3` and
+ * `drain`, the levels that take late tickets; never at `0` or `1` (level 1 asks about the re-runs only). A turn is first for
+ * finishing what the last one left, so the re-runs always run, and second for using the slots they leave free.
+ */
+export const topUpSlots = (level: Level, effective: number, reruns: number): number =>
+  level === 0 || level === 1 ? 0 : Math.max(0, effective - reruns);
+
+/**
+ * What a drain turn did, for `drainStop` and the next turn's comparison (`drain.last`), judged on the turn's re-runs alone:
+ * a top-up ticket (`topUp`, the late tickets the turn took into its free slots) never counts, so a stuck re-run cannot hide
+ * behind new work landing. A top-up ticket that fails is re-runnable next turn like any other, and is compared from then on.
+ * `before` is the last turn's released tickets, which a ticket still free now does not count as progress again.
+ */
+export const drainTurnOf = (a: { facts: Pick<Facts, "tickets">; left: Rerun; conflicted: string[]; before: readonly string[]; topUp: ReadonlySet<string> }): DrainTurn => {
+  const own = (id: string) => !a.topUp.has(id);
+  return {
+    landed: Object.entries(a.facts.tickets).filter(([id, t]) => t.state === "merged" && own(id)).length,
+    released: a.left.unblocked.filter((id) => !a.before.includes(id) && own(id)),
+    conflicted: a.conflicted.filter(own),
+    partial: (a.left.partial ?? []).filter(own),
+    unlanded: (a.left.unlanded ?? []).filter(own),
+  };
+};
+
+/**
+ * The line a re-run turn at `2`, `3` or `drain` starts with: the re-runs (`list`, `rerunList`'s), and the late tickets it tops
+ * its free slots up with, when it takes any, as a group of their own.
+ */
+export const rerunStartLine = (level: Exclude<Level, 0 | 1>, turn: number, list: string, topUp: readonly string[]): string => {
+  const of = `turn ${turn} of ${level === "drain" ? `at most ${DRAIN_CAP}` : level}`;
+  return topUp.length
+    ? `Autonomy level ${level}: running again (${of}): re-running ${list}; topping up with ${topUp.join(", ")}, queued after this run started.`
+    : `Autonomy level ${level}: running again (${of}) for ${list}.`;
 };
 
 export const rerunList = (again: Rerun, ref: (id: string) => string): string => {

@@ -84,8 +84,10 @@ This continues SKILL.md: run its "Before every action" first.
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
      before left conflicted, released, partly done (still queued) or green but not landed; a red ticket is not run again. A ticket queued after
      the run started (unblocked, or held only by another such ticket, which then joins as its dependant) is taken as one follow-on turn when the loop would end at `2`, `3` or `drain`
-     (`drain` may repeat it; `2` and `3` take one per run); one a stop leaves unrun waits for the next `sandcastle run`. A drain stops when no ticket is left to
-     run again or a stop holds: no progress, the same ticket conflicting, left partly done or failing to land in two
+     (`drain` may repeat it; `2` and `3` take one per run); one a stop leaves unrun waits for the next `sandcastle run`. A re-run turn at `2`, `3` or `drain` also
+     tops the slots its re-runs leave free up with such late tickets, in queue order, and its start line names both groups (`re-running ...; topping up with ...`);
+     a top-up adds no turn, so it does not use up the follow-on turn. A drain stops when no ticket is left to
+     run again or a stop holds, judged on the re-runs alone, never a top-up ticket: no progress, the same ticket conflicting, left partly done or failing to land in two
      turns running, a red merged base (not one judged likely load, red twice on test timeouts or a gate far slower than usual: the next turn gates the base again first, and a base that is really red stops it there), a usage limit or a stopped run, 20 turns at most.
    - **How long.** Once the project has run before, the run prints a rough estimate at its start
      (detached: in `.sandcastle/logs/run-output.log`). After `--detach` returns (step 2), read the
