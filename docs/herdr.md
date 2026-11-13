@@ -1,6 +1,6 @@
 # 🪟 Works best in Herdr
 
-What a run lays out in Herdr TUI and in the Herdr app (herdr-core), and the Herdr TUI plugin.
+What a run lays out in Herdr TUI and in the Herdr app (herdr-core), the Herdr TUI plugin and the Herdr app mod.
 
 
 sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https://herdr.dev), the
