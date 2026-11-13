@@ -3513,8 +3513,11 @@ The main thread's `turn.complete` (never a subagent's) records the turn's end.
 The status line stays the needs-you text's alone, and the skill note the mod appends says the mod
 keeps the cache warm. `test/keep-warm.test.ts` holds the rule, `mod/tests/keep-warm.test.ts` the
 hook).
-It runs inside Claude Code, not under the kit's Node, and imports nothing from `src/`; its own
-imports name the `.ts` extension, so the kit's tests can import `hooks/run-state.ts` under Node too.
+It runs inside Claude Code, not under the kit's Node, and imports nothing from `src/`.
+Its own imports name no extension (`./run-record`): `claude plugin validate --strict` refuses a
+`.ts` import path (TS5097) and reads no tsconfig that would allow one.
+The kit's tests still import `hooks/run-state.ts` under Node: `test/mod-resolve.ts`, loaded by
+`test/hermetic-env.ts`, adds `.ts` to an extensionless import made from inside `mod/hooks/`.
 Its own tests are `mod/tests/`, run by `claude plugin test mod`
 
 Verifying a change to it needs Claude Code 2.1.287 or newer on PATH: `pnpm test` then runs
