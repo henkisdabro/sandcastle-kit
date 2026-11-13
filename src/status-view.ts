@@ -13,8 +13,9 @@
 //
 // `--json`, anywhere in the arguments, is one reading printed as the rows' own JSON (`ticketRows`, src/status-rows.ts)
 // and nothing else: no frame, no colour, no live view, and an interval or `all` beside it is ignored. With `--frame`
-// it is `{ "table": <that same document>, "frame": <frameFacts> }`: the castle, title, lanes and legend the terminal
-// draws (src/status-frame.ts), as segments of text and palette tone names, for a view that is not a terminal.
+// it is `{ "table": <that same document>, "frame": <frameFacts>, "run": <runFacts> }`: the castle, title, lanes and
+// legend the terminal draws (src/status-frame.ts), as segments of text and palette tone names, for a view that is not
+// a terminal, and where the run stands (src/view-facts.ts: running, paused, finished or ended, and its line).
 // `--no-queue` (with `--json`) leaves the queue unread: no `sandcastle queue` process, its source `unavailable` with no
 // error, the rows only the queue makes or decides left out, and `queueRead: false` in the table.
 //
@@ -38,6 +39,7 @@ import { ticketRows } from "./status-rows.ts";
 import { createSources, kitPackageVersion, readSnapshot, sandcastleDir, snapshotOf } from "./status-snapshot.ts";
 import { inHerdr1 } from "./terminal-host.ts";
 import { coreRecords } from "./herdr-core.ts";
+import { runFacts } from "./view-facts.ts";
 
 const digits = (s: string | undefined): s is string => !!s && /^[0-9]+$/.test(s);
 const pause = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -347,7 +349,7 @@ const main = async (): Promise<number | undefined> => {
     // The shape is `Table` exactly as `ticketRows` returns it - { rows, counts, partly, later }, nothing added, renamed
     // or wrapped. Other views (an app mod, #866) read that type, so a change to `Row` is a change to this output.
     const table = ticketRows(snapshot);
-    process.stdout.write(JSON.stringify(argv.includes("--frame") ? { table, frame: frameFacts(snapshot, table, snapshot.now) } : table) + "\n");
+    process.stdout.write(JSON.stringify(argv.includes("--frame") ? { table, frame: frameFacts(snapshot, table, snapshot.now), run: runFacts(snapshot) } : table) + "\n");
     return 0;
   }
   const [interval = "10", show] = argv;

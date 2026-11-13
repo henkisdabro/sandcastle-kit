@@ -25,7 +25,7 @@
 // of the kit asks that clone.
 
 import { View, div, image } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
 import { exec, watchFolder, theme, props, focused, settings, run, openOverlay, closeOverlay, notify } from "herdr";
 
 const DEFAULT_COMMAND = ["sandcastle", "status", "--json", "--frame"];
@@ -215,6 +215,16 @@ const sandboxWindow = (terminal, title) =>
     },
   });
 
+// ---- the run's controls (#961) ----
+
+/** The closing report (`sandcastle report`, markdown) in a floating window of its own: it never takes the keyboard. */
+const openReport = (project, bin) =>
+  openOverlay({ kind: "window", key: `sandcastle-report-${project}`, width: 0.55, height: 0.7, mod: "sandcastle", props: { report: { project, bin } } });
+
+/** The status line in a small floating window of its own, with the run's buttons: opened only by its button. */
+const openLine = (project, command) =>
+  openOverlay({ kind: "window", key: `sandcastle-line-${project}`, width: 520, height: 46, frame: "none", mod: "sandcastle", props: { project, command, line: true } });
+
 const openCard = (ticket) => openOverlay({ mod: "sandcastle", kind: "dialog", width: 620, height: 460, props: { card: ticket } });
 
 /** The right-click menu's items for a row: `[label, action]`. */
@@ -238,7 +248,8 @@ const menuItems = (m) => [
 export default class SandcastleStatus extends View {
   init(_props, cx) {
     const p = props() ?? {};
-    this.role = p.card ? "card" : p.menu ? "menu" : p.log ? "log" : p.bar ? "bar" : "status";
+    this.role = p.card ? "card" : p.menu ? "menu" : p.log ? "log" : p.bar ? "bar" : p.report ? "report" : p.line ? "line" : "status";
+    if (this.role === "report") return this.initReport(cx);
     if (this.role === "card") return this.initCard(cx);
     if (this.role === "menu") return this.initMenu(cx);
     if (this.role === "log") return this.initLog(cx);
@@ -400,16 +411,57 @@ export default class SandcastleStatus extends View {
         .on_click(() => closeOverlay(props().overlay)).child("Close"));
   }
 
+  // ---- the closing report (a window) ----
+
+  initReport(cx) {
+    this.text = "";
+    this.error = "";
+    this.loadReport(cx);
+  }
+
+  loadReport(cx) {
+    const { project, bin } = props().report;
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec(bin, ["report"], { cwd: project, timeout: 120_000 });
+        if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop() || `exit ${r.code}`);
+        this.text = plain(r.stdout);
+        this.error = "";
+      } catch (e) {
+        this.error = String(e?.message ?? e);
+      }
+      cx.notify();
+    });
+  }
+
+  renderReport() {
+    const t = theme();
+    // A window is dragged by any press its controls do not stop.
+    const button = (id, label, fn) =>
+      div().id(id).px(8).py(2).rounded(5).cursor_pointer().text_color(t.accent).hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => fn(cx)).child(label);
+    return v_flex().id("report").size_full().min_h(0).bg(t.popover).text_color(t.foreground).text_size(13)
+      .child(h_flex().h(34).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
+        .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(`sandcastle report · ${props().report.project.split("/").pop()}`))
+        .child(button("report-reload", "Reload", (cx) => this.loadReport(cx)))
+        .child(button("report-close", "Close", () => closeOverlay(props().overlay))))
+      .child(v_flex().id("report-body").flex_1().min_h(0).overflow_y_scrollbar().p(16)
+        .child(this.text ? TextView.markdown("report-text", this.text) : div().text_color(this.error ? t.ansi1 : t.dim).child(this.error || "Loading…")));
+  }
+
   // ---- the status view ----
 
   initStatus(cx) {
     // The project is fixed when the pane opens: a later focus elsewhere must not turn it into another project's view.
     this.root = props()?.project || focused()?.cwd || "";
-    this.doc = null; // the last good reading, `{ table, frame }`
+    this.doc = null; // the last good reading, `{ table, frame, run }`
     this.full = null; // the last full read (the queue included)
     this.error = "";
     this.readAt = "";
     this.cost = null;
+    this.run = null; // the last reading's `run` (src/view-facts.ts runFacts)
+    this.busy = ""; // a pause or resume on its way
+    this.reportShown = false;
     this.width = 900; // the pane's width in px at zoom 1, from on_size_change
     this.want = "full";
     this.wake = null;
@@ -433,6 +485,81 @@ export default class SandcastleStatus extends View {
         await cx.sleep(50); // ends this loop when a newer build of the mod replaces this one
       }
     });
+  }
+
+  /**
+   * What changed between two readings of the run. A run this pane saw live that has now ended opens its closing
+   * report, once; a pane opened on an ended run opens nothing by itself.
+   */
+  seen(before, now) {
+    // The pane opens the report; a popped-out line reads the same run and must not open it a second time.
+    if (this.role !== "status" || !before || !now) return;
+    const live = (r) => r.state === "running" || r.state === "paused";
+    if (live(before) && !live(now) && !this.reportShown) {
+      this.reportShown = true;
+      openReport(this.root, binOf(props()?.command));
+    }
+  }
+
+  /** Pause or resume the run through the kit's own command, then read again at once. */
+  control(verb, cx) {
+    if (this.busy) return;
+    this.busy = verb;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec(binOf(props()?.command), [verb], { cwd: this.root, timeout: 30_000 });
+        const said = (r.stdout.trim() || r.stderr.trim()).split("\n").pop() ?? "";
+        notify({ title: `sandcastle ${verb}`, body: said || (r.code === 0 ? "done" : `exit ${r.code}`), level: r.code === 0 ? "info" : "warning" });
+      } catch (e) {
+        notify({ title: `sandcastle ${verb}`, body: String(e?.message ?? e), level: "warning" });
+      }
+      this.busy = "";
+      this.request("logs");
+      cx.notify();
+    });
+  }
+
+  /** The run's buttons: Pause while it runs, Resume while paused, the closing report once it ended. */
+  controls(t) {
+    const state = this.run?.state;
+    const button = (id, label, fn, tone) =>
+      div().id(id).flex_none().px(10).py(2).rounded(6).cursor_pointer().border_1().border_color(t.border).text_color(tone ?? t.foreground)
+        .hover((s) => s.bg(t.hover)).on_click((_e, cx) => fn(cx)).child(label);
+    const out = [];
+    if (state === "running") out.push(button("run-pause", this.busy === "pause" ? "Pausing…" : "Pause", (cx) => this.control("pause", cx)));
+    if (state === "paused") out.push(button("run-resume", this.busy === "resume" ? "Resuming…" : "Resume", (cx) => this.control("resume", cx), t.accent));
+    if (state === "finished" || state === "ended") out.push(button("run-report", "Report", () => openReport(this.root, binOf(props()?.command))));
+    return out;
+  }
+
+  /**
+   * The status line: the run's state as a dot, the Herdr TUI tab bar's line for it (`runFacts.line`), and the run's
+   * buttons. Pinned across the top of the pane (with a button that pops it out), and the whole of the floating
+   * window `openLine` opens (with its Close). The line is one row and cut with an ellipsis: the buttons stay whole.
+   */
+  statusLine(t, c, inWindow) {
+    const run = this.run;
+    const tone = !run || run.state === "none" ? t.dim
+      : run.counts?.needsYou ? c.hot
+      : run.state === "paused" ? c.blu
+      : run.state === "running" ? c.ylw
+      : run.state === "finished" ? c.grn
+      : c.hot;
+    const words = !run || run.state === "none" ? "no run yet"
+      : `${run.line}${run.state === "finished" ? " · finished" : run.state === "ended" ? " · ended early" : ""}`;
+    const stop = (el) => el.on_mouse_down("left", (_e, cx) => cx.stop_propagation());
+    const small = (id, label, fn) =>
+      stop(div().id(id).flex_none().px(8).py(2).rounded(5).cursor_pointer().text_color(t.muted).hover((s) => s.bg(t.hover)).on_click((_e, cx) => fn(cx)).child(label));
+    return h_flex().id(inWindow ? "line-window" : "line").flex_none().h(inWindow ? 46 : 34).px(inWindow ? 12 : 4).gap(8).items_center().min_w(0)
+      .when(inWindow, (el) => el.size_full().rounded(10).bg(t.popover).border_1().border_color(t.border))
+      .when(!inWindow, (el) => el.border_b(1).border_color(t.border))
+      .text_size(12.5).text_color(t.foreground)
+      .child(div().flex_none().size(8).rounded_full().bg(tone))
+      .child(div().flex_none().text_color(t.muted).child("♜"))
+      .child(div().flex_1().min_w(0).whitespace_nowrap().text_ellipsis().font_medium().child(words))
+      .children(this.controls(t).map(stop))
+      .child(inWindow ? small("line-close", "Close", () => closeOverlay(props().overlay)) : small("line-pop", "Pop out", () => openLine(this.root, props()?.command)));
   }
 
   /** Asks for a read: a full one wins over a log-driven one asked at the same time. */
@@ -471,6 +598,8 @@ export default class SandcastleStatus extends View {
         // A skipped queue says nothing; the last full read's note (a queue that could not be read) still holds.
         doc.frame.queueNote = this.full.frame.queueNote;
       } else if (doc.table.queueRead !== false) this.full = doc;
+      this.seen(this.run, doc.run);
+      this.run = doc.run ?? null;
       this.doc = doc;
       this.error = "";
       this.readAt = clockNow();
@@ -686,8 +815,10 @@ export default class SandcastleStatus extends View {
     if (this.role === "menu") return this.renderMenu();
     if (this.role === "log") return this.renderLog();
     if (this.role === "bar") return this.renderBar();
+    if (this.role === "report") return this.renderReport();
     const t = theme();
     const c = colours(t);
+    if (this.role === "line") return this.statusLine(t, c, true);
     // The root never takes its width from what it holds: the columns are sized from the pane's width, and a pane
     // that grew to fit them would report a wider size and grow again.
     const root = v_flex().id("root").size_full().min_w(0).overflow_hidden().bg(t.surface).p(PAD).gap(10).text_size(12.5).text_color(t.foreground)
@@ -712,6 +843,8 @@ export default class SandcastleStatus extends View {
       ? h_flex().gap(6).min_w(0).child(div().flex_none().px(6).rounded_full().bg(tint(c.ylw, 0x2e, t.raised)).text_color(c.ylw).child(`stale since ${this.readAt}`)).child(div().text_ellipsis().text_color(t.muted).child(this.error))
       : div().text_color(t.dim).child(`read ${this.readAt} in ${this.cost} ms`);
     return root
+      // Pinned: the root's other rows scroll and give way, the line does not.
+      .child(this.statusLine(t, c, false))
       .children(this.header(t, c, frame))
       .child(v_flex().flex_1().min_h(0).children(tbl.parts))
       .children(this.footer(t, c, frame, table, tbl.shown))

@@ -110,6 +110,9 @@ shows the same thing:
   `later` - "retried next turn" - until the run's last turn or its end, and keeps the root
   *working*; its slot terminals read *idle*, not *blocked*, the same way), else *done* at the end
   (*error* when the run ended early), with the merged share of the run as its progress and the run line as its title.
+  Its message says what you are wanted for - the newest ticket that needs you and why
+  (`#12 needs you: conflict in src/a.ts`) - and at the end how the run finished, so the app's own
+  needs-you and done notifications carry it.
 - 🧱 **A terminal per sandbox.** Each running sandbox gets a terminal of its own, following its
   ticket's log and reporting its ticket and step. By default it is a sub-agent of the status view
   with no pane: the Herdr app lists it under the run's agent, named after the project and ticket
@@ -280,3 +283,16 @@ that clone's view.
 
 The card is `sandcastle herdr card --json <project root> <ticket id>`: the card's facts as JSON, which
 the mod draws.
+
+**The status line and the run's controls.**
+A line pinned across the top of the pane says where the run stands, in the Herdr TUI tab bar's words
+(`♜ shop 4/9 · 2 working · 1 needs you · share 3`), after a dot in the run's colour, and carries its
+buttons: **Pause** while the run is live (`sandcastle pause` in the project), **Resume** while it is
+paused (`sandcastle resume`; the RUN card says `PAUSED` as the terminal view does), and **Report** once
+it has ended; a notification says what pause or resume answered.
+**Pop out** opens the same line, buttons and all, in a small floating window you can drag anywhere; it
+opens only from that button, and Close puts it away.
+When a run the pane watched ends, its closing summary (`sandcastle report`) opens in a floating window
+of its own, rendered as markdown; it does not take the keyboard, and **Report** opens it again.
+A pane opened on a run that had already ended opens nothing by itself.
+The buttons and the report run the same kit's `sandcastle` as the pane reads.

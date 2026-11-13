@@ -33,6 +33,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   terminal's do. It refreshes when the run record changes and every 15 s. A ticket's number opens its GitHub issue.
   `sandcastle herdr configure` installs it (below). The frame's JSON now also carries
   `queueNote`, the line the terminal draws when the queue is being read or cannot be. (#957)
+- The Herdr app mod has a status line pinned across its top: the run's state and counts in the Herdr
+  TUI tab bar's words, with Pause and Resume buttons (`sandcastle pause` and `resume`) and a Pop out
+  button that shows the same line in a small floating window. When a run it watched ends, it opens
+  the closing summary (`sandcastle report`) as rendered markdown in a floating window, with a Report
+  button to open it again. The run's status terminal now says in its message which ticket needs you
+  and why, and how the run finished, so the app's own notifications carry it.
+  `sandcastle status --json --frame` now also prints `run`: the run's state, its start and end, its
+  counts and the Herdr TUI tab bar's line for it. (#961)
 - The Herdr app mod's rows act: a click on a working sandbox's row peeks at its sandbox terminal, a
   click on any other row opens the ticket's card (its passes, each opening its log in a read-only
   pane), and a right-click opens a menu with the card, the newest log, the sandbox peeked at or in a
