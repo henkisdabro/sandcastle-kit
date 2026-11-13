@@ -118,3 +118,16 @@ test("status --json without --no-queue is unchanged: no queueRead key", () => {
     fixture.stop();
   }
 });
+
+test("the frame's queue note is the one the terminal draws: a failed read says why, a skipped or good read says nothing", () => {
+  const fixture = buildFixture("live", mkdtempSync(join(TMP, "queue-note-")));
+  try {
+    const failed = spawnStatus(["--json", "--frame"], { encoding: "utf8", env: { ...viewEnv(fixture), FAKE_QUEUE_FAIL: "gh: not logged in" }, stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
+    assert.equal(failed.status, 0, failed.stderr);
+    assert.equal(JSON.parse(failed.stdout).frame.queueNote, "queue: could not read - gh: not logged in");
+    assert.equal(read(fixture, ["--json", "--frame"]).frame.queueNote, "");
+    assert.equal(read(fixture, ["--json", "--frame", "--no-queue"]).frame.queueNote, "");
+  } finally {
+    fixture.stop();
+  }
+});

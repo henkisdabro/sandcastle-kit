@@ -73,4 +73,7 @@ At release:
    project with `changelog: true`, run `sandcastle report --changelog --since vPREV` first: it lists every
    ticket the runs landed since the tag with the agents' suggested lines (and those with none), across
    runs, which the last run's closing summary does not.
-3. After the release is published, close the milestone and create the next one.
+3. On a Mac with the Herdr app installed (`brew install --cask herdr-app`), `herdr-app check
+   herdr-app` passes: no CI job runs it yet, and the mod in `herdr-app/` reads
+   `sandcastle status --json --frame`, so a change to that document can break it unseen.
+4. After the release is published, close the milestone and create the next one.

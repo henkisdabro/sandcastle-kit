@@ -23,6 +23,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle status --json --no-queue` reads without the tracker call: it skips
   `sandcastle queue`, so a reading takes well under a second rather than about three. Rows only
   the queue makes or decides are left out, and the table says `queueRead: false`. (#956)
+- A Herdr app mod, `herdr-app/`: the terminal status view drawn natively in the app's theme - the
+  castle, title, lanes, table, counts and notes, laid out at the pane's width as the terminal lays
+  them out - from `sandcastle status --json --frame`, refreshed when the run record changes and
+  every 15 s. A ticket's number opens its GitHub issue. Nothing installs it yet (#958); copy the
+  folder to `~/.config/herdr-app/mods/sandcastle` to try it. The frame's JSON now also carries
+  `queueNote`, the line the terminal draws when the queue is being read or cannot be. (#957)
 
 ### Changed
 

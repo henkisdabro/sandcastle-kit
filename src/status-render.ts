@@ -260,7 +260,7 @@ export const renderFrame = (snapshot: Snapshot, table: Table, { cols, rows, show
       .join(`${c.rule} │ ${c.off}`);
 
   // An unreadable queue is not an empty one, and neither is one still being read: said under the band.
-  const queueNote = loading("queue") ? "queue: loading…" : snapshot.queue.error ? `queue: could not read - ${snapshot.queue.error}` : "";
+  const { queueNote } = facts;
 
   const header = (logo: 3 | 1): { lines: string[]; band: boolean } => {
     const out: string[] = [];
