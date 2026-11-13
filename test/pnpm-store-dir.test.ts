@@ -12,9 +12,9 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { hostPnpmStore } from "../src/config.ts";
 
-const withStorePath = <T>(printed: string, fn: () => T): T => {
+const withPnpm = <T>(script: string, fn: () => T): T => {
   const bin = mkdtempSync(join(tmpdir(), "sc-pnpm-dir-bin-"));
-  writeFileSync(join(bin, "pnpm"), `#!/bin/sh\n[ "$1" = store ] && [ "$2" = path ] && echo '${printed}'\n`);
+  writeFileSync(join(bin, "pnpm"), script);
   chmodSync(join(bin, "pnpm"), 0o755);
   const saved = process.env.PATH;
   process.env.PATH = [bin, "/usr/bin", "/bin"].join(delimiter);
@@ -24,13 +24,20 @@ const withStorePath = <T>(printed: string, fn: () => T): T => {
     process.env.PATH = saved;
   }
 };
+const withStorePath = <T>(printed: string, fn: () => T): T => withPnpm(`#!/bin/sh\n[ "$1" = store ] && [ "$2" = path ] && echo '${printed}'\n`, fn);
 
 test("the versioned directory's parent is the store-dir to mount", () => {
-  assert.equal(withStorePath("/fake/pnpm/store/v11", () => hostPnpmStore(tmpdir())), "/fake/pnpm/store");
-  assert.equal(withStorePath("/fake/pnpm/store/v3", () => hostPnpmStore(tmpdir())), "/fake/pnpm/store");
+  assert.deepEqual(withStorePath("/fake/pnpm/store/v11", () => hostPnpmStore(tmpdir())), { path: "/fake/pnpm/store" });
+  assert.deepEqual(withStorePath("/fake/pnpm/store/v3", () => hostPnpmStore(tmpdir())), { path: "/fake/pnpm/store" });
 });
 
 test("a path with no vN segment is mounted as it is, not cut short", () => {
-  assert.equal(withStorePath("/fake/pnpm/store", () => hostPnpmStore(tmpdir())), "/fake/pnpm/store");
-  assert.equal(withStorePath("/fake/pnpm/vendor", () => hostPnpmStore(tmpdir())), "/fake/pnpm/vendor");
+  assert.deepEqual(withStorePath("/fake/pnpm/store", () => hostPnpmStore(tmpdir())), { path: "/fake/pnpm/store" });
+  assert.deepEqual(withStorePath("/fake/pnpm/vendor", () => hostPnpmStore(tmpdir())), { path: "/fake/pnpm/vendor" });
+});
+
+// A loaded machine's pnpm can be slower than the limit: that is not "pnpm is not on this host".
+test("a pnpm that does not answer in time is a timeout, and a failing one is missing", () => {
+  assert.deepEqual(withPnpm("#!/bin/sh\nexec sleep 5\n", () => hostPnpmStore(tmpdir(), 200)), { problem: "timeout" });
+  assert.deepEqual(withPnpm("#!/bin/sh\nexit 127\n", () => hostPnpmStore(tmpdir())), { problem: "missing" });
 });

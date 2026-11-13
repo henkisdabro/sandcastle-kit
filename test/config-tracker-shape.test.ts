@@ -5,9 +5,9 @@
 //   pnpm test:file test/config-tracker-shape.test.ts
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { loadProject } from "../src/config.ts";
 import { OperatorError } from "../src/errors.ts";
@@ -83,11 +83,23 @@ test("the valid forms still load", async () => {
 test("every example config, and each tracker and blockers line of the init template, still loads", async () => {
   const configs = readdirSync("examples", { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith("config.ts"));
   assert.ok(configs.length >= 2, configs.join());
-  for (const f of configs) {
-    const root = mkdtempSync(join(tmpdir(), "sc-tracker-shape-"));
-    mkdirSync(join(root, ".sandcastle"));
-    writeFileSync(join(root, ".sandcastle/config.ts"), readFileSync(join("examples", f), "utf8"));
-    await loadProject(root).catch((e) => assert.fail(`examples/${f}: ${e.message}`));
+  // An example with `pnpmStore: true` asks the host's pnpm for its store when it loads. A fake
+  // answers at once: the real one ran out of its 20 s on a loaded machine, and its note failed the
+  // file as stray output (#949).
+  const bin = mkdtempSync(join(tmpdir(), "sc-tracker-shape-bin-"));
+  writeFileSync(join(bin, "pnpm"), '#!/bin/sh\n[ "$1" = store ] && [ "$2" = path ] && echo /fake/pnpm-store/v11\n');
+  chmodSync(join(bin, "pnpm"), 0o755);
+  const saved = process.env.PATH;
+  process.env.PATH = [bin, "/usr/bin", "/bin"].join(delimiter);
+  try {
+    for (const f of configs) {
+      const root = mkdtempSync(join(tmpdir(), "sc-tracker-shape-"));
+      mkdirSync(join(root, ".sandcastle"));
+      writeFileSync(join(root, ".sandcastle/config.ts"), readFileSync(join("examples", f), "utf8"));
+      await loadProject(root).catch((e) => assert.fail(`examples/${f}: ${e.message}`));
+    }
+  } finally {
+    process.env.PATH = saved;
   }
   // The template has no gates until `init` fills them in, and its options are commented out.
   const template = readFileSync("templates/config.ts", "utf8");

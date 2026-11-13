@@ -20,6 +20,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A Claude plan reading that carries only one window (Claude Code 2.1.322 writes the weekly one
   alone) is now kept, merged with the last event that had the other window. The usage pause, the
   closing summary, the Herdr token and the status view's plan lane work again. (#937)
+- `pnpmStore`'s note no longer says pnpm is not on the host when `pnpm store path` was only slow:
+  an answer that takes more than 20 s is named as that. (#949)
 - The estimate counts a run that skipped its verify as 0, instead of the verify time of earlier
   runs that ran one. (#938)
 - The typical landing gates are now the median over the landings that ran gates, not counting
