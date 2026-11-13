@@ -1395,7 +1395,7 @@ Any error, a bad value and an unreadable config.json give the fallback: the view
 settings hold, and doctor's machine-wide settings check (`herdrSettingProblem`) is where a bad value
 is told. `test/herdr-click-hint.test.ts` holds it, `test/status.test.sh` the three texts.
 
-## `src/status-snapshot.ts`, `src/status-rows.ts`, `src/status-render.ts`, `src/status-view.ts`
+## `src/status-snapshot.ts`, `src/status-rows.ts`, `src/status-frame.ts`, `src/status-render.ts`, `src/status-view.ts`
 
 The status view is TypeScript (ADR 0003; it took over from the bash view in #707): `status.sh` is a
 wrapper of a few lines that `exec`s `src/status-view.ts` with its arguments, so `sandcastle status`,
@@ -1407,6 +1407,14 @@ The view draws a **snapshot** (`snapshotOf`: the run record, outcomes.json, the 
 and last activity, each ticket's branch facts, the sandboxes, the pool's slots and the queue, and
 `sources`, where each source's reading stands), works out the rows from it (`ticketRows`, pure) and
 draws the frame (`renderFrame`, pure) in one write.
+`renderFrame` takes the castle, the title, the lanes and the legend's groups and notes from `frameFacts`
+(`src/status-frame.ts`, pure): segments of text with a palette tone name and a bold flag, no escape code
+and no width.
+It lays them out and colours them, and `status --json --frame` prints the same facts, so the terminal
+and an app mod cannot disagree on a word or a colour.
+The lanes are the ones the terminal draws for the snapshot, the legend always carries both the `TOKENS`
+and the `CPU/MEM` note (each marked with its column) and `renderFrame` drops the one whose column the
+pane is too narrow to show.
 Three rules hold it: the queue is `SANDCASTLE_BIN queue --json` in a child process, never the
 tracker imported (its code is synchronous); a ticket state's group and word are
 `mod/hooks/run-record.ts`'s `GROUPS` and `WORDS` and a run's liveness `mod/hooks/run-live.ts`'s,
@@ -3549,11 +3557,11 @@ The project website on GitHub Pages: static HTML, CSS and plain scripts (not mod
 opens from disk), no build step. `js/status.js` plays a made-up run: it hands `js/status-render.js`
 the snapshot and rows the view would read, and turns the frame it draws into coloured text;
 `js/sand.js` draws the castle, dunes and grains. `js/status-render.js` is not written by hand:
-`scripts/site-renderer.mjs` (`pnpm site:renderer`) strips the types from `src/status-grid.ts` and
-`src/status-render.ts` with Node's own type stripping, adds the few declarations the renderer
+`scripts/site-renderer.mjs` (`pnpm site:renderer`) strips the types from `src/status-grid.ts`,
+`src/status-frame.ts` and `src/status-render.ts` with Node's own type stripping, adds the few declarations the renderer
 imports from modules that need Node (named in the script's `EXTERNALS`) and commits the result, so
 the demo draws the view's own frames with no build in the deploy.
-A change to either source file needs `pnpm site:renderer` run and its output committed;
+A change to any of the three source files needs `pnpm site:renderer` run and its output committed;
 `test/site-renderer-copy.test.ts` fails when the copy differs from what the script writes, and holds
 the demo's frames to the view's at the widths it offers.
 A new import in the renderer fails the script until `EXTERNALS` names it.

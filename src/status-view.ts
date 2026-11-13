@@ -3,7 +3,7 @@
 // rows (src/status-rows.ts) and its frame (src/status-render.ts) - in a single write.
 //
 //   status-view.ts [interval] [all|collapse]
-//   status-view.ts --json
+//   status-view.ts --json [--frame]
 //
 // `0`, or any interval with no terminal on stdout (and no STATUS_FRAMES), is one frame and out: every source read
 // once, each within its deadline; exit 0, or 1 when the project has no `.sandcastle`, (the exit code `sandcastle status` hands on). Any other
@@ -12,7 +12,9 @@
 // answered, for the tests.
 //
 // `--json`, anywhere in the arguments, is one reading printed as the rows' own JSON (`ticketRows`, src/status-rows.ts)
-// and nothing else: no frame, no colour, no live view, and an interval or `all` beside it is ignored.
+// and nothing else: no frame, no colour, no live view, and an interval or `all` beside it is ignored. With `--frame`
+// it is `{ "table": <that same document>, "frame": <frameFacts> }`: the castle, title, lanes and legend the terminal
+// draws (src/status-frame.ts), as segments of text and palette tone names, for a view that is not a terminal.
 //
 // The live view never waits on a source to draw. The collectors (src/status-snapshot.ts) refresh the sources in the
 // background, on the interval, and a reading that changes is painted at once; a paint draws the snapshot as it
@@ -27,6 +29,7 @@ import { closeSync, constants, openSync, readFileSync, readSync, renameSync, rmS
 import { join, resolve } from "node:path";
 import { isatty } from "node:tty";
 import { fit, visibleWidth } from "./status-grid.ts";
+import { frameFacts } from "./status-frame.ts";
 import { palette, renderFrame } from "./status-render.ts";
 import { keysOf } from "./status-keys.ts";
 import { ticketRows } from "./status-rows.ts";
@@ -341,7 +344,8 @@ const main = async (): Promise<number | undefined> => {
     const snapshot = await readSnapshot(dir, { env, terminal: false, version });
     // The shape is `Table` exactly as `ticketRows` returns it - { rows, counts, partly, later }, nothing added, renamed
     // or wrapped. Other views (an app mod, #866) read that type, so a change to `Row` is a change to this output.
-    process.stdout.write(JSON.stringify(ticketRows(snapshot)) + "\n");
+    const table = ticketRows(snapshot);
+    process.stdout.write(JSON.stringify(argv.includes("--frame") ? { table, frame: frameFacts(snapshot, table, snapshot.now) } : table) + "\n");
     return 0;
   }
   const [interval = "10", show] = argv;
