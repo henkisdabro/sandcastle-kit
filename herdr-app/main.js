@@ -28,18 +28,21 @@ const GAP_MS = 2_000;
 // The records that change a row's state; the agents' logs beside them are written all the time.
 const WAKES = new Set(["run.json", "outcomes.json"]);
 
-// Figures (times, diffs, tokens) line up in the terminals' monospace font; everything else is the app's UI font.
+// Figures (ticket numbers, times, diffs, tokens) line up in the terminals' monospace font; everything else is the
+// app's UI font.
 const MONO = "JetBrains Mono";
-// The table's columns in px at zoom 1. ACTIVITY takes the rest; below its least width the others give way in the
-// terminal view's order (src/status-render.ts GIVE_WAY), and STATE narrows to its least.
+// The table's columns at zoom 1: each its least width, then a share of the pane's spare width by its weight, up to
+// its most; ACTIVITY takes the most and the rest. Below ACTIVITY's least the others give way in the terminal view's
+// order (src/status-render.ts GIVE_WAY), and STATE narrows to its least.
 const COLUMNS = [
-  { name: "TICKET", width: 64, align: "start" },
-  { name: "STATE", width: 128, min: 96, align: "start" },
-  { name: "TIME", width: 76, align: "end", mono: true },
-  { name: "DIFF", width: 104, align: "end", mono: true },
-  { name: "CPU/MEM", width: 104, align: "end", mono: true },
-  { name: "TOKENS", width: 132, align: "end", mono: true },
+  { name: "TICKET", min: 64, weight: 0.6, max: 110, align: "end", mono: true },
+  { name: "STATE", min: 112, weight: 1.2, max: 200, align: "start" },
+  { name: "TIME", min: 68, weight: 0.7, max: 130, align: "end", mono: true },
+  { name: "DIFF", min: 96, weight: 0.9, max: 170, align: "end", mono: true },
+  { name: "CPU/MEM", min: 96, weight: 0.9, max: 170, align: "end", mono: true },
+  { name: "TOKENS", min: 124, weight: 1, max: 200, align: "end", mono: true },
 ];
+const ACTIVITY_WEIGHT = 4;
 const ACTIVITY_MIN = 220;
 const GIVE_WAY = ["CPU/MEM", "DIFF", "TOKENS"];
 // A cache share under this is amber (CACHE_AMBER in src/status-frame.ts; the TOKENS note says the figure).
@@ -83,17 +86,22 @@ const squeeze = (row) => {
   return out.filter((s) => s.text);
 };
 
-/** The table's columns for a pane `width` px wide: the fixed ones that leave ACTIVITY its least, then ACTIVITY. */
+/** The table's columns and their widths for a table `width` px wide; ACTIVITY's is what the others leave. */
 const tableColumns = (width) => {
-  const fixed = COLUMNS.map((c) => ({ ...c }));
-  const rest = () => width - fixed.reduce((a, c) => a + c.width, 0);
+  const fixed = COLUMNS.map((c) => ({ ...c, width: c.min }));
+  const used = () => fixed.reduce((a, c) => a + c.width, 0);
   for (const name of GIVE_WAY) {
-    if (rest() >= ACTIVITY_MIN) break;
+    if (width - used() >= ACTIVITY_MIN) break;
     fixed.splice(fixed.findIndex((c) => c.name === name), 1);
   }
+  // Spread the spare width by weight, ACTIVITY's weight included, each column up to its most.
+  const spare = Math.max(width - used() - ACTIVITY_MIN, 0);
+  const weights = fixed.reduce((a, c) => a + c.weight, ACTIVITY_WEIGHT);
+  for (const c of fixed) c.width = Math.min(c.min + (spare * c.weight) / weights, c.max);
+  // Too narrow even for the least widths: STATE gives up what it can.
   const state = fixed.find((c) => c.name === "STATE");
-  state.width = Math.max(state.width - Math.max(ACTIVITY_MIN - rest(), 0), state.min);
-  return [...fixed, { name: "ACTIVITY", align: "start" }];
+  state.width = Math.max(state.width - Math.max(ACTIVITY_MIN - (width - used()), 0), 96);
+  return [...fixed.map((c) => ({ ...c, width: Math.floor(c.width) })), { name: "ACTIVITY", align: "start" }];
 };
 
 const idRange = (ids) => {
