@@ -9,6 +9,27 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Runs now return a schema-validated report by default.** Each pass makes one extra
+  `StructuredOutput` call, at the cost #821 measured. Nothing to check; `REPORT_SCHEMA=0` in the
+  environment restores the old tag-only behaviour for one release (there is no config key). (#823)
+
+### Changed
+
+- Claude passes and the Codex cross-review now return a schema-validated report by default, read
+  in place of the tags in the agent's prose; a pass whose report is missing, cut off or refused is
+  still read from its tags. `REPORT_SCHEMA=0` restores the previous behaviour for one release.
+  (#823)
+- At autonomy `2`, `3` or `drain`, a re-run turn whose re-runs leave slots free now fills them with
+  tickets queued during the run, and its start line names the re-runs and the top-up separately.
+  The drain's stop rules still judge the re-runs alone, and a top-up does not use up level 2's or
+  3's one follow-on turn. (#936)
+- Later turns of a multi-turn run print a start line (versions, CPU and memory limits, keep-awake,
+  the base-branch notice, status view, preflight, pauses, Lean) only when it differs from an
+  earlier turn's, then say how many they left out. The API-credits line still prints every turn.
+  (#946)
+
 ## [0.24.0] - 2026-11-13
 
 ### Added
