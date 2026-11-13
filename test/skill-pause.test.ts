@@ -21,7 +21,7 @@ const status = read("skill", "status.md");
 const run = read("skill", "run.md");
 const agents = read("AGENTS.md");
 const cli = read("src", "cli.ts");
-const statusView = read("src", "status-render.ts");
+const statusView = read("src", "status-frame.ts");
 
 const flat = (text: string) => text.replace(/\s+/g, " ");
 const frontmatter = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
