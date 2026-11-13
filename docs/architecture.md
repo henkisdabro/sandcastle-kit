@@ -1352,6 +1352,10 @@ in `retriedNextTurn`'s set, `mod/hooks/run-record.ts`, does not: a later turn ta
 live has no later turn), `done` once the record
 has `finishedAt`, `error` when the run ended early, with `progress` the merged share and the run
 line as the title (OSC 2: the official app's Agents panel shows titles, not messages).
+The app's own notification for a blocked or done agent carries the record's `msg` (#961), so a
+blocked root's `msg` is `needsYouLine` (the newest ticket in the needs-you group outside the retried
+set, its word, and its conflict's files or its note, and how many more) with the merged count, and a
+done root's is `run finished:` with the counts; the kit posts no notification of its own.
 One child record per ticket in flight, cleared as it leaves.
 Only a process that owns its terminal writes: the status view when `SANDCASTLE_CORE_VIEW` matches
 the record's instance and stdout is a terminal.

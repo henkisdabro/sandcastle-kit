@@ -3,7 +3,7 @@
 // is. Pure and light: the status view imports it through src/herdr-core.ts, and must not load the run's modules.
 
 import { basename } from "node:path";
-import { GROUPS, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // A run's tickets counted in the status view's own groups (`ticketRows`, src/status-rows.ts), so the
 // sidebar never says "needs you" about a ticket the view shows as fine, or the other way.
@@ -49,3 +49,35 @@ export const bareShell = (cmdlines: string[]) => {
 // Gates have one too: the orchestrator writes their output as it arrives
 // (burndown.ts), so a pane shows the test run instead of the review's closing lines.
 export const PHASE_LOG = { implement: "impl", resolve: "resolve", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
+
+/** The Herdr TUI tab bar's words for one run (`shop 4/9 · 2 working · 1 needs you`), and the Herdr app mod's status line. */
+export const lineText = (name: string, c: RunCounts, share?: number) =>
+  [`${name} ${c.merged}/${c.total}`, ...(c.paused ? ["paused"] : c.working ? [`${c.working} working`] : []), ...(c.needsYou ? [`${c.needsYou} needs you`] : []), ...(share === undefined ? [] : [`share ${share}`])].join(" · ");
+
+/**
+ * Where the last run stands, for a view that acts on it (the Herdr app mod's status line, pause and resume, its
+ * notifications and its closing report; #961): `none` without a record, `running` or `paused` while it is live,
+ * `finished` once it wrote its end, else `ended` (killed, or stopped before its end). `line` is the tab bar's.
+ */
+export type RunState = "none" | "running" | "paused" | "finished" | "ended";
+export type RunFacts = { state: RunState; startedAt?: string; finishedAt?: string; counts: RunCounts; line: string };
+export const runFacts = (
+  s: { root: string; hasRecord: boolean; live: boolean; record: RunRecord; tickets: Record<string, TicketRecord> },
+  // The view's own groups (`ticketRows`' counts): a ticket the record has implementing whose log went quiet is
+  // `stalled` there, needing a person, so the line beside the table says what its legend says.
+  view?: { working: number; "needs you": number },
+): RunFacts => {
+  const paused = s.live && !!s.record.paused && typeof s.record.paused === "object";
+  const recorded = runCounts(s.tickets, paused, retriedNextTurn({ ...s.record, tickets: s.tickets }, s.live));
+  const counts = view ? { ...recorded, working: view.working, needsYou: view["needs you"] } : recorded;
+  const finishedAt = typeof s.record.finishedAt === "string" ? s.record.finishedAt : undefined;
+  const state: RunState = !s.hasRecord ? "none" : paused ? "paused" : s.live ? "running" : finishedAt ? "finished" : "ended";
+  const name = typeof s.record.orchestrator === "string" && s.record.orchestrator ? s.record.orchestrator : basename(s.root);
+  return {
+    state,
+    ...(typeof s.record.startedAt === "string" ? { startedAt: s.record.startedAt } : {}),
+    ...(finishedAt ? { finishedAt } : {}),
+    counts,
+    line: lineText(name, counts, s.live && Number.isInteger(s.record.share) ? (s.record.share as number) : undefined),
+  };
+};

@@ -66,10 +66,10 @@ for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
     return false;
   };
 
-  test(`status --json --frame of the ${kind} fixture is { table, frame }, and its table is the plain --json document`, () => {
+  test(`status --json --frame of the ${kind} fixture is { table, frame, run }, and its table is the plain --json document`, () => {
     assert.ok(!got.stdout.includes("\u001b"), "an escape sequence in the JSON");
     assert.ok(got.stdout.endsWith("\n") && got.stdout.trim().split("\n").length === 1, "not one line of JSON and a newline");
-    assert.deepEqual(Object.keys(got.doc).sort(), ["frame", "table"]);
+    assert.deepEqual(Object.keys(got.doc).sort(), ["frame", "run", "table"]);
     assert.deepEqual(got.doc.table, JSON.parse(got.plainJson));
     assert.deepEqual(Object.keys(JSON.parse(got.plainJson)).sort(), ["counts", "later", "partly", "rows"]);
   });
@@ -169,7 +169,7 @@ test("status --json without --frame stays the bare table", () => {
   const fixture = buildFixture("live", mkdtempSync(join(TMP, "bare-")));
   try {
     assert.deepEqual(Object.keys(JSON.parse(run(fixture, ["--json"]))).sort(), ["counts", "later", "partly", "rows"]);
-    assert.deepEqual(Object.keys(JSON.parse(run(fixture, ["--frame", "--json"]))).sort(), ["frame", "table"]);
+    assert.deepEqual(Object.keys(JSON.parse(run(fixture, ["--frame", "--json"]))).sort(), ["frame", "run", "table"]);
   } finally {
     fixture.stop();
   }

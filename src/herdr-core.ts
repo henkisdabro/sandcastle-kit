@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord, WORDS } from "../mod/hooks/run-record.ts";
 import { appCliPorts, type AppPorts, type ModPane } from "./herdr-app.ts";
 import { real } from "./live-runs.ts";
 import { clear, record, windowTitle } from "./osc7501.ts";
@@ -413,6 +413,23 @@ export type RunFacts = { name: string; hasRecord: boolean; live: boolean; record
 const childId = (ticket: string) => ticket.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64) || "_";
 
 /**
+ * The newest ticket that needs a person, and why: `#12 needs you: conflict in src/a.ts, src/b.ts`, its note in place
+ * of files it has none of, and how many others need them too.
+ */
+export const needsYouLine = (tickets: Record<string, TicketRecord>, retried: ReadonlySet<string>): string => {
+  const wanted = Object.entries(tickets)
+    .filter(([id, t]) => t.state && GROUPS[t.state] === "needs you" && !retried.has(id))
+    .sort(([, a], [, b]) => (b.since ?? 0) - (a.since ?? 0));
+  if (!wanted.length) return "needs you";
+  const [id, t] = wanted[0];
+  const ref = /^\d+$/.test(id) ? `#${id}` : id;
+  const files = t.files?.length ? ` in ${t.files.slice(0, 2).join(", ")}${t.files.length > 2 ? ` +${t.files.length - 2}` : ""}` : "";
+  const why = files || (t.note ? ` - ${t.note}` : "");
+  const others = wanted.length > 1 ? ` (+${wanted.length - 1} more)` : "";
+  return `${ref} needs you: ${WORDS[t.state!] ?? t.state}${why}${others}`;
+};
+
+/**
  * The records the run's status view holds in its terminal, by key: the root (the run: working; blocked with
  * `kind=question` while a ticket needs a person; done at the end; error for a run that ended without finishing),
  * the window title, and a child record per ticket in flight. None without a run record.
@@ -421,9 +438,20 @@ export const runRecords = (run: RunFacts): Map<string, string> => {
   const shown = new Map<string, string>();
   if (!run.hasRecord) return shown;
   // A ticket a later turn takes by itself is not a person's yet: the root stays working (`retriedNextTurn`).
-  const counts = runCounts(run.tickets, !!run.record.paused, retriedNextTurn({ ...run.record, tickets: run.tickets }, run.live));
+  const retried = retriedNextTurn({ ...run.record, tickets: run.tickets }, run.live);
+  const counts = runCounts(run.tickets, !!run.record.paused, retried);
   const text = progress(counts);
   const state = counts.needsYou ? "blocked" : run.live ? "working" : run.record.finishedAt ? "done" : "error";
+  // Herdr's own toast for a blocked or done agent carries the record's msg (#961): so the msg leads with what the
+  // person is wanted for - the newest ticket that needs them and why - and an ended run says how it ended.
+  const msg =
+    state === "blocked"
+      ? `${run.live ? "" : run.record.finishedAt ? "run finished: " : "run ended early: "}${needsYouLine(run.tickets, retried)} · ${counts.merged}/${counts.total} merged`
+      : state === "done"
+        ? `run finished: ${text}`
+        : state === "error"
+          ? `${text} · ended early`
+          : text;
   shown.set(
     "root",
     record({
@@ -432,7 +460,7 @@ export const runRecords = (run: RunFacts): Map<string, string> => {
       ...(state === "blocked" ? { kind: "question" as const } : {}),
       ...(counts.total ? { progress: (100 * counts.merged) / counts.total } : {}),
       title: `sandcastle ${run.name}`,
-      msg: state === "error" ? `${text} · ended early` : text,
+      msg,
     }),
   );
   shown.set("title", windowTitle(`sandcastle ${run.name} · ${text}`));

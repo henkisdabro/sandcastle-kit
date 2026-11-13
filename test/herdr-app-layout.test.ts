@@ -73,6 +73,7 @@ const spec = (doc: Doc, width: number): string => {
   };
   swap("this.doc = null;", `this.doc = ${JSON.stringify(doc)};`);
   swap("this.width = 900;", `this.width = ${width};`);
+  swap("this.run = null;", `this.run = ${JSON.stringify((doc as { run?: unknown }).run ?? null)};`);
   writeFileSync(join(dir, "main.js"), main);
   const r = spawnSync(realApp!, ["check", dir, "--print-spec"], { encoding: "utf8", timeout: 60_000 });
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
@@ -138,6 +139,16 @@ for (const kind of ["live", "ended"] as const) {
           assert.match(row.children[1]?.line ?? "", /\.flex_1\b/, `${where}: a keyed value that does not take the row`);
         }
       }
+      // The status line (#961), pinned above everything: its words cut with an ellipsis on their one row, every
+      // button whole beside them.
+      const line = all(root).find((n) => /:id\[Str\("line"\)\]/.test(n.line));
+      assert.ok(line, `${name}: the status line`);
+      const words = line.children.find((n) => /\.text_ellipsis\b/.test(n.line));
+      assert.ok(words, `${name}: the line's words`);
+      assert.match(words.line, /\.min_w\[Number\(0\.0\)\]/);
+      assert.match(words.line, /\.flex_1\b/);
+      for (const button of line.children.filter((n) => /on_click/.test(n.line))) assert.match(button.line, /\.flex_none\b/, `${name}: a button that can be squeezed: ${button.line}`);
+      assert.match(JSON.stringify(words.children.map((n) => n.line)), /\d+\/\d+/, `${name}: the run's line`);
       // The cards of one line stretch to the tallest, one gap between them all.
       const header = lanes[0].parent!;
       assert.match(header.line, /\.flex_wrap\b/);

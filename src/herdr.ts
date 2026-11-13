@@ -48,7 +48,9 @@ import { KIT } from "./sandbox.ts";
 import { inHerdr1, terminalHost } from "./terminal-host.ts";
 import { askingInCore, openCoreView } from "./herdr-core.ts";
 import { readPlanUsages, usageBand } from "./usage.ts";
-import { bareShell as bareShellIn, PHASE_LOG as LOG, progress, type RunCounts, runCounts, showsStatus as showsStatusIn } from "./view-facts.ts";
+import { bareShell as bareShellIn, lineText, PHASE_LOG as LOG, progress, type RunCounts, runCounts, showsStatus as showsStatusIn } from "./view-facts.ts";
+// The tab bar's line moved to src/view-facts.ts, which the status view shares (#961); kept here for its callers.
+export { lineText };
 
 export { viewRecord };
 
@@ -323,8 +325,6 @@ export const sandboxPanes = (project: Pick<Project, "herdr">, env: NodeJS.Proces
 
 // One run in the tab bar, which has more room: `name 4/9 · 2 working · 1 needs you · share 3`, its
 // share of the machine's sandbox slots last (a record from an older kit has none).
-export const lineText = (name: string, c: RunCounts, share?: number) =>
-  [`${name} ${c.merged}/${c.total}`, ...(c.paused ? ["paused"] : c.working ? [`${c.working} working`] : []), ...(c.needsYou ? [`${c.needsYou} needs you`] : []), ...(share === undefined ? [] : [`share ${share}`])].join(" · ");
 
 export const elapsed = (ms: number) => {
   const m = Math.max(0, Math.floor(ms / 60_000));
