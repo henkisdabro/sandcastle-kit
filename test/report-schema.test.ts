@@ -1,4 +1,4 @@
-// REPORT_SCHEMA=1 (#820): Claude passes also return a schema-validated report. The schema file, the flag on the
+// The report schema (#820, on unless REPORT_SCHEMA=0): Claude passes also return a schema-validated report. The schema file, the flag on the
 // agent's command, and the capture that keeps the `structured_output` of the stream's `result` line with when the
 // completion signal and that line came. No Docker, model or network: the stream lines are hand-built and the
 // capture's clock is a variable.
@@ -14,10 +14,10 @@ import { test } from "node:test";
 import { claudeCode } from "@ai-hero/sandcastle";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-rs-xdg-"));
-// The switch is read at import: one instance of the module with it off, one with it on.
-process.env.REPORT_SCHEMA = "";
+// The switch is read at import: one instance of the module with REPORT_SCHEMA=0, one with the default (on).
+process.env.REPORT_SCHEMA = "0";
 const off = (await import(new URL("../src/agents.ts?off", import.meta.url).href)) as typeof import("../src/agents.ts");
-process.env.REPORT_SCHEMA = "1";
+delete process.env.REPORT_SCHEMA;
 const on = await import("../src/agents.ts");
 const { COMPLETION_SIGNAL, passReport, reportCapture, reportFrom } = on;
 
@@ -59,14 +59,14 @@ test("the schema names the five fields the tags carry, and describes each", () =
 const options = { prompt: "do the ticket", dangerouslySkipPermissions: true };
 const quoted = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 
-test("off, a Claude pass's command is what it was", () => {
+test("with REPORT_SCHEMA=0, a Claude pass's command is what it was", () => {
   const { command } = off.implAgent().buildPrintCommand(options);
   assert.equal(command, "claude --print --verbose --dangerously-skip-permissions --output-format stream-json --tools 'Bash,Read,Edit,Write,TaskStop' --model 'claude-sonnet-5-5' --effort high -p -");
   assert.equal(passReport(off.implAgent()), undefined);
   assert.equal(off.REPORT_SCHEMA, false);
 });
 
-test("on, the command carries the compact schema right after --output-format stream-json", () => {
+test("by default, the command carries the compact schema right after --output-format stream-json", () => {
   const compact = JSON.stringify(schema);
   const { command } = on.implAgent().buildPrintCommand(options);
   assert.ok(command.includes(` --output-format stream-json --json-schema ${quoted(compact)} --tools `));

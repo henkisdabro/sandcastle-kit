@@ -27,7 +27,7 @@ import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { format } from "node:util";
-import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, resolveAgent, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { agentFailure, CROSS_REVIEW, CROSS_REVIEW_MODEL, COMPLETION_TIMEOUT_SECONDS, IMPL_MODEL, MODELS_LINE, passReport, REPORT_SCHEMA, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, type ReportFacts, resolveAgent, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
@@ -598,8 +598,8 @@ export const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
 export type Said = { unmet?: string; ungated?: string; changelog: ChangelogScan; followups: Omit<FollowUp, "from" | "phase">[] };
 
 /**
- * What a pass's final message said: its `unmet`, `ungated`, changelog read and follow-ups. With no report (REPORT_SCHEMA
- * off, or no valid report came) it reads the whole `text` as the tag readers always did. With one, the report stands for
+ * What a pass's final message said: its `unmet`, `ungated`, changelog read and follow-ups. With no report (REPORT_SCHEMA=0,
+ * or no valid report came) it reads the whole `text` as the tag readers always did. With one, the report stands for
  * the pass's last iteration, and the iterations before it - `text` with the last one's `output` taken off its end - are
  * still read for the tags they left: a follow-up or a changelog line an earlier iteration named is still filed. `unmet`
  * and `ungated` are the report's alone (an earlier iteration's unmet criterion may be finished by the last). A text that
@@ -801,7 +801,7 @@ const isJson = (text: string): boolean => {
 };
 
 /**
- * The gap a review pass left in prose, for the review loop. With REPORT_SCHEMA=1 the cross-review's final message is
+ * The gap a review pass left in prose, for the review loop. With the report schema on the cross-review's final message is
  * the JSON report (or, a report that came out wrong, still JSON): its words are the schema's, not a reviewer's prose, so
  * `gapOf` reads none of it. `schema` is a parameter for a test: the switch is read once at import.
  */
@@ -1753,7 +1753,7 @@ export type PipelineContext = {
   followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[]; namedByOthers?(from: string): NamedFollowUp[] };
   /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`runTicketsView`). None, and it is shown none. */
   tickets?: readonly { id: string; title: string }[];
-  /** With REPORT_SCHEMA=1: where a pass (Claude, or the Codex cross-review) leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
+  /** With the report schema on (the default): where a pass (Claude, or the Codex cross-review) leaves whether its report came (`reportTiming`), by ticket, for the step's timings line to take. A pipeline given none records none. */
   reportTimings?: Map<string, ReportTiming>;
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
@@ -2241,9 +2241,9 @@ export const createPipeline = (ctx: PipelineContext) => {
         // An agent killed for memory ends like any killed process: the cgroup's counts say which it was, and whose limit.
         const oomBefore = await oomKills(sandbox);
         try {
-          // REPORT_SCHEMA=1: the agent's capture of the report, ended as the pass returns or throws.
+          // The agent's capture of the report, ended as the pass returns or throws.
           const capture = passReport(opts.agent);
-          const r = await sampling(sandbox, "agent", () => sandbox.run(opts).finally(() => capture?.finish()))
+          const r = await sampling(sandbox, "agent", () => sandbox.run({ ...opts, completionTimeoutSeconds: COMPLETION_TIMEOUT_SECONDS }).finally(() => capture?.finish()))
             .then((r) => {
               const facts = capture?.read();
               if (facts) ctx.reportTimings?.set(issue.id, reportTiming(facts));
@@ -3733,7 +3733,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // A green ticket from the ledger's ready mark until its landing begins or it leaves the run: in neither `active` nor `landing`, it would read as finished.
   const queuedToLand = new Map<string, number>();
   const took = new Map<string, number>();
-  // With REPORT_SCHEMA=1: whether the last agent pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
+  // With the report schema on: whether the last agent pass of each issue's step had its report (`reportTiming`), left by the pass and taken by its step's timings line.
   const reportTimings = new Map<string, ReportTiming>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();

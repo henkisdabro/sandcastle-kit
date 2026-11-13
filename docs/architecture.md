@@ -77,8 +77,9 @@ on the branch and the base
 What a Claude pass said of its work is read once, in `pass`, by `saidOf(text, facts?)`: the pass's
 `unmet`, `ungated`, changelog read and follow-ups, which `pass` hands back as the result's `said` and every
 reader (the review loop, the narrow reviews, the implementer, `noteChangelog`, `gapOf`'s guard) takes from
-there. With no report (`REPORT_SCHEMA` off, or none came valid) it reads the whole text for the own-line tags
-as it always did. With the report (`REPORT_SCHEMA=1`, `src/agents.ts`) the report stands for the pass's
+there. With no report (`REPORT_SCHEMA=0`, or none came valid) it reads the whole text for the own-line tags
+as it always did. With the report (on unless `REPORT_SCHEMA=0`, `src/agents.ts`; the switch is an
+environment variable only and goes with the tag fallback) the report stands for the pass's
 last iteration - `unmet` and `ungated` are its alone - and the iterations before it, the text with the
 last iteration's output taken off its end, are still read for their `<changelog>` and `<followup>` tags, so
 a follow-up an earlier iteration named is still filed. The tag readers and the report's items share their
@@ -3146,7 +3147,7 @@ them - that would be a second parser for any shell, and the host's check of `.gi
 the repo.
 Needs bash and `jq` in the image.
 
-`report.schema.json` is the shape of the report a Claude pass returns with `REPORT_SCHEMA=1`
+`report.schema.json` is the shape of the report a Claude pass returns unless `REPORT_SCHEMA=0`
 (`--json-schema`, `claude()` in `src/agents.ts`, which reads the file on the host and puts it, compact, on
 the command; the mount keeps a copy where a pass can read it, and no image rebuild follows an edit). Codex
 strict mode is the dialect: every object has `additionalProperties: false` and `required` naming every

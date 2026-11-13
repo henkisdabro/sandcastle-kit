@@ -1,4 +1,4 @@
-// REPORT_SCHEMA=1 for the Codex cross-review (#822): `codex exec --output-schema` makes the pass's last
+// The report schema (on unless REPORT_SCHEMA=0) for the Codex cross-review (#822): `codex exec --output-schema` makes the pass's last
 // `agent_message` the JSON report. The command's flag, the capture over hand-built `codex exec --json` lines (the
 // shapes #821's probe recorded), the refusal's reason, the cut-off, and how the report reaches `saidOf`, the
 // timings line and the cross-review's own log line. No Docker, model or network. burndown() needs Docker, so its
@@ -17,11 +17,11 @@ import { quietly } from "./quiet.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-rsc-xdg-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-rsc-cache-"));
-// Both switches are read at import: one instance of the module with the report schema off, one with it on.
+// Both switches are read at import: one instance of the module with REPORT_SCHEMA=0, one with the default (on).
 process.env.CROSS_REVIEW = "1";
-process.env.REPORT_SCHEMA = "";
+process.env.REPORT_SCHEMA = "0";
 const off = (await import(new URL("../src/agents.ts?off", import.meta.url).href)) as typeof import("../src/agents.ts");
-process.env.REPORT_SCHEMA = "1";
+delete process.env.REPORT_SCHEMA;
 const on = await import("../src/agents.ts");
 const { agentFailure, codexReportCapture, COMPLETION_SIGNAL, passReport, withOutputSchema } = on;
 const { gapOf: gapOfText, reportTiming, reviewGap, saidOf } = await import("../src/burndown.ts");
@@ -90,7 +90,7 @@ const crossAgent = async (agents: typeof import("../src/agents.ts")) => {
 };
 const SCHEMA_FLAG = " --output-schema /etc/claude-code/report.schema.json";
 
-test("with the switch off the codex command is today's; on, it carries --output-schema before the readout suffix", async () => {
+test("with REPORT_SCHEMA=0 the codex command is today's; by default, it carries --output-schema before the readout suffix", async () => {
   const plain = (await crossAgent(off)).buildPrintCommand(options).command;
   const withSchema = (await crossAgent(on)).buildPrintCommand(options).command;
   assert.match(plain, /^codex exec --json .*; rc=\$\?; .*; exit \$rc$/);
@@ -258,7 +258,7 @@ test("with the switch on, a cross-review whose run throws returns nothing and sa
   );
   assert.equal(result, undefined);
   assert.deepEqual(lines, [
-    "#12: gpt-6-astra cross-review failed with REPORT_SCHEMA=1 (boom); continuing without it - if Codex refused the report schema, every cross-review fails while the switch is on.",
+    "#12: gpt-6-astra cross-review failed with the report schema on (boom); continuing without it - if Codex refused the report schema, every cross-review fails until REPORT_SCHEMA=0 is set.",
   ]);
   const plain = await quietly(() =>
     off.crossReview("#12", async () => {
@@ -324,7 +324,7 @@ test("a Codex agent fed the recorded refusal gives a timings entry failed: inval
   );
   assert.equal(result, undefined);
   assert.ok(thrown, "the library throws for a failed turn, as it does for the pass");
-  assert.match(lines.filter((l) => l.includes("cross-review"))[0], /^#12: gpt-6-astra cross-review failed with REPORT_SCHEMA=1 \(invalid_json_schema\); continuing without it - if Codex refused the report schema, every cross-review fails while the switch is on\.$/);
+  assert.match(lines.filter((l) => l.includes("cross-review"))[0], /^#12: gpt-6-astra cross-review failed with the report schema on \(invalid_json_schema\); continuing without it - if Codex refused the report schema, every cross-review fails until REPORT_SCHEMA=0 is set\.$/);
   assert.ok(given);
   const facts = passReport(given)?.read();
   assert.ok(facts);
