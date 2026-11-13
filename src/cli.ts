@@ -448,7 +448,7 @@ try {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
         let started: boolean;
         try {
-          started = await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}), psi, startLines, runStart });
+          started = await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(gateBase ? { forceBaseGates: true } : {}), ...(loadPause ? { loadPause } : {}), ...(turn === 1 ? { docker, clock, acceptGitConfig: given.acceptGitConfig } : {}), startLines, psi, runStart });
         } catch (error) {
           // A later turn the checkout refused (another session's edit mid-run, say) ends the run as the turn before it did:
           // the merged base that turn re-gated decides the exit, not the refusal. Turn 1, and every other refusal (the
