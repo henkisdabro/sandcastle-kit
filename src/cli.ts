@@ -151,7 +151,7 @@ import { confirmApiKey } from "./api-key.ts";
 import { startClock } from "./start-clock.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainEnd, type DrainTurn, drainStop, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, stillOpen, turnRefusedCause, turnsEndLine } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainEnd, type DrainTurn, drainStop, drainTurnOf, endOf, endOfDrainStop, followOnTurn, lateQueueLines, lateTickets, mustGateBase, noRerunCause, redBaseExit, rerunList, rerunStartLine, stillOpen, topUpSlots, turnRefusedCause, turnsEndLine } from "./autonomy.ts";
 import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
@@ -410,13 +410,17 @@ try {
       let followedOn = false;
       // The ids of the follow-on turn about to run: a turn that ran them has them in drain.inRun.
       let followOnIds: string[] = [];
+      // The late tickets the re-run turn about to run tops its free slots up with, and then those the turn that just ran took:
+      // the drain's stop rules judge a turn on its re-runs alone, so these are left out of its `DrainTurn`.
+      let topUpIds: string[] = [];
+      let toppedUp = new Set<string>();
       // The tickets queued while the run was live that no turn had and no blocker holds back; unreadable: none, so no follow-on turn.
       // Each late ticket an open blocker holds, to the ids of its blockers: one that is no ticket of the tracker is named by its label, which no late ticket has, so it holds the ticket out.
       const heldBy = (tracker: ReturnType<typeof makeTracker>) => async (late: Parameters<typeof openOnQueue>[2]) =>
         new Map([...(await openOnQueue(project, tracker, late))].map(([id, on]) => [id, on.map((b) => blockerTicket(b) ?? `unread:${refLabel(b)}`)] as const));
-      const lateNow = async (tracker: ReturnType<typeof makeTracker>) =>
+      const lateNow = async (tracker: ReturnType<typeof makeTracker>, limit?: number) =>
         queuedAtStart
-          ? lateTickets(tracker, new Set([...queuedAtStart, ...drain.inRun]), heldBy(tracker), scope?.ids)
+          ? lateTickets(tracker, new Set([...queuedAtStart, ...drain.inRun]), heldBy(tracker), scope?.ids, limit)
           : [];
       // Where the loop would end with no work left for it: a follow-on turn for the late tickets, else false and the loop ends as it would.
       const followOn = async (tracker: ReturnType<typeof makeTracker>, turn: number, end: ReturnType<typeof endOf>): Promise<boolean> => {
@@ -465,8 +469,10 @@ try {
           break;
         }
         ranTurn = true;
-        for (const id of followOnIds) drain.inRun.add(id);
+        for (const id of [...followOnIds, ...topUpIds]) drain.inRun.add(id);
         followOnIds = [];
+        toppedUp = new Set(topUpIds);
+        topUpIds = [];
         if (level === 0) break;
         const facts = await gather(project);
         lastFacts = facts;
@@ -488,13 +494,8 @@ try {
         const { left, ids, verdict } = after;
         const list = rerunList(left, tracker.ref);
         if (level === "drain") {
-          const now: DrainTurn = {
-            landed: Object.values(facts.tickets).filter((t) => t.state === "merged").length,
-            released: left.unblocked.filter((id) => !drain.unblocked.includes(id)),
-            conflicted: conflictedIn(readOutcomes(root), facts.started),
-            partial: left.partial,
-            unlanded: left.unlanded,
-          };
+          // The re-runs alone: a top-up ticket landing is no progress of theirs, and its failure is a first one.
+          const now: DrainTurn = drainTurnOf({ facts, left, conflicted: conflictedIn(readOutcomes(root), facts.started), before: drain.unblocked, topUp: toppedUp });
           const why = drainStop(now, drain.last, tracker.ref);
           drain.last = now;
           drain.unblocked = left.unblocked;
@@ -530,11 +531,13 @@ try {
           }
           console.log(`Running again (turn ${turn + 1}) for ${list}.`);
         } else {
-          console.log(`Autonomy level ${level}: running again (turn ${turn + 1} of ${level === "drain" ? `at most ${DRAIN_CAP}` : level}) for ${list}.`);
+          // The slots the re-runs leave free take late tickets, in queue order; a top-up adds no turn, so `followedOn` stays as it was.
+          topUpIds = (await lateNow(tracker, topUpSlots(level, settings.concurrency.effective, ids.length))).map((t) => t.id);
+          console.log(rerunStartLine(level as Exclude<typeof level, 0 | 1>, turn + 1, list, topUpIds.map(tracker.ref)));
         }
-        // Exactly the re-runnable tickets, never the whole queue: red ones still queued stay out.
+        // The re-runnable tickets and the top-up, never the whole queue: red ones still queued stay out.
         delete process.env.ISSUES;
-        process.env.TICKETS = ids.join(",");
+        process.env.TICKETS = [...ids, ...topUpIds].join(",");
       }
       // How the turns ended, said and kept in the last turn's record, so `sandcastle report` shows it after the run.
       if (drain.turns > 0 && (level === "drain" || refusedTurn)) {
