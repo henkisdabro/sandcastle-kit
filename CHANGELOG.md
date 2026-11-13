@@ -14,6 +14,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Runs now return a schema-validated report by default.** Each pass makes one extra
   `StructuredOutput` call, at the cost #821 measured. Nothing to check; `REPORT_SCHEMA=0` in the
   environment restores the old tag-only behaviour for one release (there is no config key). (#823)
+- **Herdr app users: run `sandcastle herdr configure --yes` once** to copy the kit's app mod into
+  the app's mods directory. It is copied, not linked (the app does not reload a linked mod), so run
+  it again whenever `sandcastle doctor` warns that the copy is stale. (#958)
 
 ### Added
 
@@ -27,9 +30,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   lanes, table, counts and notes - drawn in the app's own type and theme from
   `sandcastle status --json --frame`, with gauges as bars, states as badges and the figures aligned;
   in a narrow pane the lanes wrap under the title and the table's columns give way as the
-  terminal's do. It refreshes when the run record changes and every 15 s. A ticket's number opens its GitHub issue. Nothing installs it yet (#958); copy the
-  folder to `~/.config/herdr-app/mods/sandcastle` to try it. The frame's JSON now also carries
+  terminal's do. It refreshes when the run record changes and every 15 s. A ticket's number opens its GitHub issue.
+  `sandcastle herdr configure` installs it (below). The frame's JSON now also carries
   `queueNote`, the line the terminal draws when the queue is being read or cannot be. (#957)
+- `sandcastle herdr configure` copies the kit's Herdr app mod into the app's mods directory when
+  `herdr-app` is installed, with or without Herdr TUI; `--remove` takes the copy out, and
+  `sandcastle doctor` warns when the copy is stale. (#958)
 
 ### Changed
 
