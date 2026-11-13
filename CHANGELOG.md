@@ -15,6 +15,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `StructuredOutput` call, at the cost #821 measured. Nothing to check; `REPORT_SCHEMA=0` in the
   environment restores the old tag-only behaviour for one release (there is no config key). (#823)
 
+### Added
+
+- `sandcastle status --json --frame` prints `{ table, frame }`: the ticket table plus the castle,
+  title, lanes and legend the terminal view draws, as text segments with palette tone names, so
+  another view (such as the Herdr app mod) shows the same words and colours. (#955)
+- `sandcastle status --json --no-queue` reads without the tracker call: it skips
+  `sandcastle queue`, so a reading takes well under a second rather than about three. Rows only
+  the queue makes or decides are left out, and the table says `queueRead: false`. (#956)
+
 ### Changed
 
 - Claude passes and the Codex cross-review now return a schema-validated report by default, read
