@@ -23,7 +23,7 @@ export type Record7501 = {
 };
 
 // The core refuses a payload that is not escape-code-safe UTF-8, and one that is too long.
-const TEXT_MAX = 160;
+export const TEXT_MAX = 160;
 const WORD = /^[A-Za-z0-9._-]{1,64}$/;
 
 const word = (name: string, value: string) => {

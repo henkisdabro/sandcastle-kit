@@ -517,3 +517,16 @@ test("a blocked run's msg names the newest ticket that needs a person and why, a
   assert.equal(msgOf({ live: false, record: { finishedAt: "2026-11-13T00:00:00Z" } }), "run finished: #12 needs you: conflict in src/a.ts, src/b.ts +2 (+1 more) · 1/3 merged");
   assert.equal(msgOf({ live: false }), "run ended early: #12 needs you: conflict in src/a.ts, src/b.ts +2 (+1 more) · 1/3 merged");
 });
+
+// The core cuts a record's msg at 160 code points (#969): a long note is cut itself, so the count after it stays.
+test("a 300-character note is cut in a blocked run's msg, which keeps the merged count and (+N more)", () => {
+  const t = (state: string, since: number, more: object = {}) => ({ state, since, ...more }) as never;
+  const tickets = { "12": t("held", 200, { note: `human merge: ${"x".repeat(286)}` }), "9": t("held", 100, { note: "short" }), "3": t("merged", 50) };
+  for (const over of [{}, { live: false, record: { finishedAt: "2026-11-13T00:00:00Z" } }, { live: false }]) {
+    const msg = Buffer.from(/msg=([^:\x07]+)/.exec(runRecords(run(tickets, over)).get("root")!)![1], "base64").toString();
+    assert.ok([...msg].length <= 160, msg);
+    assert.match(msg, /^(run finished: |run ended early: )?#12 needs you: held - human merge: x+… \(\+1 more\) · 1\/3 merged$/);
+  }
+  // With room to spare the note is whole.
+  assert.equal(needsYouLine(tickets, new Set(), 400), `#12 needs you: held - human merge: ${"x".repeat(286)} (+1 more)`);
+});
