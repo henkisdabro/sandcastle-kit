@@ -30,6 +30,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   earlier turn's, then say how many they left out. The API-credits line still prints every turn.
   (#946)
 
+### Fixed
+
+- A project checked out under `/tmp/claude-<uid>/` (where a Claude Code session's scratchpad puts
+  a fresh clone) no longer crashes every Claude pass with "Temp directory /tmp/claude-<uid> is owned
+  by uid 0": the kit now sets `CLAUDE_CODE_TMPDIR` to a directory under the agent's home in every
+  sandbox. This was the crash #842 saw on an API-key dry run; the credential played no part. (#953)
+
 ## [0.24.0] - 2026-11-13
 
 ### Added
