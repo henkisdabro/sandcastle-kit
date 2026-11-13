@@ -246,3 +246,11 @@ test("a run that is no longer live retries nothing", () => {
   const { counts } = ticketRows(live({ "7": { state: "not landed" } }, DRAIN(2), { live: false }));
   assert.equal(counts.later, 0);
 });
+
+// The Herdr app mod peeks at a working ticket's sandbox terminal (#960): the row carries the address the snapshot's
+// `terminals` gives for its ticket, and nothing for a ticket without one.
+test("a ticket with a herdr-core slot terminal carries its address, and one without carries none", () => {
+  const rows = ticketRows(live({ "12": { state: "implement", since: NOW - 60 }, "13": { state: "review", since: NOW - 60 } }, {}, { terminals: ["#12 t7", "#130 t9"] })).rows;
+  assert.equal(row(rows, "12").terminal, "t7");
+  assert.equal(row(rows, "13").terminal, undefined, "#130's terminal is not #13's");
+});

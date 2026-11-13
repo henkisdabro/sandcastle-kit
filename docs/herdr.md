@@ -129,8 +129,9 @@ shows the same thing:
   A terminal opened before the update to 0.1.19 keeps the old behaviour until it is recreated.
   `sandcastle doctor` warns on an hc older than 0.1.19.
 
-What Herdr TUI's plugin does has no herdr-core counterpart yet: no tab bar line or ticket card
-(a Ctrl-click on a ticket opens nothing; on a terminal address it peeks, as above), and no status
+What Herdr TUI's plugin does has no herdr-core counterpart yet in the terminal view: no tab bar line or
+ticket card (a Ctrl-click on a ticket opens nothing; on a terminal address it peeks, as above; the
+[app mod](#the-herdr-app-mod)'s rows open the card), and no status
 view brought back after a restart of the core (the status terminal comes back as a shell, and the next run replaces it; `sandcastle status` there shows the run
 meanwhile).
 `sandcastle herdr ...` in a herdr-core terminal says so.
@@ -267,3 +268,15 @@ Once installed, a run started in the app opens the mod pane in place of the term
 ([herdr-core](#herdr-core) above); there is no setting for it.
 The pane reads the run through the same kit's `sandcastle`, so a run from a clone of the kit shows
 that clone's view.
+
+**Its rows act.**
+
+| Action | What it does |
+|---|---|
+| Click a working sandbox's row | Peeks at its sandbox terminal (herdr-core's slot terminal for the ticket), over the tab; the peek can keep it as a tab. |
+| Click any other row | Opens the ticket's card in a dialog: the card Herdr TUI's Ctrl-click opens, with its passes, outcomes and times, why it is held or in conflict, and its red gate's last lines. A pass with a log opens that log in a read-only pane under the status pane (its end only, past 400 KB; Reload reads it again). The card's own buttons peek at the sandbox, open the tracker link and open the log folder. |
+| Click the ticket number | Opens the GitHub issue in the browser, as before. |
+| Right-click a row | A menu: the ticket card, its newest log, the sandbox peeked at or in a floating window of its own (moved anywhere, closed from its bar), the ticket in its tracker (a GitHub issue in the browser, a ticket file in a read-only pane) and the log folder. |
+
+The card is `sandcastle herdr card --json <project root> <ticket id>`: the card's facts as JSON, which
+the mod draws.

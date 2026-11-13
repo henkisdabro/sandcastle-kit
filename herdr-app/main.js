@@ -15,10 +15,18 @@
 //
 // Props: `project` (the project root; default: the focused pane's folder when the pane opens) and `command` (the
 // argv that prints the facts; default `sandcastle status --json --frame`; a test points it at a fixture's wrapper).
+//
+// The rows act (#960). A click on a row whose ticket has a sandbox terminal (herdr-core's slot, `row.terminal`)
+// peeks at it (`terminal.peek`); a click on any other row opens the ticket's card, the Herdr TUI plugin's card as
+// data (`sandcastle herdr card --json`), where each pass opens its log in a read-only Editor pane. A right-click
+// opens a menu: the card, the newest log, the tracker link, the log folder, and the sandbox peeked at or in a
+// floating window. The same mod draws each of those, by its props: `card`, `menu` and `bar` (the window's title
+// and close) in overlays, `log` as a pane. The `sandcastle` they run is the status command's, so a run from a clone
+// of the kit asks that clone.
 
 import { View, div, image } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { exec, watchFolder, theme, props, focused, settings } from "herdr";
+import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
+import { exec, watchFolder, theme, props, focused, settings, run, openOverlay, closeOverlay, notify } from "herdr";
 
 const DEFAULT_COMMAND = ["sandcastle", "status", "--json", "--frame"];
 // Git, Docker and the queue change without a write the wake sees: read everything this often regardless.
@@ -135,8 +143,258 @@ const withQueueRows = (fresh, full) => {
   return { ...fresh, rows: sortRows([...fresh.rows, ...kept]), counts, later };
 };
 
+// ---- the row actions (#960) ----
+
+// A log pane shows at most this much of the file's end: a long agent log stays quick to draw.
+const LOG_TAIL = 400_000;
+// Every control character but newline and tab goes: an agent's log is its own text, and an escape in it is noise here.
+// oxlint-disable-next-line no-control-regex -- matching escape sequences and control characters is the point: it strips them
+const plain = (text) => text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+
+/** The `sandcastle` the status command runs (its first word when it is `... status`), else the one on PATH. */
+const binOf = (command) => (Array.isArray(command) && command[1] === "status" ? command[0] : "sandcastle");
+const logsOf = (root) => `${root}/.sandcastle/logs`;
+
+/** Opens a URL or folder with the system's opener: `open` on macOS, `xdg-open` elsewhere. */
+const openExternal = async (target) => {
+  for (const opener of ["open", "xdg-open"]) {
+    try {
+      if ((await exec(opener, [target])).code === 0) return true;
+    } catch {
+      // not this system's opener
+    }
+  }
+  notify({ title: "sandcastle", body: `Could not open ${target}`, level: "warning" });
+  return false;
+};
+
+/** A file in a read-only Editor pane under the focused pane (the status pane a row was clicked in). */
+const openFile = (path, root) => run("pane.split", { direction: "down", mod: "sandcastle", props: { log: path, project: root } });
+
+/** The ticket's card as `sandcastle herdr card --json` prints it, or a reason it could not be read. */
+const readCard = async (bin, root, id) => {
+  try {
+    const r = await exec(bin, ["herdr", "card", "--json", root, id], { cwd: root, timeout: 30_000 });
+    if (r.code !== 0) return { error: r.stderr.trim().split("\n").pop() || r.stdout.trim().split("\n").pop() || `exit ${r.code}` };
+    return { card: JSON.parse(r.stdout) };
+  } catch (e) {
+    return { error: String(e?.message ?? e) };
+  }
+};
+
+/** A pass's log, else the newest log of any kind: what "Newest log" opens. */
+const newestLog = (card) => [...card.passes].reverse().find((p) => p.log)?.log ?? card.logs[card.logs.length - 1];
+
+/** The tracker link the card found: a page opens in the browser, a ticket file in a read-only pane. */
+const openTracker = (tracker, root) => {
+  if (/^https?:\/\//.test(tracker)) return void openExternal(tracker);
+  if (tracker.startsWith("/")) return void openFile(tracker, root);
+  notify({ title: "sandcastle", body: tracker, level: "info" });
+};
+
+const peek = (terminal) => run("terminal.peek", { terminal });
+/** The sandbox terminal in a floating window: the window's bar (this mod) names it and closes it. */
+const sandboxWindow = (terminal, title) =>
+  openOverlay({
+    kind: "window",
+    key: `sandcastle-sandbox-${terminal}`,
+    width: 0.6,
+    height: 0.6,
+    layout: {
+      id: "sandbox",
+      type: "column",
+      children: [
+        { id: "sandbox-bar", type: "block", size: { px: 30 }, content: { mod: "sandcastle", props: { bar: { title } } } },
+        { id: "sandbox-terminal", type: "block", content: { terminal } },
+      ],
+    },
+  });
+
+const openCard = (ticket) => openOverlay({ mod: "sandcastle", kind: "dialog", width: 620, height: 460, props: { card: ticket } });
+
+/** The right-click menu's items for a row: `[label, action]`. */
+const menuItems = (m) => [
+  ["Ticket card", () => openCard(m)],
+  ["Newest log", async () => {
+    const { card, error } = await readCard(m.bin, m.project, m.id);
+    const log = card && newestLog(card);
+    if (log) openFile(`${logsOf(m.project)}/${log}`, m.project);
+    else notify({ title: "sandcastle", body: error ?? `${m.shown} has no logs here`, level: "info" });
+  }],
+  ...(m.terminal ? [["Peek at the sandbox", () => peek(m.terminal)], ["Sandbox in a window", () => sandboxWindow(m.terminal, `${m.shown} sandbox`)]] : []),
+  ["Open in the tracker", async () => {
+    const { card, error } = await readCard(m.bin, m.project, m.id);
+    if (card?.tracker) openTracker(card.tracker, m.project);
+    else notify({ title: "sandcastle", body: error ?? "No tracker link", level: "warning" });
+  }],
+  ["Open the log folder", () => void openExternal(logsOf(m.project))],
+];
+
 export default class SandcastleStatus extends View {
   init(_props, cx) {
+    const p = props() ?? {};
+    this.role = p.card ? "card" : p.menu ? "menu" : p.log ? "log" : p.bar ? "bar" : "status";
+    if (this.role === "card") return this.initCard(cx);
+    if (this.role === "menu") return this.initMenu(cx);
+    if (this.role === "log") return this.initLog(cx);
+    if (this.role === "bar") return;
+    this.initStatus(cx);
+  }
+
+  // ---- the card (a dialog) ----
+
+  initCard(cx) {
+    this.ticket = props().card;
+    this.card = null;
+    this.error = "";
+    this.handle = cx.focus_handle();
+    this.handle.focus();
+    cx.spawn(async (cx) => {
+      const { card, error } = await readCard(this.ticket.bin, this.ticket.project, this.ticket.id);
+      this.card = card ?? null;
+      this.error = error ?? "";
+      cx.notify();
+    });
+  }
+
+  renderCard() {
+    const t = theme();
+    const c = colours(t);
+    const close = () => closeOverlay(props().overlay);
+    const action = (id, label, fn) =>
+      div().id(id).px(8).py(2).rounded(5).cursor_pointer().text_color(t.accent).hover((s) => s.bg(t.hover)).on_click(() => fn()).child(label);
+    const root = v_flex().id("card").track_focus(this.handle).size_full().min_h(0).p(16).gap(10).bg(t.popover).text_size(12.5).text_color(t.foreground)
+      .on_key_down((e) => {
+        if (e.key === "escape") close();
+      });
+    const card = this.card;
+    const head = h_flex().gap(8).items_center()
+      .child(div().text_size(16).font_semibold().child(card?.ref ?? this.ticket.shown))
+      .child(div().flex_1().min_w(0).text_ellipsis().text_color(t.muted).child(card?.title ?? ""))
+      .child(action("card-close", "Close", close));
+    if (!card) return root.child(head).child(div().text_color(this.error ? c.hot : t.muted).child(this.error || "Loading…"));
+    const logs = logsOf(this.ticket.project);
+    const rows = card.passes.map((p, i) =>
+      h_flex().id(`pass-${i}`).h(26).gap(10).px(6).items_center().rounded(4)
+        .when(Boolean(p.log), (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => {
+          openFile(`${logs}/${p.log}`, this.ticket.project);
+          close();
+        }))
+        .child(div().w(110).flex_none().child(p.pass))
+        .child(div().flex_1().min_w(0).text_ellipsis().text_color(/^(red|failed)/.test(p.outcome) ? c.hot : p.outcome === "running" ? c.ylw : c.grn).child(p.outcome))
+        .child(div().w(70).flex_none().font_family(MONO).text_size(11.5).text_color(t.muted).child(p.time))
+        .child(div().w(36).flex_none().text_color(p.log ? t.accent : t.dim).child(p.log ? "log" : "")));
+    const others = card.inRun ? [] : card.logs.map((f, i) =>
+      h_flex().id(`log-${i}`).h(24).px(6).items_center().rounded(4).cursor_pointer().text_color(t.accent).hover((s) => s.bg(t.hover))
+        .on_click(() => {
+          openFile(`${logs}/${f}`, this.ticket.project);
+          close();
+        }).child(f));
+    return root
+      .child(head)
+      .child(div().text_color(t.muted).child(card.inRun ? card.status : "Not in the last run: run.json has no entry for this ticket."))
+      .child(v_flex().id("passes").flex_1().min_h(0).overflow_y_scrollbar().gap(2)
+        .children(card.inRun && !rows.length ? [div().text_color(t.dim).child("No pass of it is timed in this run yet.")] : rows)
+        .children(others)
+        .children(card.why.map((w) => div().pt(4).text_color(c.ylw).child(w)))
+        .when(Boolean(card.gateTail?.length), (el) => el.child(div().pt(6).text_color(t.muted).child("The gates log ends:"))
+          .children(card.gateTail.map((l) => div().font_family(MONO).text_size(11.5).text_color(t.dim).child(l)))))
+      .child(h_flex().gap(6).pt(6).border_t(1).border_color(t.border).flex_wrap()
+        .when(Boolean(this.ticket.terminal), (el) => el.child(action("card-peek", "Peek at the sandbox", () => {
+          close();
+          peek(this.ticket.terminal);
+        })))
+        .when(Boolean(card.tracker), (el) => el.child(action("card-tracker", /^https?:/.test(card.tracker) ? "Open in the tracker" : card.tracker.startsWith("/") ? "Open the ticket file" : card.tracker, () => {
+          close();
+          openTracker(card.tracker, this.ticket.project);
+        })))
+        .child(action("card-folder", "Open the log folder", () => void openExternal(logs))));
+  }
+
+  // ---- the right-click menu (a popup) ----
+
+  initMenu(cx) {
+    this.at = 0;
+    this.handle = cx.focus_handle();
+    this.handle.focus();
+  }
+
+  renderMenu() {
+    const t = theme();
+    const m = props().menu;
+    const list = menuItems(m);
+    const choose = (i) => {
+      closeOverlay(props().overlay);
+      list[i]?.[1]();
+    };
+    return v_flex().id("menu").track_focus(this.handle).w_full().min_h(0).p(5).bg(t.popover).text_size(12.8).text_color(t.foreground)
+      .on_key_down((e, cx) => {
+        if (e.key === "down") this.at = (this.at + 1) % list.length;
+        else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
+        else if (e.key === "enter") choose(this.at);
+        else if (e.key === "escape") closeOverlay(props().overlay);
+        else return;
+        cx.notify();
+      })
+      .child(div().px(8).py(3).text_size(11).text_color(t.muted).child(m.shown))
+      .children(list.map((it, i) =>
+        div().id(`item-${i}`).px(8).py(5).rounded(5).cursor_pointer().when(i === this.at, (el) => el.bg(t.hover)).hover((s) => s.bg(t.hover))
+          .on_click(() => choose(i)).child(it[0])));
+  }
+
+  // ---- a log, read-only (a pane) ----
+
+  initLog(cx) {
+    this.path = props().log;
+    this.code = null;
+    this.error = "";
+    this.cut = false;
+    this.load(cx);
+  }
+
+  load(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("tail", ["-c", String(LOG_TAIL), this.path], { timeout: 10_000 });
+        if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);
+        const size = await exec("wc", ["-c", this.path]).then((w) => Number(w.stdout.trim().split(/\s+/)[0]) || 0).catch(() => 0);
+        this.cut = size > LOG_TAIL;
+        const text = plain(r.stdout);
+        if (this.code) this.code.set_value(text);
+        else this.code = EditorState.new({ language: "txt", readonly: true, soft_wrap: true, value: text, font_family: settings().font_family, font_size: 12 });
+        this.error = "";
+      } catch (e) {
+        this.error = String(e?.message ?? e);
+      }
+      cx.notify();
+    });
+  }
+
+  renderLog() {
+    const t = theme();
+    const name = this.path.split("/").pop();
+    return v_flex().id("log").size_full().min_h(0).bg(t.surface).text_color(t.foreground).text_size(12.5)
+      .child(h_flex().h(32).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
+        .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(name))
+        .when(this.cut, (el) => el.child(div().text_size(11).text_color(t.dim).child("its end only")))
+        .child(div().id("log-reload").px(8).py(2).rounded(5).cursor_pointer().text_color(t.accent).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.load(cx)).child("Reload")))
+      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(this.error ? t.ansi1 : t.dim).child(this.error || "Loading…"));
+  }
+
+  // ---- a sandbox window's bar ----
+
+  renderBar() {
+    const t = theme();
+    return h_flex().id("bar").size_full().px(10).gap(8).items_center().bg(t.raised).text_size(12).text_color(t.foreground)
+      .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(props().bar?.title ?? "sandbox"))
+      .child(div().id("bar-close").px(8).rounded(5).cursor_pointer().text_color(t.muted).hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click(() => closeOverlay(props().overlay)).child("Close"));
+  }
+
+  // ---- the status view ----
+
+  initStatus(cx) {
     // The project is fixed when the pane opens: a later focus elsewhere must not turn it into another project's view.
     this.root = props()?.project || focused()?.cwd || "";
     this.doc = null; // the last good reading, `{ table, frame }`
@@ -309,7 +567,9 @@ export default class SandcastleStatus extends View {
       const id = div().font_semibold().whitespace_nowrap().text_color(t.foreground).child(r.shown);
       // The number opens the ticket in its tracker: a GitHub issue, through `gh` in the project.
       return n
-        ? id.id(`link-${r.id}`).cursor_pointer().hover((s) => s.underline().text_color(t.accent)).on_click(() => {
+        ? id.id(`link-${r.id}`).cursor_pointer().hover((s) => s.underline().text_color(t.accent)).on_click((_e, cx) => {
+            // The number's own action, not the row's.
+            cx.stop_propagation();
             exec("gh", ["issue", "view", n, "--web"], { cwd: this.root }).catch(() => {});
           })
         : id;
@@ -359,7 +619,13 @@ export default class SandcastleStatus extends View {
       // The groups apart, as the terminal draws a rule between them.
       const apart = prio !== undefined && r.prio !== prio;
       prio = r.prio;
-      body.push(h_flex().id(`row-${r.id}`).h(28).items_center().rounded(4).hover((s) => s.bg(t.hover))
+      const ticket = { project: this.root, id: r.id, shown: r.shown, terminal: r.terminal, bin: binOf(props()?.command) };
+      body.push(h_flex().id(`row-${r.id}`).h(28).items_center().rounded(4).cursor_pointer().hover((s) => s.bg(t.hover))
+        .on_click(() => (r.terminal ? peek(r.terminal) : openCard(ticket)))
+        .on_mouse_down("right", (_e, cx) => {
+          cx.stop_propagation();
+          openOverlay({ mod: "sandcastle", kind: "popup", width: 220, props: { menu: ticket } });
+        })
         .when(apart, (el) => el.mt(5).border_t(1).border_color(t.border))
         .children(cols.map((col) => cell(col, content(col, r)))));
     }
@@ -395,6 +661,10 @@ export default class SandcastleStatus extends View {
   }
 
   render(_cx) {
+    if (this.role === "card") return this.renderCard();
+    if (this.role === "menu") return this.renderMenu();
+    if (this.role === "log") return this.renderLog();
+    if (this.role === "bar") return this.renderBar();
     const t = theme();
     const c = colours(t);
     // The root never takes its width from what it holds: the columns are sized from the pane's width, and a pane

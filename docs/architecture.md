@@ -1447,6 +1447,13 @@ draws the frame (`renderFrame`, pure) in one write.
 and no width.
 It lays them out and colours them, and `status --json --frame` prints the same facts, so the terminal
 and an app mod cannot disagree on a word or a colour.
+A row carries its sandbox's herdr-core slot terminal (`terminal`, from the snapshot's `terminals`,
+which `slotAddresses` reads), which the Herdr app mod's row click peeks at (#960).
+Its other row click opens the ticket card, which the mod draws from `sandcastle herdr card --json`:
+`cardData` in `src/herdr-plugin.ts`, the facts the Herdr TUI plugin's card prints (`ticketCard` is
+built on it), with every agent's text made printable and the tracker link (`trackerLink`, git only).
+The verb takes a project root holding `.sandcastle/logs` and a ticket id's characters, loads no
+project config, and answers outside a terminal host, as the app runs it.
 The lanes are the ones the terminal draws for the snapshot, the legend always carries both the `TOKENS`
 and the `CPU/MEM` note (each marked with its column) and `renderFrame` drops the one whose column the
 pane is too narrow to show.
