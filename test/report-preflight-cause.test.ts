@@ -67,5 +67,5 @@ test("the helper burndown calls leaves the message in the record", () => {
 
 test("burndown's preflight catch records the failure before rethrowing it", () => {
   const src = readFileSync(join(KIT, "src/burndown.ts"), "utf8");
-  assert.match(src, /await timed\("", "preflight", \(\) => preflight\(project, image, extraModels\)\);\n\s+\} catch \(e\) \{\n(?:\s+\/\/.*\n)*\s+recordPreflightFailure\(run, e\);\n\s+throw e;/);
+  assert.match(src, /await timed\("", "preflight", \(\) => preflight\(project, image, extraModels, [^\n]*\)\);\n\s+\} catch \(e\) \{\n(?:\s+\/\/.*\n)*\s+recordPreflightFailure\(run, e\);\n\s+throw e;/);
 });

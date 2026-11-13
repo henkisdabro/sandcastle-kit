@@ -29,7 +29,7 @@ test("the start line names the base and says a commit, pull or merge on it stops
 test("a run prints that line, for its own base branch, after the keep-awake line", () => {
   const src = read("../src/burndown.ts");
   const awake = src.indexOf("Keep awake: ${await keepAwake()}");
-  const said = src.indexOf("console.log(baseIsTheRunsLine(project.baseBranch));");
+  const said = src.indexOf('sayStart(memo, "base", baseIsTheRunsLine(project.baseBranch))');
   assert.ok(awake > 0 && said > awake);
 });
 

@@ -42,7 +42,7 @@ import { agentBaseline, onNoPsi, cpuFields, cpuOf, peakOf, pressureFields, press
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { createSharedMeter, estimateBeside, estimateSlots, joinPool, leaseSlot, limit, limitWithSource, myShare, otherRuns, recordOfRun, setDemand, setLandingNear, sharedBelowAsk, type SlotClaim, type SlotLease, splitAtStart, startLines, uncountSlot, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logAgentExit, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logAgentExit, logExpansionFailure, logSaysLimit, markLog, markPass, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, releaseAwake, reviewedOnlyHead, sayStart,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordPreflightFailure, recordRun, renderPrompts, runTokens, type Tokens, carriedKind, isRemainder, tokenLine, priceRun, typicalTimes, typicalGateMs, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter, peakContexts, createTokenCount, tokensNoteWords,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
@@ -3335,12 +3335,16 @@ export const burndown = async (project: Project, turn?: TurnOptions): Promise<bo
 /** What `sandcastle run` hands each turn. `loadPause` is the run's one hold for the machine's CPU pressure, absent when `LOAD_PAUSE` is off. */
 // `psi`: the run's own, across its turns: whether the no-PSI line was said.
 // `runStart`: when the person started the run (ms), the same for every turn: a later turn's own start would let an outsider's edit made during an earlier turn through.
+// `startLines`: the run's own too, the start lines its turns said, by name (`sayStart`): a later turn says one again only when it changed.
 type PsiState = { told: boolean };
-type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; runStart?: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
+type TurnOptions = { settings: ResolvedSettings; turn: number; psi?: PsiState; startLines?: Map<string, string>; runStart?: number; loadPause?: LoadPause; docker?: () => string | undefined; clock?: StartClock; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> }; forceBaseGates?: boolean };
 
 const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boolean> => {
   // The first turn takes the clock `sandcastle run` started; a later turn counts only its own steps.
   const clock = turn?.clock ?? startClock();
+  // The start lines this turn left out because an earlier turn said them (`sayStart`), told once after the last.
+  const memo = turn?.startLines;
+  let skipped = 0;
   const DRY_RUN = process.env.DRY_RUN === "1";
   // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
   resetMergeCheckGap();
@@ -3533,10 +3537,10 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // Asked before the run (cli.ts), and said on every turn's start lines too: a run that bills API credits is never silent.
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
-  console.log(versionsLine(versions, kitAtStart));
+  skipped += sayStart(memo, "versions", versionsLine(versions, kitAtStart)) ? 0 : 1;
   // Where a setting came from, when the clone's own file set one: the run's models and levels differ from the committed config's.
   const localLine = localConfigLine(project);
-  if (localLine) console.log(localLine);
+  if (localLine) skipped += sayStart(memo, "local", localLine) ? 0 : 1;
   // Before any sandbox: every one this turn opens takes a CPU limit by its kind, so agents' own full-suite
   // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
   // gates, which run one at a time and set the run's end (`gateProject` below opens those).
@@ -3547,11 +3551,11 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const pool = { concurrency: settings.concurrency.effective, maxGates: limit("gates") };
   const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
   const gateCpus = sandboxCpus(project, "gate", pool, () => info);
-  console.log(cpusLine(project, ticketCpus, gateCpus));
+  skipped += sayStart(memo, "cpus", cpusLine(project, ticketCpus, gateCpus)) ? 0 : 1;
   // One limit for both kinds of sandbox: a gate runs in a ticket's sandbox too, so the gate's figure sets both.
   const memory = sandboxMemory(project, () => info);
   const memoryBytes: number | false = memory.bytes ?? false;
-  console.log(memoryLine(memory));
+  skipped += sayStart(memo, "memory", memoryLine(memory)) ? 0 : 1;
   // Said at the first reading, as no sandbox is open yet: early in the run, with the base gates.
   onNoPsi(() => console.log("Memory pressure: the sandboxes' kernel has no PSI (no /sys/fs/cgroup/memory.pressure), so none is recorded this run; the closing summary and `sandcastle size` show none, which is not the same as no pressure."), turn?.psi);
   // The project as the gate-only sandboxes see it; `project` from here is a ticket's.
@@ -3593,9 +3597,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   if (rough) console.log(rough.text);
   console.log(`Machine-wide: ${usage()}`);
   clock.step("keep awake");
-  console.log(`Keep awake: ${await keepAwake()}`);
+  skipped += sayStart(memo, "keep awake", `Keep awake: ${await keepAwake()}`) ? 0 : 1;
   clock.step();
-  console.log(baseIsTheRunsLine(project.baseBranch));
+  skipped += sayStart(memo, "base", baseIsTheRunsLine(project.baseBranch)) ? 0 : 1;
   if (TEST_RED_GATE) {
     console.log(
       "SANDCASTLE_TEST_RED_GATE=1: each ticket's first gate run counts as red, to test the repair pass. " +
@@ -3716,7 +3720,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   if (!statusPane && viewHost === "core") {
     throw new OperatorError("Could not open the status view in herdr-core - nothing was started. Check `hc ls`, or run `sandcastle status` yourself.");
   }
-  if (statusPane) console.log(viewHost === "core" ? `Status view: terminal ${statusPane}` : `Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
+  if (statusPane) skipped += sayStart(memo, "status view", viewHost === "core" ? `Status view: terminal ${statusPane}` : `Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`) ? 0 : 1;
   // A statement of its own, not part of the line above: a start with no pane still says where its time went. `startTook`, as `took` below is the tickets' times.
   const startTook = clock.line();
   if (startTook) console.log(startTook);
@@ -3833,7 +3837,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     return { model, from: `label model:${model} on ${labelled.join(", ")}` };
   });
   try {
-    await timed("", "preflight", () => preflight(project, image, extraModels));
+    await timed("", "preflight", () => preflight(project, image, extraModels, (line) => void (skipped += sayStart(memo, "preflight", line) ? 0 : 1)));
   } catch (e) {
     // The refusal is printed once, by the command; the record keeps its cause for a summary asked for later.
     recordPreflightFailure(run, e);
@@ -3877,9 +3881,9 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     const pause = turn.loadPause;
     pause.listen((change) => run.update({ loadPause: loadRecord(change) }));
     setLoadHold(pause.hold);
-    console.log(loadPauseLine(settings.loadPause, readMachineCpu()));
+    skipped += sayStart(memo, "load pause", loadPauseLine(settings.loadPause, readMachineCpu())) ? 0 : 1;
   }
-  if (settings.usagePause !== undefined) console.log(usagePauseLine(settings.usagePause, planUsage.map((u) => u.provider)));
+  if (settings.usagePause !== undefined) skipped += sayStart(memo, "usage pause", usagePauseLine(settings.usagePause, planUsage.map((u) => u.provider))) ? 0 : 1;
   if (planUsage.length) run.update({ usage: [...planUsage] });
   // Also without a plan to show: a ticket's tokens, as its running pass spends them, are the status view's TOKENS column.
   usageWatch = watchUsage({
@@ -3903,15 +3907,19 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   const { plan: lean, file: planFile } = writePlan(project);
   const kept = lean.items.filter((i) => i.kept && i.kind !== "hook").map((i) => `${i.kind}:${i.id}`);
   const dropped = lean.items.filter((i) => i.kind === "hook" && !i.kept).length;
-  console.log(
+  skipped += sayStart(
+    memo,
+    "lean",
     `Lean: hiding ${lean.items.filter((i) => !i.kept && i.kind !== "hook").length} item(s) the repo would load` +
       (kept.length ? `; keeping ${kept.join(", ")}` : "") +
       // The count and the list are the repo's items; Claude Code's own bundled skills are off in every sandbox (container/managed-settings.json).
       "; Claude Code's bundled skills off" +
       alwaysLoadedSegment(alwaysLoadedRules(project.root)) +
       `; ${lean.hooks.length} hook(s) kept${dropped ? `, ${dropped} dropped by lean.dropHooks` : ""} (\`sandcastle lean\` for detail).`,
-  );
+  ) ? 0 : 1;
   for (const line of unmatchedLines(unmatched(project, lean))) console.log(`Lean: ${line}.`);
+  // A later turn's start lines that said nothing new, told once, where the last of them would be.
+  if (skipped) console.log(`(${skipped} start line(s) unchanged from an earlier turn)`);
   const refs = hiddenReferences(project.root, lean, project.lean.dropHooks);
   if (refs.length) {
     console.log(
