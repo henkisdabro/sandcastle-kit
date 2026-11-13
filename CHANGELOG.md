@@ -76,6 +76,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   a fresh clone) no longer crashes every Claude pass with "Temp directory /tmp/claude-<uid> is owned
   by uid 0": the kit now sets `CLAUDE_CODE_TMPDIR` to a directory under the agent's home in every
   sandbox. This was the crash #842 saw on an API-key dry run; the credential played no part. (#953)
+- The Herdr app mod's closing report shows ticket titles and agents' notes as plain text, so a
+  markdown link or image in one is no longer live and `_` in a path no longer turns to emphasis.
+  Each run's end opens that run's report in a window of its own, where a window left open from an
+  earlier run could show the earlier report, and a second run in the same pane opened none; the
+  window's title names the run's start. A long needs-you note or ticket-file id in the status
+  terminal's message is cut so the merged count and `(+N more)` stay. (#969)
 
 ## [0.24.0] - 2026-11-13
 

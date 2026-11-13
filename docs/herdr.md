@@ -294,5 +294,8 @@ it has ended; a notification says what pause or resume answered.
 opens only from that button, and Close puts it away.
 When a run the pane watched ends, its closing summary (`sandcastle report`) opens in a floating window
 of its own, rendered as markdown; it does not take the keyboard, and **Report** opens it again.
+Ticket titles and agents' notes in it show as written: a link, an image or `_` in them is plain text.
+Each run's report is a window of its own, its title naming the run's start time, so one left open
+from an earlier run is never shown as the next run's.
 A pane opened on a run that had already ended opens nothing by itself.
 The buttons and the report run the same kit's `sandcastle` as the pane reads.

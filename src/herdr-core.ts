@@ -19,7 +19,7 @@ import { basename, join } from "node:path";
 import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord, WORDS } from "../mod/hooks/run-record.ts";
 import { appCliPorts, type AppPorts, type ModPane } from "./herdr-app.ts";
 import { real } from "./live-runs.ts";
-import { clear, record, windowTitle } from "./osc7501.ts";
+import { clear, record, TEXT_MAX, windowTitle } from "./osc7501.ts";
 import type { CoreTerminal } from "./terminal-host.ts";
 import type { SandboxView } from "./herdr.ts";
 import { bareShell, PHASE_LOG, progress, runCounts, showsStatus } from "./view-facts.ts";
@@ -414,9 +414,10 @@ const childId = (ticket: string) => ticket.replace(/[^A-Za-z0-9._-]/g, "_").slic
 
 /**
  * The newest ticket that needs a person, and why: `#12 needs you: conflict in src/a.ts, src/b.ts`, its note in place
- * of files it has none of, and how many others need them too.
+ * of files it has none of, and how many others need them too. Within `room` code points, the why cut with `…`: the
+ * record's msg is cut at its end (`TEXT_MAX`), and the count after it must stay.
  */
-export const needsYouLine = (tickets: Record<string, TicketRecord>, retried: ReadonlySet<string>): string => {
+export const needsYouLine = (tickets: Record<string, TicketRecord>, retried: ReadonlySet<string>, room = Infinity): string => {
   const wanted = Object.entries(tickets)
     .filter(([id, t]) => t.state && GROUPS[t.state] === "needs you" && !retried.has(id))
     .sort(([, a], [, b]) => (b.since ?? 0) - (a.since ?? 0));
@@ -426,7 +427,11 @@ export const needsYouLine = (tickets: Record<string, TicketRecord>, retried: Rea
   const files = t.files?.length ? ` in ${t.files.slice(0, 2).join(", ")}${t.files.length > 2 ? ` +${t.files.length - 2}` : ""}` : "";
   const why = files || (t.note ? ` - ${t.note}` : "");
   const others = wanted.length > 1 ? ` (+${wanted.length - 1} more)` : "";
-  return `${ref} needs you: ${WORDS[t.state!] ?? t.state}${why}${others}`;
+  // The ref is cut too when it alone overruns (a ticket file's id can be a long slug): what follows is the count.
+  const body = [...`${ref} needs you: ${WORDS[t.state!] ?? t.state}${why}`];
+  const fit = room - [...others].length;
+  const cut = body.length > fit ? `${body.slice(0, Math.max(0, fit - 1)).join("")}…` : body.join("");
+  return `${cut}${others}`;
 };
 
 /**
@@ -444,9 +449,11 @@ export const runRecords = (run: RunFacts): Map<string, string> => {
   const state = counts.needsYou ? "blocked" : run.live ? "working" : run.record.finishedAt ? "done" : "error";
   // Herdr's own toast for a blocked or done agent carries the record's msg (#961): so the msg leads with what the
   // person is wanted for - the newest ticket that needs them and why - and an ended run says how it ended.
+  const ended = run.live ? "" : run.record.finishedAt ? "run finished: " : "run ended early: ";
+  const merged = ` · ${counts.merged}/${counts.total} merged`;
   const msg =
     state === "blocked"
-      ? `${run.live ? "" : run.record.finishedAt ? "run finished: " : "run ended early: "}${needsYouLine(run.tickets, retried)} · ${counts.merged}/${counts.total} merged`
+      ? `${ended}${needsYouLine(run.tickets, retried, TEXT_MAX - [...ended].length - [...merged].length)}${merged}`
       : state === "done"
         ? `run finished: ${text}`
         : state === "error"

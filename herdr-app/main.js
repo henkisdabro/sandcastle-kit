@@ -217,9 +217,40 @@ const sandboxWindow = (terminal, title) =>
 
 // ---- the run's controls (#961) ----
 
-/** The closing report (`sandcastle report`, markdown) in a floating window of its own: it never takes the keyboard. */
-const openReport = (project, bin) =>
-  openOverlay({ kind: "window", key: `sandcastle-report-${project}`, width: 0.55, height: 0.7, mod: "sandcastle", props: { report: { project, bin } } });
+/**
+ * The closing report (`sandcastle report`, markdown) in a floating window of its own: it never takes the keyboard.
+ * The run's start is in the key: a window left open from an earlier run keeps that run's report, and the app would
+ * show it again, unread, for the next run's under the same key.
+ */
+const openReport = (project, bin, run) =>
+  openOverlay({ kind: "window", key: `sandcastle-report-${project}-${run?.startedAt ?? ""}`, width: 0.55, height: 0.7, mod: "sandcastle", props: { report: { project, bin, started: startedClock(run?.startedAt) } } });
+
+// The run's start as the report window's title shows it: windows left open from earlier runs look alike otherwise.
+const startedClock = (startedAt) => {
+  const d = new Date(startedAt ?? "");
+  return Number.isNaN(d.getTime()) ? "" : `${two(d.getHours())}:${two(d.getMinutes())}`;
+};
+
+// A heading's, a list item's or a numbered step's mark at a line's start: the report's own markdown, kept.
+// `[^]*`, not `.*`: `.` stops at U+2028 and U+2029, which a ticket title may hold, and the match would fail.
+const MARK = /^(\s*(?:#{1,6} |[-*+] |\d+\. )?)([^]*)$/;
+/**
+ * The report's text as markdown that shows each line as written. Ticket titles (anyone can file one on a public repo)
+ * and agents' notes are in it: a link or an image in them would be live (an image loads from its host), and `_` or
+ * `*` in a path would turn to emphasis. Every ASCII punctuation mark after a line's own mark is escaped, outside a
+ * code span (where markdown is literal already, and a backslash would show). A hard break at each line's end keeps
+ * the terminal's lines, which markdown would fold into a paragraph; fenced code is left as it is.
+ */
+const reportMarkdown = (text) => {
+  let fenced = false;
+  return text.split("\n").map((l) => {
+    if (l.startsWith("```")) fenced = !fenced;
+    if (fenced || l.startsWith("```") || !l.trim()) return l;
+    const [, mark, rest] = MARK.exec(l);
+    const body = rest.split(/(`[^`]+`)/).map((part, i) => (i % 2 ? part : part.replace(/[!-/:-@[-`{-~]/g, "\\$&"))).join("");
+    return `${mark}${body}  `;
+  }).join("\n");
+};
 
 /** The status line in a small floating window of its own, with the run's buttons: opened only by its button. */
 const openLine = (project, command) =>
@@ -425,13 +456,7 @@ export default class SandcastleStatus extends View {
       try {
         const r = await exec(bin, ["report"], { cwd: project, timeout: 120_000 });
         if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop() || `exit ${r.code}`);
-        // The summary is written for a terminal: each of its lines is a line, which markdown would fold into its
-        // paragraph. A hard break at each line's end keeps them, outside fenced code.
-        let fenced = false;
-        this.text = plain(r.stdout).split("\n").map((l) => {
-          if (l.startsWith("```")) fenced = !fenced;
-          return fenced || !l.trim() ? l : `${l}  `;
-        }).join("\n");
+        this.text = reportMarkdown(plain(r.stdout));
         this.error = "";
       } catch (e) {
         this.error = String(e?.message ?? e);
@@ -448,7 +473,7 @@ export default class SandcastleStatus extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => fn(cx)).child(label);
     return v_flex().id("report").size_full().min_h(0).bg(t.popover).text_color(t.foreground).text_size(13)
       .child(h_flex().h(34).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
-        .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(`sandcastle report · ${props().report.project.split("/").pop()}`))
+        .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(`sandcastle report · ${props().report.project.split("/").pop()}${props().report.started ? ` · run of ${props().report.started}` : ""}`))
         .child(button("report-reload", "Reload", (cx) => this.loadReport(cx)))
         .child(button("report-close", "Close", () => closeOverlay(props().overlay))))
       .child(v_flex().id("report-body").flex_1().min_h(0).overflow_y_scrollbar().p(16)
@@ -467,7 +492,7 @@ export default class SandcastleStatus extends View {
     this.cost = null;
     this.run = null; // the last reading's `run` (src/view-facts.ts runFacts)
     this.busy = ""; // a pause or resume on its way
-    this.reportShown = false;
+    this.reportedRun = null; // the `startedAt` of the run whose end this pane opened the report for
     this.width = 900; // the pane's width in px at zoom 1, from on_size_change
     this.want = "full";
     this.wake = null;
@@ -495,15 +520,17 @@ export default class SandcastleStatus extends View {
 
   /**
    * What changed between two readings of the run. A run this pane saw live that has now ended opens its closing
-   * report, once; a pane opened on an ended run opens nothing by itself.
+   * report, once per run (the next run in the same pane opens its own); a pane opened on an ended run opens nothing by
+   * itself.
    */
   seen(before, now) {
     // The pane opens the report; a popped-out line reads the same run and must not open it a second time.
     if (this.role !== "status" || !before || !now) return;
     const live = (r) => r.state === "running" || r.state === "paused";
-    if (live(before) && !live(now) && !this.reportShown) {
-      this.reportShown = true;
-      openReport(this.root, binOf(props()?.command));
+    const started = now.startedAt ?? "";
+    if (live(before) && !live(now) && this.reportedRun !== started) {
+      this.reportedRun = started;
+      openReport(this.root, binOf(props()?.command), now);
     }
   }
 
@@ -535,7 +562,7 @@ export default class SandcastleStatus extends View {
     const out = [];
     if (state === "running") out.push(button("run-pause", this.busy === "pause" ? "Pausing…" : "Pause", (cx) => this.control("pause", cx)));
     if (state === "paused") out.push(button("run-resume", this.busy === "resume" ? "Resuming…" : "Resume", (cx) => this.control("resume", cx), t.accent));
-    if (state === "finished" || state === "ended") out.push(button("run-report", "Report", () => openReport(this.root, binOf(props()?.command))));
+    if (state === "finished" || state === "ended") out.push(button("run-report", "Report", () => openReport(this.root, binOf(props()?.command), this.run)));
     return out;
   }
 
