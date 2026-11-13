@@ -1319,9 +1319,22 @@ The status terminal is then started with no `herdr.*` labels and `--parent <call
 it no pane and lists it under the caller, and it still writes the run's records and parents the
 slots, so the root record's needs-you alert and the slots' nesting do not depend on the mod.
 Any of those failing opens the terminal view as before; a failed split says so in one line.
+A split whose answer was lost (a timeout, output that is not JSON) may still have made the pane, so
+the layout is read before and after it: the one new `sandcastle` pane of this project is adopted,
+more than one are closed.
+The split focuses the new pane; the keyboard goes back to the pane that had it before the split
+(`herdr-app status`), so a run started in a tab in the background does not bring it forward.
+`herdr-app ls` lists only terminals: a mod pane and its props are read from the core's `herdr-app`
+document (`hc connect`, `doc.get`; `modPanesIn`).
 The pane is recorded as `pane` in `core-view.json` and, like the status terminal, outlives the run
-to show how it ended: a later instance's start closes it (`pane.close`), the same instance's next
-turn keeps it, and a start that fails after the split closes it.
+to show how it ended.
+Every start that does not return early (a later instance's, or the same instance's whose status
+terminal is gone) closes the recorded pane, but only while the layout shows it as this project's
+`sandcastle` pane: the record is a bare id, and an id that is gone, another project's, another mod's
+or unreadable is left alone.
+The same instance's next turn, its status terminal still running the view, keeps it, and a start
+that fails after the split closes it.
+The ports ask `herdr-app --version` once per start, with a 2 s bound.
 `coreStatusLine` words the start line (`Status view: app pane <pane> (terminal <id>)`), which
 `src/detach.ts` waits for as it does the terminal's.
 

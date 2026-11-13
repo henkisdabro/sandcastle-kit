@@ -128,7 +128,7 @@ export type CoreStatusOptions = { kit: string; hc?: Hc; instance?: string; app?:
  * slots' parent - but as the caller's sub-agent with no pane. Anything short of that (`appPane`) opens the terminal
  * view as before.
  */
-export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = hcCli, instance = RUN_INSTANCE, app = appCliPorts }: CoreStatusOptions): string | undefined => {
+export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = hcCli, instance = RUN_INSTANCE, app = appCliPorts() }: CoreStatusOptions): string | undefined => {
   const key = projectKey(root);
   const name = statusName(root);
   const marker = `SANDCASTLE_CORE_VIEW=${instance}`;
@@ -139,14 +139,9 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     const previous = readCoreView(root);
     // An autonomy run's next turn: the view the first turn opened is already this run's.
     if (previous?.instance === instance && previous.status && runsStatusView(get(hc, previous.status))) return previous.status;
-    // An earlier run's mod pane goes, as its status terminal does below: this run's opens beside its own caller.
-    if (previous?.pane && previous.instance !== instance) {
-      try {
-        app.close(previous.pane);
-      } catch {
-        /* closed by hand, or no window */
-      }
-    }
+    // The mod pane on record goes, as the status terminal does below - an earlier run's, or this run's own whose
+    // status terminal is gone: this start opens its own beside its caller, and a pane left open would be orphaned.
+    if (previous?.pane) closeRecordedPane(root, previous.pane, app);
     pane = appPane(root, caller, kit, app);
 
     // The project's status terminal from an earlier run: a view still running is stopped first, and what is left - a
@@ -267,23 +262,78 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
   }
 };
 
+/** This project's `sandcastle` mod panes in the app's layout; undefined when the layout cannot be read. */
+const projectPanes = (root: string, app: AppPorts): Set<string> | undefined => {
+  try {
+    return new Set(app.modPanes().filter((p) => p.project === root).map((p) => p.pane));
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Closes a pane `core-view.json` names, only once the app's layout shows it is still this project's `sandcastle` mod
+ * pane: the record is a bare id, and the pane may since have been closed and its id meant something else, or the
+ * layout may be unreadable - either way it is left alone.
+ */
+const closeRecordedPane = (root: string, pane: string, app: AppPorts) => {
+  if (!projectPanes(root, app)?.has(pane)) return;
+  try {
+    app.close(pane);
+  } catch {
+    /* closed meanwhile, or no window */
+  }
+};
+
 /**
  * The Herdr app's mod pane, split beside the caller's pane, or undefined for the terminal view: the caller is not in
  * the app (no `herdr.*` labels, or no pane in a running window), or the mod is not current (doctor not `ok`), or the
  * split failed - said in one line, as the run goes on with the terminal view. The mod reads the run through this
  * kit's own `sandcastle`, as the status terminal does, never whichever one is on PATH.
+ *
+ * A split whose answer was lost (a timeout, output that is not JSON) may still have made the pane: the one new pane
+ * of this project's in the layout is adopted, and more than one are closed, so no pane is left that nothing records.
+ * The split focuses the new pane; the keyboard goes back to whatever pane had it, so a run started in a tab in the
+ * background does not bring that tab forward.
  */
 export const appPane = (root: string, caller: CoreTerminal, kit: string, app: AppPorts): string | undefined => {
   if (!caller.labels["herdr.space"] || !caller.labels["herdr.tab"]) return undefined;
+  let focused: string | undefined;
+  let pane: string | undefined;
   try {
     if (!app.modCurrent(kit)) return undefined;
     const beside = app.paneOf(caller.address);
     if (!beside) return undefined;
-    return app.split(beside, { project: root, command: [join(kit, "bin/sandcastle"), "status", "--json", "--frame"] });
+    focused = app.focused();
+    const before = projectPanes(root, app);
+    try {
+      pane = app.split(beside, { project: root, command: [join(kit, "bin/sandcastle"), "status", "--json", "--frame"] });
+    } catch (error) {
+      const made = before ? [...(projectPanes(root, app) ?? [])].filter((p) => !before.has(p)) : [];
+      if (made.length === 1) pane = made[0];
+      else {
+        for (const p of made) {
+          try {
+            app.close(p);
+          } catch {
+            /* gone already */
+          }
+        }
+        throw error;
+      }
+    }
   } catch (error) {
     console.log(`Could not open the Herdr app pane (${message(error)}): the terminal status view opens instead.`);
     return undefined;
   }
+  if (focused) {
+    try {
+      app.focus(focused);
+    } catch {
+      /* the pane is open; focus is a nicety */
+    }
+  }
+  return pane;
 };
 
 /** The start's `Status view:` line on herdr-core: the mod pane when this run opened one, else the terminal. */
