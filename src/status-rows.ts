@@ -41,6 +41,8 @@ export type Row = {
   noteTone: Tone;
   /** The log the ticket's id links to, when links are on and it has one. */
   link?: string;
+  /** Its sandbox's herdr-core slot terminal (`t7`), while a live run has one: what the Herdr app mod peeks at. */
+  terminal?: string;
   /** Sort order: the group's rank, then the newest change first, then the id. */
   prio: number;
   key: number;
@@ -178,6 +180,13 @@ const linkOf = (snapshot: Snapshot, id: string): string | undefined => {
   return log ? `${snapshot.dir}/logs/${log.name}`.replace(/%/g, "%25").replace(/ /g, "%20").replace(/#/g, "%23") : undefined;
 };
 
+/** A ticket's slot terminal from the snapshot's `terminals` (`#12 t7`, as `slotAddresses` gives them). */
+const terminalOf = (snapshot: Snapshot, shown: string): { terminal?: string } => {
+  const entry = snapshot.terminals?.find((t) => t.startsWith(`${shown} `));
+  const address = entry?.slice(shown.length + 1);
+  return address && /^\S+$/.test(address) ? { terminal: address } : {};
+};
+
 /** The rows of a snapshot, in the table's order, and the legend's counts. */
 export const ticketRows = (snapshot: Snapshot): Table => {
   const { now, base, live, record, tickets, queue, branches, containers, outcomes, logs, tails } = snapshot;
@@ -250,6 +259,7 @@ export const ticketRows = (snapshot: Snapshot): Table => {
       prio: RANK[group],
       timeTone: row.time === "-" ? "gry" : row.timeTone,
       link: linkOf(snapshot, row.id),
+      ...terminalOf(snapshot, shownId(row.id)),
     };
     rows.push(full);
     // Only a row whose word is `later` folds into the footer; a retried row keeps its word and stays in the table, counted as later.

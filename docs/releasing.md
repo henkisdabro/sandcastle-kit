@@ -76,4 +76,7 @@ At release:
 3. On a Mac with the Herdr app installed (`brew install --cask herdr-app`), `herdr-app check
    herdr-app` passes: no CI job runs it yet, and the mod in `herdr-app/` reads
    `sandcastle status --json --frame`, so a change to that document can break it unseen.
+   `test/herdr-app-layout.test.ts` (part of `pnpm test`, skipped where there is no `herdr-app`) checks
+   the lane cards there too, at a narrow, a half and a wide pane with long values: run `pnpm test` on
+   that Mac.
 4. After the release is published, close the milestone and create the next one.

@@ -18,7 +18,7 @@ import { HERDR_PLUGIN, KIT, runKit } from "./cli-spawn.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-card-config-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-card-cache-"));
-const { cardKey, githubIssueUrl, ticketCard, ticketFileOf, trackerLink } = await import("../src/herdr-plugin.ts");
+const { cardData, cardKey, githubIssueUrl, ticketCard, ticketFileOf, trackerLink } = await import("../src/herdr-plugin.ts");
 const { ticketPasses } = await import("../src/report.ts");
 const { slug } = await import("../src/tracker.ts");
 type CardFacts = import("../src/herdr-plugin.ts").CardFacts;
@@ -221,4 +221,70 @@ test("t on a ticket file's card runs nothing from the clicked repo's own git con
   git("config", "core.fsmonitor", hook);
   trackerLink(repo, "x-1", slug);
   assert.equal(existsSync(ran), false, "the repo's fsmonitor hook ran");
+});
+
+// The Herdr app mod draws the card from `sandcastle herdr card --json` (#960): the same facts as data, each pass
+// with its log where it exists, every text made printable.
+test("cardData: the card's facts as data, a pass's log only where it exists, an agent's escape codes stripped", () => {
+  const d = cardData({
+    id: "12",
+    ticket: { state: "review", since: NOW - 125, title: "Fix \x1b[31mcart\x1b[0m", note: "held" },
+    passes: [{ phase: "implement", ms: 600_000, ok: true }, { phase: "gates", ms: 60_000, ok: false, red: ["lint"] }],
+    logs: logsOf("12", "impl", "review"),
+    now: NOW,
+  });
+  assert.deepEqual(d, {
+    id: "12",
+    ref: "#12",
+    title: "Fix cart",
+    inRun: true,
+    status: "review for 2m 05s",
+    passes: [
+      { pass: "impl", outcome: "ok", time: "10m 00s", log: "agent-issue-12-impl-12.log" },
+      { pass: "gates", outcome: "red: lint", time: "1m 00s" },
+      { pass: "review", outcome: "running", time: "2m 05s", log: "agent-issue-12-review-12.log" },
+    ],
+    why: ["held"],
+    logs: ["agent-issue-12-impl-12.log", "agent-issue-12-review-12.log"],
+  });
+  assert.deepEqual(cardData({ id: "9", passes: [], logs: logsOf("9", "gates", "impl"), now: NOW }), {
+    id: "9",
+    ref: "#9",
+    inRun: false,
+    passes: [],
+    why: [],
+    logs: ["agent-issue-9-impl-9.log", "agent-issue-9-gates-9.log"],
+  });
+});
+
+test("sandcastle herdr card --json prints the card of a project's ticket, and refuses an id or root it cannot vouch for", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-card-json-")));
+  const logs = join(root, ".sandcastle/logs");
+  mkdirSync(logs, { recursive: true });
+  writeFileSync(join(logs, "run.json"), JSON.stringify({ startedAt: RUN, tickets: { "12": { state: "red", since: NOW - 60 } } }));
+  writeFileSync(join(logs, "timings.jsonl"), `${line("12", "implement", 60_000, true)}\n`);
+  for (const f of logsOf("12", "impl", "gates")) writeFileSync(join(logs, f), "x\n");
+  const r = runKit(["herdr", "card", "--json", root, "12"], { script: HERDR_PLUGIN, cwd: root, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const d = JSON.parse(r.stdout);
+  assert.equal(d.ref, "#12");
+  assert.equal(d.passes[0].log, "agent-issue-12-impl-12.log");
+  assert.match(d.tracker, /no GitHub origin remote/);
+  for (const args of [[root, "../12"], [root], [join(root, "nowhere"), "12"]]) {
+    const bad = runKit(["herdr", "card", "--json", ...args], { script: HERDR_PLUGIN, cwd: root, encoding: "utf8" });
+    assert.equal(bad.status, 1, `${args.join(" ")}: ${bad.stdout}`);
+  }
+});
+
+test("cardData: a state and a pass name from the record are made printable too", () => {
+  const d = cardData({
+    id: "12",
+    ticket: { state: "\x1b[31mweird\x07" as never, since: NOW - 5 },
+    passes: [{ phase: "\x1b]0;title\x07odd" as never, ms: 1000, ok: true }],
+    logs: [],
+    now: NOW,
+  });
+  assert.equal(d.status, "weird for 5s");
+  assert.equal(d.passes[0].pass, "]0;titleodd");
+  for (const text of [d.status, ...d.passes.map((p) => p.pass)]) assert.doesNotMatch(text ?? "", /[\x00-\x1f\x7f]/);
 });

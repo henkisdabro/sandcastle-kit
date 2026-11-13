@@ -1320,10 +1320,18 @@ it no pane and lists it under the caller, and it still writes the run's records 
 slots, so the root record's needs-you alert and the slots' nesting do not depend on the mod.
 Any of those failing opens the terminal view as before; a failed split says so in one line.
 A split whose answer was lost (a timeout, output that is not JSON) may still have made the pane, so
-the layout is read before and after it: the one new `sandcastle` pane of this project is adopted,
-more than one are closed.
+the layout is read before and after it: the one new `sandcastle` pane of this project whose `run`
+prop is this instance is adopted, more than one are closed; a person's log or status pane, or
+another run's, is never counted.
+A mod check that throws (the kit's files read while it is pulled) is a no, never a failed start.
 The split focuses the new pane; the keyboard goes back to the pane that had it before the split
-(`herdr-app status`), so a run started in a tab in the background does not bring it forward.
+(`herdr-app status`), so a run started in a tab in the background does not bring it forward; when
+the app cannot say which pane had it, to the caller's.
+The props also carry `run` (the instance), which the mod ignores: it marks a pane a run opened.
+A split the app completes only after its answer timed out is recorded nowhere, so every start (the
+same instance's next turn too) closes this project's panes with a `run` prop that the record does
+not name (`closeStrayPanes`): the run lock means one run owns the project.
+A pane a person opened by hand has no `run` prop and stays.
 `herdr-app ls` lists only terminals: a mod pane and its props are read from the core's `herdr-app`
 document (`hc connect`, `doc.get`; `modPanesIn`).
 The pane is recorded as `pane` in `core-view.json` and, like the status terminal, outlives the run
@@ -1441,6 +1449,13 @@ draws the frame (`renderFrame`, pure) in one write.
 and no width.
 It lays them out and colours them, and `status --json --frame` prints the same facts, so the terminal
 and an app mod cannot disagree on a word or a colour.
+A row carries its sandbox's herdr-core slot terminal (`terminal`, from the snapshot's `terminals`,
+which `slotAddresses` reads), which the Herdr app mod's row click peeks at (#960).
+Its other row click opens the ticket card, which the mod draws from `sandcastle herdr card --json`:
+`cardData` in `src/herdr-plugin.ts`, the facts the Herdr TUI plugin's card prints (`ticketCard` is
+built on it), with every agent's text made printable and the tracker link (`trackerLink`, git only).
+The verb takes a project root holding `.sandcastle/logs` and a ticket id's characters, loads no
+project config, and answers outside a terminal host, as the app runs it.
 The lanes are the ones the terminal draws for the snapshot, the legend always carries both the `TOKENS`
 and the `CPU/MEM` note (each marked with its column) and `renderFrame` drops the one whose column the
 pane is too narrow to show.

@@ -79,7 +79,8 @@ export const appModState = (kit: string, installed = appInstalled): ModState | u
 };
 
 /** A `sandcastle` mod pane the app's layout holds on this machine, and the project its props name. */
-export type ModPane = { pane: string; project?: string };
+/** `run`: the instance of the run that opened the pane (`appPane`); none for a pane a person opened by hand. */
+export type ModPane = { pane: string; project?: string; run?: string };
 
 /** What the run asks of the app; a test passes its own. Each throws, as `execFileSync` does, when the app says no. */
 export type AppPorts = {
@@ -107,7 +108,7 @@ export const paneIn = (listed: Listed, terminal: string): string | undefined => 
   return undefined;
 };
 
-type Node = { id?: unknown; content?: { mod?: unknown; props?: { project?: unknown } }; children?: unknown };
+type Node = { id?: unknown; content?: { mod?: unknown; props?: { project?: unknown; run?: unknown } }; children?: unknown };
 /**
  * The `sandcastle` mod panes in the core's `herdr-app` document: the layout the app keeps there, where a mod pane
  * is a block whose `content` names the mod and its props, and whose `id` is the pane's. `herdr-app ls` lists only
@@ -118,7 +119,10 @@ export const modPanesIn = (doc: unknown): ModPane[] => {
   const walk = (node: unknown) => {
     if (!node || typeof node !== "object") return;
     const n = node as Node;
-    if (n.content?.mod === MOD_NAME && typeof n.id === "string") out.push({ pane: n.id, ...(typeof n.content.props?.project === "string" ? { project: n.content.props.project } : {}) });
+    if (n.content?.mod === MOD_NAME && typeof n.id === "string") {
+      const props = n.content.props;
+      out.push({ pane: n.id, ...(typeof props?.project === "string" ? { project: props.project } : {}), ...(typeof props?.run === "string" ? { run: props.run } : {}) });
+    }
     for (const value of Object.values(node)) if (value && typeof value === "object") walk(value);
   };
   walk(doc);
