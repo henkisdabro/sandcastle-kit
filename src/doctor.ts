@@ -13,7 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pinnedFor } from "./hooks-path.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
-import { liveRuns, pluginState } from "./herdr-plugin.ts";
+import { appModLine, liveRuns, pluginState } from "./herdr-plugin.ts";
 import { terminalHost } from "./terminal-host.ts";
 import type { Probe } from "../mod/hooks/run-live.ts";
 import { RUNS_DIR, tabAwaitsReport } from "./live-runs.ts";
@@ -682,6 +682,11 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     );
     if (plugin.linkedFrom) console.log(clickHintLine(resolveClickHint()));
   }
+
+  // The Herdr app mod is a copy in the app's mods directory (the app does not reload a symlink), so doctor compares it
+  // with this kit's herdr-app/. Nothing is said when the Herdr app is not installed.
+  const appMod = appModLine();
+  if (appMod) console.log(appMod);
 
   // A bare kit clone (no project config) is not a project; checking it would print a false FIX.
   if (isProjectRoot(repoRoot)) {

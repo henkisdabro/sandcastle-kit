@@ -143,7 +143,9 @@
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
 //                    and keys to Herdr's config (shows them and asks first); --remove
-//                    takes all of it out. Works from anywhere
+//                    takes all of it out. Works from anywhere. With `herdr-app` on PATH it
+//                    also copies the kit's Herdr app mod (copied, not linked) to the app's
+//                    mods directory, and --remove takes that copy out
 //
 // Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, LOAD_PAUSE, SANDCASTLE_API_KEY:
 // environment variables, see docs/configuration.md.

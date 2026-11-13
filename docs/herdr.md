@@ -1,6 +1,6 @@
 # 🪟 Works best in Herdr
 
-What a run lays out in Herdr TUI and in the Herdr app (herdr-core), and the Herdr TUI plugin.
+What a run lays out in Herdr TUI and in the Herdr app (herdr-core), the Herdr TUI plugin and the Herdr app mod.
 
 
 sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https://herdr.dev), the
@@ -215,3 +215,39 @@ holds the status view alone):
 └────────────────────────────────────────┘   └──────────────────────────┴────────────────────────┘
                                               sidebar: #12 review ● · #15 implement ●
 ```
+
+## The Herdr app mod
+
+The kit ships a mod for the Herdr app in `herdr-app/`: the terminal status view drawn in the app's own
+type.
+It is optional and needs the app (`herdr-app` on PATH).
+`sandcastle herdr configure` copies the mod when `herdr-app` is installed, with or without Herdr TUI, and
+`sandcastle herdr configure --remove` takes the copy out again:
+
+```bash
+sandcastle herdr configure            # shows what it copies, asks, then does it
+sandcastle herdr configure --yes      # copies without asking; also the way to update the copy
+```
+
+It copies the folder's tracked files (not the `jsconfig.json` and `gpui-kit.d.ts` the app writes into a mod
+it loads) to `mods/sandcastle/` under the app's home: `$HERDR_APP_HOME`, else `~/.config/herdr-app`.
+Outside a terminal it prints what it would copy and stops, as it does for the plugin block.
+It touches no other mod and none of the app's own files.
+
+**Copied, not linked.**
+The app reloads a mod folder when a file in it is saved, but not through a symlink: a linked folder
+kept its old code after two saves, and a copied one showed the edit at once.
+So, unlike the Herdr TUI plugin, the mod is a copy, and a `git pull` of the kit does not update it.
+The copy carries a stamp, `.sandcastle-kit`, with the kit's version, a hash of the copied files and the
+list of them.
+`sandcastle doctor` compares the stamp's hash with the kit's `herdr-app/` and warns when the copy is
+stale (`sandcastle herdr configure --yes` copies it again); it lists the mod as optional when the app is
+installed and there is no copy, and says nothing when the app is not installed.
+Edits made to the installed copy are not watched.
+
+A second `configure --yes` with nothing changed writes no file, as the app reloads a mod on any save.
+A file the kit dropped since the last copy is removed with the next one, and `--remove` deletes the
+files the stamp lists, then the folder if it is empty.
+A `mods/sandcastle/` with no stamp is not the kit's: `configure` refuses, naming the folder, and copies
+nothing; move it or remove it first.
+The mod and the plugin are independent: a plugin step that fails does not undo the mod's copy.

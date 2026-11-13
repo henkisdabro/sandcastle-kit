@@ -13,10 +13,11 @@
 // show the tokens a run reports (src/herdr.ts).
 
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { confirm } from "./autonomy.ts";
 import { clickHintLine, resolveClickHint } from "./click-hint.ts";
@@ -195,9 +196,168 @@ export const pluginState = () => {
   };
 };
 
-/** `byDefault`: the answer when the user just presses Enter (setup offers the plugin as a yes). */
-export const configure = async (remove: boolean, yes: boolean, byDefault = false) => {
-  if (spawnSync("herdr", ["--version"]).status !== 0) throw new OperatorError("Herdr is not installed (https://herdr.dev) - there is nothing to configure.");
+// ---------------------------------------------------------------------------
+// The Herdr app mod (herdr-app/): copied, never linked. The app reloads a mod folder on save, but not through a
+// symlink (a linked folder kept its old code after two saves, a copied one showed the edit at once), so the kit
+// copies it into the app's mods directory and copies it again when the kit's files change.
+// ---------------------------------------------------------------------------
+
+const APP_STAMP = ".sandcastle-kit";
+
+const onPath = (command: string) => spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0;
+const appInstalled = () => onPath("herdr-app");
+
+/** The app's home: `$HERDR_APP_HOME`, else `~/.config/herdr-app`. */
+export const appHome = (env: NodeJS.ProcessEnv = process.env) => env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
+const appModDir = () => join(appHome(), "mods", "sandcastle");
+
+/**
+ * The kit's tracked `herdr-app/` files (relative to it, sorted), not the app's own `jsconfig.json` and
+ * `gpui-kit.d.ts` that it writes into a mod folder it loads: `herdr-app/.gitignore` names those. Read from the
+ * folder, not from git, so a kit without a `.git` (a release archive) copies the same files.
+ */
+const appFiles = (kit: string) => {
+  const root = join(kit, "herdr-app");
+  const ignored = new Set(
+    (existsSync(join(root, ".gitignore")) ? readFileSync(join(root, ".gitignore"), "utf8") : "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#")),
+  );
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && !ignored.has(entry.name)) out.push(relative(root, full).split(sep).join("/"));
+    }
+  };
+  if (existsSync(root)) walk(root);
+  return out.sort();
+};
+
+const appHash = (kit: string, files: string[]) => {
+  const hash = createHash("sha256");
+  for (const file of files) hash.update(`${file}\0${createHash("sha256").update(readFileSync(join(kit, "herdr-app", file))).digest("hex")}\n`);
+  return hash.digest("hex");
+};
+
+type AppStamp = { version: string; hash: string; files: string[] };
+const readStamp = (dir: string): AppStamp | undefined => {
+  try {
+    const stamp = JSON.parse(readFileSync(join(dir, APP_STAMP), "utf8"));
+    if (typeof stamp.hash === "string" && Array.isArray(stamp.files) && stamp.files.every((f: unknown) => typeof f === "string")) return stamp;
+  } catch {}
+  return undefined;
+};
+
+const kitVersionOf = (kit: string) => {
+  try {
+    return JSON.parse(readFileSync(join(kit, "package.json"), "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+};
+
+// A listed file is a path inside the mod folder, whatever the stamp says: a stamp edited by hand never reaches out.
+const inside = (dir: string, file: string) => {
+  const rel = relative(dir, join(dir, file));
+  return !!rel && !rel.startsWith("..") && !rel.includes(`..${sep}`) && !file.startsWith("/");
+};
+
+/** For doctor: the app mod's line, or nothing when the Herdr app is not installed. */
+export const appModLine = (kit = KIT): string | undefined => {
+  if (!appInstalled()) return undefined;
+  const dir = appModDir();
+  if (!existsSync(dir)) return "opt  Herdr app mod (optional: the status view in the app's own look)\n       -> `sandcastle herdr configure` (shows what it copies and asks first).";
+  const stamp = readStamp(dir);
+  if (!stamp) return `warn Herdr app mod: ${dir} is not the kit's (no ${APP_STAMP} stamp in it).\n       -> Move it or remove it, then run \`sandcastle herdr configure --yes\`.`;
+  if (stamp.hash !== appHash(kit, appFiles(kit))) return "warn Herdr app mod: the copy is older than this kit's herdr-app/.\n       -> `sandcastle herdr configure --yes` copies it again.";
+  return `ok   Herdr app mod: ${dir} is current`;
+};
+
+const removeEmptyDirs = (dir: string, stop: string) => {
+  for (let d = dir; d.startsWith(stop) && d !== stop; d = dirname(d)) {
+    try {
+      if (readdirSync(d).length) return;
+      rmdirSync(d);
+    } catch {
+      return;
+    }
+  }
+};
+
+/**
+ * Copies (or with `remove`, takes out) the app mod. Returns true when it stopped for want of a terminal or `--yes`
+ * (it has printed what it would do), so `configure` can say so once for both halves.
+ */
+const configureAppMod = async (remove: boolean, yes: boolean, byDefault: boolean, kit: string): Promise<boolean> => {
+  const dir = appModDir();
+  const stamp = existsSync(dir) ? readStamp(dir) : undefined;
+  if (remove) {
+    if (!stamp) {
+      if (existsSync(dir)) console.log(`${dir} is not the kit's (no ${APP_STAMP} stamp in it), so it stays.`);
+      return false;
+    }
+    const listed = [...stamp.files, APP_STAMP].filter((f) => inside(dir, f));
+    for (const file of listed) rmSync(join(dir, file), { force: true });
+    for (const file of listed) removeEmptyDirs(dirname(join(dir, file)), dir);
+    // The folder goes only when nothing else is in it.
+    removeEmptyDirs(dir, join(appHome(), "mods"));
+    console.log(`Removed the Herdr app mod from ${dir}.`);
+    return false;
+  }
+  if (existsSync(dir) && !stamp) {
+    throw new OperatorError(`${dir} exists and is not the kit's (no ${APP_STAMP} stamp in it), so nothing was copied. Move it or remove it, then run \`sandcastle herdr configure --yes\` again.`);
+  }
+  const files = appFiles(kit);
+  if (!files.length) return false;
+  const hash = appHash(kit, files);
+  if (stamp?.hash === hash && files.every((f) => existsSync(join(dir, f)))) {
+    console.log(`The Herdr app mod in ${dir} is current: nothing copied.`);
+    return false;
+  }
+  console.log(`This will copy the Herdr app mod (${files.length} files from ${join(kit, "herdr-app")}) to ${dir}.\n\`sandcastle herdr configure --remove\` takes it out again. It is copied, not linked: the app does not reload a mod through a symlink.\n`);
+  if (!yes) {
+    const answer = await confirm(`Copy the Herdr app mod? ${byDefault ? "[Y/n]" : "[y/N]"} `, undefined, undefined, byDefault);
+    if (answer === undefined) return true;
+    if (!answer) {
+      console.log("Nothing copied.");
+      return false;
+    }
+  }
+  mkdirSync(dir, { recursive: true });
+  for (const file of files) {
+    mkdirSync(dirname(join(dir, file)), { recursive: true });
+    writeFileSync(join(dir, file), readFileSync(join(kit, "herdr-app", file)));
+  }
+  // A file the kit dropped since the last copy goes too.
+  for (const old of stamp?.files ?? []) if (!files.includes(old) && inside(dir, old)) rmSync(join(dir, old), { force: true });
+  for (const old of stamp?.files ?? []) removeEmptyDirs(dirname(join(dir, old)), dir);
+  writeFileSync(join(dir, APP_STAMP), `${JSON.stringify({ version: kitVersionOf(kit), hash, files }, null, 2)}\n`);
+  console.log(`Copied the Herdr app mod to ${dir}. The app reloads it on its own.`);
+  return false;
+};
+
+/**
+ * `byDefault`: the answer when the user just presses Enter (setup offers the plugin as a yes). The app mod (when
+ * `herdr-app` is on PATH) and the Herdr TUI plugin are independent: either alone is configured, and a plugin step
+ * that fails never takes back the mod copy (the mod goes first).
+ */
+export const configure = async (remove: boolean, yes: boolean, byDefault = false, kit = KIT) => {
+  const app = appInstalled();
+  const tui = onPath("herdr");
+  if (!tui && !app) throw new OperatorError("Herdr is not installed (https://herdr.dev) - there is nothing to configure.");
+  const needsAnswer = app ? await configureAppMod(remove, yes, byDefault, kit) : false;
+  if (!tui) {
+    if (needsAnswer) throw new OperatorError("Not a terminal: run it in one to answer, or pass --yes.");
+    return;
+  }
+  await configurePlugin(remove, yes, byDefault);
+  if (needsAnswer) throw new OperatorError("Not a terminal: run it in one to answer, or pass --yes.");
+};
+
+const configurePlugin = async (remove: boolean, yes: boolean, byDefault: boolean) => {
   const path = herdrConfigFile();
   const before = existsSync(path) ? readFileSync(path, "utf8") : "";
   const plugin = pluginState();

@@ -45,6 +45,12 @@ Declining is not skipping: every step still runs its check, and only the asking 
      finds none: the block was written by an older kit), run `sandcastle herdr configure --yes`
      once: it replaces its own block, and the sidebar then shows the plan's usage under a run. It is
      optional, and the block is replaced either way, so running it again is safe.
+   - **`herdr-app-mod`**: if doctor lists `warn Herdr app mod` with a stale copy (the Herdr app's copy of the kit's
+     `herdr-app/` is older than this kit's), run `sandcastle herdr configure --yes`: it copies the changed
+     files again and leaves the copy alone when nothing changed, so running it again is safe. If doctor lists
+     `opt  Herdr app mod`, the app is installed and the mod is not: offer `sandcastle herdr configure` (outside a
+     terminal it prints what it would copy and stops), and once the user agrees, `--yes`. A `warn` saying the
+     folder is not the kit's means a `mods/sandcastle` the kit did not write: tell the user, and leave it.
    - **`claude-mod`**: if doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it
      shows a live run above the prompt, says when a ticket needs the user, and tells the session
      when the run ends. It is code that runs inside Claude Code with the user's permissions (the
