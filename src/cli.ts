@@ -66,6 +66,8 @@
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
 //                    it fits its pane unless given "all"
 //                    `--json`: the ticket rows of one reading as JSON (`ticketRows`, `src/status-rows.ts`), for other views
+//                    `--json --frame`: `{ table, frame }`, the same rows and beside them the logo, title, lanes
+//                    and legend as text and palette tones (`frameFacts`, `src/status-frame.ts`)
 //   build [--force]  build the base and project images
 //   preflight [--api-key]
 //                    one reply from every model, nothing else; asks first, as a run
