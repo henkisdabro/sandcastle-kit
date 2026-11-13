@@ -446,7 +446,7 @@ export const runRecords = (run: RunFacts): Map<string, string> => {
   // person is wanted for - the newest ticket that needs them and why - and an ended run says how it ended.
   const msg =
     state === "blocked"
-      ? `${needsYouLine(run.tickets, retried)} · ${counts.merged}/${counts.total} merged`
+      ? `${run.live ? "" : run.record.finishedAt ? "run finished: " : "run ended early: "}${needsYouLine(run.tickets, retried)} · ${counts.merged}/${counts.total} merged`
       : state === "done"
         ? `run finished: ${text}`
         : state === "error"

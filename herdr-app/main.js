@@ -425,7 +425,13 @@ export default class SandcastleStatus extends View {
       try {
         const r = await exec(bin, ["report"], { cwd: project, timeout: 120_000 });
         if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop() || `exit ${r.code}`);
-        this.text = plain(r.stdout);
+        // The summary is written for a terminal: each of its lines is a line, which markdown would fold into its
+        // paragraph. A hard break at each line's end keeps them, outside fenced code.
+        let fenced = false;
+        this.text = plain(r.stdout).split("\n").map((l) => {
+          if (l.startsWith("```")) fenced = !fenced;
+          return fenced || !l.trim() ? l : `${l}  `;
+        }).join("\n");
         this.error = "";
       } catch (e) {
         this.error = String(e?.message ?? e);

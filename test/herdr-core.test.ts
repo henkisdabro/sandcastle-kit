@@ -433,7 +433,7 @@ test("the root stays working while a later turn retries the ticket that failed, 
   // Killed: a record with no finishedAt, but no turn will follow.
   assert.equal(
     runRecords(run(tickets, { live: false, record: drain(2) })).get("root"),
-    record({ state: "blocked", app: "sandcastle", kind: "question", progress: 50, title: "sandcastle shop", msg: "a needs you: not landed · 1/2 merged" }),
+    record({ state: "blocked", app: "sandcastle", kind: "question", progress: 50, title: "sandcastle shop", msg: "run ended early: a needs you: not landed · 1/2 merged" }),
   );
 });
 
@@ -512,4 +512,8 @@ test("a blocked run's msg names the newest ticket that needs a person and why, a
   // A ticket a later turn takes by itself is not the person's.
   assert.equal(needsYouLine(tickets, new Set(["12"])), "#9 needs you: held - human merge: .github/");
   assert.match(runRecords(run(tickets)).get("root")!, new RegExp(`msg=${Buffer.from("#12 needs you: conflict in src/a.ts, src/b.ts +2 (+1 more) · 1/3 merged").toString("base64")}`));
+  // The run's end with a ticket still wanting the person: the msg says the run ended, and who.
+  const msgOf = (over: object) => Buffer.from(/msg=([^:\x07]+)/.exec(runRecords(run(tickets, over)).get("root")!)![1], "base64").toString();
+  assert.equal(msgOf({ live: false, record: { finishedAt: "2026-11-13T00:00:00Z" } }), "run finished: #12 needs you: conflict in src/a.ts, src/b.ts +2 (+1 more) · 1/3 merged");
+  assert.equal(msgOf({ live: false }), "run ended early: #12 needs you: conflict in src/a.ts, src/b.ts +2 (+1 more) · 1/3 merged");
 });
