@@ -322,7 +322,8 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   The run's output goes to `.sandcastle/logs/run-output.log` (emptied at each start), and the
   command waits up to a minute for the run's status view, then prints
   `Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: ...` (in a
-  herdr-core terminal, `Status view: terminal <id>`).
+  herdr-core terminal, `Status view: terminal <id>`; in the Herdr app with its mod installed,
+  `Status view: app pane <pane> (terminal <id>)`).
   Outside Herdr the status view is `sandcastle status` in a terminal of yours.
   A run that ends before it is going is reported with the end of its output.
   A detached run ignores SIGHUP.

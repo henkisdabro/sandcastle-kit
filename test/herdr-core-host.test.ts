@@ -197,7 +197,7 @@ const logs = join(process.cwd(), ".sandcastle/logs");
 mkdirSync(logs, { recursive: true });
 writeFileSync(join(logs, "run.lock"), process.pid + " token fake\\n");
 console.log("host=" + process.env.SANDCASTLE_TERMINAL_HOST);
-console.log("Status view: terminal t9");
+console.log(process.env.FAKE_STATUS_LINE || "Status view: terminal t9");
 setTimeout(() => process.exit(0), 5000);
 `;
 
@@ -224,6 +224,24 @@ test("--detach hands the child its parent's host in place of any inherited one, 
     }
   } finally {
     delete process.env[HOST_ENV];
+  }
+});
+
+test("--detach waits for the app pane's status line too (#959)", async () => {
+  const fake = join(tmp, "scripts/src/cli.ts/fake-run.mjs");
+  mkdirSync(dirname(fake), { recursive: true });
+  writeFileSync(fake, FAKE_RUN);
+  process.env.FAKE_STATUS_LINE = "Status view: app pane p1a2b (terminal t9)";
+  try {
+    const root = join(tmp, "detach-app-pane");
+    mkdirSync(root, { recursive: true });
+    const r = await startDetached(root, [], { entry: [fake], inHerdr: true, timeoutMs: 15_000, host: JSON.stringify({ kind: "core", terminal: { address: "t-kid", pid: 1, labels: {} } }) });
+    const pid = livePid(root);
+    if (pid) process.kill(pid, "SIGKILL");
+    assert.equal(r.code, 0, r.lines.join("\n"));
+    assert.match(r.lines.join("\n"), /Status view: app pane p1a2b \(terminal t9\)\./);
+  } finally {
+    delete process.env.FAKE_STATUS_LINE;
   }
 });
 

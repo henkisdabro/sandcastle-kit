@@ -37,6 +37,7 @@ import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, che
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { terminalHost } from "./terminal-host.ts";
+import { coreStatusLine } from "./herdr-core.ts";
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, onNoPsi, cpuFields, cpuOf, peakOf, pressureFields, pressureOf, readMachineCpu, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
@@ -3720,7 +3721,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   if (!statusPane && viewHost === "core") {
     throw new OperatorError("Could not open the status view in herdr-core - nothing was started. Check `hc ls`, or run `sandcastle status` yourself.");
   }
-  if (statusPane) skipped += sayStart(memo, "status view", viewHost === "core" ? `Status view: terminal ${statusPane}` : `Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`) ? 0 : 1;
+  if (statusPane) skipped += sayStart(memo, "status view", viewHost === "core" ? coreStatusLine(project.root, statusPane) : `Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`) ? 0 : 1;
   // A statement of its own, not part of the line above: a start with no pane still says where its time went. `startTook`, as `took` below is the tickets' times.
   const startTook = clock.line();
   if (startTook) console.log(startTook);

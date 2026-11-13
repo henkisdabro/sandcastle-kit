@@ -90,6 +90,17 @@ The run never moves your focus: it works in the background until you switch to i
 Started in a herdr-core terminal, by hand or with `--detach`, the run opens its status view as a
 core terminal split into that tab, and prints `Status view: terminal <id>`.
 It never adopts the tab or opens one.
+
+In the Herdr app, with the [app mod](#the-herdr-app-mod) installed and current (doctor's line reads
+`ok`), the run opens the mod pane beside you **in place of** the terminal view, and prints
+`Status view: app pane <pane> (terminal <id>)`.
+The status terminal still runs, as an agent listed under yours with no pane: it carries the run's
+state below, and the sandbox terminals sit under it.
+Anywhere else - another herdr-core client, a terminal with no pane in the window, the mod missing
+or stale, or the pane failing to open (one line says why) - the run opens the terminal view as
+above.
+The next run closes the pane an earlier run opened, as it replaces the status terminal.
+`sandcastle status` still opens the terminal view by hand, anywhere.
 The kit talks to herdr-core alone (`hc`), so the Herdr app, and any other client of herdr-core,
 shows the same thing:
 
@@ -251,3 +262,8 @@ files the stamp lists, then the folder if it is empty.
 A `mods/sandcastle/` with no stamp is not the kit's: `configure` refuses, naming the folder, and copies
 nothing; move it or remove it first.
 The mod and the plugin are independent: a plugin step that fails does not undo the mod's copy.
+
+Once installed, a run started in the app opens the mod pane in place of the terminal status view
+([herdr-core](#herdr-core) above); there is no setting for it.
+The pane reads the run through the same kit's `sandcastle`, so a run from a clone of the kit shows
+that clone's view.

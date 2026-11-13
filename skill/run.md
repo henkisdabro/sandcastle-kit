@@ -115,7 +115,9 @@ This continues SKILL.md: run its "Before every action" first.
    Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: .sandcastle/logs/run-output.log. ...
    ```
 
-   **Confirm that line.** In a herdr-core terminal it says `Status view: terminal <id>`, outside Herdr
+   **Confirm that line.** In a herdr-core terminal it says `Status view: terminal <id>` (in the Herdr
+   app with the kit's mod installed, `Status view: app pane <pane> (terminal <id>)`: the mod pane in
+   place of the terminal view), outside Herdr
    ``Status view: run `sandcastle status` ``. If the
    command refuses, prints `The run ended at once`, or names no status view where Herdr is in use,
    tell the user plainly that there is no run to watch. Otherwise tell them the pid, and the tab

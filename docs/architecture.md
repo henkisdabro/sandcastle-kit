@@ -1309,6 +1309,22 @@ started.
 A start that fails part-way ends what it started; a run with no status view refuses to start, as
 on Herdr TUI.
 
+The Herdr app's mod pane (#959, `appPane`, over `src/herdr-app.ts`'s `AppPorts`, which a test
+replaces): the mod pane opens in place of the status terminal's pane only when the caller carries
+`herdr.space` and `herdr.tab`, the mod is current (`appModState`, doctor's `ok`), `herdr-app ls`
+gives the caller a pane on this machine, and `pane.split` with `mod: "sandcastle"` answers a pane.
+Its props are the project and this kit's `bin/sandcastle status --json --frame`, never the
+`sandcastle` on PATH.
+The status terminal is then started with no `herdr.*` labels and `--parent <caller>`: the app gives
+it no pane and lists it under the caller, and it still writes the run's records and parents the
+slots, so the root record's needs-you alert and the slots' nesting do not depend on the mod.
+Any of those failing opens the terminal view as before; a failed split says so in one line.
+The pane is recorded as `pane` in `core-view.json` and, like the status terminal, outlives the run
+to show how it ended: a later instance's start closes it (`pane.close`), the same instance's next
+turn keeps it, and a start that fails after the split closes it.
+`coreStatusLine` words the start line (`Status view: app pane <pane> (terminal <id>)`), which
+`src/detach.ts` waits for as it does the terminal's.
+
 What the status view tells the core (`coreRecords`, `runRecords`): the terminal's root record is
 `working`, `blocked` with `kind=question` while any ticket needs a person (a `not landed` or `conflict` ticket
 in `retriedNextTurn`'s set, `mod/hooks/run-record.ts`, does not: a later turn takes it, and a run that is not
