@@ -530,3 +530,14 @@ test("a 300-character note is cut in a blocked run's msg, which keeps the merged
   // With room to spare the note is whole.
   assert.equal(needsYouLine(tickets, new Set(), 400), `#12 needs you: held - human merge: ${"x".repeat(286)} (+1 more)`);
 });
+
+// A ticket file's id is the bare slug: one long enough overruns the msg by itself, and the count must still stay.
+test("a long ticket-file id is cut in a blocked run's msg, which keeps the merged count; no stray … with no note", () => {
+  const t = (state: string, since: number, more: object = {}) => ({ state, since, ...more }) as never;
+  const slug = `fix-${"a".repeat(200)}`;
+  const tickets = { [slug]: t("held", 200), "3": t("merged", 50) };
+  const msg = Buffer.from(/msg=([^:\x07]+)/.exec(runRecords(run(tickets, { live: false })).get("root")!)![1], "base64").toString();
+  assert.ok([...msg].length <= 160, msg);
+  assert.match(msg, /^run ended early: fix-a+… · 1\/2 merged$/);
+  assert.equal(needsYouLine({ "12": t("held", 1) }, new Set(), 40), "#12 needs you: held");
+});

@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-type Overlay = { key: string; props: { report: { project: string; bin: string } } };
+type Overlay = { key: string; props: { report: { project: string; bin: string; started: string } } };
 type Mod = {
   reportMarkdown: (text: string) => string;
   plain: (text: string) => string;
@@ -88,6 +88,12 @@ test("a markdown link, an image, emphasis and HTML in the report's text are esca
   assert.equal(md.slice(0, 4).map((l) => l.replace(/\\([!-/:-@[-`{-~])/g, "$1").replace(/ {2}$/, "")).join("\n"), report.split("\n").slice(0, 4).join("\n"));
 });
 
+test("a ticket title holding U+2028 or U+2029 is escaped like any other line, not an error", () => {
+  const { mod } = load();
+  const md = mod.reportMarkdown(mod.plain("- #7 Fix [the](x) thing\u2028now\u2029too"));
+  assert.equal(md, "- \\#7 Fix \\[the\\]\\(x\\) thing\u2028now\u2029too  ");
+});
+
 test("a second run's end in the same pane shows that run's report, not the first's left open", () => {
   const { mod, opened } = load();
   const view = new mod.SandcastleStatus();
@@ -102,7 +108,9 @@ test("a second run's end in the same pane shows that run's report, not the first
   view.seen({ ...second, state: "running" }, { ...second, state: "finished" });
   assert.equal(opened.length, 2, "each run's end opens its report");
   assert.notEqual(opened[1].key, opened[0].key, "run 2's report is a window of its own, not run 1's kept by the app");
-  assert.deepEqual(opened[1].props.report, { project: "/p", bin: "/kit/bin/sandcastle" });
+  assert.deepEqual(Object.keys(opened[1].props.report), ["project", "bin", "started"]);
+  assert.match(opened[1].props.report.started, /^\d\d:\d\d$/, "the window's title names the run's start");
+  assert.notEqual(opened[1].props.report.started, opened[0].props.report.started);
   // A later reading of the same ended run opens nothing more.
   view.seen({ ...second, state: "finished" }, { ...second, state: "finished" });
   view.seen({ ...second, state: "running" }, { ...second, state: "finished" });

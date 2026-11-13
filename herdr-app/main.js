@@ -223,10 +223,17 @@ const sandboxWindow = (terminal, title) =>
  * show it again, unread, for the next run's under the same key.
  */
 const openReport = (project, bin, run) =>
-  openOverlay({ kind: "window", key: `sandcastle-report-${project}-${run?.startedAt ?? ""}`, width: 0.55, height: 0.7, mod: "sandcastle", props: { report: { project, bin } } });
+  openOverlay({ kind: "window", key: `sandcastle-report-${project}-${run?.startedAt ?? ""}`, width: 0.55, height: 0.7, mod: "sandcastle", props: { report: { project, bin, started: startedClock(run?.startedAt) } } });
+
+// The run's start as the report window's title shows it: windows left open from earlier runs look alike otherwise.
+const startedClock = (startedAt) => {
+  const d = new Date(startedAt ?? "");
+  return Number.isNaN(d.getTime()) ? "" : `${two(d.getHours())}:${two(d.getMinutes())}`;
+};
 
 // A heading's, a list item's or a numbered step's mark at a line's start: the report's own markdown, kept.
-const MARK = /^(\s*(?:#{1,6} |[-*+] |\d+\. )?)(.*)$/;
+// `[^]*`, not `.*`: `.` stops at U+2028 and U+2029, which a ticket title may hold, and the match would fail.
+const MARK = /^(\s*(?:#{1,6} |[-*+] |\d+\. )?)([^]*)$/;
 /**
  * The report's text as markdown that shows each line as written. Ticket titles (anyone can file one on a public repo)
  * and agents' notes are in it: a link or an image in them would be live (an image loads from its host), and `_` or
@@ -466,7 +473,7 @@ export default class SandcastleStatus extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => fn(cx)).child(label);
     return v_flex().id("report").size_full().min_h(0).bg(t.popover).text_color(t.foreground).text_size(13)
       .child(h_flex().h(34).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
-        .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(`sandcastle report · ${props().report.project.split("/").pop()}`))
+        .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(`sandcastle report · ${props().report.project.split("/").pop()}${props().report.started ? ` · run of ${props().report.started}` : ""}`))
         .child(button("report-reload", "Reload", (cx) => this.loadReport(cx)))
         .child(button("report-close", "Close", () => closeOverlay(props().overlay))))
       .child(v_flex().id("report-body").flex_1().min_h(0).overflow_y_scrollbar().p(16)

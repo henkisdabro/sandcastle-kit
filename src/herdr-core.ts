@@ -427,10 +427,11 @@ export const needsYouLine = (tickets: Record<string, TicketRecord>, retried: Rea
   const files = t.files?.length ? ` in ${t.files.slice(0, 2).join(", ")}${t.files.length > 2 ? ` +${t.files.length - 2}` : ""}` : "";
   const why = files || (t.note ? ` - ${t.note}` : "");
   const others = wanted.length > 1 ? ` (+${wanted.length - 1} more)` : "";
-  const head = `${ref} needs you: ${WORDS[t.state!] ?? t.state}`;
-  const fit = room - [...head].length - [...others].length;
-  const cut = [...why].length > fit ? `${[...why].slice(0, Math.max(0, fit - 1)).join("")}…` : why;
-  return `${head}${cut}${others}`;
+  // The ref is cut too when it alone overruns (a ticket file's id can be a long slug): what follows is the count.
+  const body = [...`${ref} needs you: ${WORDS[t.state!] ?? t.state}${why}`];
+  const fit = room - [...others].length;
+  const cut = body.length > fit ? `${body.slice(0, Math.max(0, fit - 1)).join("")}…` : body.join("");
+  return `${cut}${others}`;
 };
 
 /**
