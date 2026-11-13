@@ -114,6 +114,12 @@ export const appCliPorts: AppPorts = {
   split(pane, props) {
     const out = JSON.parse(appCli(["do", "pane.split", JSON.stringify({ direction: "right", pane, mod: MOD_NAME, props })])) as { pane?: unknown; error?: unknown };
     if (typeof out.pane !== "string") throw new Error(`herdr-app pane.split gave no pane: ${JSON.stringify(out).slice(0, 120)}`);
+    // The split focuses the new pane: the keyboard goes back to the person's terminal, as the terminal view leaves it.
+    try {
+      appCli(["do", "pane.focus", JSON.stringify({ pane })]);
+    } catch {
+      /* the pane is open; focus is a nicety */
+    }
     return out.pane;
   },
   close(pane) {
