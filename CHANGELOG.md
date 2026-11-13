@@ -9,6 +9,43 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- The end line of a `drain` run now gives the whole run: its start and end times, its span, the
+  tickets landed (as #refs, the first 20 and a count of the rest) and the tokens summed over every
+  turn. A run recorded before this prints the short line as before. (#942)
+
+### Fixed
+
+- A Claude plan reading that carries only one window (Claude Code 2.1.322 writes the weekly one
+  alone) is now kept, merged with the last event that had the other window. The usage pause, the
+  closing summary, the Herdr token and the status view's plan lane work again. (#937)
+- The estimate counts a run that skipped its verify as 0, instead of the verify time of earlier
+  runs that ran one. (#938)
+- The typical landing gates are now the median over the landings that ran gates, not counting
+  fast-forwards. Recorded landing gates of 0 ms stay in that figure. (#938)
+- A follow-on turn now also takes a late ticket that is blocked only by other late tickets, so it
+  starts in that turn once its blocker lands. (#939)
+- A landing that did not land now says why in the live output, and that a later turn retries it.
+  A carried branch's lines now name the turn it came from, and the base-gates skip line reads
+  "gated this run". (#940)
+- A non-final turn's closing summary no longer counts a ticket the next turn re-runs as "need
+  fixing". The Settings line now names the concurrency (`concurrency 2 of 4 asked`). (#941)
+- When the keep-awake helper fails at once, the start line now gives its error, and later turns no
+  longer start it again. Resuming a run now restores keep-awake. (#943)
+- Notes the agents give for a person to check are joined without a stray full stop before each
+  semicolon, and a repeat that differs only by its full stop is dropped. (#945)
+
+### Changed
+
+- Keep awake under WSL no longer tries the Linux helper. It says that Windows decides when the PC
+  sleeps, so the PC must be kept awake in Windows' power settings. (#943)
+- The start line now says, before the models and the colon, which setting holds the sandbox cap
+  (`SANDCASTLE_MAX_SANDBOXES`, `maxSandboxes` or the default) and points at `sandcastle size`. It
+  also says that gate passes run beside the workers on their own slots. (#944)
+- When `pnpm test:related` refuses a change that matches too many files, it lists only the first
+  20 and gives a count of the rest. (#945)
+
 ## [0.23.0] - 2026-11-12
 
 ### Upgrading
