@@ -186,5 +186,5 @@ test("a dirty tree without the file gets no hint about it", () => {
 
 test("the run's start line is printed by burndown() only when the file set a key", () => {
   const source = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(source, /const localLine = localConfigLine\(project\);\n\s+if \(localLine\) console\.log\(localLine\);/);
+  assert.match(source, /const localLine = localConfigLine\(project\);\n\s+if \(localLine\) skipped \+= sayStart\(memo, "local", localLine\) \? 0 : 1;/);
 });

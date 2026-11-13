@@ -151,6 +151,19 @@ let settling: { child: ChildProcess; released: boolean } | undefined;
 let released = false;
 
 /**
+ * A start line a later turn of the same run says only when it differs from the one an earlier turn said under
+ * the same `key`: the versions, the CPU limit and the pauses are the same in turns 2-4 and push each turn's ticket
+ * list and estimate away from its summary. `memo` is the run's (`TurnOptions.startLines`); with none, a single turn
+ * with no loop, every line is printed. Returns whether it printed, so the turn can count what it left out.
+ */
+export const sayStart = (memo: Map<string, string> | undefined, key: string, line: string, print: (line: string) => void = console.log): boolean => {
+  if (memo?.get(key) === line) return false;
+  memo?.set(key, line);
+  print(line);
+  return true;
+};
+
+/**
  * The start line that tells the operator the base is the run's. The guard cannot tell a person's
  * commit on the base from a sandbox's, so one made mid-run stops the run (pipelines in flight
  * finish, nothing more lands) and the tokens spent on them buy nothing until a re-run. Worktrees share
@@ -423,7 +436,8 @@ export const recordPreflightFailure = (record: { update: (fields: RunRecord) => 
 };
 
 // `extra` is a model only some tickets ask for (a label), with where it came from.
-export const preflight = async (project: Project, image: string, extra: { model: string; from: string }[] = []) => {
+// `say`: where the ok line goes. A run's later turn passes `sayStart`, so the line the first turn printed is not printed again.
+export const preflight = async (project: Project, image: string, extra: { model: string; from: string }[] = [], say: (line: string) => void = console.log) => {
   // Before any probe, and with preflight skipped too: without Codex on the host every ticket's
   // cross-review failed one by one, and preflight said only "spawn codex ENOENT" after the Claude probes.
   if (CROSS_REVIEW && spawnSync("codex", ["--version"], { stdio: "ignore" }).error) {
@@ -476,7 +490,7 @@ export const preflight = async (project: Project, image: string, extra: { model:
     const claudeOnly = failures.every((f) => f.model !== CROSS_REVIEW_MODEL);
     throw new OperatorError(preflightFailure(failures, claudeOnly ? credentialSource(project) : undefined, CROSS_REVIEW ? CROSS_REVIEW_MODEL : undefined));
   }
-  console.log(`Preflight ok: ${MODELS_LINE}`);
+  say(`Preflight ok: ${MODELS_LINE}`);
 };
 
 // ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ test("the start's time line prints after the Status view line, as a statement of
   assert.ok(view < line && line < image, "view, then the line, then the image step");
   // Not inside the view line's `if (statusPane)`: a start with no pane still says where its time went.
   const viewStatement = src.slice(src.lastIndexOf("\n", view) + 1, src.indexOf("\n", view));
-  assert.match(viewStatement, /^  if \(statusPane\) console\.log\(.*\);$/, "the view line is a one-line if");
+  assert.match(viewStatement, /^  if \(statusPane\) skipped \+= sayStart\(.*\) \? 0 : 1;$/, "the view line is a one-line if");
   const printStart = src.lastIndexOf("\n", line) + 1;
   assert.match(src.slice(printStart, line), /^  const \w+ = $/, "the line is read by a statement at the function's own indent");
   assert.match(src.slice(line, line + 120), /clock\.line\(\);\n  if \(\w+\) console\.log\(\w+\);/);

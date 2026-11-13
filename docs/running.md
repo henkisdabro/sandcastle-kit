@@ -91,6 +91,11 @@ blocker has landed, one whose blocker is open and not in the run waits for a lat
 one whose existing branch changes a file another ready ticket's branch also changes.
 Then come the image check, preflight, the hook check and the base gates; a red one stops the run
 before any agent starts.
+Later turns of an autonomy run print only the start lines that changed since an earlier turn
+(the versions, the CPU and memory limits, `Keep awake`, the base-branch line, the status view, the
+preflight, the load and usage pauses and the `Lean:` line), then
+`(N start line(s) unchanged from an earlier turn)`; the API-credits line, the ticket list, the
+estimate and the turn's own lines print every turn.
 
 **Spending an API key is never silent.** Claude Code spends `ANTHROPIC_API_KEY` before
 `CLAUDE_CODE_OAUTH_TOKEN`, and the personal and the project `.env` merge key by key, so an API key
@@ -506,6 +511,7 @@ Then:
 after a turn it re-runs only the tickets that ended in a merge conflict, whose blockers have now
 landed, or that merged partly done and are still queued - `1` asks first, `2` re-runs once, `3` up
 to twice.
+A later turn repeats only the start lines that changed, and says how many it left out.
 Each turn prints its own closing summary, and the last one also carries what the earlier turns left
 for a person (a held branch, a partly done remainder, a check by hand, a follow-up to triage), each
 line ending `(turn N)`, so `sandcastle report` and `sandcastle wait` never say "Needs you: none"
