@@ -58,6 +58,11 @@ const CACHE_AMBER = 70;
 // The lanes whose rows are key and value: the key (the row's first, muted segment) gets a column of its own.
 const KEYED = new Set(["MACHINE", "MODELS", "PLAN"]);
 const PAD = 14;
+// The header's cards: one gap between them (and the title), one inner padding, one row gap, one key column.
+const CARD_GAP = 10;
+const CARD_PAD = 10;
+const LANE_ROW_GAP = 3;
+const KEY_WIDTH = 72;
 const BAR = /^[█░▓]+$/;
 
 const two = (n) => String(n).padStart(2, "0");
@@ -304,10 +309,13 @@ export default class SandcastleStatus extends View {
           close();
           peek(this.ticket.terminal);
         })))
-        .when(Boolean(card.tracker), (el) => el.child(action("card-tracker", /^https?:/.test(card.tracker) ? "Open in the tracker" : card.tracker.startsWith("/") ? "Open the ticket file" : card.tracker, () => {
-          close();
-          openTracker(card.tracker, this.ticket.project);
-        })))
+        // A link or a ticket file opens; anything else is the reason there is none, said as text.
+        .when(Boolean(card.tracker), (el) => el.child(/^https?:|^\//.test(card.tracker)
+          ? action("card-tracker", card.tracker.startsWith("/") ? "Open the ticket file" : "Open in the tracker", () => {
+              close();
+              openTracker(card.tracker, this.ticket.project);
+            })
+          : div().px(8).py(2).text_color(t.dim).child(card.tracker)))
         .child(action("card-folder", "Open the log folder", () => void openExternal(logs))));
   }
 
@@ -494,13 +502,21 @@ export default class SandcastleStatus extends View {
           }
         }
         i--;
-        parts.push(div().flex_none().w(Math.max(total * 9, 36)).h(6).mx(4).rounded_full().bg(t.hover)
+        // No left margin: a gauge starts at the value column's edge, as a text value in the same card does.
+        parts.push(div().flex_none().w(Math.max(total * 9, 36)).h(6).mr(6).rounded_full().bg(t.hover)
           .child(div().h_full().rounded_full().w(Math.max(total * 9, 36) * (filled / (total || 1))).bg(c[tone] ?? c.head)));
         continue;
       }
-      parts.push(div().flex_none().whitespace_nowrap().text_color(c[s.tone] ?? c.plain).when(Boolean(s.bold), (el) => el.font_semibold()).child(s.text));
+      // A segment breaks after each `, ` so a list (MODELS' `sonnet/high, review opus/high`) wraps between its items;
+      // a piece still wider than its card is cut with an ellipsis inside it rather than running past its edge.
+      for (const piece of s.text.split(/(?<=, )/)) {
+        parts.push(div().min_w(0).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c[s.tone] ?? c.plain).when(Boolean(s.bold), (el) => el.font_semibold()).child(piece));
+      }
     }
     // A row longer than its card wraps between its pieces rather than losing words off its end.
+    // Never `flex_1` or `overflow_hidden` here: in a lane's column the first makes the row's height basis 0 and the
+    // second drops its content minimum, so a row that wraps kept one line's height and the next row painted over its
+    // second (test/herdr-app-layout.test.ts holds it).
     return h_flex().flex_wrap().items_center().min_w(0).when(size !== undefined, (el) => el.text_size(size)).children(parts);
   }
 
@@ -518,7 +534,7 @@ export default class SandcastleStatus extends View {
       div().font_family(MONO).text_color(t.accent).child(clockNow()),
       ...(ti.version ? [div().text_color(t.muted).child(`v${ti.version}`)] : []),
     ].flatMap((el, i) => (i === 0 ? [el] : [dot(), el]));
-    return h_flex().flex_none().gap(12).items_center().min_w(260).py(4)
+    return h_flex().flex_none().gap(12).items_center().min_w(260)
       .child(image(`mods/sandcastle/${settings()?.dark === false ? "castle-light" : "castle"}.svg`).flex_none().w(48).h(45))
       .child(v_flex().gap(2).min_w(0)
         .child(h_flex().gap(4).text_size(11).font_semibold().text_color(t.muted).child(ti.wordmark))
@@ -528,24 +544,29 @@ export default class SandcastleStatus extends View {
 
   lane(t, c, lane) {
     const keyed = KEYED.has(lane.name);
-    const rows = lane.rows.map((r) => {
-      if (!keyed) return this.segs(t, c, squeeze(r));
+    // The terminal's blank rows only fill its character grid: here every row sits LANE_ROW_GAP apart, and a value
+    // that wraps adds only its own extra line.
+    const rows = lane.rows.filter((r) => r.length).map((r, i) => {
+      if (!keyed) return this.segs(t, c, squeeze(r)).id(`lane-${lane.name}-${i}`);
       // A key column: the row's first muted segment, or none when the row continues the one above (PLAN's windows).
+      // One width in every card, so a card's values start at one x; the key sits on the value's first line.
       const lead = r[0] && r[0].tone === "mute" ? r[0].text.trim() : "";
       const rest = squeeze(lead ? r.slice(1) : r);
-      return h_flex().gap(8).min_w(0)
-        .child(div().flex_none().w(64).text_color(t.muted).child(lead))
-        .child(this.segs(t, c, rest));
+      return h_flex().id(`lane-${lane.name}-${i}`).items_start().gap(8).min_w(0)
+        .child(div().flex_none().w(KEY_WIDTH).text_color(t.muted).child(lead))
+        .child(this.segs(t, c, rest).flex_1());
     });
-    return v_flex().flex_1().min_w(200).gap(3).p(10).rounded(6).bg(t.raised)
+    return v_flex().id(`lane-${lane.name}`).flex_1().min_w(200).overflow_hidden().gap(LANE_ROW_GAP).p(CARD_PAD).rounded(6).bg(t.raised)
       .child(div().text_size(10.5).font_semibold().text_color(t.muted).child(lane.title.text))
-      .children(rows.map((r, i) => (lane.rows[i]?.length ? r : div().h(4))));
+      .children(rows);
   }
 
   header(t, c, frame) {
     // The title and the lanes in one wrapping row: in a wide pane the lanes sit beside the title, in a narrow one
     // they wrap under it, each still whole.
-    const out = [h_flex().flex_wrap().gap(10).items_start().child(this.title(t, c, frame)).children(frame.lanes.map((l) => this.lane(t, c, l)))];
+    // One gap between every card and the title, across and down; the cards of one line stretch to its tallest, their
+    // rows from the top.
+    const out = [h_flex().flex_wrap().gap(CARD_GAP).items_stretch().child(this.title(t, c, frame)).children(frame.lanes.map((l) => this.lane(t, c, l)))];
     if (frame.queueNote) out.push(h_flex().gap(6).text_size(12).text_color(c.ylw).child("⚠").child(div().text_color(t.muted).text_ellipsis().child(frame.queueNote)));
     return out;
   }
