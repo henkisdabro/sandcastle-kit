@@ -251,23 +251,25 @@ export const PNPM_STORE_SANDBOX = "/home/agent/.pnpm-store";
 export const PNPM_STORE_SETUP = `pnpm config set store-dir ${PNPM_STORE_SANDBOX}`;
 
 /**
- * The host's pnpm store-dir, or undefined when pnpm is not on the host (or cannot say).
+ * The host's pnpm store-dir, or why there is none: pnpm is not on the host (or cannot say), or
+ * `pnpm store path` gave no answer within `timeout` - a loaded machine, not a missing pnpm, so the
+ * note says which.
  * `pnpm store path` prints the versioned directory (`<store-dir>/v11`), and pnpm adds its own
  * version segment to any `store-dir` it is given: mounting the versioned path would make the
  * sandbox's store `<store-dir>/v11/v11`, a second store nested in the host's that no install of
  * the host ever fills. The parent is what the sandbox's `store-dir` must be, so its `<mount>/vN`
  * is the host's own store when the pnpm majors match (another major gets its own `vN` beside it).
  */
-export const hostPnpmStore = (root: string): string | undefined => {
+export const hostPnpmStore = (root: string, timeout = 20_000): { path: string } | { problem: "missing" | "timeout" } => {
   let versioned: string;
   try {
-    versioned = execFileSync("pnpm", ["store", "path"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20_000 }).trim();
-  } catch {
-    return undefined;
+    versioned = execFileSync("pnpm", ["store", "path"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout }).trim();
+  } catch (e) {
+    return { problem: (e as NodeJS.ErrnoException).code === "ETIMEDOUT" ? "timeout" : "missing" };
   }
-  if (!versioned) return undefined;
+  if (!versioned) return { problem: "missing" };
   // A path with no `vN` last segment is not one pnpm would add a segment to: mount it as it is.
-  return /^v\d+$/.test(basename(versioned)) ? dirname(versioned) : versioned;
+  return { path: /^v\d+$/.test(basename(versioned)) ? dirname(versioned) : versioned };
 };
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
@@ -604,10 +606,12 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   let mounts = config.mounts ?? [];
   let setup = config.setup ?? [];
   if (config.pnpmStore) {
-    const store = hostPnpmStore(root);
-    if (!store) {
-      console.warn("pnpmStore is set but pnpm is not on this host (`pnpm store path` failed): no store mounted, each sandbox's install downloads.");
+    const host = hostPnpmStore(root);
+    if ("problem" in host) {
+      const why = host.problem === "timeout" ? "`pnpm store path` gave no answer within 20 s" : "pnpm is not on this host (`pnpm store path` failed)";
+      console.warn(`pnpmStore is set but ${why}: no store mounted, each sandbox's install downloads.`);
     } else {
+      const store = host.path;
       if (!mounts.some((m) => m.sandboxPath === PNPM_STORE_SANDBOX)) {
         // A project `.npmrc` store-dir can point at the root, `.sandcastle/` or `.git`: the same check as a literal mount.
         const mount = { hostPath: store, sandboxPath: PNPM_STORE_SANDBOX };
