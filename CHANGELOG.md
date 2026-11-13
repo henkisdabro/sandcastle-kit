@@ -9,14 +9,56 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-13
+
 ### Added
 
+- `sandcastle report --run <pid|startedAt>` prints the closing summary of a recorded run that was
+  stopped, crashed or replaced before it printed one, built from `history.jsonl` or run.json with
+  the git state and blockers as they are now. (#922)
 - The end line of a `drain` run now gives the whole run: its start and end times, its span, the
   tickets landed (as #refs, the first 20 and a count of the rest) and the tokens summed over every
   turn. A run recorded before this prints the short line as before. (#942)
 
 ### Fixed
 
+- With `CROSS_REVIEW=1`, sandboxes now get a copy of the Codex login with the refresh token
+  blanked, so a sandbox can no longer refresh and rotate it and leave the host's login failing
+  with "refresh token was already used". If the copy cannot be written, the sandbox does not open
+  and the partial files are removed, rather than the host's refresh token reaching it. (#920)
+- A run refused by its preflight now keeps the cause in the run record (`preflightFailure`), and
+  the closing summary's headline shows it instead of pointing at the run's output. (#921)
+- Codex cross-review skips end at the window's reset, and stay recorded when a retry reuses an
+  earlier review. (#923)
+- The status view's MACHINE lane no longer shows a sandbox waiting for a gates slot as a count
+  over the limit (`4/3`): the sandboxes gauge counts the slots against the limit and adds
+  `+N for gates` for the sandboxes outside it. (#924)
+- A worktree tool (Claude Code's worktree setup) rewriting a relative `core.hooksPath` to its
+  absolute form no longer stops a run or leaves sandbox commits without hooks: every sandbox is
+  given the tracked relative path through its git environment, and the guard takes that exact
+  rewrite with one line. (#925)
+- A change to the shared `.git` made on the host between a red gate and its repair pass is now
+  caught before the pass starts, so the run stops with the guard's message instead of spending a
+  repair pass on a red the change caused. (#926)
+- A follow-up the closing summary lists to file by hand (after a stop, a failed filing or a `.git`
+  stop) now shows its full title and an `evidence:` line under its bullet, so nobody has to search
+  the agent logs for the `<followup>` tag; run.json keeps the evidence whole. (#927)
+- A run stopped with Ctrl-C or `sandcastle stop` during its base gates or a verify now removes its
+  own throwaway worktree and `sandcastle/*` branch on exit, instead of leaving them for
+  `sandcastle clean`. They are kept when the run stopped on the guard, or when its `.git` check
+  fails at that moment. (#928)
+- A run's start on a large queue no longer re-reads every in-flight ticket's files at each admit,
+  so the `schedule` step is linear in the tickets (39 tickets: about 80 git commands instead of
+  1,600). (#929)
+- A slow or failing GitHub read during a run (a ticket's withdrawal check, the outsider-edit
+  check, the reopen check, the blocker reads) is now tried three times when GitHub times out or
+  answers with a 5xx, so one slow minute no longer costs a ticket its landing or its start. (#932)
+- A `not landed` or `conflict` ticket that a later autonomy turn will re-run by itself no longer
+  reads as needing you while the run goes. The status view, the Herdr app's run record and the
+  Herdr tab bar show `later` ("retried next turn") until the run's last turn or its end (#933);
+  its slot terminal is not marked blocked, and the Herdr sidebar and run agent do not count it
+  (#934); and the Claude Code mod raises no needs-you notice, pinned line or band count for it
+  (#935).
 - A Claude plan reading that carries only one window (Claude Code 2.1.322 writes the weekly one
   alone) is now kept, merged with the last event that had the other window. The usage pause, the
   closing summary, the Herdr token and the status view's plan lane work again. (#937)
@@ -42,6 +84,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- With `USAGE_PAUSE` set, a Codex usage window at the threshold no longer pauses the run: the
+  ticket's cross-review is skipped instead, and the closing summary lists the tickets that landed
+  without one. Only Claude's windows pause the run. (#923)
+- `sandcastle doctor` now warns, instead of giving a FIX, for a `core.hooksPath` that is the exact
+  absolute form of a tracked hooks directory, since sandboxes still run its hooks; an absolute path
+  to an untracked directory keeps the FIX. (#925)
 - Keep awake under WSL no longer tries the Linux helper. It says that Windows decides when the PC
   sleeps, so the PC must be kept awake in Windows' power settings. (#943)
 - The start line now says, before the models and the colon, which setting holds the sandbox cap
@@ -3344,7 +3392,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.20.0...v0.21.0
