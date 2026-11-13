@@ -39,6 +39,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- In the Herdr app with the kit's app mod installed and current, a run opens the mod pane beside
+  you in place of the terminal status view, and says `Status view: app pane <pane> (terminal <id>)`.
+  The status terminal still runs, with no pane, listed under your agent. Outside the app, or when
+  the mod is missing, stale or fails to open, the run opens the terminal view as before;
+  `sandcastle status` still opens it by hand anywhere. (#959)
 - Claude passes and the Codex cross-review now return a schema-validated report by default, read
   in place of the tags in the agent's prose; a pass whose report is missing, cut off or refused is
   still read from its tags. `REPORT_SCHEMA=0` restores the previous behaviour for one release.

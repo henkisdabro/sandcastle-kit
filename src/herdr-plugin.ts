@@ -13,7 +13,6 @@
 // show the tokens a run reports (src/herdr.ts).
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
@@ -31,6 +30,7 @@ import { readTickets, retriedNextTurn, type TicketRecord, type TicketState, WORD
 import type { TicketPass } from "./report.ts";
 import { KIT } from "./sandbox.ts";
 import { terminalHost } from "./terminal-host.ts";
+import { APP_STAMP, appFiles, appHash, appHome, appInstalled, appModDir, appModState, onPath, readStamp } from "./herdr-app.ts";
 
 export const PLUGIN_ID = "sandcastle-kit";
 export const PLUGIN_DIR = join(KIT, "herdr");
@@ -202,55 +202,6 @@ export const pluginState = () => {
 // copies it into the app's mods directory and copies it again when the kit's files change.
 // ---------------------------------------------------------------------------
 
-const APP_STAMP = ".sandcastle-kit";
-
-const onPath = (command: string) => spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0;
-const appInstalled = () => onPath("herdr-app");
-
-/** The app's home: `$HERDR_APP_HOME`, else `~/.config/herdr-app`. */
-export const appHome = (env: NodeJS.ProcessEnv = process.env) => env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
-const appModDir = () => join(appHome(), "mods", "sandcastle");
-
-/**
- * The kit's tracked `herdr-app/` files (relative to it, sorted), not the app's own `jsconfig.json` and
- * `gpui-kit.d.ts` that it writes into a mod folder it loads: `herdr-app/.gitignore` names those. Read from the
- * folder, not from git, so a kit without a `.git` (a release archive) copies the same files.
- */
-const appFiles = (kit: string) => {
-  const root = join(kit, "herdr-app");
-  const ignored = new Set(
-    (existsSync(join(root, ".gitignore")) ? readFileSync(join(root, ".gitignore"), "utf8") : "")
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith("#")),
-  );
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && !ignored.has(entry.name)) out.push(relative(root, full).split(sep).join("/"));
-    }
-  };
-  if (existsSync(root)) walk(root);
-  return out.sort();
-};
-
-const appHash = (kit: string, files: string[]) => {
-  const hash = createHash("sha256");
-  for (const file of files) hash.update(`${file}\0${createHash("sha256").update(readFileSync(join(kit, "herdr-app", file))).digest("hex")}\n`);
-  return hash.digest("hex");
-};
-
-type AppStamp = { version: string; hash: string; files: string[] };
-const readStamp = (dir: string): AppStamp | undefined => {
-  try {
-    const stamp = JSON.parse(readFileSync(join(dir, APP_STAMP), "utf8"));
-    if (typeof stamp.hash === "string" && Array.isArray(stamp.files) && stamp.files.every((f: unknown) => typeof f === "string")) return stamp;
-  } catch {}
-  return undefined;
-};
-
 const kitVersionOf = (kit: string) => {
   try {
     return JSON.parse(readFileSync(join(kit, "package.json"), "utf8")).version ?? "unknown";
@@ -267,12 +218,12 @@ const inside = (dir: string, file: string) => {
 
 /** For doctor: the app mod's line, or nothing when the Herdr app is not installed. */
 export const appModLine = (kit = KIT): string | undefined => {
-  if (!appInstalled()) return undefined;
+  const state = appModState(kit);
   const dir = appModDir();
-  if (!existsSync(dir)) return "opt  Herdr app mod (optional: the status view in the app's own look)\n       -> `sandcastle herdr configure` (shows what it copies and asks first).";
-  const stamp = readStamp(dir);
-  if (!stamp) return `warn Herdr app mod: ${dir} is not the kit's (no ${APP_STAMP} stamp in it).\n       -> Move it or remove it, then run \`sandcastle herdr configure --yes\`.`;
-  if (stamp.hash !== appHash(kit, appFiles(kit))) return "warn Herdr app mod: the copy is older than this kit's herdr-app/.\n       -> `sandcastle herdr configure --yes` copies it again.";
+  if (state === undefined) return undefined;
+  if (state === "absent") return "opt  Herdr app mod (optional: the status view in the app's own look)\n       -> `sandcastle herdr configure` (shows what it copies and asks first).";
+  if (state === "foreign") return `warn Herdr app mod: ${dir} is not the kit's (no ${APP_STAMP} stamp in it).\n       -> Move it or remove it, then run \`sandcastle herdr configure --yes\`.`;
+  if (state === "stale") return "warn Herdr app mod: the copy is older than this kit's herdr-app/.\n       -> `sandcastle herdr configure --yes` copies it again.";
   return `ok   Herdr app mod: ${dir} is current`;
 };
 

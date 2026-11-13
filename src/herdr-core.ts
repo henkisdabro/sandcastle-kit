@@ -17,6 +17,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { appCliPorts, type AppPorts } from "./herdr-app.ts";
 import { real } from "./live-runs.ts";
 import { clear, record, windowTitle } from "./osc7501.ts";
 import type { CoreTerminal } from "./terminal-host.ts";
@@ -46,7 +47,8 @@ export const ticketName = (root: string, issue: string) => {
 /** Fresh in each process: an autonomy run's turns are one run. */
 export const RUN_INSTANCE = randomUUID().replaceAll("-", "").slice(0, 12);
 
-export type CoreView = { instance: string; status?: string; slots?: string[] };
+/** `pane`: the Herdr app's mod pane this instance opened in place of the status terminal's own pane (#959). */
+export type CoreView = { instance: string; status?: string; slots?: string[]; pane?: string };
 export const coreViewRecord = (root: string) => join(root, ".sandcastle/logs/core-view.json");
 const readView = (file: string): CoreView | undefined => {
   try {
@@ -110,7 +112,7 @@ export const teardown = (root: string, instance = RUN_INSTANCE, hc: Hc = hcCli) 
   }
 };
 
-export type CoreStatusOptions = { kit: string; hc?: Hc; instance?: string };
+export type CoreStatusOptions = { kit: string; hc?: Hc; instance?: string; app?: AppPorts };
 
 /**
  * Opens the run's status view as a core terminal, or reuses the project's, and records it. Started with
@@ -120,17 +122,27 @@ export type CoreStatusOptions = { kit: string; hc?: Hc; instance?: string };
  * wrong, and nothing is ever typed into a terminal. The caller's `herdr.space` and `herdr.tab` put
  * it in the caller's tab (an unlabelled terminal stays hidden). Undefined, with the reason printed, when hc fails:
  * whatever this call started is ended first.
+ *
+ * In the Herdr app with the kit's mod current (#959), the mod pane opens beside the caller in place of the terminal
+ * view: the status terminal still runs - its records are the run's agent state, needs-you alert included, and the
+ * slots' parent - but as the caller's sub-agent with no pane. Anything short of that (`appPane`) opens the terminal
+ * view as before.
  */
-export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = hcCli, instance = RUN_INSTANCE }: CoreStatusOptions): string | undefined => {
+export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = hcCli, instance = RUN_INSTANCE, app = appCliPorts() }: CoreStatusOptions): string | undefined => {
   const key = projectKey(root);
   const name = statusName(root);
   const marker = `SANDCASTLE_CORE_VIEW=${instance}`;
   const bin = join(kit, "bin/sandcastle");
   let started: string | undefined;
+  let pane: string | undefined;
   try {
     const previous = readCoreView(root);
     // An autonomy run's next turn: the view the first turn opened is already this run's.
     if (previous?.instance === instance && previous.status && runsStatusView(get(hc, previous.status))) return previous.status;
+    // The mod pane on record goes, as the status terminal does below - an earlier run's, or this run's own whose
+    // status terminal is gone: this start opens its own beside its caller, and a pane left open would be orphaned.
+    if (previous?.pane) closeRecordedPane(root, previous.pane, app);
+    pane = appPane(root, caller, kit, app);
 
     // The project's status terminal from an earlier run: a view still running is stopped first, and what is left - a
     // bare shell (Ctrl-C leaves a `--keep` terminal one only when the view dies by the signal) or a finished terminal
@@ -195,13 +207,14 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
       nameFree = nameIsFree(found.address);
     }
 
+    // With the mod pane, no `herdr.*` labels: the app gives the terminal no pane, and lists it under the caller.
     const labels = [
-      ...(["herdr.space", "herdr.tab"] as const).flatMap((k) => (caller.labels[k] ? [`${k}=${caller.labels[k]}`] : [])),
+      ...(pane ? [] : (["herdr.space", "herdr.tab"] as const).flatMap((k) => (caller.labels[k] ? [`${k}=${caller.labels[k]}`] : []))),
       `sandcastle.root=${key}`,
       `sandcastle.instance=${instance}`,
     ];
     const runArgs = (named: boolean) => [
-      "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--keep", ...(named ? ["--name", name] : []), "--cwd", root,
+      "run", "--bg", "--json", "--no-notify", "--outlive-parent", "--keep", ...(pane ? ["--parent", caller.address] : []), ...(named ? ["--name", name] : []), "--cwd", root,
       ...labels.flatMap((l) => ["--label", l]), "--", "env", marker, bin, "status",
     ];
     // `get` answers undefined on any hc error, so a failed `get` reads as a free name and `run --name` can fail as
@@ -223,7 +236,7 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     if (unnamedLine) console.log(unnamedLine);
     started = out.address;
     const address = started;
-    writeCoreView(root, { instance, status: address, slots: [] });
+    writeCoreView(root, { instance, status: address, slots: [], ...(pane ? { pane } : {}) });
     if (!opened.size) process.on("exit", () => opened.forEach((o, r) => teardown(r, o.instance, o.hc)));
     opened.set(root, { instance, hc });
     return address;
@@ -237,9 +250,96 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
         }
       }
     }
+    if (pane) {
+      try {
+        app.close(pane);
+      } catch {
+        /* gone already */
+      }
+    }
     console.log(`Could not open the status view in herdr-core (${message(error)}).`);
     return undefined;
   }
+};
+
+/** This project's `sandcastle` mod panes in the app's layout; undefined when the layout cannot be read. */
+const projectPanes = (root: string, app: AppPorts): Set<string> | undefined => {
+  try {
+    return new Set(app.modPanes().filter((p) => p.project === root).map((p) => p.pane));
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Closes a pane `core-view.json` names, only once the app's layout shows it is still this project's `sandcastle` mod
+ * pane: the record is a bare id, and the pane may since have been closed and its id meant something else, or the
+ * layout may be unreadable - either way it is left alone.
+ */
+const closeRecordedPane = (root: string, pane: string, app: AppPorts) => {
+  if (!projectPanes(root, app)?.has(pane)) return;
+  try {
+    app.close(pane);
+  } catch {
+    /* closed meanwhile, or no window */
+  }
+};
+
+/**
+ * The Herdr app's mod pane, split beside the caller's pane, or undefined for the terminal view: the caller is not in
+ * the app (no `herdr.*` labels, or no pane in a running window), or the mod is not current (doctor not `ok`), or the
+ * split failed - said in one line, as the run goes on with the terminal view. The mod reads the run through this
+ * kit's own `sandcastle`, as the status terminal does, never whichever one is on PATH.
+ *
+ * A split whose answer was lost (a timeout, output that is not JSON) may still have made the pane: the one new pane
+ * of this project's in the layout is adopted, and more than one are closed, so no pane is left that nothing records.
+ * The split focuses the new pane; the keyboard goes back to whatever pane had it, so a run started in a tab in the
+ * background does not bring that tab forward.
+ */
+export const appPane = (root: string, caller: CoreTerminal, kit: string, app: AppPorts): string | undefined => {
+  if (!caller.labels["herdr.space"] || !caller.labels["herdr.tab"]) return undefined;
+  let focused: string | undefined;
+  let pane: string | undefined;
+  try {
+    if (!app.modCurrent(kit)) return undefined;
+    const beside = app.paneOf(caller.address);
+    if (!beside) return undefined;
+    focused = app.focused();
+    const before = projectPanes(root, app);
+    try {
+      pane = app.split(beside, { project: root, command: [join(kit, "bin/sandcastle"), "status", "--json", "--frame"] });
+    } catch (error) {
+      const made = before ? [...(projectPanes(root, app) ?? [])].filter((p) => !before.has(p)) : [];
+      if (made.length === 1) pane = made[0];
+      else {
+        for (const p of made) {
+          try {
+            app.close(p);
+          } catch {
+            /* gone already */
+          }
+        }
+        throw error;
+      }
+    }
+  } catch (error) {
+    console.log(`Could not open the Herdr app pane (${message(error)}): the terminal status view opens instead.`);
+    return undefined;
+  }
+  if (focused) {
+    try {
+      app.focus(focused);
+    } catch {
+      /* the pane is open; focus is a nicety */
+    }
+  }
+  return pane;
+};
+
+/** The start's `Status view:` line on herdr-core: the mod pane when this run opened one, else the terminal. */
+export const coreStatusLine = (root: string, status: string) => {
+  const view = readCoreView(root);
+  return view?.status === status && view.pane ? `Status view: app pane ${view.pane} (terminal ${status})` : `Status view: terminal ${status}`;
 };
 
 /**
