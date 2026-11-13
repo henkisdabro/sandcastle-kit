@@ -3245,6 +3245,10 @@ so auto memory stayed on); the container's environment is the sandbox's alone.
 Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnv`
 (`src/sandbox.ts`) leaves the agent's keys out, a person's `.env` naming one included: the exported
 value would win anyway (`test/agent-env.test.ts`, `test/claude-tools-allow-list.test.ts`).
+`sandboxEnv` also gives every sandbox `CLAUDE_CODE_TMPDIR` (`CLAUDE_TMPDIR`, `/home/agent/.claude-tmp`), beside
+`TZ` and the committer: a project cloned under `/tmp/claude-<uid>/` has its `.git` mounted at that path, Docker
+makes the parents root-owned and Claude Code refuses `/tmp/claude-<uid>` unless its user owns it, which crashed
+every Claude pass (`test/sandbox-claude-tmpdir.test.ts`). It sits among the keys the agent's own env removes.
 A review pass (the review model and its fallback, `reviewWithFallback`) and a resolve pass
 (`resolveAgent`: the implementer's model and effort) also get `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` on
 their command, which Claude Code 2.1.242 and later read (an older one ignores it).

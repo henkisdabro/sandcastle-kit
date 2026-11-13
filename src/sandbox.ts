@@ -1087,6 +1087,12 @@ export const hostTimeZone = (): string | undefined => {
   }
 };
 
+// Claude Code's temp root inside a sandbox. Without it Claude Code uses `/tmp/claude-<uid>` and refuses that directory
+// unless the running user owns it ("Temp directory /tmp/claude-1000 is owned by uid 0"). A project cloned under
+// `/tmp/claude-<uid>/` has its shared `.git` mounted at that host path, so Docker creates the missing parents as root
+// and every Claude pass crashes a second after it starts. A path under the agent's home is never a mount's parent.
+export const CLAUDE_TMPDIR = "/home/agent/.claude-tmp";
+
 // Not part of credentials(): doctor and the token checks read that as what the user configured.
 // Every sandbox - a ticket's, a landing's, a gate-only one - is built from this through `sandboxConfig`,
 // so gates run in the host's zone too, not CI's usual UTC.
@@ -1095,7 +1101,7 @@ export const sandboxEnv = (project: Project): Record<string, string> => {
   // A key the agent's own env sets (`claudeEnv`) stays out: Sandcastle refuses every pass whose agent and sandbox name
   // the same key, and the agent's value, exported before its command, would win anyway. So does the prompt cache TTL a
   // review or resolve pass sets (`CACHE_TTL_KEY`), even though an implement pass's env does not name it.
-  const env = credentials(project);
+  const env: Record<string, string> = { ...credentials(project), CLAUDE_CODE_TMPDIR: CLAUDE_TMPDIR };
   for (const key of [...Object.keys(claudeEnv()), CACHE_TTL_KEY]) delete env[key];
   // The project's tracked hooks path, pinned: a worktree tool may rewrite the shared `.git/config` value to its absolute
   // host form, which does not exist in a container, and command-scope config outranks the file (git 2.31+). The kit
