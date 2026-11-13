@@ -663,11 +663,11 @@ export const cardData = (f: CardFacts): CardData => {
     const gate = p.phase === "gates" || p.phase === "landing gates";
     const outcome = gate ? (p.ok ? "green" : `red${p.red?.length ? `: ${p.red.join(", ")}` : ""}`) : p.ok ? "ok" : "failed";
     const log = exists(own(PASS_LOG[p.phase]));
-    return { pass: WORDS[p.phase as TicketState] ?? p.phase, outcome: printable(outcome), time: duration(p.ms), ...(log ? { log } : {}) };
+    return { pass: printable(WORDS[p.phase as TicketState] ?? p.phase), outcome: printable(outcome), time: duration(p.ms), ...(log ? { log } : {}) };
   });
   if (t.state && RUNNING.has(t.state)) {
     const log = exists(own(PASS_LOG[t.state]));
-    passes.push({ pass: WORDS[t.state] ?? t.state, outcome: "running", time: t.since ? duration((f.now - t.since) * 1000) : "", ...(log ? { log } : {}) });
+    passes.push({ pass: printable(WORDS[t.state] ?? t.state), outcome: "running", time: t.since ? duration((f.now - t.since) * 1000) : "", ...(log ? { log } : {}) });
   }
   const why = [
     ...(t.note ? [printable(t.note)] : []),
@@ -680,7 +680,7 @@ export const cardData = (f: CardFacts): CardData => {
     ref,
     ...(t.title ? { title: printable(t.title) } : {}),
     inRun: true,
-    status: t.since ? `${word} for ${duration((f.now - t.since) * 1000)}` : word,
+    status: printable(t.since ? `${word} for ${duration((f.now - t.since) * 1000)}` : word),
     passes,
     why,
     ...(f.gateTail?.length ? { gateTail: f.gateTail.map(printable) } : {}),

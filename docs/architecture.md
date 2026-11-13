@@ -1320,8 +1320,10 @@ it no pane and lists it under the caller, and it still writes the run's records 
 slots, so the root record's needs-you alert and the slots' nesting do not depend on the mod.
 Any of those failing opens the terminal view as before; a failed split says so in one line.
 A split whose answer was lost (a timeout, output that is not JSON) may still have made the pane, so
-the layout is read before and after it: the one new `sandcastle` pane of this project is adopted,
-more than one are closed.
+the layout is read before and after it: the one new `sandcastle` pane of this project whose `run`
+prop is this instance is adopted, more than one are closed; a person's log or status pane, or
+another run's, is never counted.
+A mod check that throws (the kit's files read while it is pulled) is a no, never a failed start.
 The split focuses the new pane; the keyboard goes back to the pane that had it before the split
 (`herdr-app status`), so a run started in a tab in the background does not bring it forward; when
 the app cannot say which pane had it, to the caller's.

@@ -140,7 +140,15 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     // An autonomy run's next turn: the view the first turn opened is already this run's.
     // A stray mod pane comes only from a split, which a start tries in the app with the mod current: only such a
     // start, or one after a run that had a pane, reads the app's layout for one.
-    const sweep = !!previous?.pane || (inApp(caller) && app.modCurrent(kit));
+    // A mod check that throws (the kit's files read mid-pull) is a no: the run starts with the terminal view.
+    const current = () => {
+      try {
+        return app.modCurrent(kit);
+      } catch {
+        return false;
+      }
+    };
+    const sweep = !!previous?.pane || (inApp(caller) && current());
     if (previous?.instance === instance && previous.status && runsStatusView(get(hc, previous.status))) {
       if (sweep) closeStrayPanes(root, previous.pane, app);
       return previous.status;
@@ -338,11 +346,20 @@ export const appPane = (root: string, caller: CoreTerminal, kit: string, app: Ap
     const beside = app.paneOf(caller.address);
     if (!beside) return undefined;
     focused = app.focused() ?? beside;
-    const before = projectPanes(root, app);
+    // Only panes this split could have made: this project's, carrying this instance as their `run`. A log pane or
+    // a status pane a person opened meanwhile is never adopted or closed.
+    const mine = () => {
+      try {
+        return new Set(app.modPanes().filter((p) => p.project === root && p.run === instance).map((p) => p.pane));
+      } catch {
+        return undefined;
+      }
+    };
+    const before = mine();
     try {
       pane = app.split(beside, { project: root, command: [join(kit, "bin/sandcastle"), "status", "--json", "--frame"], run: instance });
     } catch (error) {
-      const made = before ? [...(projectPanes(root, app) ?? [])].filter((p) => !before.has(p)) : [];
+      const made = before ? [...(mine() ?? [])].filter((p) => !before.has(p)) : [];
       if (made.length === 1) pane = made[0];
       else {
         for (const p of made) {

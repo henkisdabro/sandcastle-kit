@@ -47,15 +47,20 @@ type Fake = {
   /** The `sandcastle` mod panes in the layout before the run. */
   layout?: ModPane[];
   /** The split fails having made no pane; `lost`: it made one and its answer was lost; `twice`: it made two. */
-  split?: "fails" | "lost" | "twice";
+  split?: "fails" | "lost" | "twice" | "crowded";
   layoutUnreadable?: boolean;
   closeThrows?: boolean;
+  modCurrentThrows?: boolean;
 };
 const fakeApp = (o: Fake = {}) => {
   const calls: Calls = { modCurrent: 0, paneOf: [], split: [], close: [], focus: [] };
   const layout: ModPane[] = [...(o.layout ?? [])];
   const app: AppPorts = {
-    modCurrent: () => (calls.modCurrent++, o.current ?? true),
+    modCurrent() {
+      calls.modCurrent++;
+      if (o.modCurrentThrows) throw new Error("ENOENT: herdr-app/main.js");
+      return o.current ?? true;
+    },
     paneOf: (t) => (calls.paneOf.push(t), "pane" in o ? o.pane : "p-caller"),
     focused: () => o.focused,
     modPanes() {
@@ -66,8 +71,10 @@ const fakeApp = (o: Fake = {}) => {
       calls.split.push([pane, props]);
       const project = (props as { project: string }).project;
       if (o.split === "fails") throw new Error("no such mod");
-      layout.push({ pane: "p-mod", project, run: true });
-      if (o.split === "twice") layout.push({ pane: "p-mod2", project, run: true });
+      layout.push({ pane: "p-mod", project, run: (props as { run: string }).run });
+      if (o.split === "twice") layout.push({ pane: "p-mod2", project, run: (props as { run: string }).run });
+      // A person's log pane and status pane, and another run's pane, appear while the split's answer is lost.
+      if (o.split === "crowded") layout.push({ pane: "p-log", project }, { pane: "p-by-hand", project }, { pane: "p-other-run", project, run: "other" });
       if (o.split) throw new Error("timed out");
       return "p-mod";
     },
@@ -260,10 +267,10 @@ test("a start closes this project's run panes the record does not name, and leav
   writeFileSync(coreViewRecord(root), JSON.stringify({ instance: "old", status: "t3", slots: [], pane: "p-old" }));
   const { app, calls, layout } = fakeApp({
     layout: [
-      { pane: "p-old", project: root, run: true },
-      { pane: "p-late", project: root, run: true },
+      { pane: "p-old", project: root, run: "old" },
+      { pane: "p-late", project: root, run: "old" },
       { pane: "p-by-hand", project: root },
-      { pane: "p-other", project: "/elsewhere", run: true },
+      { pane: "p-other", project: "/elsewhere", run: "old" },
     ],
   });
   await quietly(() => openCoreStatus(root, inApp, { kit: "/k", hc: fakeHc().hc, instance: "i1", app }));
@@ -274,7 +281,7 @@ test("a start closes this project's run panes the record does not name, and leav
 test("the same run's next turn keeps its own pane and closes a stray beside it", async () => {
   const root = project();
   writeFileSync(coreViewRecord(root), JSON.stringify({ instance: "i1", status: "t9", slots: [], pane: "p-mine" }));
-  const { app, calls } = fakeApp({ layout: [{ pane: "p-mine", project: root, run: true }, { pane: "p-late", project: root, run: true }] });
+  const { app, calls } = fakeApp({ layout: [{ pane: "p-mine", project: root, run: "old" }, { pane: "p-late", project: root, run: "old" }] });
   const live = (args: string[]) => (args[0] === "get" ? JSON.stringify({ address: "t9", state: "live", foreground: { argv: ["node", "/k/src/cli.ts", "status"] } }) : "{}");
   assert.equal(openCoreStatus(root, inApp, { kit: "/k", hc: live, instance: "i1", app }), "t9");
   assert.deepEqual(calls.close, ["p-late"]);
@@ -310,7 +317,7 @@ test("modPanesIn reads the sandcastle mod panes and their projects from the core
       },
     ],
   };
-  assert.deepEqual(modPanesIn(doc), [{ pane: "p2", project: "/a", run: true }, { pane: "p4" }]);
+  assert.deepEqual(modPanesIn(doc), [{ pane: "p2", project: "/a", run: "i1" }, { pane: "p4" }]);
   assert.deepEqual(modPanesIn(null), []);
 });
 
@@ -323,4 +330,28 @@ test("paneIn finds a terminal's pane on this machine only: a remote space's ids 
   };
   assert.equal(paneIn(listed, "t7"), "p3");
   assert.equal(paneIn(listed, "t9"), undefined);
+});
+
+// A lost split's panes are told by this instance's `run` prop: a person's log or status pane, or another run's,
+// that appeared meanwhile is neither adopted nor closed.
+test("a lost split adopts only a pane carrying this run's instance, never a person's or another run's", async () => {
+  const root = project();
+  const { app, calls, layout } = fakeApp({ split: "crowded" });
+  const { result, lines } = await quietly(() => openCoreStatus(root, inApp, { kit: "/k", hc: fakeHc().hc, instance: "i1", app }));
+  assert.equal(result, "t9");
+  assert.deepEqual(lines, []);
+  assert.deepEqual(calls.close, []);
+  assert.equal(readCoreView(root)?.pane, "p-mod");
+  assert.deepEqual(layout.map((p) => p.pane).sort(), ["p-by-hand", "p-log", "p-mod", "p-other-run"]);
+});
+
+// The kit pulled mid-run: reading its herdr-app/ files throws. The run still starts, with the terminal view.
+test("a mod check that throws counts as not current: the start opens the terminal view and does not fail", async () => {
+  const root = project();
+  const { hc, run } = fakeHc();
+  const { app, calls } = fakeApp({ modCurrentThrows: true });
+  const { result } = await quietly(() => openCoreStatus(root, inApp, { kit: "/k", hc, instance: "i1", app }));
+  assert.equal(result, "t9");
+  assert.deepEqual(calls.split, []);
+  terminalView(root, run());
 });

@@ -79,8 +79,8 @@ export const appModState = (kit: string, installed = appInstalled): ModState | u
 };
 
 /** A `sandcastle` mod pane the app's layout holds on this machine, and the project its props name. */
-/** `run`: the pane carries a `run` prop, so a run opened it (`appPane`), not a person by hand. */
-export type ModPane = { pane: string; project?: string; run?: boolean };
+/** `run`: the instance of the run that opened the pane (`appPane`); none for a pane a person opened by hand. */
+export type ModPane = { pane: string; project?: string; run?: string };
 
 /** What the run asks of the app; a test passes its own. Each throws, as `execFileSync` does, when the app says no. */
 export type AppPorts = {
@@ -121,7 +121,7 @@ export const modPanesIn = (doc: unknown): ModPane[] => {
     const n = node as Node;
     if (n.content?.mod === MOD_NAME && typeof n.id === "string") {
       const props = n.content.props;
-      out.push({ pane: n.id, ...(typeof props?.project === "string" ? { project: props.project } : {}), ...(typeof props?.run === "string" ? { run: true } : {}) });
+      out.push({ pane: n.id, ...(typeof props?.project === "string" ? { project: props.project } : {}), ...(typeof props?.run === "string" ? { run: props.run } : {}) });
     }
     for (const value of Object.values(node)) if (value && typeof value === "object") walk(value);
   };

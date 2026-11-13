@@ -275,3 +275,16 @@ test("sandcastle herdr card --json prints the card of a project's ticket, and re
     assert.equal(bad.status, 1, `${args.join(" ")}: ${bad.stdout}`);
   }
 });
+
+test("cardData: a state and a pass name from the record are made printable too", () => {
+  const d = cardData({
+    id: "12",
+    ticket: { state: "\x1b[31mweird\x07" as never, since: NOW - 5 },
+    passes: [{ phase: "\x1b]0;title\x07odd" as never, ms: 1000, ok: true }],
+    logs: [],
+    now: NOW,
+  });
+  assert.equal(d.status, "weird for 5s");
+  assert.equal(d.passes[0].pass, "]0;titleodd");
+  for (const text of [d.status, ...d.passes.map((p) => p.pass)]) assert.doesNotMatch(text ?? "", /[\x00-\x1f\x7f]/);
+});
