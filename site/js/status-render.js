@@ -565,6 +565,8 @@ const frameFacts = (snapshot          , table       , now        )             =
     },
     lanes,
     legend: { groups, notes },
+    // An unreadable queue is not an empty one, and neither is one still being read; a skipped one (`--no-queue`) says nothing.
+    queueNote: loading("queue") ? "queue: loading…" : snapshot.queue.error ? `queue: could not read - ${snapshot.queue.error}` : "",
   };
 };
 
@@ -816,7 +818,7 @@ const renderFrame = (snapshot          , table       , { cols, rows, showAll, co
       .join(`${c.rule} │ ${c.off}`);
 
   // An unreadable queue is not an empty one, and neither is one still being read: said under the band.
-  const queueNote = loading("queue") ? "queue: loading…" : snapshot.queue.error ? `queue: could not read - ${snapshot.queue.error}` : "";
+  const { queueNote } = facts;
 
   const header = (logo       )                                     => {
     const out           = [];
