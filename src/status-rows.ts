@@ -57,6 +57,12 @@ export type Table = {
   partly: number;
   /** The `later` rows' ids, and how many of them wait for a blocker. */
   later: { ids: string[]; blocked: number };
+  /**
+   * `false` when the queue was left unread (`--no-queue`): the rows the queue alone makes or decides - queued and
+   * blocked tickets outside the record, and logged ones it would turn `later`, `queued` or `blocked` - are left out.
+   * Absent otherwise. A reader keeps, from its last full read, every row this one lacks.
+   */
+  queueRead?: false;
 };
 
 const RANK: Record<ViewGroup, number> = { working: 0, "needs you": 1, ready: 2, queued: 3, blocked: 4, merged: 5, later: 6, "left over": 7, idle: 7 };
@@ -369,6 +375,8 @@ export const ticketRows = (snapshot: Snapshot): Table => {
     }
   }
 
+  const skipped = snapshot.queueSkipped === true;
+
   // 2. Queued tickets with no log yet and nothing in the record.
   for (const { id } of queue.tickets) {
     if (inRecord(id) || ids.has(id)) continue;
@@ -481,6 +489,10 @@ export const ticketRows = (snapshot: Snapshot): Table => {
     } else if (branch.onBase) state = "merged";
     else state = "no commits";
     let group = groupOf(state);
+    // With the queue unread there is no telling which of these it would turn back into a queued, blocked or later
+    // ticket, so each is left out rather than shown with a word the queue may overturn. No ticket shows twice: the
+    // reader keeps its row from the last full read.
+    if (skipped && (group === "merged" || group === "idle" || group === "left over") && !(live && runIssues.has(id))) continue;
     // Back on the queue after an earlier run: queued, not done. Never a ticket of the live run, which is handling it.
     if ((group === "merged" || group === "idle" || group === "left over") && queued.has(id) && requeued(id) && !(live && runIssues.has(id))) {
       state = live ? "later" : "queued";
@@ -516,7 +528,7 @@ export const ticketRows = (snapshot: Snapshot): Table => {
     );
   }
 
-  return { rows: sortRows(rows), counts, partly, later };
+  return { rows: sortRows(rows), counts, partly, later, ...(skipped ? { queueRead: false as const } : {}) };
 };
 
 /** The phase word an inferred row's newest log shows. */

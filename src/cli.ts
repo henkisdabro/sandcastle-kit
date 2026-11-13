@@ -68,6 +68,10 @@
 //                    `--json`: the ticket rows of one reading as JSON (`ticketRows`, `src/status-rows.ts`), for other views
 //                    `--json --frame`: `{ table, frame }`, the same rows and beside them the logo, title, lanes
 //                    and legend as text and palette tones (`frameFacts`, `src/status-frame.ts`)
+//                    `--json --no-queue`: no tracker call and no `sandcastle queue` process (about a
+//                    second less); the rows only the queue makes or decides (queued, blocked and
+//                    later tickets outside the run record) are left out and the table says
+//                    `queueRead: false`, so a reader keeps those rows from its last full read
 //   build [--force]  build the base and project images
 //   preflight [--api-key]
 //                    one reply from every model, nothing else; asks first, as a run

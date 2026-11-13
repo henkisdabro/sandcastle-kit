@@ -3,7 +3,7 @@
 // rows (src/status-rows.ts) and its frame (src/status-render.ts) - in a single write.
 //
 //   status-view.ts [interval] [all|collapse]
-//   status-view.ts --json [--frame]
+//   status-view.ts --json [--frame] [--no-queue]
 //
 // `0`, or any interval with no terminal on stdout (and no STATUS_FRAMES), is one frame and out: every source read
 // once, each within its deadline; exit 0, or 1 when the project has no `.sandcastle`, (the exit code `sandcastle status` hands on). Any other
@@ -15,6 +15,8 @@
 // and nothing else: no frame, no colour, no live view, and an interval or `all` beside it is ignored. With `--frame`
 // it is `{ "table": <that same document>, "frame": <frameFacts> }`: the castle, title, lanes and legend the terminal
 // draws (src/status-frame.ts), as segments of text and palette tone names, for a view that is not a terminal.
+// `--no-queue` (with `--json`) leaves the queue unread: no `sandcastle queue` process, its source `unavailable` with no
+// error, the rows only the queue makes or decides left out, and `queueRead: false` in the table.
 //
 // The live view never waits on a source to draw. The collectors (src/status-snapshot.ts) refresh the sources in the
 // background, on the interval, and a reading that changes is painted at once; a paint draws the snapshot as it
@@ -341,7 +343,7 @@ const main = async (): Promise<number | undefined> => {
   const argv = process.argv.slice(2);
   if (argv.includes("--json")) {
     // One reading with no terminal, as `status 0` into a pipe: no links unless SANDCASTLE_LINKS says so.
-    const snapshot = await readSnapshot(dir, { env, terminal: false, version });
+    const snapshot = await readSnapshot(dir, { env, terminal: false, version, queue: !argv.includes("--no-queue") });
     // The shape is `Table` exactly as `ticketRows` returns it - { rows, counts, partly, later }, nothing added, renamed
     // or wrapped. Other views (an app mod, #866) read that type, so a change to `Row` is a change to this output.
     const table = ticketRows(snapshot);

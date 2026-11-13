@@ -109,6 +109,8 @@ export type Snapshot = {
   version?: string;
   /** Where each source's reading stands; a snapshot without it read every source in full. */
   sources?: Record<SourceName, SourceStatus>;
+  /** The queue was left unread on purpose (`--no-queue`), not failed: its rows are left out, and `queue.error` is unset. */
+  queueSkipped?: true;
 };
 
 
@@ -830,13 +832,16 @@ export type Sources = {
 };
 
 /** The collectors of a project's sources. `dir` is its `.sandcastle`; `onChange` is told whenever a reading changes. */
-export const createSources = (dir: string, env: NodeJS.ProcessEnv, onChange?: () => void): Sources => {
+export const createSources = (dir: string, env: NodeJS.ProcessEnv, onChange?: () => void, { queue: readQueueToo = true }: { queue?: boolean } = {}): Sources => {
   const record = createCollector({ read: (signal) => readRecord(dir, env, signal), deadline: DEADLINES.record, onChange });
   const gitSource = createCollector({ read: (signal) => readGit(dir, env, record.reading.value, signal), deadline: DEADLINES.git, onChange });
   const docker = createCollector({ read: (signal) => readDocker(dir, env, signal), deadline: DEADLINES.docker, onChange });
   const queue = createCollector({ read: (signal) => readQueue(env, dir, signal), deadline: DEADLINES.queue, onChange });
   const pool = createCollector({ read: (signal) => readPool(env, signal), deadline: DEADLINES.pool, onChange });
-  const all = { record, git: gitSource, docker, queue, pool };
+  // Left unread (`--no-queue`): no collector is ever refreshed, so no `sandcastle queue` process starts, and the
+  // reading is `unavailable` with no error - the queue was skipped, not broken, so no "could not read" note is drawn.
+  const skipped: Reading<QueueFact[]> = { status: "unavailable" };
+  const all = readQueueToo ? { record, git: gitSource, docker, queue, pool } : { record, git: gitSource, docker, pool };
   // What the queue cache keys on besides its minute: the run record's run and where it stands. A run rewrites the
   // record every few seconds while it works, but starts, lands (its stage) and exits, having closed what it
   // landed, far less often - only those change the queue.
@@ -851,13 +856,13 @@ export const createSources = (dir: string, env: NodeJS.ProcessEnv, onChange?: ()
   let queuedAt: number | undefined;
   let queuedFor = "";
   return {
-    readings: () => ({ record: record.reading, git: gitSource.reading, docker: docker.reading, queue: queue.reading, pool: pool.reading }),
+    readings: () => ({ record: record.reading, git: gitSource.reading, docker: docker.reading, queue: readQueueToo ? queue.reading : skipped, pool: pool.reading }),
     answered: () => Object.values(all).every((c) => c.reading.status !== "loading"),
     refresh: () => {
       const waits = [record.refresh().then(() => gitSource.refresh()), docker.refresh(), pool.refresh()];
       const t = performance.now();
       const changed = recordState();
-      if (!queue.busy && (queuedAt === undefined || t - queuedAt >= QUEUE_CACHE_MS || changed !== queuedFor)) {
+      if (readQueueToo && !queue.busy && (queuedAt === undefined || t - queuedAt >= QUEUE_CACHE_MS || changed !== queuedFor)) {
         [queuedAt, queuedFor] = [t, changed];
         waits.push(queue.refresh());
       }
@@ -880,7 +885,7 @@ const NO_RECORD: RecordPart = { hasRecord: false, record: {} as RunRecord, ticke
  * The snapshot of the readings at `now` (epoch seconds; a redraw passes the clock, so ages count up between
  * refreshes). A source with no value yet draws as empty, and `sources` says which are loading.
  */
-export const snapshotOf = (dir: string, readings: Readings, { env = process.env, terminal = false, now = Math.floor(Date.now() / 1000), version }: { env?: NodeJS.ProcessEnv; terminal?: boolean; now?: number; version?: string } = {}): Snapshot => {
+export const snapshotOf = (dir: string, readings: Readings, { env = process.env, terminal = false, now = Math.floor(Date.now() / 1000), version, queue: queueRead = true }: { env?: NodeJS.ProcessEnv; terminal?: boolean; now?: number; version?: string; queue?: boolean } = {}): Snapshot => {
   const { hasRecord, record, tickets, live, outcomes, logs, tails, worktrees, runOutput, terminals } = readings.record.value ?? NO_RECORD;
   const { base, branches, unpushed } = readings.git.value ?? { base: env.SANDCASTLE_BASE || "", branches: {}, unpushed: 0 };
   const { containers, cpus } = readings.docker.value ?? { containers: {}, cpus: cores ?? 1 };
@@ -931,6 +936,7 @@ export const snapshotOf = (dir: string, readings: Readings, { env = process.env,
     links: linksOn(env, terminal),
     clickMod: env.SANDCASTLE_CLICK_MOD || "",
     ...(version ? { version } : {}),
+    ...(queueRead ? {} : { queueSkipped: true as const }),
     sources: { record: readings.record.status, git: readings.git.status, docker: readings.docker.status, queue: readings.queue.status, pool: readings.pool.status },
   };
 };
@@ -946,10 +952,10 @@ export const sandcastleDir = (env: NodeJS.ProcessEnv = process.env): string | un
 };
 
 /** Reads every source once, each within its deadline, and the snapshot of what they answered: a one-off frame's. */
-export const readSnapshot = async (dir: string, { env = process.env, terminal = false, version }: { env?: NodeJS.ProcessEnv; terminal?: boolean; version?: string } = {}): Promise<Snapshot> => {
-  const sources = createSources(dir, env);
+export const readSnapshot = async (dir: string, { env = process.env, terminal = false, version, queue = true }: { env?: NodeJS.ProcessEnv; terminal?: boolean; version?: string; queue?: boolean } = {}): Promise<Snapshot> => {
+  const sources = createSources(dir, env, undefined, { queue });
   await sources.refresh();
-  return snapshotOf(dir, sources.readings(), { env, terminal, version });
+  return snapshotOf(dir, sources.readings(), { env, terminal, version, queue });
 };
 
 /**
