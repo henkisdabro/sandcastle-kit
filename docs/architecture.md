@@ -3166,13 +3166,17 @@ checked by `reportFrom`; otherwise `no agent message`, `not JSON`, `invalid: <wh
 held a `turn.failed`, `failed: <code>` - the `"code":"..."` in its `error.message`, read from anywhere in it
 (`failed: invalid_json_schema` for a schema the API refuses, which fails before any model turn), else the
 message's first 80 characters. The signal sits in the report's own `signal` field, so the library's
-`completionSignal` arms on the JSON message. A pass cut off by the grace window (the signal in prose, then a
+`completionSignal` arms on the JSON message. The grace window is `COMPLETION_TIMEOUT_SECONDS` (`src/agents.ts`,
+60 s, the library's own default), set on every pass's `sandbox.run` options in `pass` so a library default moving
+never moves it: #821 saw at most 2.3 s between a pass's `StructuredOutput` call and its `result` line.
+A pass cut off by the grace window (the signal in prose, then a
 silence, and no valid report at or after it) records `cutOff` with its figures running to the pass's end.
 A valid report followed by a final prose message is missing (`not JSON`), but was not cut off:
 its timing figures end at the last message, since the report did arrive after the signal.
 `reportTiming` and `crossReview`'s line prefer the capture's `failed: ...` reason to the thrown error's text, so
-a refused schema reads `failed: invalid_json_schema` on the timings line, and with the switch on `crossReview`
-says the report schema was on and that a refused schema ends every cross-review while it is. In the review loop
+a refused schema reads `failed: invalid_json_schema` on the timings line, and with the report on (unless
+`REPORT_SCHEMA=0`) `crossReview` says the report schema was on and that a refused schema ends every cross-review
+until `REPORT_SCHEMA=0` is set. In the review loop
 `reviewGap` skips `gapOf` for a cross-review whose text parses as JSON: it is not prose. The limit: the
 cross-reviewer's `<report>` hand-back is not in its JSON, so for a tracker where agents do not write it, it is
 not posted (the hand-back forms get their own design). `test/report-schema-codex.test.ts` holds all of it.
