@@ -63,6 +63,7 @@ read a module's section there before changing it.
 | `src/live-runs.ts` | The machine-wide live-runs directory (`RUNS_DIR`, under `KIT_CACHE`) that the Herdr tab bar and the Claude Code mod read |
 | `src/herdr-plugin.ts` | `sandcastle herdr`: `configure` (link the plugin, add or remove the config block), and the plugin's own verbs - the tab bar line, popups, the ticket card a Ctrl-click opens, the Agents view |
 | `herdr/` | The Herdr plugin: `herdr-plugin.toml` (its `version` follows each release; a test checks) and `entry.sh`, through which every action, pane and hook runs |
+| `herdr-app/` | Prototype (#871) of a mod for the official Herdr app: the run's ticket rows from `sandcastle status --json` and a header from `run.json`, refreshed by `watchFolder` on `.sandcastle/logs/` and a 15 s timer. Not linked by `configure` yet; `herdr-app check herdr-app` checks it |
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files. Which one a project uses, and its triage label names (`detectFromDocs`) |
 | `src/blockers.ts` | What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), `openBlockersNow`, `blockedNote` |
 | `src/touches.ts` | The `Touches:` line of a ticket body, and `unmergeableFiles`; a scheduling hint, never a guard |
