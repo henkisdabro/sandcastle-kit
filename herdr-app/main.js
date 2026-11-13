@@ -276,7 +276,7 @@ export default class SandcastleStatus extends View {
     const lane = (l, need, first) =>
       v_flex().flex_1().min_w(need * CELL).px(CELL).py(2).when(!first, (el) => el.border_l(1).border_color(t.border))
         .child(this.segs(c, [l.title]))
-        .children([0, 1, 2].map((i) => this.segs(c, l.rows[i] ?? [{ text: " ", tone: "plain" }])));
+        .children([0, 1, 2].map((i) => this.segs(c, l.rows[i]?.length ? l.rows[i] : [{ text: " ", tone: "plain" }])));
     const parts = [];
     if (beside) {
       parts.push(h_flex().items_stretch()
