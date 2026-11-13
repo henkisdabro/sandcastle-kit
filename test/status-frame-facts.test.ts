@@ -115,6 +115,11 @@ for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
   test(`the ${kind} fixture's logo is the castle the frame draws, with none of the title`, () => {
     assert.equal(frame.logo.length, 3);
     for (const row of frame.logo) assert.ok(inFrame(joined(row)), `castle row "${joined(row)}" is not in the frame`);
+    // Each castle row with its title row beside it is one cell of the frame: the castle the terminal draws, row by row.
+    frame.logo.forEach((row, i) => {
+      const beside = joined([...row, ...frame.title.rows[i]!]);
+      assert.ok(inFrame(beside), `castle row ${i + 1} with its title, "${squeeze(beside)}", is not in the frame:\n${got.frame}`);
+    });
     const castle = frame.logo.map(joined).join("\n");
     assert.match(castle, /▄ ▄ ▄/);
     assert.match(castle, /█████/);
@@ -151,10 +156,13 @@ for (const kind of ["live", "legacy", "ended"] as FixtureKind[]) {
   });
 }
 
-test("the ended fixture has no PLAN lane, and the live one's lanes are the ones its frame titles", () => {
+test("the ended fixture's lanes are RUN, MACHINE, MODELS and SETTINGS: no PLAN", () => {
   const ended = read("ended").doc.frame;
   assert.ok(!ended.lanes.some((l) => l.name === "PLAN"), "an ended run has no plan lane");
-  assert.deepEqual(ended.lanes.map((l) => l.name).slice(0, 2), ["RUN", "MACHINE"]);
+  assert.deepEqual(
+    ended.lanes.map((l) => l.name),
+    ["RUN", "MACHINE", "MODELS", "SETTINGS"],
+  );
 });
 
 test("status --json without --frame stays the bare table", () => {
