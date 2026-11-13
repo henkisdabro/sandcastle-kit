@@ -242,7 +242,8 @@ export default class SandcastleStatus extends View {
       }
       parts.push(div().flex_none().whitespace_nowrap().text_color(c[s.tone] ?? c.plain).when(Boolean(s.bold), (el) => el.font_semibold()).child(s.text));
     }
-    return h_flex().items_center().min_w(0).overflow_hidden().whitespace_nowrap().when(size !== undefined, (el) => el.text_size(size)).children(parts);
+    // A row longer than its card wraps between its pieces rather than losing words off its end.
+    return h_flex().flex_wrap().items_center().min_w(0).when(size !== undefined, (el) => el.text_size(size)).children(parts);
   }
 
   /** The clock segment shows this machine's time now, as the terminal's view redraws it each second. */
