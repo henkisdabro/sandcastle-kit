@@ -16,7 +16,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8").replace(/\r\n/g, "\n");
 const skill = read("skill", "SKILL.md");
 const audit = read("skill", "audit.md");
-const agents = read("AGENTS.md");
+const layout = read("docs", "layout.md");
 
 const frontmatter = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
 const section = skill.match(/^## audit\b[\s\S]*?(?=^## |(?![\s\S]))/m)?.[0] ?? "";
@@ -79,8 +79,8 @@ test("audit.md quotes no real-looking blocker", () => {
   assert.doesNotMatch(audit, /(blocked by|depends on):?\s+(#\d+|[A-Z]+-\d+|\S+\.md)/i);
 });
 
-test("AGENTS.md's skill row names audit.md", () => {
-  const row = agents.split("\n").find((l) => l.startsWith("| `skill/` |")) ?? "";
+test("docs/layout.md's skill row names audit.md", () => {
+  const row = layout.split("\n").find((l) => l.startsWith("| `skill/` |")) ?? "";
   assert.ok(row.includes("audit.md"), row);
 });
 
