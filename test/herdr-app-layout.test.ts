@@ -15,6 +15,7 @@ import { accessSync, constants, copyFileSync, mkdirSync, mkdtempSync, readdirSyn
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { after, test } from "node:test";
+import { retryOnInterrupted } from "./herdr-app-retry.ts";
 import { buildFixture, type FixtureKind } from "./status-fixture.ts";
 import { spawnStatus, viewEnv } from "./status-run.ts";
 
@@ -75,7 +76,11 @@ const spec = (doc: Doc, width: number): string => {
   swap("this.width = 900;", `this.width = ${width};`);
   swap("this.run = null;", `this.run = ${JSON.stringify((doc as { run?: unknown }).run ?? null)};`);
   writeFileSync(join(dir, "main.js"), main);
-  const r = spawnSync(realApp!, ["check", dir, "--print-spec"], { encoding: "utf8", timeout: 60_000 });
+  const check = () => spawnSync(realApp!, ["check", dir, "--print-spec"], { encoding: "utf8", timeout: 60_000 });
+  let r = check();
+  // The app stops a render that runs past about 50 ms of wall-clock time, which a full suite's load can cause:
+  // run it once more for that error only. A spawn the timeout killed has no status and is not run again.
+  if (r.status !== null && r.status !== 0 && retryOnInterrupted(`${r.stdout}\n${r.stderr}`)) r = check();
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   return r.stdout;
 };
