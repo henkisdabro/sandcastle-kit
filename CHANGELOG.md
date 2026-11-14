@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-14
+
 ### Upgrading
 
 - **`sandcastle herdr configure` now has two halves, `--app` and `--tui`.** Where both the Herdr app
@@ -3508,7 +3510,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.22.0...v0.23.0
