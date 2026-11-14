@@ -71,8 +71,15 @@ test("a docker a test puts ahead of the no-op one is the one that runs", () => {
   assert.equal(r.stdout, "own\n");
 });
 
+// The two Herdr homes the preload sets after scrubbing, inside the test's own cache: never the developer's.
+const HERDR_HOMES = ["HERDR_APP_HOME", "HERDR_CONFIG_PATH"];
+
 test("a test sees none of the host's Herdr, tmux or kit settings", () => {
-  for (const name of Object.keys(process.env)) assert.equal(scrubs(name), false, `${name} leaked into the test's environment`);
+  for (const name of Object.keys(process.env)) if (!HERDR_HOMES.includes(name)) assert.equal(scrubs(name), false, `${name} leaked into the test's environment`);
+});
+
+test("a test's Herdr app home and Herdr TUI config are inside its own cache, never the developer's", () => {
+  for (const name of HERDR_HOMES) assert.ok(process.env[name]?.startsWith(`${process.env.XDG_CACHE_HOME}/`), `${name}: ${process.env[name]}`);
 });
 
 test("a polluted shell reaches a test file as the canonical environment", () => {
@@ -97,7 +104,7 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
     TMPDIR: link,
     PATH: [hostBin, "/shim", process.env.PATH].join(delimiter),
     HERDR_ENV: "1", HERDR_PANE_ID: "p", TMUX: "x", TMUX_PANE: "%1", AUTONOMY_LEVEL: "3", CONCURRENCY: "9", USAGE_CHECK: "1",
-    SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", SANDCASTLE_TEST_MACHINE_CPU: "real", GH_TOKEN: "t", NO_COLOR: "1", FORCE_COLOR: "1", XDG_CONFIG_HOME: "/xdg",
+    SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", SANDCASTLE_TEST_MACHINE_CPU: "real", GH_TOKEN: "t", NO_COLOR: "1", FORCE_COLOR: "1", XDG_CONFIG_HOME: "/xdg", HERDR_APP_HOME: "/real/herdr-app", HERDR_CONFIG_PATH: "/real/herdr/config.toml",
     GIT_COMMITTER_NAME: "n", GIT_COMMITTER_EMAIL: "n@example.com", GIT_AUTHOR_NAME: "n", GIT_AUTHOR_EMAIL: "n@example.com", EMAIL: "n@example.com",
     GIT_CONFIG_GLOBAL: join(dir, "host-gitconfig"), GIT_CONFIG_NOSYSTEM: "0",
     GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "commit.gpgsign", GIT_CONFIG_VALUE_0: "false",
@@ -117,6 +124,8 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   assert.equal(seen.env.SANDCASTLE_TEST_TEMP, "kept");
   assert.equal(seen.env.SANDCASTLE_TEST_MACHINE_CPU, "none", "the machine's CPU pressure is off whatever the shell set");
   assert.equal(seen.env.XDG_CONFIG_HOME, "/xdg");
+  // The shell's real Herdr homes never reach a test: a bare `configure --remove` there deleted an installed app mod.
+  for (const name of HERDR_HOMES) assert.ok(seen.env[name]?.startsWith(`${seen.env.XDG_CACHE_HOME}/`), `${name}: ${seen.env[name]}`);
   for (const gone of ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "EMAIL"]) assert.equal(seen.env[gone], undefined, gone);
   // The committer's stay (full-check's agent leg sets them); alone they let no commit through.
   assert.deepEqual([seen.env.GIT_COMMITTER_NAME, seen.env.GIT_COMMITTER_EMAIL], ["n", "n@example.com"]);
