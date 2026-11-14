@@ -30,25 +30,27 @@ Declining is not skipping: every step still runs its check, and only the asking 
      (`sandcastle status` in a pane, a Herdr popup) keeps the old code, and the next redraw can show a
      frame the new kit would not draw. Tell the user to close and reopen any they have open; a run's own
      Herdr status pane is replaced by the next run's.
-   - **`herdr-plugin`**: if doctor lists `opt  Herdr plugin and sidebar rows`, or `info Herdr TUI plugin: not linked`
-     (Herdr TUI is installed, and this is a herdr-core terminal or a plain terminal: the plugin serves Herdr TUI's
-     tabs), recommend the kit's Herdr plugin: run
-     `sandcastle herdr configure` (outside a terminal it prints what it would add and stops), show
-     the user that block, and once they agree run it again with `--yes`. It edits Herdr's own
-     config, not the project, so it is theirs to decline.
+   - **`herdr-plugin`**: if doctor lists `opt  Herdr plugin and sidebar rows` (this is a Herdr TUI tab), recommend
+     the kit's Herdr plugin: run `sandcastle herdr configure --tui` (outside a terminal it prints what it would add
+     and stops), show the user that block, and once they agree run it again with `--yes`. If doctor lists only
+     `info Herdr TUI plugin: not linked` (Herdr TUI is installed, and this is a herdr-core terminal or a plain
+     terminal), say once that the plugin serves Herdr TUI's tabs only and the Herdr app does not need it, and offer
+     it only if the user says they use Herdr TUI. Either way it edits Herdr's own config, not the project, so it is
+     theirs to decline. Never run a bare `sandcastle herdr configure --yes` to add it: with the Herdr app installed
+     too, a bare one leaves a plugin that is not set up alone.
    - If doctor lists the Herdr plugin as `ok` but `${XDG_CACHE_HOME:-~/.cache}/sandcastle-kit/herdr-plugin-linked`
-     does not exist (the plugin was linked by an older kit), run `sandcastle herdr configure --yes`
+     does not exist (the plugin was linked by an older kit), run `sandcastle herdr configure --tui --yes`
      once: it leaves that file, without which the status view shows no ticket links or Ctrl-click
      hint. It replaces its own block, so running it again is safe.
    - If the plugin is linked (doctor lists it `ok`) but the sandcastle block in Herdr's config names
      no `$sc_usage` row (`grep -c sc_usage` on the file `herdr --help` names after `Config:`
-     finds none: the block was written by an older kit), run `sandcastle herdr configure --yes`
+     finds none: the block was written by an older kit), run `sandcastle herdr configure --tui --yes`
      once: it replaces its own block, and the sidebar then shows the plan's usage under a run. It is
      optional, and the block is replaced either way, so running it again is safe.
    - **`herdr-app-mod`**: if doctor lists `warn Herdr app mod` with a stale copy (the Herdr app's copy of the kit's
-     `herdr-app/` is older than this kit's), run `sandcastle herdr configure --yes`: it copies the changed
+     `herdr-app/` is older than this kit's), run `sandcastle herdr configure --app --yes`: it copies the changed
      files again and leaves the copy alone when nothing changed, so running it again is safe. If doctor lists
-     `opt  Herdr app mod`, the app is installed and the mod is not: offer `sandcastle herdr configure` (outside a
+     `opt  Herdr app mod`, the app is installed and the mod is not: offer `sandcastle herdr configure --app` (outside a
      terminal it prints what it would copy and stops), and once the user agrees, `--yes`. A `warn` saying the
      folder is not the kit's means a `mods/sandcastle` the kit did not write: tell the user, and leave it.
    - **`claude-mod`**: if doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it

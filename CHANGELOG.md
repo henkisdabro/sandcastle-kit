@@ -9,7 +9,21 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **`sandcastle herdr configure` now has two halves, `--app` and `--tui`.** Where both the Herdr app
+  and Herdr TUI are installed, a bare `configure` copies the app mod and no longer links the Herdr TUI
+  plugin unless it is already set up from this checkout: add it with `sandcastle herdr configure
+  --tui`. Where only one of them is installed, a bare `configure` does what it did. An unknown
+  argument is now refused rather than ignored, so a script passing one stops with the usage line.
+
 ### Changed
+
+- `sandcastle herdr configure` takes `--app` (the Herdr app mod) and `--tui` (the Herdr TUI plugin),
+  with or without `--remove`; a bare `--remove` still takes out both. With both products installed, a
+  bare `configure` leaves a Herdr TUI plugin that is not set up here (or is linked from another
+  checkout) alone and says how to add it. Doctor's, setup's and `/sandcastle update`'s Herdr lines name
+  the half they mean, and the update offers the plugin only from a Herdr TUI tab.
 
 - A run in a herdr-core terminal that the Herdr app shows from another machine now says why it opened
   the terminal status view: the start line, a detached start's message and doctor (an `info` line)
@@ -17,6 +31,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- `sandcastle herdr configure --remove` with Herdr TUI's server stopped no longer deletes the block and
+  marker and then crashes with a stack trace on the unlink, leaving the plugin linked: it unlinks first,
+  and on Herdr's refusal stops with nothing changed (the app mod included), naming `herdr server` as
+  the fix. Every other failed `herdr` call in `configure` is an error message, not a stack trace.
 - The Herdr app mod's PLAN card shows each provider on one row, with its windows and the reading's
   age beside the name, where the provider's name sat alone (Claude Code reports the weekly window
   alone) and its windows hung under it; a card that wraps onto a line of its own no longer stretches

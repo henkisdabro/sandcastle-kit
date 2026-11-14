@@ -13,6 +13,7 @@ import { parseEnv } from "node:util";
 import { claudeCode, doctor, probeGithubToken, run } from "./doctor.ts";
 import { OperatorError } from "./errors.ts";
 import { configure, pluginState } from "./herdr-plugin.ts";
+import { appInstalled } from "./herdr-app.ts";
 import { terminalHost } from "./terminal-host.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 import { sizePointerNow } from "./size.ts";
@@ -251,11 +252,12 @@ export const setup = async (repoRoot?: string) => {
           : "\nHerdr TUI is installed: in its tabs, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar.",
       );
       try {
-        await configure(false, false, true);
+        // Named halves: the plugin, offered here, and the app mod beside it when the app is installed.
+        await configure(false, false, true, KIT, { tui: true, app: appInstalled() });
       } catch (error) {
         // A `herdr` that fails on its own (a broken install, a server that refuses) costs the plugin, not the rest of setup.
         if (!(error instanceof Error)) throw error;
-        console.log(`     ${error instanceof OperatorError ? error.message : `Herdr could not link the plugin (${error.message.split("\n")[0]}): \`sandcastle herdr configure\` tries again.`}`);
+        console.log(`     ${error instanceof OperatorError ? error.message : `Herdr could not link the plugin (${error.message.split("\n")[0]}): \`sandcastle herdr configure --tui\` tries again.`}`);
       }
     }
   }

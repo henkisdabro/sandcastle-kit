@@ -92,7 +92,7 @@ test("doctor in a herdr-core terminal names herdr-core and hc's version, and the
   });
   const out = r.stdout + r.stderr;
   assert.match(out, /^ok {3}herdr-core \(hc 9\.9\.9\): opens the status view beside this terminal \(terminal t-kid\)$/m, out);
-  assert.match(out, /^info Herdr TUI plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr TUI tabs, and this is a herdr-core terminal$/m, out);
+  assert.match(out, /^info Herdr TUI plugin: not linked \(`sandcastle herdr configure --tui` links it; the Herdr app does not need it\) - it serves Herdr TUI tabs, and this is a herdr-core terminal$/m, out);
   assert.doesNotMatch(out, /Herdr \(optional: opens the status pane automatically\)|Herdr plugin and sidebar rows/, "no Herdr TUI checks in a core tab");
 });
 
@@ -110,7 +110,7 @@ test("doctor outside both hosts checks the Herdr TUI plugin when Herdr TUI is in
   const before = calls().length;
   const installed = doctor([bin, dirname(process.execPath), "/usr/bin", "/bin"]);
   assert.match(installed, /^opt  Herdr \(optional: opens the status pane automatically\)$/m, installed);
-  assert.match(installed, /^info Herdr TUI plugin: not linked \(`sandcastle herdr configure` links it\) - it serves Herdr TUI tabs, and this is not a Herdr tab$/m, installed);
+  assert.match(installed, /^info Herdr TUI plugin: not linked \(`sandcastle herdr configure --tui` links it; the Herdr app does not need it\) - it serves Herdr TUI tabs, and this is not a Herdr tab$/m, installed);
   assert.match(installed, /^info herdr-core is installed, but this terminal is not one of its own: start a run from a terminal in the Herdr app to see it there\.$/m, installed);
   assert.ok(!calls().slice(before).some((c) => c.startsWith("hc ") && c !== "hc --version"), "only hc --version: no core is started");
   const absent = doctor([dirname(process.execPath), "/usr/bin", "/bin"]);

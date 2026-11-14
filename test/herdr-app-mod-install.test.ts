@@ -88,7 +88,7 @@ test("doctor warns when a tracked file changed, and configure --yes makes it ok"
   await quietly(() => configure(false, true, false, kit));
   assert.match(appModLine(kit) ?? "", /^ok /);
   writeFileSync(join(kit, "herdr-app", "main.js"), "// main, edited\n");
-  assert.match(appModLine(kit) ?? "", /^warn .*\n.*sandcastle herdr configure --yes/);
+  assert.match(appModLine(kit) ?? "", /^warn .*\n.*sandcastle herdr configure --app --yes/);
   await quietly(() => configure(false, true, false, kit));
   assert.match(appModLine(kit) ?? "", /^ok /);
 });
