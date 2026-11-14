@@ -240,7 +240,7 @@ function inputs(t) {
     dir: '',
     name: 'my-app',
     base: 'main',
-    version: '0.24.0',
+    version: '0.25.0',
     hasRecord: true,
     record,
     tickets: recordTickets,
