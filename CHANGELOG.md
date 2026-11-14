@@ -11,6 +11,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- The Herdr app mod's PLAN card shows each provider on one row, with its windows and the reading's
+  age beside the name, where the provider's name sat alone (Claude Code reports the weekly window
+  alone) and its windows hung under it; a card that wraps onto a line of its own no longer stretches
+  across the pane.
 - The closing summary's bullet for a ticket merged partly done with a check-by-hand note no longer
   reads `.;` where the agent's note ended a sentence before the check.
 
