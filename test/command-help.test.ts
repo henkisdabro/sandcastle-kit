@@ -89,7 +89,7 @@ test("herdr configure --help, through the plugin's own entry, edits no config", 
   for (const flag of ["--help", "-h"]) {
     const r = cli("src/herdr-plugin.ts", ["herdr", "configure", flag], dir, config);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /herdr configure \[--remove\]/);
+    assert.match(r.stdout, /herdr configure \[--app\] \[--tui\] \[--remove\] \[--yes\]/);
   }
   assert.ok(!existsSync(join(config, "herdr.toml")));
   assert.deepEqual(readdirSync(config), [], "nothing written to the user's config");

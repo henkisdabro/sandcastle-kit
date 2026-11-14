@@ -1415,8 +1415,8 @@ from disk - `prompts/` (as each ticket's pass starts, `src/run.ts`), `container/
 into every sandbox as it opens) and `status.sh` and `src/status-*.ts` (each time a status view
 starts) - so a pull under it gives its later tickets newer templates than its own code expects; a
 run does not snapshot them, and `skill/update.md` checks for live runs before its pull.
-`PLUGIN_MARKER` (`herdr-plugin-linked`, beside it) is left by `sandcastle herdr configure` and
-removed by `--remove`; the status view decides once at start-up whether it is inside Herdr TUI (`inHerdr1`: never in a herdr-core terminal) and on a
+`PLUGIN_MARKER` (`herdr-plugin-linked`, beside it) is left by `sandcastle herdr configure`'s plugin half and
+removed by `--remove` (after the unlink, which Herdr refuses with its server stopped); the status view decides once at start-up whether it is inside Herdr TUI (`inHerdr1`: never in a herdr-core terminal) and on a
 terminal, and re-reads the marker on every redraw (a file test, at the loop's top level) to decide
 whether to emit ticket links and the click hint, as a Ctrl-click does nothing without the plugin: a
 view opened before `configure` shows them within one redraw of the link.

@@ -65,6 +65,10 @@ export const SCRUBBED = [
   "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY", "LINEAR_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID",
   // The terminal the click hint senses (src/click-hint.ts), and the colour switch.
   "TERM_PROGRAM", "LC_TERMINAL", "VTE_VERSION", "KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "NO_COLOR",
+  // Node's test runner hands each test file FORCE_COLOR=1 when its own stdout is a colour terminal (`pnpm test` at a
+  // prompt): every child a test started then printed colour codes, and ten tests comparing its words failed there,
+  // never in CI or a gate, which run on a pipe.
+  "FORCE_COLOR",
   // The ssh the newest-release lookup builds on (src/upgrading.ts): a developer's own command is not a test's.
   "GIT_SSH_COMMAND", "GIT_SSH",
   // The status view's pane size and colour depth (src/status-view.ts): a test of a frame gives its own.

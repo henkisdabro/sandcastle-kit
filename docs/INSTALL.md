@@ -37,7 +37,7 @@ the same by hand.
 > on any OS, and Podman or rootless Docker on Linux, where the agent could not write its worktree.
 
 **Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) 0.9.3 or later (a tab with the status view,
-opened automatically; a pane per sandbox is opt-in with `herdr: { panes: "all" }`; `sandcastle herdr configure` adds the kit's plugin - see
+opened automatically; a pane per sandbox is opt-in with `herdr: { panes: "all" }`; `sandcastle herdr configure --tui` adds the kit's plugin - see
 [The Herdr plugin](herdr.md#the-herdr-plugin)) or herdr-core (`hc` 0.1.19 or later: the status view as a terminal beside yours, and a
 `sandcastle run --detach` that outlives the terminal it was started in - see
 [herdr-core](herdr.md#herdr-core)), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
@@ -60,7 +60,7 @@ install ends with it; to run it again later: `sandcastle setup`.
    the token you paste is fine-grained and that GitHub accepts it.
 5. **Writes** `~/.config/sandcastle-kit/.env` with owner-only permissions (600), keeping anything
    already in it.
-6. **Where Herdr TUI is installed, offers the kit's plugin** (`sandcastle herdr configure`), from
+6. **Where Herdr TUI is installed, offers the kit's plugin** (`sandcastle herdr configure --tui`), from
    any terminal: it shows what it adds to Herdr's config and asks first, with yes as the default.
 7. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `ps` on Linux) and prints the fix
    for anything missing.

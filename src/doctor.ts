@@ -13,6 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pinnedFor } from "./hooks-path.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
+import { remoteApp } from "./herdr-core.ts";
 import { appModLine, liveRuns, pluginState } from "./herdr-plugin.ts";
 import { terminalHost } from "./terminal-host.ts";
 import type { Probe } from "../mod/hooks/run-live.ts";
@@ -656,6 +657,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     const hc = run("hc", ["--version"]);
     console.log(`ok   herdr-core${hc ? ` (${hc})` : ""}: opens the status view beside this terminal (terminal ${host.terminal.address})`);
     if (hc && olderThan(hc, HC_VERIFIED)) console.log(hcFloorLine(hc));
+    // Nothing is broken: the app shows this terminal from another machine, so a run here opens the terminal view.
+    if (remoteApp(host.terminal)) console.log("info Herdr app: shows this terminal from another machine - a run here opens the terminal status view; the app pane needs the run on the app's machine");
   } else {
     check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
     // Installed but not this terminal's host: a run from here shows nothing in the Herdr app, which surprises.
@@ -667,7 +670,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   // this terminal needs it. `herdr plugin list` reads Herdr's own files, so a stopped server answers too.
   if (!herdr1 && run("herdr", ["--version"])) {
     const plugin = pluginState();
-    const state = plugin.linkedHere && plugin.block ? "linked from this checkout" : plugin.linkedFrom ? `linked from ${plugin.linkedFrom}` : "not linked (`sandcastle herdr configure` links it)";
+    const state = plugin.linkedHere && plugin.block ? "linked from this checkout" : plugin.linkedFrom ? `linked from ${plugin.linkedFrom}` : "not linked (`sandcastle herdr configure --tui` links it; the Herdr app does not need it)";
     console.log(`info Herdr TUI plugin: ${state} - it serves Herdr TUI tabs, and this is ${host.kind === "core" ? "a herdr-core terminal" : "not a Herdr tab"}`);
   }
   if (herdr1) {
@@ -676,8 +679,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       plugin.linkedHere && plugin.block,
       "Herdr plugin and sidebar rows (optional: the status view and report over any tab, Ctrl-click logs, run progress in the sidebar)",
       plugin.linkedFrom && !plugin.linkedHere
-        ? `Linked from another checkout (${plugin.linkedFrom}): \`sandcastle herdr configure\` here links this one.`
-        : "`sandcastle herdr configure` (shows what it adds and asks first).",
+        ? `Linked from another checkout (${plugin.linkedFrom}): \`sandcastle herdr configure --tui\` here links this one.`
+        : "`sandcastle herdr configure --tui` (shows what it adds and asks first).",
       true,
     );
     if (plugin.linkedFrom) console.log(clickHintLine(resolveClickHint()));

@@ -141,12 +141,14 @@
 //                    what a herdr-core sandbox terminal runs (the run starts it, with
 //                    `herdr.panes: "all"`): the sandbox's log as it goes, and its ticket and step
 //                    as the terminal's record; ends once that run is over. Not for typing in
-//   herdr configure [--remove]
-//                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
-//                    and keys to Herdr's config (shows them and asks first); --remove
-//                    takes all of it out. Works from anywhere. With `herdr-app` on PATH it
-//                    also copies the kit's Herdr app mod (copied, not linked) to the app's
-//                    mods directory, and --remove takes that copy out
+//   herdr configure [--app] [--tui] [--remove] [--yes]
+//                    two halves: --tui links the kit's Herdr TUI plugin and adds its
+//                    sidebar rows, tab bar entry and keys to Herdr's config; --app copies
+//                    the kit's Herdr app mod (copied, not linked) to the app's mods
+//                    directory. Shows what it changes and asks first (--yes: no question).
+//                    With neither flag: whichever of the two is installed; with both,
+//                    the app mod, and the plugin only where it is already set up here.
+//                    --remove takes out the half named, or both. Works from anywhere
 //
 // Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, REPORT_SCHEMA, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, LOAD_PAUSE, SANDCASTLE_API_KEY:
 // environment variables, see docs/configuration.md.
