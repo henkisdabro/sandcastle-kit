@@ -1,7 +1,7 @@
 // The pause and resume actions are skill-only text: SKILL.md routes to skill/pause.md, which tells
 // an agent to hold a run with `sandcastle pause` (never `sandcastle stop`, which ends the passes in
 // flight) and to confirm before a stop. This pins the routing - frontmatter, table rows, router
-// sections, the AGENTS.md row - the rules pause.md must keep, the lines it quotes from the kit's
+// sections, the docs/layout.md row - the rules pause.md must keep, the lines it quotes from the kit's
 // own output, and the pointers status.md and run.md hold to a paused run.
 //
 //   pnpm test:file test/skill-pause.test.ts
@@ -19,7 +19,7 @@ const skill = read("skill", "SKILL.md");
 const pause = read("skill", "pause.md");
 const status = read("skill", "status.md");
 const run = read("skill", "run.md");
-const agents = read("AGENTS.md");
+const layout = read("docs", "layout.md");
 const cli = read("src", "cli.ts");
 const statusView = read("src", "status-frame.ts");
 
@@ -118,7 +118,7 @@ test("run.md says a paused run is still live, so the mod sends no end prompt unt
   assert.match(step, /A paused run \(pause\.md\) is still live, so the mod sends no end prompt until the run ends/);
 });
 
-test("AGENTS.md's skill row names pause.md", () => {
-  const row = agents.split("\n").find((l) => l.startsWith("| `skill/` |")) ?? "";
+test("docs/layout.md's skill row names pause.md", () => {
+  const row = layout.split("\n").find((l) => l.startsWith("| `skill/` |")) ?? "";
   assert.ok(row.includes("pause.md"), row);
 });

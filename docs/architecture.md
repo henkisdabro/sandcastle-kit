@@ -1,7 +1,7 @@
 # Architecture notes
 
-What each of the kit's larger modules owns, in more detail than `AGENTS.md`'s Layout table. Read
-the section for a file before changing it; update it in the same commit when a rule here changes.
+What each of the kit's larger modules owns, in more detail than the Layout table (`docs/layout.md`).
+Read the section for a file before changing it; update it in the same commit when a rule here changes.
 The terms (run record, attempt, ending, requeued) are defined in `GLOSSARY.md`.
 
 ## `bin/sandcastle`
@@ -3379,7 +3379,7 @@ reads a name that is neither scrubbed (`SCRUBBED`) nor on its keep list, so a ne
 line in one of them - and `test/no-stray.ts` fails a file that prints outside `quietly`.
 Some read the docs: the `skill*` tests check SKILL.md's frontmatter and pointers, each action file's
 steps and brief, run.md's seven headings against `src/report.ts`, update.md's step references and
-AGENTS.md's Layout row for `skill/`
+`docs/layout.md`'s row for `skill/`
 
 ## `skill/`
 

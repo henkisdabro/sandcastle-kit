@@ -33,13 +33,15 @@ test("the bash32 comparison runs only with STATUS_BASH unset and 80 columns, whe
   assert.match(source, /FAIL \[bash32\]/);
 });
 
-test("test/suite.sh and AGENTS.md say one scenario is rendered under bash32", () => {
+test("test/suite.sh and docs/layout.md say one scenario is rendered under bash32, and AGENTS.md claims no second pass", () => {
   const suite = readFileSync(join(KIT, "test/suite.sh"), "utf8");
   assert.doesNotMatch(suite, /each with its bash32 pass/);
   assert.match(suite, /one\s+# scenario under bash32|also renders\s+# one scenario under bash32/);
-  const agents = readFileSync(join(KIT, "AGENTS.md"), "utf8");
-  assert.doesNotMatch(agents, /runs a second time under it/);
-  assert.doesNotMatch(agents, /second pass under `bash32`/);
+  for (const doc of ["AGENTS.md", "docs/layout.md"]) {
+    const text = readFileSync(join(KIT, doc), "utf8");
+    assert.doesNotMatch(text, /runs a second time under it/, doc);
+    assert.doesNotMatch(text, /second pass under `bash32`/, doc);
+  }
 });
 
 test("status.sh under bash32 draws the same frame as under the bash on PATH", { skip: existsSync(BASH32) ? false : `${BASH32} is absent (this repository's sandbox image builds it)` }, () => {

@@ -303,9 +303,9 @@ fix its cause or ask the user.
 
 ## 🤝 Contributing to the kit
 
-`AGENTS.md` has the layout and conventions. This repository is public and used daily by its
-maintainer, so nothing personal, client-specific or secret may be committed: enable the guard with
-`git config core.hooksPath .githooks` (requires `gitleaks`; add your own denylist at
+`AGENTS.md` has the conventions and `docs/layout.md` the layout. This repository is public and
+used daily by its maintainer, so nothing personal, client-specific or secret may be committed:
+enable the guard with `git config core.hooksPath .githooks` (requires `gitleaks`; add your own denylist at
 `~/.config/sandcastle-kit/denylist`, and in `allowlist` beside it the few lines you mean to
 publish anyway, such as an author credit). CI scans every push for secrets.
 
