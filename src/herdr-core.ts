@@ -434,6 +434,13 @@ export const needsYouLine = (tickets: Record<string, TicketRecord>, retried: Rea
   return `${cut}${others}`;
 };
 
+/** ` · check #12, #9 +1 by hand`: the merged tickets whose change no gate exercises, newest first, or "" with none. */
+export const checkByHandLine = (tickets: Record<string, TicketRecord>): string => {
+  const ids = Object.entries(tickets).filter(([, t]) => t.state === "merged" && t.ungated).sort(([, a], [, b]) => (b.since ?? 0) - (a.since ?? 0)).map(([id]) => (/^\d+$/.test(id) ? `#${id}` : id));
+  if (!ids.length) return "";
+  return ` · check ${ids.slice(0, 2).join(", ")}${ids.length > 2 ? ` +${ids.length - 2}` : ""} by hand`;
+};
+
 /**
  * The records the run's status view holds in its terminal, by key: the root (the run: working; blocked with
  * `kind=question` while a ticket needs a person; done at the end; error for a run that ended without finishing),
@@ -451,13 +458,16 @@ export const runRecords = (run: RunFacts): Map<string, string> => {
   // person is wanted for - the newest ticket that needs them and why - and an ended run says how it ended.
   const ended = run.live ? "" : run.record.finishedAt ? "run finished: " : "run ended early: ";
   const merged = ` · ${counts.merged}/${counts.total} merged`;
+  // A merged ticket no gate exercised is the summary's "needs you", but no ticket's state: without this the toast of
+  // a finished run says nothing is left for the person while the report opens on a check by hand.
+  const byHand = run.live ? "" : checkByHandLine(run.tickets);
   const msg =
     state === "blocked"
       ? `${ended}${needsYouLine(run.tickets, retried, TEXT_MAX - [...ended].length - [...merged].length)}${merged}`
       : state === "done"
-        ? `run finished: ${text}`
+        ? `run finished: ${text}${byHand}`
         : state === "error"
-          ? `${text} · ended early`
+          ? `${text} · ended early${byHand}`
           : text;
   shown.set(
     "root",

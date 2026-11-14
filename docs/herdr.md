@@ -111,8 +111,9 @@ shows the same thing:
   *working*; its slot terminals read *idle*, not *blocked*, the same way), else *done* at the end
   (*error* when the run ended early), with the merged share of the run as its progress and the run line as its title.
   Its message says what you are wanted for - the newest ticket that needs you and why
-  (`#12 needs you: conflict in src/a.ts`) - and at the end how the run finished, so the app's own
-  needs-you and done notifications carry it.
+  (`#12 needs you: conflict in src/a.ts`) - and at the end how the run finished, with any merged ticket
+  to check by hand (`run finished: 1/1 · check #964 by hand`), so the app's own needs-you and done
+  notifications carry it.
 - 🧱 **A terminal per sandbox.** Each running sandbox gets a terminal of its own, following its
   ticket's log and reporting its ticket and step. By default it is a sub-agent of the status view
   with no pane: the Herdr app lists it under the run's agent, named after the project and ticket
