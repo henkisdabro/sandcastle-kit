@@ -17,7 +17,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { GROUPS, retriedNextTurn, type RunRecord, type TicketRecord, WORDS } from "../mod/hooks/run-record.ts";
-import { appCliPorts, type AppPorts, type ModPane } from "./herdr-app.ts";
+import { appCliPorts, appInstalled, type AppPorts, type ModPane } from "./herdr-app.ts";
 import { real } from "./live-runs.ts";
 import { clear, record, TEXT_MAX, windowTitle } from "./osc7501.ts";
 import type { CoreTerminal } from "./terminal-host.ts";
@@ -256,6 +256,9 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     started = out.address;
     const address = started;
     writeCoreView(root, { instance, status: address, slots: [], ...(pane ? { pane } : {}), ...(inApp(caller) ? { caller: caller.address } : {}) });
+    // Kept in this process, not in the record: the start's line is printed by the run that opened the view, and the
+    // record is what other readers hold to its fields. Asked once, through the start's own probe.
+    if (!pane && remoteApp(caller, app.installed ?? (() => true))) remoteViews.add(`${root}\0${address}`);
     if (!opened.size) process.on("exit", () => opened.forEach((o, r) => teardown(r, o.instance, o.hc)));
     opened.set(root, { instance, hc });
     return address;
@@ -283,6 +286,18 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
 
 /** A caller the app shows: its terminal carries the app's `herdr.space` and `herdr.tab` labels. */
 const inApp = (caller: CoreTerminal) => !!caller.labels["herdr.space"] && !!caller.labels["herdr.tab"];
+
+/**
+ * The Herdr app shows this terminal from another machine: it carries the app's labels, and `herdr-app` is not on this
+ * one. A run here has no app to open a pane in (#975), so it opens the terminal view and says why. `installed` is the
+ * run's own probe (`herdr-app --version`, asked once per start), so deciding the case spawns nothing else.
+ */
+export const remoteApp = (caller: CoreTerminal, installed: () => boolean = appInstalled) => inApp(caller) && !installed();
+
+const remoteViews = new Set<string>();
+
+/** The reason the start's line and doctor give for a remote app (#975). */
+export const REMOTE_APP_WHY = "the Herdr app shows this machine remotely: its app pane needs a run started on the app's machine, #975";
 
 /** This project's `sandcastle` mod panes in the app's layout; undefined when the layout cannot be read. */
 const projectPanes = (root: string, app: AppPorts): Set<string> | undefined => {
@@ -393,7 +408,9 @@ export const appPane = (root: string, caller: CoreTerminal, kit: string, app: Ap
 /** The start's `Status view:` line on herdr-core: the mod pane when this run opened one, else the terminal. */
 export const coreStatusLine = (root: string, status: string) => {
   const view = readCoreView(root);
-  return view?.status === status && view.pane ? `Status view: app pane ${view.pane} (terminal ${status})` : `Status view: terminal ${status}`;
+  if (view?.status === status && view.pane) return `Status view: app pane ${view.pane} (terminal ${status})`;
+  // The run that opened the view asked once whether `herdr-app` is here, and the line asks no more.
+  return remoteViews.has(`${root}\0${status}`) ? `Status view: terminal ${status} (${REMOTE_APP_WHY})` : `Status view: terminal ${status}`;
 };
 
 /**

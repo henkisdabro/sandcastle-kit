@@ -224,7 +224,7 @@ export const startDetached = async (
   while (Date.now() < deadline && ended === undefined && !failed) {
     if (inHerdr) {
       // Printed by the run (burndown.ts) once its view is open: a Herdr TUI pane, or a herdr-core terminal.
-      status = /^Status view: (?:pane \S+(?: \(tab \S+\))?|terminal \S+|app pane \S+ \(terminal \S+\))$/m.exec(readLog(log))?.[0];
+      status = /^Status view: (?:pane \S+(?: \(tab \S+\))?|terminal \S+(?: \([^()\n]*\))?|app pane \S+ \(terminal \S+\))$/m.exec(readLog(log))?.[0];
     } else if (pid !== undefined && livePid(root) === pid) {
       status = "Status view: run `sandcastle status`";
     }
