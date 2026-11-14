@@ -99,6 +99,11 @@ state below, and the sandbox terminals sit under it.
 Anywhere else - another herdr-core client, a terminal with no pane in the window, the mod missing
 or stale, or the pane failing to open (one line says why) - the run opens the terminal view as
 above.
+When the app shows a terminal from **another machine** (a machine added with `hc machine add`) and
+`herdr-app` is not installed here, the app pane needs the run started on the app's machine.
+The run here opens the terminal view and says why: `Status view: terminal <id> (the Herdr app shows
+this machine remotely: ...)`, and doctor adds an `info` line (never a warning) after its herdr-core
+line.
 The next run closes the pane an earlier run opened, as it replaces the status terminal.
 `sandcastle status` still opens the terminal view by hand, anywhere.
 The kit talks to herdr-core alone (`hc`), so the Herdr app, and any other client of herdr-core,

@@ -13,6 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pinnedFor } from "./hooks-path.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
+import { remoteApp } from "./herdr-core.ts";
 import { appModLine, liveRuns, pluginState } from "./herdr-plugin.ts";
 import { terminalHost } from "./terminal-host.ts";
 import type { Probe } from "../mod/hooks/run-live.ts";
@@ -656,6 +657,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     const hc = run("hc", ["--version"]);
     console.log(`ok   herdr-core${hc ? ` (${hc})` : ""}: opens the status view beside this terminal (terminal ${host.terminal.address})`);
     if (hc && olderThan(hc, HC_VERIFIED)) console.log(hcFloorLine(hc));
+    // Nothing is broken: the app shows this terminal from another machine, so a run here opens the terminal view.
+    if (remoteApp(host.terminal)) console.log("info Herdr app: shows this terminal from another machine - a run here opens the terminal status view; the app pane needs the run on the app's machine");
   } else {
     check(herdr1, "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
     // Installed but not this terminal's host: a run from here shows nothing in the Herdr app, which surprises.

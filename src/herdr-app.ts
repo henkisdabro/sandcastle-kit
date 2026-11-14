@@ -84,6 +84,8 @@ export type ModPane = { pane: string; project?: string; run?: string };
 
 /** What the run asks of the app; a test passes its own. Each throws, as `execFileSync` does, when the app says no. */
 export type AppPorts = {
+  /** `herdr-app` on PATH, asked once per start. Optional: a fake that leaves it out is asked of the real probe. */
+  installed?(): boolean;
   /** Doctor's `ok`: `herdr-app` on PATH and the mod current against this kit's files. */
   modCurrent(kit: string): boolean;
   /** The pane the app shows `terminal` (a bare local address) in, or undefined: no window, or no pane for it. */
@@ -141,6 +143,7 @@ export const appCliPorts = ({ timeoutMs = 10_000 }: { timeoutMs?: number } = {})
   let installed: boolean | undefined;
   const isInstalled = () => (installed ??= appInstalled());
   return {
+    installed: isInstalled,
     modCurrent: (kit) => appModState(kit, isInstalled) === "current",
     paneOf(terminal) {
       if (!isInstalled()) return undefined;
