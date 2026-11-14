@@ -33,7 +33,7 @@ test("the bash32 comparison runs only with STATUS_BASH unset and 80 columns, whe
   assert.match(source, /FAIL \[bash32\]/);
 });
 
-test("test/suite.sh, AGENTS.md and docs/layout.md say one scenario is rendered under bash32", () => {
+test("test/suite.sh and docs/layout.md say one scenario is rendered under bash32, and AGENTS.md claims no second pass", () => {
   const suite = readFileSync(join(KIT, "test/suite.sh"), "utf8");
   assert.doesNotMatch(suite, /each with its bash32 pass/);
   assert.match(suite, /one\s+# scenario under bash32|also renders\s+# one scenario under bash32/);

@@ -25,25 +25,19 @@ bug no gate would fail"), never as an incident from a named project.
 
 ## Layout
 
-The table of every path, one line each, is `docs/layout.md`: read it to find where a thing lives,
-and add a row there when you add a module. What the larger modules own, and the rules each keeps
-(the scheduler's requeue-once rule, the file hold, landing, the guard's fingerprint), is in
-`docs/architecture.md`: read a module's section there before changing it.
+**Where a thing lives**: `docs/layout.md`, one row per path. A new module adds its row there.
+**Before changing a module**, read its section of `docs/architecture.md`: what it owns and the rules
+it keeps (the scheduler's requeue-once rule, the file hold, landing, the guard's fingerprint).
 
-| Area | What |
+| Area | Rule its name does not tell |
 |---|---|
-| `bin/sandcastle` | Shell entry: runs `src/cli.ts` on Node's own type stripping |
-| `src/` | The kit: the CLI and every command, the run (burndown, schedule, landing, ledger, report), sandboxes and gates, the guard and pool, the trackers, the Herdr and herdr-core views, and the status view |
+| `skill/` | Shared by Claude Code, Codex and OpenCode: read its portability rules in `docs/architecture.md` before editing |
+| `mod/` | The optional Claude Code mod; runs inside Claude Code, so its code stays self-contained in `mod/` |
 | `herdr/`, `herdr-app/` | The Herdr TUI plugin and the Herdr app mod |
-| `mod/` | The optional Claude Code mod; imports nothing from `src/` |
-| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode. Before editing it, read its portability rules in `docs/architecture.md` |
-| `prompts/` | Implement, review, repair and resolve templates |
-| `container/` | Mounted read-only at `/etc/claude-code` in every sandbox: managed settings, `git-guard.sh`, the report schema |
-| `docker/` | The shared base and agents images |
-| `status.sh` | The status view's entry, a Bash 3.2-safe wrapper with no logic |
+| `container/` | Mounted read-only at `/etc/claude-code` in every sandbox |
+| `status.sh` | A Bash 3.2-safe wrapper that `exec`s `src/status-view.ts`; the view's logic goes there |
 | `templates/`, `examples/` | What `sandcastle init` copies into a project; invented example configs |
-| `test/` | One `*.test.ts` file per behaviour, the runners and fixtures, `full-check.sh` |
-| `docs/`, `site/`, `CHANGELOG.md` | User documentation, the GitHub Pages site, Keep a Changelog |
+| `test/` | One `*.test.ts` file per behaviour |
 
 `@ai-hero/sandcastle` is a dependency, not vendored, with a pnpm patch (`patches/`; why, in
 `docs/architecture.md` -> "patched dependency"). Its behaviour is in
@@ -78,9 +72,7 @@ once and each leg's result on stderr as the leg ends, but the summary only when 
 so start it in the background with both streams in a file, and read its `RESULT:` line.
 
 In this repository's sandbox image (`.sandcastle/Dockerfile`), `bash32` is macOS's bash 3.2 built
-from source, and `test/status.test.sh` (part of `pnpm test`) renders one scenario through `status.sh`
-under it and checks the frame is the same as under the bash on PATH. Every
-host shell script (all but `container/`) parses under it too, and `test/host-shell-portability.test.ts`
+from source. Every host shell script (all but `container/`) parses under it, and `test/host-shell-portability.test.ts`
 refuses a bash 4 construct or a GNU-only flag without a fallback in one: shellcheck has no 3.2
 dialect. A line that must keep one says why with `# portability-ok: <reason>`. Before
 committing a change to a shell script, run `shellcheck -S error` on it; `shellcheck` is installed there too.

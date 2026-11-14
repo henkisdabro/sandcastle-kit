@@ -1,7 +1,7 @@
 # Layout
 
 One line per path of the kit's own repository: where each thing lives and what it holds.
-`AGENTS.md` -> "Layout" keeps one line per area and points here.
+`AGENTS.md` -> "Layout" keeps the rules a path name does not tell, and points here.
 What the larger modules own, and the rules each keeps (the scheduler's requeue-once rule, the file
 hold, landing, the guard's fingerprint), is in [Architecture notes](architecture.md): read a
 module's section there before changing it.
@@ -109,7 +109,7 @@ A ticket that adds a module adds its row here.
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
 | `docs/setup.md`, `queue.md`, `running.md`, `commands.md`, `configuration.md`, `concurrency.md`, `safety.md`, `herdr.md`, `claude-mod.md`, `troubleshooting.md`, `how-it-works.md` | The user documentation the README's Documentation table points to, one topic each. A behaviour's reference lives in its topic file; the README keeps the pitch, quick start, a short how-it-works, the command list and the agent section. `docs/configuration.md`'s tables are what `sandcastle changes` compares between releases |
 | `docs/img/` | The README's pictures. GitHub plays no SVG animation in a README, so the moving ones are GIFs, rebuilt by `record-gifs.sh` there; the castle's colours are the status view's |
-| `docs/layout.md` | This table, one line per path; `AGENTS.md` keeps one line per area |
+| `docs/layout.md` | This table, one line per path; `AGENTS.md` keeps the rules a path name does not tell |
 | `docs/releasing.md` | Version bumps, the tag and the release notes' shape |
 | `test/full-check.sh` | Every check below on this machine, in a Linux container and the outbound scan of the commits not yet on `origin/main`, all legs side by side; the suite runs as `test/shard.ts`'s shards through `test/run-shards.sh`, their count from `test/shard-count.sh` (the cores shared between the passes at once) |
 | `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step. `site/js/status-render.js` is generated from the status view's renderer by `scripts/site-renderer.mjs` (`pnpm site:renderer`): rerun it and commit the output after changing `src/status-grid.ts`, `src/status-frame.ts` or `src/status-render.ts` (`test/site-renderer-copy.test.ts` fails otherwise) |
