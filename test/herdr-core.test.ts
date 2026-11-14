@@ -44,7 +44,7 @@ esac
 chmodSync(join(bin, "hc"), 0o755);
 Object.assign(process.env, { PATH: `${bin}${delimiter}${process.env.PATH}`, HC_TERMINAL_ID: "t-mine" });
 
-const { coreRecords, coreViewRecord, needsYouLine, openCoreStatus, openCoreView, projectKey, readCoreView, readSlotState, runRecords, slotAddresses, slotLink, slotName, slotStateFile, statusName, teardown, ticketName, askingInCore } =
+const { coreRecords, coreViewRecord, needsYouLine, openCoreStatus, openCoreView, projectKey, readCoreView, readSlotState, runCaller, runRecords, slotAddresses, slotLink, slotName, slotStateFile, statusName, teardown, ticketName, askingInCore } =
   await import("../src/herdr-core.ts");
 const { askingInPane, openSandboxView, viewRecord } = await import("../src/herdr.ts");
 const { openStatusPane } = await import("../src/run.ts");
@@ -88,7 +88,22 @@ test("a fresh status view: argv only, the core flags, the caller's tab and this 
     "--", "env", "SANDCASTLE_CORE_VIEW=i1", `${KIT}/bin/sandcastle`, "status",
   ]);
   assert.match(statusName(root), /^[a-z0-9_-]{1,32}$/);
-  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t7", slots: [] });
+  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t7", slots: [], caller: "t-mine", pid: process.pid });
+});
+
+test("runCaller: the record's caller only for the run whose pid it holds, and only a plain address", () => {
+  const root = project();
+  const logs = join(root, ".sandcastle/logs");
+  assert.equal(runCaller(logs, 42), undefined, "no record");
+  const write = (view: object) => writeFileSync(coreViewRecord(root), JSON.stringify({ instance: "i1", status: "t9", slots: [], ...view }));
+  write({ caller: "t7", pid: 42 });
+  assert.equal(runCaller(logs, 42), "t7");
+  assert.equal(runCaller(logs, 43), undefined, "another run's record");
+  assert.equal(runCaller(logs, undefined), undefined, "a run record with no pid");
+  write({ caller: "xps:t7", pid: 42 });
+  assert.equal(runCaller(logs, 42), "xps:t7", "an address on another machine");
+  write({ caller: "t7 --confirmed", pid: 42 });
+  assert.equal(runCaller(logs, 42), undefined);
 });
 
 test("a caller with no tab labels starts a hidden view", () => {
@@ -132,7 +147,7 @@ test("a status terminal left finished (an ordinary exit is final) is removed, an
   assert.deepEqual(calls().find((c) => c[0] === "rm"), ["rm", "t3", "--json"]);
   const run = calls().find((c) => c[0] === "run")!;
   assert.equal(run[run.indexOf("--name") + 1], statusName(root));
-  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [] });
+  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [], caller: "t-mine", pid: process.pid });
 });
 
 test("the status terminal running a person's program keeps it, and its name: this run's view starts unnamed", () => {
@@ -214,7 +229,7 @@ test("slots: argv only, the core flags under the status terminal, this run's lab
   ]);
   assert.equal(runs[2].at(-3), "1");
   assert.match(slotName(root, 99), /^[a-z0-9_-]{1,32}$/);
-  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t7", slots: ["t8", "t9"] });
+  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t7", slots: ["t8", "t9"], caller: "t-mine", pid: process.pid });
   assert.deepEqual(readSlotState(slotStateFile(root, 0)), { address: "t8", issue: "12", ref: "#12", title: "Add cart", phase: "setup", state: "working" });
   assert.equal(readlinkSync(slotLink(root, 0)), "none.log");
 });

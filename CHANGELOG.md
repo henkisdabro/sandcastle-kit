@@ -20,6 +20,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- The Herdr app mod's closing-report window has **Go to the run**, which brings forward the space,
+  tab and pane of the terminal that ran `sandcastle run`, while that terminal still runs.
+  `core-view.json` records the caller, and `status --json --frame`'s `run` names it as `caller`.
 - `sandcastle status --json --frame` prints `{ table, frame }`: the ticket table plus the castle,
   title, lanes and legend the terminal view draws, as text segments with palette tone names, so
   another view (such as the Herdr app mod) shows the same words and colours. (#955)

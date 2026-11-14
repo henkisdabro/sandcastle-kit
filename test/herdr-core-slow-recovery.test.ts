@@ -45,5 +45,5 @@ test("a status view still running after the wait is ended and replaced by name, 
   assert.deepEqual(calls.map((c) => c[0]).filter((v) => v !== "get"), ["keys", "kill", "rm", "run"]);
   const run = calls.find((c) => c[0] === "run")!;
   assert.equal(run[run.indexOf("--name") + 1], statusName(root));
-  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [] });
+  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [], caller: "t-mine", pid: process.pid });
 });

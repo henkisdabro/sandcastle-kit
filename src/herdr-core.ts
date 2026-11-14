@@ -47,8 +47,12 @@ export const ticketName = (root: string, issue: string) => {
 /** Fresh in each process: an autonomy run's turns are one run. */
 export const RUN_INSTANCE = randomUUID().replaceAll("-", "").slice(0, 12);
 
-/** `pane`: the Herdr app's mod pane this instance opened in place of the status terminal's own pane (#959). */
-export type CoreView = { instance: string; status?: string; slots?: string[]; pane?: string };
+/**
+ * `pane`: the Herdr app's mod pane this instance opened in place of the status terminal's own pane (#959).
+ * `caller`: the terminal that ran `sandcastle run`, and `pid` the run's process (run.json's `pid`), which ties the
+ * record to its run: the app mod's report window takes a person back to the caller (`runCaller`).
+ */
+export type CoreView = { instance: string; status?: string; slots?: string[]; pane?: string; caller?: string; pid?: number };
 export const coreViewRecord = (root: string) => join(root, ".sandcastle/logs/core-view.json");
 const readView = (file: string): CoreView | undefined => {
   try {
@@ -251,7 +255,7 @@ export const openCoreStatus = (root: string, caller: CoreTerminal, { kit, hc = h
     if (unnamedLine) console.log(unnamedLine);
     started = out.address;
     const address = started;
-    writeCoreView(root, { instance, status: address, slots: [], ...(pane ? { pane } : {}) });
+    writeCoreView(root, { instance, status: address, slots: [], ...(pane ? { pane } : {}), caller: caller.address, pid: process.pid });
     if (!opened.size) process.on("exit", () => opened.forEach((o, r) => teardown(r, o.instance, o.hc)));
     opened.set(root, { instance, hc });
     return address;
@@ -689,6 +693,16 @@ export const openCoreView = (root: string, caller: CoreTerminal, { panes, slots:
     refresh() {},
     close() {},
   };
+};
+
+/**
+ * The terminal that started the run whose record `pid` names, from `core-view.json`: undefined for a record another
+ * run wrote (a Herdr TUI run writes none, so the last core run's record may be older than run.json), and for an address
+ * that is not plain (it goes to the app's commands as it is).
+ */
+export const runCaller = (logs: string, pid: unknown): string | undefined => {
+  const view = readView(join(logs, "core-view.json"));
+  return typeof pid === "number" && view?.pid === pid && typeof view.caller === "string" && /^[\w.:-]+$/.test(view.caller) ? view.caller : undefined;
 };
 
 /** The live slots the record holds, each as the ticket it shows and its address (`#12 t7`), for the status view. */

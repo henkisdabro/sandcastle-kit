@@ -5,7 +5,7 @@
 //   pnpm test:file test/run-facts.test.ts
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -39,6 +39,12 @@ test("runFacts with the view's counts: a stalled ticket the record has implement
   assert.deepEqual([facts.counts.working, facts.counts.needsYou, facts.counts.merged, facts.counts.total], [0, 2, 1, 3]);
 });
 
+test("runFacts carries the run's caller only with a record, so the report can take a person back to it", () => {
+  assert.equal(runFacts({ ...base, record: {}, caller: "t7" }).caller, "t7");
+  assert.equal(runFacts({ ...base, record: {} }).caller, undefined);
+  assert.equal(runFacts({ ...base, hasRecord: false, live: false, record: {}, caller: "t7" }).caller, undefined);
+});
+
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-run-facts-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 
@@ -56,5 +62,29 @@ test("status --json --frame carries the run's facts beside the table and the fra
     } finally {
       fixture.stop();
     }
+  }
+});
+
+test("status --json --frame names the run's caller from core-view.json only when that record is this run's", () => {
+  const fixture = buildFixture("ended", mkdtempSync(join(TMP, "caller-")));
+  try {
+    const logs = join(fixture.root, ".sandcastle/logs");
+    const { pid } = JSON.parse(readFileSync(join(logs, "run.json"), "utf8")) as { pid: number };
+    const read = () => {
+      const r = spawnStatus(["--json", "--frame"], { encoding: "utf8", env: viewEnv(fixture), stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
+      assert.equal(r.status, 0, r.stderr);
+      return JSON.parse(r.stdout).run.caller as string | undefined;
+    };
+    assert.equal(read(), undefined, "no herdr-core record: no caller");
+    const record = (view: object) => writeFileSync(join(logs, "core-view.json"), JSON.stringify({ instance: "i1", status: "t9", slots: [], ...view }));
+    record({ caller: "t7", pid });
+    assert.equal(read(), "t7");
+    // An earlier core run's record, left behind by a run in the Herdr TUI since: not this run's caller.
+    record({ caller: "t7", pid: pid + 1 });
+    assert.equal(read(), undefined);
+    record({ caller: "t7" });
+    assert.equal(read(), undefined, "a record from before the caller was kept names nobody");
+  } finally {
+    fixture.stop();
   }
 });
