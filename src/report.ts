@@ -1141,8 +1141,9 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
           ? "the ticket is still open but no longer in the queue, so no run takes it"
           : "and the next `sandcastle run` picks up the remainder";
       // A reviewer's check-by-hand note on the same ticket goes on its one bullet: often the same check in other words.
+      // The agent's note is a sentence and often ends with a full stop, which read ".;" before the check.
       const check = o.ungated.includes(id) ? `; check by hand: ${f.tickets[id].ungated ?? ""}` : "";
-      return `- ${name(id)} - merged, partly done: ${note}${more}${check} - the ticket is still open${o.partlyDecide.includes(id) || o.partlyAway.includes(id) ? "; " : ", "}${then}`;
+      return `- ${name(id)} - merged, partly done: ${check && !more ? note.replace(/\.$/, "") : note}${more}${check} - the ticket is still open${o.partlyDecide.includes(id) || o.partlyAway.includes(id) ? "; " : ", "}${then}`;
     }),
     // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
     ...o.ungated.filter((id) => !o.partly.includes(id)).map((id) => {

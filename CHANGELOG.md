@@ -9,6 +9,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Fixed
+
+- The closing summary's bullet for a ticket merged partly done with a check-by-hand note no longer
+  reads `.;` where the agent's note ended a sentence before the check.
+
 ## [0.25.0] - 2026-11-14
 
 ### Upgrading
