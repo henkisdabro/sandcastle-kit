@@ -28,6 +28,8 @@ type Report = { project: string; bin: string; started: string; caller?: string }
 const load = ({ report, live = [] }: { report?: Report; live?: { address: string; state: string }[] } = {}) => {
   const overlays = new Map<string, Overlay>();
   const commands: [string, unknown][] = [];
+  // The click's `cx`: each `notify` (a render asked for) is counted.
+  const cx = { notified: 0, notify: () => void cx.notified++ };
   const opened: Overlay[] = [];
   const elements: Element[] = [];
   const div = () => {
@@ -36,7 +38,7 @@ const load = ({ report, live = [] }: { report?: Report; live?: { address: string
     const chain: unknown = new Proxy({}, {
       get: (_t, name) => (...args: unknown[]) => {
         if (name === "id") el.id = args[0] as string;
-        if (name === "on_click") el.click = () => (args[0] as (e: unknown, cx: unknown) => void)({}, {});
+        if (name === "on_click") el.click = () => (args[0] as (e: unknown, cx: unknown) => void)({}, cx);
         // `.when(cond, f)` applies f only when cond holds, as gpui's does.
         if (name === "when" && args[0]) (args[1] as (el: unknown) => unknown)(chain);
         return chain;
@@ -67,7 +69,7 @@ const load = ({ report, live = [] }: { report?: Report; live?: { address: string
     return () => undefined;
   };
   const mod = new Function(...names, source)(...names.map(stand)) as Mod;
-  return { mod, opened, elements, commands };
+  return { mod, opened, elements, commands, cx };
 };
 
 test("a markdown link, an image, emphasis and HTML in the report's text are escaped; its headings, lists and code spans are kept", () => {
@@ -173,4 +175,19 @@ test("a report opened for a run with a known caller carries it; the window offer
   window.error = "";
   window.renderReport();
   assert.equal(elements.find((e) => e.id === "report-caller"), undefined, "no caller known: no button");
+});
+
+test("Go to the run asks again on the click: a caller that ended since the window drew does nothing and hides the button", () => {
+  const live = [{ address: "t7", state: "live" }];
+  const { mod, elements, commands, cx } = load({ report: { project: "/p", bin: "sandcastle", started: "01:00", caller: "t7" }, live });
+  const window = new mod.SandcastleStatus();
+  window.text = "";
+  window.error = "";
+  window.renderReport();
+  const button = elements.find((e) => e.id === "report-caller");
+  assert.ok(button);
+  live[0].state = "finished";
+  button.click!();
+  assert.deepEqual(commands, [], "no focus on a terminal that has ended");
+  assert.equal(cx.notified, 1, "the window draws again, without the button");
 });

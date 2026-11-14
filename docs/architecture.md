@@ -1260,16 +1260,18 @@ A snapshot that does not parse is dropped and the child detects for itself.
 The core adapter: the run's status view as a core terminal, the slot terminals, and their
 teardown.
 It shares no state with `src/herdr.ts`.
-Its record is `.sandcastle/logs/core-view.json` (`instance`, `status`, `slots`, and the run's
-`caller` and `pid`), so nothing that
+Its record is `.sandcastle/logs/core-view.json` (`instance`, `status`, `slots`, and for a caller in
+the Herdr app its `caller`), so nothing that
 reads `herdr-view.json` - the plugin's tick, `tellDeadTab`, `restartStatusView`,
 `tabAwaitsReport` - ever acts on a core address; a core run retires a Herdr TUI run's
 `herdr-view.json` (`retireViewRecord`) and never `hc kill`s an id from it.
 The live-runs registry is unchanged, so the Herdr TUI tab bar lists a core run like any other and
 finds no tab of it to act on (`test/herdr-core-host.test.ts`).
-The `caller` is the terminal that ran `sandcastle run`; `runCaller` hands it to the status view's run
-facts (`runFacts.caller`) only while the record's `pid` is run.json's, since a Herdr TUI run writes
-no record and leaves an earlier core run's in place; the app mod's report window goes back to it.
+The `caller` is the terminal that ran `sandcastle run`, recorded only when the app shows it (its
+`herdr.space` and `herdr.tab` labels); `runCaller` hands it to the status view's run facts
+(`runFacts.caller`) only while the record's `instance` is run.json's, since a Herdr TUI or plain
+run writes no record and leaves an earlier core run's in place (a pid comes round again, an
+instance does not); the app mod's report window goes back to it, asking again on the click.
 
 The seam is the one `burndown()` already calls: `openStatusPane` (`src/run.ts`), `openSandboxView`
 and `askingInPane` (`src/herdr.ts`) each dispatch once on the host, `core` to here, `herdr1` to

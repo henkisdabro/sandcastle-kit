@@ -69,21 +69,25 @@ test("status --json --frame names the run's caller from core-view.json only when
   const fixture = buildFixture("ended", mkdtempSync(join(TMP, "caller-")));
   try {
     const logs = join(fixture.root, ".sandcastle/logs");
-    const { pid } = JSON.parse(readFileSync(join(logs, "run.json"), "utf8")) as { pid: number };
+    // The record of a run of this kit: it names its instance, as the core view's record does.
+    const runFile = join(logs, "run.json");
+    const record = JSON.parse(readFileSync(runFile, "utf8")) as { pid: number };
+    writeFileSync(runFile, JSON.stringify({ ...record, instance: "i1" }));
     const read = () => {
       const r = spawnStatus(["--json", "--frame"], { encoding: "utf8", env: viewEnv(fixture), stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
       assert.equal(r.status, 0, r.stderr);
       return JSON.parse(r.stdout).run.caller as string | undefined;
     };
     assert.equal(read(), undefined, "no herdr-core record: no caller");
-    const record = (view: object) => writeFileSync(join(logs, "core-view.json"), JSON.stringify({ instance: "i1", status: "t9", slots: [], ...view }));
-    record({ caller: "t7", pid });
+    const view = (fields: object) => writeFileSync(join(logs, "core-view.json"), JSON.stringify({ instance: "i1", status: "t9", slots: [], ...fields }));
+    view({ caller: "t7" });
     assert.equal(read(), "t7");
-    // An earlier core run's record, left behind by a run in the Herdr TUI since: not this run's caller.
-    record({ caller: "t7", pid: pid + 1 });
+    // An earlier core run's record, left behind by a run in the Herdr TUI since: not this run's caller, even when the
+    // later run got the earlier one's pid.
+    view({ instance: "i0", caller: "t7", pid: record.pid });
     assert.equal(read(), undefined);
-    record({ caller: "t7" });
-    assert.equal(read(), undefined, "a record from before the caller was kept names nobody");
+    view({});
+    assert.equal(read(), undefined, "a record with no caller (one outside the app) names nobody");
   } finally {
     fixture.stop();
   }

@@ -60,7 +60,7 @@ test("a status shell that still carries a root record is replaced by a fresh vie
   assert.deepEqual(verbs(), ["kill", "rm", "run"]);
   const run = calls().find((c) => c[0] === "run")!;
   assert.equal(run[run.indexOf("--name") + 1], statusName(root));
-  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [], caller: "t-mine", pid: process.pid });
+  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [] });
 });
 
 const withShell = (root: string, doc: object) => writeFileSync(join(stub, "shell.json"), JSON.stringify({ address: "t3", ...doc }));
@@ -76,7 +76,7 @@ test("a status shell hc will not remove costs the view its name, never the view,
   assert.deepEqual(verbs(), ["kill", "rm", "run"]);
   const run = calls().find((c) => c[0] === "run")!;
   assert.ok(!run.includes("--name"), run.join(" "));
-  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [], caller: "t-mine", pid: process.pid });
+  assert.deepEqual(readCoreView(root), { instance: "i2", status: "t9", slots: [] });
   assert.equal(lines.length, 1, lines.join("\n"));
   assert.match(lines[0], /\bt3\b/);
 });

@@ -444,7 +444,7 @@ export const readRecord = async (dir: string, env: NodeJS.ProcessEnv, signal: Ab
     worktrees,
     runOutput: live ? await readRunOutput(join(logsDir, "run-output.log")) : [],
     terminals: live ? slotAddresses(logsDir).map(plainText) : [],
-    ...(hasRecord ? { caller: runCaller(logsDir, record.pid) } : {}),
+    ...(hasRecord ? { caller: runCaller(logsDir, record.instance) } : {}),
   };
 
   // The logs a row may show: a recorded ticket's current step, an inferred ticket's newest phase.

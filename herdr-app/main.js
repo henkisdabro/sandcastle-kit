@@ -230,8 +230,14 @@ const openReport = (project, bin, run) =>
  * back to where the run was started. A caller that has ended, or one this computer's core does not list, has no way.
  */
 const liveCaller = (caller) => (caller && terminals().some((t) => t.address === caller && t.state === "live") ? caller : undefined);
-/** Brings the caller's space, tab and pane forward: `agent.focus` shows a terminal wherever it is, a sub-agent too. */
-const goToCaller = (caller) => run("agent.focus", { terminal: caller });
+/**
+ * Brings the caller's space, tab and pane forward: `agent.focus` shows a terminal wherever it is, a sub-agent too.
+ * Asked again on the click: the window has no timer, so the button can outlive its caller; then it goes, and nothing runs.
+ */
+const goToCaller = (caller, cx) => {
+  if (liveCaller(caller)) run("agent.focus", { terminal: caller });
+  else cx.notify();
+};
 
 // The run's start as the report window's title shows it: windows left open from earlier runs look alike otherwise.
 const startedClock = (startedAt) => {
@@ -482,7 +488,7 @@ export default class SandcastleStatus extends View {
     return v_flex().id("report").size_full().min_h(0).bg(t.popover).text_color(t.foreground).text_size(13)
       .child(h_flex().h(34).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
         .child(div().flex_1().min_w(0).text_ellipsis().font_semibold().child(`sandcastle report · ${props().report.project.split("/").pop()}${props().report.started ? ` · run of ${props().report.started}` : ""}`))
-        .when(!!liveCaller(props().report.caller), (el) => el.child(button("report-caller", "Go to the run", () => goToCaller(props().report.caller))))
+        .when(!!liveCaller(props().report.caller), (el) => el.child(button("report-caller", "Go to the run", (cx) => goToCaller(props().report.caller, cx))))
         .child(button("report-reload", "Reload", (cx) => this.loadReport(cx)))
         .child(button("report-close", "Close", () => closeOverlay(props().overlay))))
       .child(v_flex().id("report-body").flex_1().min_h(0).overflow_y_scrollbar().p(16)

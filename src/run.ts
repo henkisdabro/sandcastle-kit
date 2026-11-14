@@ -13,7 +13,7 @@ import { assertBaseHasCommit, type Gate, LANDING, LANDING_GATES } from "./gates.
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { coreMiss, terminalHost } from "./terminal-host.ts";
-import { openCoreStatus } from "./herdr-core.ts";
+import { openCoreStatus, RUN_INSTANCE } from "./herdr-core.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, staleBaseParents } from "./sandbox.ts";
 import { protectedPathsNote } from "./guard.ts";
 import { CheckoutRefusal, OperatorError, promptExpansionLine } from "./errors.ts";
@@ -886,7 +886,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   // Only the id: the session's other variables include tokens. It tells the Claude Code mod
   // whose run this is, wherever the project's root is.
   const session = sessionId(process.env.CLAUDE_CODE_SESSION_ID);
-  let run: RunRecord = { orchestrator: project.name, pid: process.pid, ...(session ? { session } : {}), startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
+  let run: RunRecord = { orchestrator: project.name, pid: process.pid, instance: RUN_INSTANCE, ...(session ? { session } : {}), startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
   // Written whole and renamed into place: the view reads it every few seconds,
   // and a half-written file read as no record at all, so every row fell back
   // to the guesswork the record is there to replace.

@@ -318,6 +318,8 @@ export type RunRecord = {
   /** The project's name. */
   orchestrator?: string;
   pid?: number;
+  /** The run process's instance (`RUN_INSTANCE`, src/herdr-core.ts): `core-view.json` holds the same, so the status view tells this run's herdr-core record from an earlier run's, a pid reused or not. */
+  instance?: string;
   /** The Claude Code session that started the run (`CLAUDE_CODE_SESSION_ID`, nothing else of its environment); absent from a plain terminal, Codex or OpenCode. */
   session?: string;
   startedAt?: string;
