@@ -434,11 +434,22 @@ export const needsYouLine = (tickets: Record<string, TicketRecord>, retried: Rea
   return `${cut}${others}`;
 };
 
-/** ` · check #12, #9 +1 by hand`: the merged tickets whose change no gate exercises, newest first, or "" with none. */
-export const checkByHandLine = (tickets: Record<string, TicketRecord>): string => {
+/**
+ * ` · check #12, #9 +1 by hand`: the merged tickets of this turn whose change no gate exercises, newest first, or ""
+ * with none. Held to `room` code points: ids drop into the `+N` first, then the one left is cut, so the line keeps
+ * saying what to do however long a ticket file's id is.
+ */
+export const checkByHandLine = (tickets: Record<string, TicketRecord>, room = Infinity): string => {
   const ids = Object.entries(tickets).filter(([, t]) => t.state === "merged" && t.ungated).sort(([, a], [, b]) => (b.since ?? 0) - (a.since ?? 0)).map(([id]) => (/^\d+$/.test(id) ? `#${id}` : id));
   if (!ids.length) return "";
-  return ` · check ${ids.slice(0, 2).join(", ")}${ids.length > 2 ? ` +${ids.length - 2}` : ""} by hand`;
+  const line = (shown: string[], rest: number) => ` · check ${shown.join(", ")}${rest ? ` +${rest}` : ""} by hand`;
+  for (let n = Math.min(2, ids.length); n >= 1; n--) {
+    const full = line(ids.slice(0, n), ids.length - n);
+    if ([...full].length <= room) return full;
+  }
+  const bare = [...line([""], ids.length - 1)].length;
+  if (room - bare < 2) return "";
+  return line([`${[...ids[0]].slice(0, room - bare - 1).join("")}…`], ids.length - 1);
 };
 
 /**
@@ -460,14 +471,15 @@ export const runRecords = (run: RunFacts): Map<string, string> => {
   const merged = ` · ${counts.merged}/${counts.total} merged`;
   // A merged ticket no gate exercised is the summary's "needs you", but no ticket's state: without this the toast of
   // a finished run says nothing is left for the person while the report opens on a check by hand.
-  const byHand = run.live ? "" : checkByHandLine(run.tickets);
+  const left = (head: string) => (run.live ? "" : checkByHandLine(run.tickets, TEXT_MAX - [...head].length));
+  const needs = `${ended}${needsYouLine(run.tickets, retried, TEXT_MAX - [...ended].length - [...merged].length)}${merged}`;
   const msg =
     state === "blocked"
-      ? `${ended}${needsYouLine(run.tickets, retried, TEXT_MAX - [...ended].length - [...merged].length)}${merged}`
+      ? `${needs}${left(needs)}`
       : state === "done"
-        ? `run finished: ${text}${byHand}`
+        ? `run finished: ${text}${left(`run finished: ${text}`)}`
         : state === "error"
-          ? `${text} · ended early${byHand}`
+          ? `${text} · ended early${left(`${text} · ended early`)}`
           : text;
   shown.set(
     "root",

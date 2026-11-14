@@ -553,3 +553,19 @@ test("a finished run's msg names the merged tickets to check by hand, and a live
   assert.equal(msgOf({ "3": tickets["3"] }, { live: false, record: { finishedAt: "2026-11-14T00:04:00Z" } }), "run finished: 1/1");
   assert.doesNotMatch(msgOf({ "964": tickets["964"] }, {}), /by hand/);
 });
+
+// The core cuts a msg at 160 code points from the end: the check-by-hand line fits itself, as needsYouLine does (#969).
+test("the check-by-hand line keeps its count and 'by hand' with long ticket-file ids, and joins a blocked or early-ended run's msg", () => {
+  const t = (state: string, since: number, more: object = {}) => ({ state, since, ...more }) as never;
+  const a = `fix-${"a".repeat(70)}`;
+  const b = `fix-${"b".repeat(70)}`;
+  const tickets = { [a]: t("merged", 3, { ungated: "x" }), [b]: t("merged", 2, { ungated: "y" }), c: t("merged", 1, { ungated: "z" }), d: t("conflict", 0) };
+  const msgOf = (over: object) => Buffer.from(/msg=([^:\x07]+)/.exec(runRecords(run(tickets as never, over)).get("root")!)![1], "base64").toString();
+  const done = msgOf({ live: false, record: { finishedAt: "2026-11-14T00:04:00Z" } });
+  assert.ok([...done].length <= 160, done);
+  assert.match(done, /^run finished: d needs you: conflict · 3\/4 merged · check fix-a+ \+2 by hand$/);
+  assert.match(msgOf({ live: false }), /^run ended early: d needs you: conflict · 3\/4 merged · check fix-a+ \+2 by hand$/);
+  // One id too long for the room left is cut itself.
+  assert.equal(checkByHandLine({ [a]: tickets[a] }, 30), ` · check ${"fix-aaaaaaaa"}… by hand`);
+  assert.equal(checkByHandLine({ [a]: tickets[a] }, 15), "");
+});
