@@ -39,6 +39,8 @@
 //    `origin`, and a test's `doctor` or `--version --json`, its read refused above, wrote a failure there that
 //    hid a newer release from the developer's own idle mark and doctor for an hour. A test that needs a cache of
 //    its own still sets it; a child the test starts inherits this one.
+//  - `HERDR_APP_HOME` and `HERDR_CONFIG_PATH` point inside that cache directory, never at the developer's Herdr app
+//    home or Herdr TUI config: a test's `sandcastle herdr configure --remove` once deleted a real installed app mod.
 //  - `SANDCASTLE_TEST_MACHINE_CPU` is `none`: `readMachineCpu` (src/peaks.ts), called with no injected host, then gives no
 //    reading, so no test's gate pass, judgement or hold depends on the machine's real CPU load (a loaded developer
 //    machine, full-check and the macOS CI leg would flake otherwise). A test that wants readings injects them.
@@ -126,6 +128,11 @@ if (process.env.NODE_TEST_CONTEXT) {
   writeFileSync(globalConfig, "");
   const cache = mkdtempSync(join(process.env.TMPDIR, "sandcastle-xdg-cache-"));
   process.env.XDG_CACHE_HOME = cache;
+  // Herdr's two homes, set after HERDR_* is scrubbed and gone with the cache: removed alone, they fell back to the
+  // developer's real ones, and a test's bare `configure --remove` deleted the installed Herdr app mod on a Mac
+  // (`--remove` takes out a mod whose folder exists, with or without the app). A test that needs its own sets it.
+  process.env.HERDR_APP_HOME = join(cache, "herdr-app");
+  process.env.HERDR_CONFIG_PATH = join(cache, "herdr", "config.toml");
   // One listener for both: a test file that adds its own exit listeners would pass Node's warning limit of ten.
   process.on("exit", () => {
     rmSync(globalConfig, { force: true });
