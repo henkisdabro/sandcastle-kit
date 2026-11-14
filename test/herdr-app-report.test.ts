@@ -11,21 +11,25 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-type Overlay = { key: string; props: { report: { project: string; bin: string; started: string } } };
+type Overlay = { key: string; props: { report: Report } };
 type Mod = {
   reportMarkdown: (text: string) => string;
   plain: (text: string) => string;
-  SandcastleStatus: new () => { role: string; root: string; run: unknown; reportedRun: unknown; seen: (before: object, now: object) => void; controls: (t: object) => unknown[] };
+  SandcastleStatus: new () => { role: string; root: string; run: unknown; reportedRun: unknown; text: string; error: string; seen: (before: object, now: object) => void; controls: (t: object) => unknown[]; renderReport: () => unknown };
 };
 
 type Element = { id?: string; click?: () => void };
+type Report = { project: string; bin: string; started: string; caller?: string };
 
 /**
  * main.js with its imports as stand-ins: `div` an element that takes any style and keeps its id and click handler,
  * `openOverlay` an app's, which keeps an open overlay by its key, and every other name a no-op.
  */
-const load = () => {
+const load = ({ report, live = [] }: { report?: Report; live?: { address: string; state: string }[] } = {}) => {
   const overlays = new Map<string, Overlay>();
+  const commands: [string, unknown][] = [];
+  // The click's `cx`: each `notify` (a render asked for) is counted.
+  const cx = { notified: 0, notify: () => void cx.notified++ };
   const opened: Overlay[] = [];
   const elements: Element[] = [];
   const div = () => {
@@ -34,7 +38,9 @@ const load = () => {
     const chain: unknown = new Proxy({}, {
       get: (_t, name) => (...args: unknown[]) => {
         if (name === "id") el.id = args[0] as string;
-        if (name === "on_click") el.click = () => (args[0] as (e: unknown, cx: unknown) => void)({}, {});
+        if (name === "on_click") el.click = () => (args[0] as (e: unknown, cx: unknown) => void)({}, cx);
+        // `.when(cond, f)` applies f only when cond holds, as gpui's does.
+        if (name === "when" && args[0]) (args[1] as (el: unknown) => unknown)(chain);
         return chain;
       },
     });
@@ -48,7 +54,12 @@ const load = () => {
   const stand = (name: string): unknown => {
     if (name === "View") return class {};
     if (name === "div") return div;
-    if (name === "props") return () => ({ project: "/p", command: ["/kit/bin/sandcastle", "status", "--json", "--frame"] });
+    if (["h_flex", "v_flex"].includes(name)) return div;
+    if (name === "TextView") return { markdown: div };
+    if (name === "props") return () => ({ project: "/p", command: ["/kit/bin/sandcastle", "status", "--json", "--frame"], ...(report ? { report } : {}) });
+    if (name === "theme") return () => ({});
+    if (name === "terminals") return () => live;
+    if (name === "run") return (command: string, args: unknown) => void commands.push([command, args]);
     if (name === "openOverlay")
       return (o: Overlay) => {
         // An app keeps an open overlay by its key: a second open with the same key shows the one already there.
@@ -58,7 +69,7 @@ const load = () => {
     return () => undefined;
   };
   const mod = new Function(...names, source)(...names.map(stand)) as Mod;
-  return { mod, opened, elements };
+  return { mod, opened, elements, commands, cx };
 };
 
 test("a markdown link, an image, emphasis and HTML in the report's text are escaped; its headings, lists and code spans are kept", () => {
@@ -132,4 +143,51 @@ test("Report opens the window of the run the pane shows", () => {
   view.run = { startedAt: "2026-11-14T03:00:00.000Z", state: "finished" };
   assert.notEqual(report().key, first.key);
   assert.equal(report().key, opened[opened.length - 1].key, "the same run's Report is the same window");
+});
+
+test("a report opened for a run with a known caller carries it; the window offers the way back only while it is live", () => {
+  const { mod, opened } = load();
+  const view = new mod.SandcastleStatus();
+  view.role = "status";
+  view.root = "/p";
+  view.reportedRun = null;
+  const run = { startedAt: "2026-11-14T01:00:00.000Z", caller: "t7" };
+  view.seen({ ...run, state: "running" }, { ...run, state: "finished" });
+  assert.equal(opened[0].props.report.caller, "t7");
+
+  const header = (live: { address: string; state: string }[]) => {
+    const { mod, elements, commands } = load({ report: { project: "/p", bin: "sandcastle", started: "01:00", caller: "t7" }, live });
+    const window = new mod.SandcastleStatus();
+    window.text = "";
+    window.error = "";
+    window.renderReport();
+    return { button: elements.find((e) => e.id === "report-caller"), commands };
+  };
+  const { button, commands } = header([{ address: "t3", state: "live" }, { address: "t7", state: "live" }]);
+  assert.ok(button, "a live caller: the button is there");
+  button.click!();
+  assert.deepEqual(commands, [["agent.focus", { terminal: "t7" }]], "it brings the caller's space, tab and pane forward");
+  assert.equal(header([{ address: "t7", state: "finished" }]).button, undefined, "a caller that has ended: no button");
+  assert.equal(header([]).button, undefined, "a caller the core does not list: no button");
+  const { mod: plainMod, elements } = load({ report: { project: "/p", bin: "sandcastle", started: "01:00" }, live: [{ address: "t7", state: "live" }] });
+  const window = new plainMod.SandcastleStatus();
+  window.text = "";
+  window.error = "";
+  window.renderReport();
+  assert.equal(elements.find((e) => e.id === "report-caller"), undefined, "no caller known: no button");
+});
+
+test("Go to the run asks again on the click: a caller that ended since the window drew does nothing and hides the button", () => {
+  const live = [{ address: "t7", state: "live" }];
+  const { mod, elements, commands, cx } = load({ report: { project: "/p", bin: "sandcastle", started: "01:00", caller: "t7" }, live });
+  const window = new mod.SandcastleStatus();
+  window.text = "";
+  window.error = "";
+  window.renderReport();
+  const button = elements.find((e) => e.id === "report-caller");
+  assert.ok(button);
+  live[0].state = "finished";
+  button.click!();
+  assert.deepEqual(commands, [], "no focus on a terminal that has ended");
+  assert.equal(cx.notified, 1, "the window draws again, without the button");
 });

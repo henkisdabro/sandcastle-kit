@@ -298,5 +298,8 @@ of its own, rendered as markdown; it does not take the keyboard, and **Report** 
 Ticket titles and agents' notes in it show as written: a link, an image or `_` in them is plain text.
 Each run's report is a window of its own, its title naming the run's start time, so one left open
 from an earlier run is never shown as the next run's.
+When the run started in a Herdr app terminal, the report window's header has **Go to the run**
+beside Reload and Close: it brings forward the space, tab and pane of the terminal that ran
+`sandcastle run` (`agent.focus`), and is there only while that terminal still runs.
 A pane opened on a run that had already ended opens nothing by itself.
 The buttons and the report run the same kit's `sandcastle` as the pane reads.

@@ -60,9 +60,10 @@ export const lineText = (name: string, c: RunCounts, share?: number) =>
  * `finished` once it wrote its end, else `ended` (killed, or stopped before its end). `line` is the tab bar's.
  */
 export type RunState = "none" | "running" | "paused" | "finished" | "ended";
-export type RunFacts = { state: RunState; startedAt?: string; finishedAt?: string; counts: RunCounts; line: string };
+// `caller`: the herdr-core terminal that ran `sandcastle run` (`runCaller`), present only when its record is this run's.
+export type RunFacts = { state: RunState; startedAt?: string; finishedAt?: string; counts: RunCounts; line: string; caller?: string };
 export const runFacts = (
-  s: { root: string; hasRecord: boolean; live: boolean; record: RunRecord; tickets: Record<string, TicketRecord> },
+  s: { root: string; hasRecord: boolean; live: boolean; record: RunRecord; tickets: Record<string, TicketRecord>; caller?: string },
   // The view's own groups (`ticketRows`' counts): a ticket the record has implementing whose log went quiet is
   // `stalled` there, needing a person, so the line beside the table says what its legend says.
   view?: { working: number; "needs you": number },
@@ -79,5 +80,6 @@ export const runFacts = (
     ...(finishedAt ? { finishedAt } : {}),
     counts,
     line: lineText(name, counts, s.live && Number.isInteger(s.record.share) ? (s.record.share as number) : undefined),
+    ...(s.hasRecord && s.caller ? { caller: s.caller } : {}),
   };
 };

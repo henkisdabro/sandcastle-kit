@@ -103,14 +103,14 @@ test("in the app with the mod current: the mod pane beside the caller, the statu
   assert.deepEqual(calls.split, [["p-caller", { project: root, command: ["/k/bin/sandcastle", "status", "--json", "--frame"], run: "i1" }]]);
   assert.equal(run()[run().indexOf("--parent") + 1], "t-mine");
   assert.ok(!labelsOf(run()).some((l) => l.startsWith("herdr.")), run().join(" "));
-  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t9", slots: [], pane: "p-mod" });
+  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t9", slots: [], pane: "p-mod", caller: "t-mine" });
   assert.equal(coreStatusLine(root, "t9"), "Status view: app pane p-mod (terminal t9)");
 });
 
 const terminalView = (root: string, run: string[]) => {
   assert.ok(!run.includes("--parent"), run.join(" "));
   assert.deepEqual(labelsOf(run).filter((l) => l.startsWith("herdr.")), ["herdr.space=sp1", "herdr.tab=tb1"]);
-  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t9", slots: [] });
+  assert.deepEqual(readCoreView(root), { instance: "i1", status: "t9", slots: [], caller: "t-mine" });
   assert.equal(coreStatusLine(root, "t9"), "Status view: terminal t9");
 };
 
@@ -121,6 +121,7 @@ test("a caller outside the app (no herdr.* labels) opens the terminal view and n
   assert.equal(openCoreStatus(root, { address: "t-mine", pid: 1, labels: {} }, { kit: "/k", hc, instance: "i1", app }), "t9");
   assert.deepEqual(calls, untouched);
   assert.ok(!run().includes("--parent"));
+  // No caller: the app shows no terminal of it to go back to, so the report window offers no way back.
   assert.deepEqual(readCoreView(root), { instance: "i1", status: "t9", slots: [] });
 });
 
