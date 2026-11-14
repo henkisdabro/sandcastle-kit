@@ -82,6 +82,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   earlier run could show the earlier report, and a second run in the same pane opened none; the
   window's title names the run's start. A long needs-you note or ticket-file id in the status
   terminal's message is cut so the merged count and `(+N more)` stay. (#969)
+- A run's end notification in the Herdr app names the last turn's merged tickets the closing summary
+  asks you to check by hand (`run finished: 1/1 · check #964 by hand`), where it read as if nothing
+  was left for you; the names are cut to fit, so the count and `by hand` stay.
 
 ## [0.24.0] - 2026-11-13
 

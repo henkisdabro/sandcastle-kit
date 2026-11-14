@@ -44,7 +44,7 @@ esac
 chmodSync(join(bin, "hc"), 0o755);
 Object.assign(process.env, { PATH: `${bin}${delimiter}${process.env.PATH}`, HC_TERMINAL_ID: "t-mine" });
 
-const { coreRecords, coreViewRecord, needsYouLine, openCoreStatus, openCoreView, projectKey, readCoreView, readSlotState, runRecords, slotAddresses, slotLink, slotName, slotStateFile, statusName, teardown, ticketName, askingInCore } =
+const { checkByHandLine, coreRecords, coreViewRecord, needsYouLine, openCoreStatus, openCoreView, projectKey, readCoreView, readSlotState, runRecords, slotAddresses, slotLink, slotName, slotStateFile, statusName, teardown, ticketName, askingInCore } =
   await import("../src/herdr-core.ts");
 const { askingInPane, openSandboxView, viewRecord } = await import("../src/herdr.ts");
 const { openStatusPane } = await import("../src/run.ts");
@@ -540,4 +540,32 @@ test("a long ticket-file id is cut in a blocked run's msg, which keeps the merge
   assert.ok([...msg].length <= 160, msg);
   assert.match(msg, /^run ended early: fix-a+… · 1\/2 merged$/);
   assert.equal(needsYouLine({ "12": t("held", 1) }, new Set(), 40), "#12 needs you: held");
+});
+
+// A merged ticket no gate exercised is the report's "needs you" but no ticket's state: the finished run's toast says so.
+test("a finished run's msg names the merged tickets to check by hand, and a live run's does not", () => {
+  const t = (state: string, since: number, more: object = {}) => ({ state, since, ...more }) as never;
+  const tickets = { "964": t("merged", 3, { ungated: "open the site" }), "12": t("merged", 2, { ungated: "read it" }), "9": t("merged", 1, { ungated: "x" }), "3": t("merged", 0) };
+  const msgOf = (tk: object, over: object) => Buffer.from(/msg=([^:\x07]+)/.exec(runRecords(run(tk as never, over)).get("root")!)![1], "base64").toString();
+  assert.equal(msgOf({ "964": tickets["964"] }, { live: false, record: { finishedAt: "2026-11-14T00:04:00Z" } }), "run finished: 1/1 · check #964 by hand");
+  assert.equal(checkByHandLine(tickets), " · check #964, #12 +1 by hand");
+  assert.equal(checkByHandLine({ "3": tickets["3"] }), "");
+  assert.equal(msgOf({ "3": tickets["3"] }, { live: false, record: { finishedAt: "2026-11-14T00:04:00Z" } }), "run finished: 1/1");
+  assert.doesNotMatch(msgOf({ "964": tickets["964"] }, {}), /by hand/);
+});
+
+// The core cuts a msg at 160 code points from the end: the check-by-hand line fits itself, as needsYouLine does (#969).
+test("the check-by-hand line keeps its count and 'by hand' with long ticket-file ids, and joins a blocked or early-ended run's msg", () => {
+  const t = (state: string, since: number, more: object = {}) => ({ state, since, ...more }) as never;
+  const a = `fix-${"a".repeat(70)}`;
+  const b = `fix-${"b".repeat(70)}`;
+  const tickets = { [a]: t("merged", 3, { ungated: "x" }), [b]: t("merged", 2, { ungated: "y" }), c: t("merged", 1, { ungated: "z" }), d: t("conflict", 0) };
+  const msgOf = (over: object) => Buffer.from(/msg=([^:\x07]+)/.exec(runRecords(run(tickets as never, over)).get("root")!)![1], "base64").toString();
+  const done = msgOf({ live: false, record: { finishedAt: "2026-11-14T00:04:00Z" } });
+  assert.ok([...done].length <= 160, done);
+  assert.match(done, /^run finished: d needs you: conflict · 3\/4 merged · check fix-a+ \+2 by hand$/);
+  assert.match(msgOf({ live: false }), /^run ended early: d needs you: conflict · 3\/4 merged · check fix-a+ \+2 by hand$/);
+  // One id too long for the room left is cut itself.
+  assert.equal(checkByHandLine({ [a]: tickets[a] }, 30), ` · check ${"fix-aaaaaaaa"}… by hand`);
+  assert.equal(checkByHandLine({ [a]: tickets[a] }, 15), "");
 });
