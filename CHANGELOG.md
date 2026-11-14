@@ -9,6 +9,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- A run in a herdr-core terminal that the Herdr app shows from another machine now says why it opened
+  the terminal status view: the start line, a detached start's message and doctor (an `info` line)
+  name that the app pane needs a run started on the app's machine. (#978)
+
 ### Fixed
 
 - The Herdr app mod's PLAN card shows each provider on one row, with its windows and the reading's
