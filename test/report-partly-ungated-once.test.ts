@@ -53,3 +53,16 @@ test("partly done with a check-by-hand note: one bullet carrying both, one next 
   assert.match(next, /Check #8 by hand/);
   assert.doesNotMatch(next, /Check #7/);
 });
+
+test("an agent's note that ends a sentence joins the check without a stray full stop", () => {
+  const out = render(
+    facts(
+      { "7": { state: "merged", title: "Image", unmet: "needs a person: rebuild the image and run a project.", ungated: "No image was built here." } },
+      ["7"],
+    ) as never,
+    true,
+  );
+  const needs = section(out, "## Needs you");
+  assert.match(needs, /merged, partly done: needs a person: rebuild the image and run a project; check by hand: No image was built here\. - /);
+  assert.doesNotMatch(needs, /\.;/);
+});
