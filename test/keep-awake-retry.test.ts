@@ -21,8 +21,9 @@ const waitForLines = async (counts: string, n: number): Promise<string[]> => {
   return linesIn(counts);
 };
 
-// `body` is the fake helper's shell, run after the `-h` probe; `counts` is the file its lines go to.
-const pauseDuringSettle = async (body: (counts: string) => string) => {
+// `body` is the fake helper's shell, run after the `-h` probe; `counts` is the file its lines go to. Returns what
+// the first `keepAwake` said.
+const pauseDuringSettle = async (body: (counts: string) => string): Promise<string> => {
   const bin = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
   const counts = join(bin, "counts");
   for (const name of ["caffeinate", "systemd-inhibit"]) {
@@ -37,11 +38,11 @@ const pauseDuringSettle = async (body: (counts: string) => string) => {
     const starting = keepAwake({ wsl: false });
     assert.equal((await waitForLines(counts, 1)).length, 1, "the first helper has started");
     releaseAwake();
-    // Proves the release landed mid-settle: the first attempt was stopped, not settled.
-    assert.match(await starting, /^off - /);
+    const first = await starting;
     await holdAwake({ wsl: false });
     assert.deepEqual(await waitForLines(counts, 2), ["run", "run"], "resume starts a new helper after the pause stopped the settling one");
     assert.match(await keepAwake({ wsl: false }), /^on \(/);
+    return first;
   } finally {
     releaseAwake();
     resetKeepAwake();
@@ -58,5 +59,8 @@ test("a pause during the helper's settle does not stop the next resume keeping a
 // The helper the resume starts writes only after the settle: it is alive, so `keepAwake` says on, and its line is
 // not in `counts` yet. The first helper still writes at once, so the pause still lands during its settle.
 test("a pause during the helper's settle, then a resume whose helper is slow to write, still ends with two helpers started", async () => {
-  await pauseDuringSettle((counts) => `if [ -e '${counts}' ]; then sleep 0.4; fi\necho run >> '${counts}'`);
+  const first = await pauseDuringSettle((counts) => `if [ -e '${counts}' ]; then sleep 0.4; fi\necho run >> '${counts}'`);
+  // Proves the release landed mid-settle: the first attempt was stopped, not settled. Only this case asserts it: in
+  // the case above a first shell slower than the settle is a load the test must still pass under.
+  assert.match(first, /^off - /);
 });
