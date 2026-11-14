@@ -63,6 +63,9 @@ const CARD_GAP = 10;
 const CARD_PAD = 10;
 const LANE_ROW_GAP = 3;
 const KEY_WIDTH = 72;
+// A card that wraps onto a line of its own keeps a card's width: growing to fill the line, PLAN's one row once
+// spread across the whole pane.
+const LANE_MAX = 460;
 const BAR = /^[█░▓]+$/;
 
 const two = (n) => String(n).padStart(2, "0");
@@ -82,6 +85,41 @@ const colours = (t) => ({
 const tint = (colour, alpha, fallback) => (/^#[0-9a-f]{6}$/i.test(colour ?? "") ? `${colour}${alpha.toString(16).padStart(2, "0")}` : fallback);
 
 /** A row's text with runs of spaces as one, none leading or trailing: the terminal's padding means nothing here. */
+const blankSeg = (s) => !s.text.trim();
+const ruleDot = (s) => s.tone === "rule" && s.text.trim() === "·";
+/** A row's segments without the blanks and separators at either end. */
+const trimCells = (segs) => {
+  let a = 0;
+  let b = segs.length;
+  while (a < b && (blankSeg(segs[a]) || ruleDot(segs[a]))) a++;
+  while (b > a && (blankSeg(segs[b - 1]) || ruleDot(segs[b - 1]))) b--;
+  return segs.slice(a, b);
+};
+/**
+ * PLAN's rows are laid out for the terminal's grid: a provider's name with its 5-hour window, then its week window
+ * and the reading's age on rows of their own, indented under it with spaces, and a window the reading lacks drawn as
+ * a blank as wide as it. A card has no grid: there the provider's name sat alone (Claude Code reports the weekly
+ * window alone) and its windows hung under an empty key. Here a row that continues the one above (it starts with
+ * blanks) joins it, blank cells go, and each provider is one keyed row.
+ */
+const foldPlan = (rows) => {
+  const out = [];
+  for (const row of rows) {
+    if (!row.length) continue;
+    if (blankSeg(row[0]) && out.length) {
+      const more = trimCells(row);
+      if (!more.length) continue;
+      const prev = out[out.length - 1];
+      const hasValue = prev.length > (prev[0]?.tone === "mute" ? 1 : 0);
+      out[out.length - 1] = hasValue ? [...prev, { text: " · ", tone: "rule" }, ...more] : [...prev, ...more];
+      continue;
+    }
+    const key = row[0].tone === "mute" ? [row[0]] : [];
+    out.push([...key, ...trimCells(row.slice(key.length))]);
+  }
+  return out;
+};
+
 const squeeze = (row) => {
   const out = [];
   let space = true;
@@ -723,7 +761,7 @@ export default class SandcastleStatus extends View {
     const keyed = KEYED.has(lane.name);
     // The terminal's blank rows only fill its character grid: here every row sits LANE_ROW_GAP apart, and a value
     // that wraps adds only its own extra line.
-    const rows = lane.rows.filter((r) => r.length).map((r, i) => {
+    const rows = (lane.name === "PLAN" ? foldPlan(lane.rows) : lane.rows).filter((r) => r.length).map((r, i) => {
       if (!keyed) return this.segs(t, c, squeeze(r)).id(`lane-${lane.name}-${i}`);
       // A key column: the row's first muted segment, or none when the row continues the one above (PLAN's windows).
       // One width in every card, so a card's values start at one x; the key sits on the value's first line.
@@ -733,7 +771,7 @@ export default class SandcastleStatus extends View {
         .child(div().flex_none().w(KEY_WIDTH).text_color(t.muted).child(lead))
         .child(this.segs(t, c, rest).flex_1());
     });
-    return v_flex().id(`lane-${lane.name}`).flex_1().min_w(200).overflow_hidden().gap(LANE_ROW_GAP).p(CARD_PAD).rounded(6).bg(t.raised)
+    return v_flex().id(`lane-${lane.name}`).flex_1().min_w(200).max_w(LANE_MAX).overflow_hidden().gap(LANE_ROW_GAP).p(CARD_PAD).rounded(6).bg(t.raised)
       .child(div().text_size(10.5).font_semibold().text_color(t.muted).child(lane.title.text))
       .children(rows);
   }

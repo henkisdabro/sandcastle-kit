@@ -41,9 +41,10 @@ const skip = realApp ? false : "no Herdr app (herdr-app) on this machine";
 type Segment = { text: string; tone: string; bold?: true };
 type Doc = { table: unknown; frame: { lanes: { name: string; rows: Segment[][] }[] } & Record<string, unknown> };
 
-const reading = (kind: FixtureKind): Doc => {
+const reading = (kind: FixtureKind, tweak?: (root: string) => void): Doc => {
   const fixture = buildFixture(kind, mkdtempSync(join(TMP, `${kind}-`)));
   try {
+    tweak?.(fixture.root);
     const r = spawnStatus(["--json", "--frame"], { encoding: "utf8", env: viewEnv(fixture), stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
     assert.equal(r.status, 0, r.stderr);
     return JSON.parse(r.stdout) as Doc;
@@ -165,6 +166,41 @@ for (const kind of ["live", "ended"] as const) {
     }
   });
 }
+
+// PLAN's frame rows are the terminal's grid: the provider with its 5-hour window, then its week window and the
+// reading's age indented under it, a missing window a blank. Drawn as keyed rows, the provider sat alone and its
+// week window hung under an empty key, and the card, wrapped onto a line of its own, stretched across the pane.
+// Claude Code reports the weekly window alone, so the week-only reading is the common one.
+const weekOnly = (root: string) => {
+  const file = join(root, ".sandcastle", "logs", "run.json");
+  const record = JSON.parse(readFileSync(file, "utf8")) as { usage: { windows: Record<string, unknown> }[] };
+  for (const u of record.usage) delete u.windows.fiveHour;
+  writeFileSync(file, JSON.stringify(record));
+};
+test("PLAN: one keyed row per provider, its windows and age on it, and no card wider than a card", { skip }, () => {
+  for (const [label, doc] of [["both windows", reading("live")], ["week only", reading("live", weekOnly)]] as const) {
+    const plan = doc.frame.lanes.find((l) => l.name === "PLAN");
+    assert.ok(plan, `${label}: the reading has a PLAN lane`);
+    const providers = plan.rows.filter((r) => r[0]?.tone === "mute").length;
+    for (const [name, width] of cases) {
+      const root = tree(spec(doc, width));
+      const where = `${label}, ${name}`;
+      for (const lane of lanesOf(root)) assert.match(lane.line, /\.max_w\[/, `${where}: a card that can stretch across the pane: ${lane.line}`);
+      const card = lanesOf(root).find((n) => n.line.includes('"lane-PLAN"'));
+      assert.ok(card, `${where}: the PLAN card`);
+      const rows = card.children.filter((n) => /:id\[Str\("lane-PLAN-\d+"\)\]/.test(n.line));
+      assert.equal(rows.length, providers, `${where}: one row per provider`);
+      for (const row of rows) {
+        assert.ok(hasText(row.children[0]!), `${where}: a row with an empty key`);
+        const words = all(row.children[1]!).filter(isText).map((n) => n.line).join(" ");
+        assert.match(words, /week/, `${where}: the week window on the provider's row`);
+        assert.match(words, /ago/, `${where}: the reading's age on the provider's row`);
+        if (label === "both windows") assert.match(words, /5h/, `${where}: the 5-hour window on the provider's row`);
+        else assert.doesNotMatch(words, /5h/, `${where}: a blank 5-hour window drawn`);
+      }
+    }
+  }
+});
 
 // Fails here, not as a skipped test, when a mod folder cannot be built: the copy reads the kit's own files.
 test("the layout check's copy of the mod reads the kit's files", () => {
