@@ -221,9 +221,9 @@ export const appModLine = (kit = KIT): string | undefined => {
   const state = appModState(kit);
   const dir = appModDir();
   if (state === undefined) return undefined;
-  if (state === "absent") return "opt  Herdr app mod (optional: the status view in the app's own look)\n       -> `sandcastle herdr configure` (shows what it copies and asks first).";
-  if (state === "foreign") return `warn Herdr app mod: ${dir} is not the kit's (no ${APP_STAMP} stamp in it).\n       -> Move it or remove it, then run \`sandcastle herdr configure --yes\`.`;
-  if (state === "stale") return "warn Herdr app mod: the copy is older than this kit's herdr-app/.\n       -> `sandcastle herdr configure --yes` copies it again.";
+  if (state === "absent") return "opt  Herdr app mod (optional: the status view in the app's own look)\n       -> `sandcastle herdr configure --app` (shows what it copies and asks first).";
+  if (state === "foreign") return `warn Herdr app mod: ${dir} is not the kit's (no ${APP_STAMP} stamp in it).\n       -> Move it or remove it, then run \`sandcastle herdr configure --app --yes\`.`;
+  if (state === "stale") return "warn Herdr app mod: the copy is older than this kit's herdr-app/.\n       -> `sandcastle herdr configure --app --yes` copies it again.";
   return `ok   Herdr app mod: ${dir} is current`;
 };
 
@@ -255,11 +255,11 @@ const configureAppMod = async (remove: boolean, yes: boolean, byDefault: boolean
     for (const file of listed) removeEmptyDirs(dirname(join(dir, file)), dir);
     // The folder goes only when nothing else is in it.
     removeEmptyDirs(dir, join(appHome(), "mods"));
-    console.log(`Removed the Herdr app mod from ${dir}.`);
+    console.log(`Removed the Herdr app mod from ${dir}. \`sandcastle herdr configure --app\` copies it again.`);
     return false;
   }
   if (existsSync(dir) && !stamp) {
-    throw new OperatorError(`${dir} exists and is not the kit's (no ${APP_STAMP} stamp in it), so nothing was copied. Move it or remove it, then run \`sandcastle herdr configure --yes\` again.`);
+    throw new OperatorError(`${dir} exists and is not the kit's (no ${APP_STAMP} stamp in it), so nothing was copied. Move it or remove it, then run \`sandcastle herdr configure --app --yes\` again.`);
   }
   const files = appFiles(kit);
   if (!files.length) return false;
@@ -268,7 +268,7 @@ const configureAppMod = async (remove: boolean, yes: boolean, byDefault: boolean
     console.log(`The Herdr app mod in ${dir} is current: nothing copied.`);
     return false;
   }
-  console.log(`This will copy the Herdr app mod (${files.length} files from ${join(kit, "herdr-app")}) to ${dir}.\n\`sandcastle herdr configure --remove\` takes it out again. It is copied, not linked: the app does not reload a mod through a symlink.\n`);
+  console.log(`This will copy the Herdr app mod (${files.length} files from ${join(kit, "herdr-app")}) to ${dir}.\n\`sandcastle herdr configure --remove --app\` takes it out again. It is copied, not linked: the app does not reload a mod through a symlink.\n`);
   if (!yes) {
     const answer = await confirm(`Copy the Herdr app mod? ${byDefault ? "[Y/n]" : "[y/N]"} `, undefined, undefined, byDefault);
     if (answer === undefined) return true;
@@ -290,22 +290,85 @@ const configureAppMod = async (remove: boolean, yes: boolean, byDefault: boolean
   return false;
 };
 
+/** `configure`'s two halves, named: `--app` the Herdr app mod, `--tui` the Herdr TUI plugin. Neither: see `configure`. */
+export type Halves = { app?: boolean; tui?: boolean };
+export const CONFIGURE_USAGE = "Usage: sandcastle herdr configure [--app] [--tui] [--remove] [--yes].";
+
+/**
+ * Which halves a `configure` with no `--app` or `--tui` sets up, and the line it says about a half it leaves alone.
+ * With one of Herdr TUI and the Herdr app installed, that one, as before the two were separable: a Linux machine has
+ * no Herdr app, and its users' documented command is the bare one. With both, the app mod, and the TUI plugin only
+ * where it is already set up from this checkout (linked here, or its block present with nothing linked elsewhere):
+ * Herdr TUI on PATH beside the app is often left from before the app, and linking a plugin and editing its config
+ * there was a change nobody asked for. A link from another checkout is that checkout's, so it is left alone too.
+ */
+export const defaultHalves = (app: boolean, tui: boolean, plugin: { linkedHere: boolean; linkedFrom?: string; block: boolean }): { app: boolean; tui: boolean; skipped?: string } => {
+  if (!(app && tui)) return { app, tui };
+  if (plugin.linkedFrom && !plugin.linkedHere) {
+    return { app, tui: false, skipped: `Herdr TUI plugin: linked from another checkout (${plugin.linkedFrom}), so left alone - \`sandcastle herdr configure --tui\` here links this one in its place.` };
+  }
+  if (plugin.linkedHere || plugin.block) return { app, tui: true };
+  return { app, tui: false, skipped: "Herdr TUI plugin: not set up here, so left alone - `sandcastle herdr configure --tui` adds it (the Herdr app does not need it)." };
+};
+
 /**
  * `byDefault`: the answer when the user just presses Enter (setup offers the plugin as a yes). The app mod (when
- * `herdr-app` is on PATH) and the Herdr TUI plugin are independent: either alone is configured, and a plugin step
- * that fails never takes back the mod copy (the mod goes first).
+ * `herdr-app` is on PATH) and the Herdr TUI plugin are independent: `pick` names one or both, and with neither
+ * `defaultHalves` decides. Adding a half needs its program; removing one needs only what the kit left, so a mod or a
+ * block outlives an uninstalled app or Herdr and can still be taken out. `--remove` takes the plugin out first, its
+ * unlink before anything else: a Herdr that refuses the unlink (its server not running) leaves both halves as found.
+ * Adding copies the mod first, so a plugin step that fails never takes back the mod copy.
  */
-export const configure = async (remove: boolean, yes: boolean, byDefault = false, kit = KIT) => {
+export const configure = async (remove: boolean, yes: boolean, byDefault = false, kit = KIT, pick: Halves = {}) => {
   const app = appInstalled();
   const tui = onPath("herdr");
-  if (!tui && !app) throw new OperatorError("Herdr is not installed (https://herdr.dev) - there is nothing to configure.");
-  const needsAnswer = app ? await configureAppMod(remove, yes, byDefault, kit) : false;
-  if (!tui) {
-    if (needsAnswer) throw new OperatorError("Not a terminal: run it in one to answer, or pass --yes.");
+  const named = !!(pick.app || pick.tui);
+  if (remove) {
+    // A half with nothing of the kit's in it says nothing: no plugin line for a machine that never had Herdr TUI.
+    const plugin = pick.tui || (!named && (tui || pluginState().block));
+    const mod = pick.app || (!named && (app || existsSync(appModDir())));
+    if (!plugin && !mod) throw new OperatorError("Nothing of the kit's to remove: no Herdr TUI plugin or block, and no Herdr app mod.");
+    if (plugin) await configurePlugin(true, yes, byDefault);
+    if (mod) await configureAppMod(true, yes, byDefault, kit);
     return;
   }
-  await configurePlugin(remove, yes, byDefault);
+  if (pick.app && !app) throw new OperatorError("`herdr-app --version` did not answer: the Herdr app is not installed here (or did not start in time), so there is no mod to copy.");
+  if (pick.tui && !tui) throw new OperatorError("`herdr --version` did not answer: Herdr TUI is not installed here (or did not start in time), so there is no plugin to link.");
+  if (!named && !tui && !app) throw new OperatorError("Herdr is not installed (https://herdr.dev) - there is nothing to configure.");
+  const halves = named ? { app: !!pick.app, tui: !!pick.tui } : defaultHalves(app, tui, tui && app ? pluginState() : { linkedHere: false, block: false });
+  const needsAnswer = halves.app ? await configureAppMod(false, yes, byDefault, kit) : false;
+  if ("skipped" in halves && halves.skipped) console.log(halves.skipped);
+  if (halves.tui) await configurePlugin(false, yes, byDefault);
   if (needsAnswer) throw new OperatorError("Not a terminal: run it in one to answer, or pass --yes.");
+};
+
+/**
+ * A `herdr` call that failed, as words the operator acts on rather than a stack trace. Herdr answers `{ "error": ... }`;
+ * the one failure with a fix the kit can name is a stopped server, which `plugin unlink` needs (`plugin link` and
+ * `plugin list` do not). `after` says what state that leaves.
+ */
+export const herdrFailure = (error: unknown, args: string[], after: string): OperatorError => {
+  const e = error as { stdout?: string; stderr?: string; message?: string };
+  const out = `${e.stdout ?? ""}\n${e.stderr ?? ""}`;
+  const said = (() => {
+    for (const line of out.split("\n")) {
+      try {
+        const json = JSON.parse(line) as { error?: { code?: string; message?: string } };
+        if (json.error) return json.error;
+      } catch {
+        // not Herdr's JSON
+      }
+    }
+    return undefined;
+  })();
+  const command = `herdr ${args.join(" ")}`;
+  if (said?.code === "server_not_running") {
+    return new OperatorError(
+      `Herdr TUI's server is not running, and \`${command}\` needs it: run \`herdr server\` in another terminal (or open \`herdr\`), run this again, then \`herdr server stop\` if you started it for this. ${after}`,
+    );
+  }
+  const why = said?.message ?? (out.trim().split("\n")[0] || String(e.message ?? error).split("\n")[0]);
+  return new OperatorError(`\`${command}\` failed: ${why}. ${after}`);
 };
 
 const configurePlugin = async (remove: boolean, yes: boolean, byDefault: boolean) => {
@@ -314,17 +377,32 @@ const configurePlugin = async (remove: boolean, yes: boolean, byDefault: boolean
   const plugin = pluginState();
 
   if (remove) {
-    // A link from another checkout stays, so the status view's links stay with it.
-    if (!plugin.linkedFrom || plugin.linkedHere) rmSync(PLUGIN_MARKER, { force: true });
-    const after = withoutBlock(before);
-    if (after !== before) writeFileSync(path, after);
     // Only this checkout's link: the one in use may be another clone's or worktree's. Herdr
     // drops the plugin's Agents view with the link, so its "on" flag goes too: left behind,
     // a later link's startup hook put the view back, and the next key turned it off.
+    // The unlink goes first: Herdr refuses it with its server stopped, and the block and marker
+    // deleted before it left a plugin still linked with its keys and rows gone.
     if (plugin.linkedHere) {
-      herdr(["plugin", "unlink", PLUGIN_ID]);
+      try {
+        herdr(["plugin", "unlink", PLUGIN_ID]);
+      } catch (error) {
+        throw herdrFailure(error, ["plugin", "unlink", PLUGIN_ID], "Nothing was changed.");
+      }
       rmSync(viewFlag(), { force: true });
-    } else if (plugin.linkedFrom) console.log(`The plugin is linked from another checkout (${plugin.linkedFrom}), so it stays linked: \`sandcastle herdr configure --remove\` there unlinks it.`);
+    } else if (plugin.linkedFrom) console.log(`The plugin is linked from another checkout (${plugin.linkedFrom}), so it stays linked: \`sandcastle herdr configure --remove --tui\` there unlinks it.`);
+    // A link from another checkout stays, so the status view's links stay with it.
+    if (!plugin.linkedFrom || plugin.linkedHere) rmSync(PLUGIN_MARKER, { force: true });
+    const after = withoutBlock(before);
+    if (after !== before) {
+      try {
+        writeFileSync(path, after);
+      } catch (error) {
+        // Nothing to roll back: run again, it finds the plugin unlinked and strips the block.
+        throw new OperatorError(
+          `${plugin.linkedHere ? "The plugin is unlinked, but" : "Could not take the block out:"} ${path} could not be written (${(error as Error).message}), so the sandcastle-kit block is still in it. Run \`sandcastle herdr configure --remove --tui\` again once it is writable: it finishes the job.`,
+        );
+      }
+    }
     if (after === before && (before.includes(`"${PLUGIN_ID}.`) || before.includes("herdr line"))) {
       console.log(`${path} has sandcastle-kit entries outside its marker lines (a tool may have rewritten the file): delete them by hand.`);
     }
@@ -334,7 +412,7 @@ const configurePlugin = async (remove: boolean, yes: boolean, byDefault: boolean
       return;
     }
     const reload = reloadConfig();
-    console.log(`Removed ${done.join(" and ")}.${reload.ok ? " Herdr reloaded its config." : ""}`);
+    console.log(`Removed ${done.join(" and ")}.${reload.ok ? " Herdr reloaded its config." : ""} \`sandcastle herdr configure --tui\` adds it again.`);
     return;
   }
 
@@ -350,7 +428,7 @@ const configurePlugin = async (remove: boolean, yes: boolean, byDefault: boolean
     `This will:\n  1. link the sandcastle-kit plugin from ${PLUGIN_DIR} (\`herdr plugin link\`; no build, a \`git pull\` of the kit updates it)` +
       (elsewhere ? `,\n     in place of the link to ${elsewhere}` : "") +
       `\n  2. add the block below to the end of ${path}\n  3. reload Herdr's config (nothing restarts; your panes are untouched)\n` +
-      `\`sandcastle herdr configure --remove\` undoes all three.\n\n${configBlock()}\n`,
+      `\`sandcastle herdr configure --remove --tui\` undoes all three.\n\n${configBlock()}\n`,
   );
   if (!yes) {
     const answer = await confirm(`Go ahead? ${byDefault ? "[Y/n]" : "[y/N]"} `, undefined, undefined, byDefault);
@@ -362,8 +440,29 @@ const configurePlugin = async (remove: boolean, yes: boolean, byDefault: boolean
   }
   // What Herdr already says about the config as it is, so its old warnings are not blamed on the block.
   const baseline = reloadConfig();
-  if (elsewhere) herdr(["plugin", "unlink", PLUGIN_ID]);
-  herdr(["plugin", "link", PLUGIN_DIR]);
+  // A failed `herdr` call is the operator's to act on, never a stack trace. The other checkout's link goes first, so a
+  // refused unlink has changed nothing; a link that fails after it puts that link back if Herdr lets it.
+  if (elsewhere) {
+    try {
+      herdr(["plugin", "unlink", PLUGIN_ID]);
+    } catch (error) {
+      throw herdrFailure(error, ["plugin", "unlink", PLUGIN_ID], "Nothing was changed.");
+    }
+  }
+  try {
+    herdr(["plugin", "link", PLUGIN_DIR]);
+  } catch (error) {
+    let after = "Nothing in the config was changed.";
+    if (elsewhere) {
+      try {
+        herdr(["plugin", "link", elsewhere]);
+        after += ` The link to ${elsewhere} is back.`;
+      } catch {
+        after += ` The link to ${elsewhere} could not be put back: \`herdr plugin link ${elsewhere}\` restores it.`;
+      }
+    }
+    throw herdrFailure(error, ["plugin", "link", PLUGIN_DIR], after);
+  }
   mkdirSync(dirname(path), { recursive: true });
   if (before) writeFileSync(`${path}.sandcastle-kit.bak`, before);
   writeFileSync(path, withBlock(before));
@@ -375,17 +474,26 @@ const configurePlugin = async (remove: boolean, yes: boolean, byDefault: boolean
     if (before) writeFileSync(path, before);
     else rmSync(path, { force: true });
     reloadConfig();
-    if (!plugin.linkedHere) herdr(["plugin", "unlink", PLUGIN_ID]);
-    if (elsewhere) herdr(["plugin", "link", elsewhere]);
+    // The roll-back's own `herdr` calls may fail too (a server that stopped meanwhile): said, not thrown over the cause.
+    const undone: string[] = [];
+    const undo = (args: string[]) => {
+      try {
+        herdr(args);
+      } catch {
+        undone.push(`\`herdr ${args.join(" ")}\``);
+      }
+    };
+    if (!plugin.linkedHere) undo(["plugin", "unlink", PLUGIN_ID]);
+    if (elsewhere) undo(["plugin", "link", elsewhere]);
     throw new OperatorError(
-      `Herdr did not take the new config, so ${path} and the plugin link are back as they were:\n` +
+      `Herdr did not take the new config, so ${path} ${undone.length ? `is back as it was; the plugin link could not be put back (run ${undone.join(" and ")})` : "and the plugin link are back as they were"}:\n` +
         (reload.ok ? JSON.stringify(reload.diagnostics, null, 2) : reload.reason),
     );
   }
   mkdirSync(dirname(PLUGIN_MARKER), { recursive: true });
   writeFileSync(PLUGIN_MARKER, PLUGIN_DIR);
   console.log(
-    `Done${reload.ok ? " - Herdr reloaded its config" : ". Herdr is not running: it reads the block when it starts, and if it reports a problem then, `sandcastle herdr configure --remove` takes the block out"}.` +
+    `Done${reload.ok ? " - Herdr reloaded its config" : ". Herdr is not running: it reads the block when it starts, and if it reports a problem then, `sandcastle herdr configure --remove --tui` takes the block out"}.` +
       `\n  prefix+shift+s  status view    prefix+shift+e  last run's report    prefix+shift+a  sandboxes first in Agents` +
       `\n  (the prefix is ctrl+b unless you changed it). A click on a ticket in the status view opens its card (its passes, and a key for each one's log), with the key below.`,
   );
@@ -990,8 +1098,12 @@ export const herdrCommand = async (args: string[]) => {
     return console.log(`\`sandcastle herdr ${verb}\` is a Herdr TUI plugin verb, and this is a herdr-core terminal: nothing to do here.`);
   }
   switch (verb) {
-    case "configure":
-      return configure(rest.includes("--remove"), rest.includes("--yes"));
+    case "configure": {
+      // Every argument checked: a flag a kit does not know was ignored, so `--app --yes` did both halves.
+      const unknown = rest.filter((a) => !["--app", "--tui", "--remove", "--yes"].includes(a));
+      if (unknown.length) throw new OperatorError(`Unknown argument${unknown.length > 1 ? "s" : ""}: ${unknown.join(" ")}. ${CONFIGURE_USAGE}`);
+      return configure(rest.includes("--remove"), rest.includes("--yes"), false, KIT, { app: rest.includes("--app"), tui: rest.includes("--tui") });
+    }
     case "line": {
       // A live run's own tab after a Herdr restart gets its status view back on the next tick.
       const line = runsLine(undefined, undefined, undefined, replaceDeadTab, (root) => void restartStatusView(root));
@@ -1025,7 +1137,7 @@ export const herdrCommand = async (args: string[]) => {
       requeueAwaiting();
       return view("reapply");
     default:
-      throw new OperatorError("Usage: sandcastle herdr configure [--remove] [--yes]. The plugin's own verbs: line, open, open-log, card, view, startup.");
+      throw new OperatorError(`${CONFIGURE_USAGE} The plugin's own verbs: line, open, open-log, card, view, startup.`);
   }
 };
 

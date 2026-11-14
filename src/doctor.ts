@@ -670,7 +670,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   // this terminal needs it. `herdr plugin list` reads Herdr's own files, so a stopped server answers too.
   if (!herdr1 && run("herdr", ["--version"])) {
     const plugin = pluginState();
-    const state = plugin.linkedHere && plugin.block ? "linked from this checkout" : plugin.linkedFrom ? `linked from ${plugin.linkedFrom}` : "not linked (`sandcastle herdr configure` links it)";
+    const state = plugin.linkedHere && plugin.block ? "linked from this checkout" : plugin.linkedFrom ? `linked from ${plugin.linkedFrom}` : "not linked (`sandcastle herdr configure --tui` links it; the Herdr app does not need it)";
     console.log(`info Herdr TUI plugin: ${state} - it serves Herdr TUI tabs, and this is ${host.kind === "core" ? "a herdr-core terminal" : "not a Herdr tab"}`);
   }
   if (herdr1) {
@@ -679,8 +679,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       plugin.linkedHere && plugin.block,
       "Herdr plugin and sidebar rows (optional: the status view and report over any tab, Ctrl-click logs, run progress in the sidebar)",
       plugin.linkedFrom && !plugin.linkedHere
-        ? `Linked from another checkout (${plugin.linkedFrom}): \`sandcastle herdr configure\` here links this one.`
-        : "`sandcastle herdr configure` (shows what it adds and asks first).",
+        ? `Linked from another checkout (${plugin.linkedFrom}): \`sandcastle herdr configure --tui\` here links this one.`
+        : "`sandcastle herdr configure --tui` (shows what it adds and asks first).",
       true,
     );
     if (plugin.linkedFrom) console.log(clickHintLine(resolveClickHint()));

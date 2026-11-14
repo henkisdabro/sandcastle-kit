@@ -159,17 +159,32 @@ The kit ships a [Herdr plugin](https://herdr.dev/docs/plugins) in `herdr/`. It i
 nothing above needs it. One command sets it up:
 
 ```bash
-sandcastle herdr configure            # shows what it adds, asks, then does it
-sandcastle herdr configure --remove   # takes all of it out again
+sandcastle herdr configure --tui            # shows what it adds, asks, then does it
+sandcastle herdr configure --remove --tui   # takes all of it out again
 ```
+
+`configure` has two halves: `--tui`, this plugin, and `--app`, the [Herdr app mod](#the-herdr-app-mod).
+With neither flag it sets up whichever of Herdr TUI and the Herdr app is installed.
+With both installed it copies the app mod, and refreshes the plugin only where it is already set up from this
+checkout (linked here, or its block in the config with nothing linked elsewhere): Herdr TUI left on a machine that
+now uses the app is not linked, and `configure` says how to add it.
+`--remove` with neither flag takes out both halves.
+Any other argument is refused, with the usage line.
+The two flags need a kit newer than 0.25.0, which ignored them and did both halves.
 
 It links the plugin from the kit's own checkout (no build step: a `git pull` of the kit updates it),
 appends one marked block to Herdr's `config.toml`, and reloads Herdr's config.
 Nothing restarts and no pane is touched.
-`sandcastle setup` and `/sandcastle update` offer it wherever Herdr TUI is installed - from a Herdr
-TUI tab, a herdr-core terminal or a plain terminal - with yes as the default answer, and
-`sandcastle doctor` says whether it is in place.
+`sandcastle setup` offers it wherever Herdr TUI is installed - from a Herdr TUI tab, a herdr-core
+terminal or a plain terminal - with yes as the default answer; `/sandcastle update` recommends it from a
+Herdr TUI tab and mentions it as optional elsewhere; and `sandcastle doctor` says whether it is in place.
 Nothing installs it without asking: it edits your own Herdr config.
+
+`--remove` unlinks the plugin before it takes the block out, and Herdr unlinks a plugin only with its server
+running.
+With the server stopped (where you use only the Herdr app, it never runs), `configure` stops, changes nothing - the
+app mod included, for a bare `--remove` - and names the fix: run `herdr server` in another terminal, run the command
+again, then `herdr server stop`.
 It serves Herdr TUI tabs only.
 Without Herdr TUI installed none of this exists, and nothing asks.
 What you get:
@@ -180,7 +195,7 @@ What you get:
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup: `q` closes it, and its bottom line says so. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
 | Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says which key opens them (below). The ticket's card opens in a popup: its number, title, state and how long it has been in it; one line per pass in its last run (implement, review, gates, repair - each attempt -, resolve, landing gates) with its outcome and time; the reason it is held or in conflict, or the last lines of its red gate's log. A digit opens that pass's log: it follows the log live (new lines appear at the bottom as the agent writes them), and `Ctrl-C` closes it, as its bottom line says (`less` reads no other key while it follows; Esc does nothing in it); a log shorter than the popup opens from its top line and does not follow, `q` or `Ctrl-C` closes it, with `F` to follow new lines. Closing the log puts the card back. `t` prints the ticket's tracker link (its GitHub issue, from the `origin` remote, or its ticket file), and `q`, Esc or `Ctrl-C` closes the card. A ticket the last run did not take shows its logs, and says so. |
-| Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`); and the run's own agent shows the plan's usage (`5h 14% · wk 93% ■`), amber from 75% and red from 90%. A kit that wrote its block before this row existed needs `sandcastle herdr configure --yes` again to show it |
+| Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`); and the run's own agent shows the plan's usage (`5h 14% · wk 93% ■`), amber from 75% and red from 90%. A kit that wrote its block before this row existed needs `sandcastle herdr configure --tui --yes` again to show it |
 | Tab bar | Every live run on the machine, from any tab: `♜ shop 4/9 · 2 working · 1 needs you`. |
 
 **Which click.** The key depends on the terminal Herdr runs in, not on Herdr: Ctrl-click works in
@@ -214,8 +229,9 @@ If your `config.toml` already sets sidebar rows (`ui.sidebar.agents` or `ui.side
 bar entries or one of the three keys, `configure` changes nothing and prints the block for you to
 merge by hand; comment lines do not count, so a config saved from `herdr --default-config` is fine.
 After writing, it asks Herdr to reload the config and puts the file and the plugin link back as
-they were if Herdr says anything new about it. The previous file is kept as
-`config.toml.sandcastle-kit.bak`.
+they were if Herdr says anything new about it. The file as it was before the last `configure` that wrote
+the block is kept as `config.toml.sandcastle-kit.bak`, and stays after `--remove`: delete it when you no longer
+want it.
 
 Herdr cannot dock a plugin in its sidebar (plugins get terminal panes and popups, not native
 panels), so the sidebar carries the run through the values it reports, and the full view stays a
@@ -242,13 +258,16 @@ holds the status view alone):
 The kit ships a mod for the Herdr app in `herdr-app/`: the terminal status view drawn in the app's own
 type.
 It is optional and needs the app (`herdr-app` on PATH).
-`sandcastle herdr configure` copies the mod when `herdr-app` is installed, with or without Herdr TUI, and
-`sandcastle herdr configure --remove` takes the copy out again:
+`sandcastle herdr configure --app` copies the mod when `herdr-app` is installed, with or without Herdr TUI, and
+`sandcastle herdr configure --remove --app` takes the copy out again, also once the app is uninstalled:
 
 ```bash
-sandcastle herdr configure            # shows what it copies, asks, then does it
-sandcastle herdr configure --yes      # copies without asking; also the way to update the copy
+sandcastle herdr configure --app         # shows what it copies, asks, then does it
+sandcastle herdr configure --app --yes   # copies without asking; also the way to update the copy
 ```
+
+A bare `sandcastle herdr configure` copies it too wherever the app is installed (see
+[The Herdr plugin](#the-herdr-plugin) for what it does about Herdr TUI beside it).
 
 It copies the folder's tracked files (not the `jsconfig.json` and `gpui-kit.d.ts` the app writes into a mod
 it loads) to `mods/sandcastle/` under the app's home: `$HERDR_APP_HOME`, else `~/.config/herdr-app`.
@@ -262,7 +281,7 @@ So, unlike the Herdr TUI plugin, the mod is a copy, and a `git pull` of the kit 
 The copy carries a stamp, `.sandcastle-kit`, with the kit's version, a hash of the copied files and the
 list of them.
 `sandcastle doctor` compares the stamp's hash with the kit's `herdr-app/` and warns when the copy is
-stale (`sandcastle herdr configure --yes` copies it again); it lists the mod as optional when the app is
+stale (`sandcastle herdr configure --app --yes` copies it again); it lists the mod as optional when the app is
 installed and there is no copy, and says nothing when the app is not installed.
 Edits made to the installed copy are not watched.
 
