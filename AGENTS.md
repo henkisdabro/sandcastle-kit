@@ -108,6 +108,8 @@ directory, never in a real project.
   changes shipped files and adds nothing under `[Unreleased]` fails the Changelog check
   (`scripts/changelog-check.mjs`, which lists the paths that count); label it `no-changelog`
   when nobody outside the code would notice, a refactor say.
+  In a run, an agent never edits `CHANGELOG.md`: it gives the line in a `<changelog>` tag and the
+  maintainer writes it (`.sandcastle/rules.md`), so a ticket's Touches line never names it.
 
 ## Releases
 

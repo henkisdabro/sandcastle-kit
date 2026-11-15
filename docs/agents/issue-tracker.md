@@ -23,6 +23,8 @@ Infer the repo from `git remote -v` - `gh` does this automatically when run insi
   record compatible.
 - **A release-focused run**: `sandcastle run $(gh issue list --milestone vX.Y.Z --label ready-for-agent --json number -q '.[].number')`.
 - **At release**, follow the Planning section of `docs/releasing.md`.
+- **A design spec first**: a ticket that changes how the kit works gets a written design spec -
+  files, data recorded, tests, and the macOS/Linux angle - before it is labelled `ready-for-agent`.
 
 ## Pull requests as a triage surface
 

@@ -3176,6 +3176,14 @@ The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{TICKET}}`, `{
 About 20 test files pin the templates' wording, few of them named `prompt-*`. Before changing a template, run them all:
 `grep -lE '"prompts"|(implement|review|repair|resolve)\.md' test/*.ts`.
 
+Agents run the typecheck gate and the tests that cover their change; only the orchestrator runs
+every gate, in config order, stopping at the first red.
+An agent's full-suite run repeated the gates that start minutes later and slowed the gates beside
+it (#376, whose reviewer full-suite run #761 took back; #594, #809, #849).
+Templates name no project script: a project's related-tests command belongs in its `rules.md`
+(#809).
+Each template carries its own copy of the shared safety sentences, not a shared fragment (#539).
+
 ## `container/`
 
 Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `src/sandbox.ts`):
@@ -3380,6 +3388,14 @@ line in one of them - and `test/no-stray.ts` fails a file that prints outside `q
 Some read the docs: the `skill*` tests check SKILL.md's frontmatter and pointers, each action file's
 steps and brief, run.md's seven headings against `src/report.ts`, update.md's step references and
 `docs/layout.md`'s row for `skill/`
+
+**A flaky test** is fixed where its time goes, once the failure is seen: keep the failing output
+(#689 and #690 waited for it).
+A race in the kit or the test's seam is removed, never hidden by a raised production constant, a
+fixed sleep, a retry or a weaker assertion (#973).
+A retry is allowed only for an outside tool's fixed, measured time budget, once, on that tool's
+exact failure signal, with a test of the predicate (#689, #974); a fixture may get a longer limit
+than production when that limit is not what the test checks (#690).
 
 ## `skill/`
 

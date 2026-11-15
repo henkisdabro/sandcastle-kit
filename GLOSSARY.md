@@ -39,6 +39,12 @@ ticket state:
 the ticket is queued again, and the fact stays with it through that attempt.
 _Avoid_: using it as a ticket state
 
+**Held**:
+A ticket waiting for a person before the kit takes it further, marked by the hold label: a branch
+that changes a protected path, an outsider's edit after queueing, or a ticket an agent handed back.
+The file hold and the load pause are waits inside a run, not this.
+_Avoid_: blocked (waiting for an open blocker), paused (a whole run)
+
 **Attempt**:
 One pass of a ticket through the pipeline - implement, review, gates, repair - in a sandbox of its
 own. A ticket that conflicts or goes red at landing, whose branch its pipeline finds no longer
@@ -113,6 +119,20 @@ _Avoid_: cell, panel, group (a bucket of ticket states)
 
 ### Where a run is watched
 
+**Status view**:
+The live picture of a run's tickets, drawn from one snapshot: the terminal view (`sandcastle
+status`), or in the Herdr app the Herdr app mod's pane in its place.
+_Avoid_: status.sh (the wrapper that starts it), dashboard
+
+**Claude Code mod**:
+The optional Claude Code plugin that draws the live band, the idle mark and the end prompt in the
+session that started a run.
+_Avoid_: the mod (alone), plugin (the Herdr TUI plugin)
+
+**Herdr app mod**:
+The kit's mod for the Herdr app, which draws the status view in an app pane.
+_Avoid_: the mod (alone), app plugin
+
 **Terminal host**:
 The terminal multiplexer a command runs in, as the kit finds it: Herdr TUI, herdr-core, or none. It
 decides where the status view opens and what the run reports to the sidebar.
@@ -150,11 +170,16 @@ and a paused run's parked tickets add nothing: it asks for none once nothing is 
 _Avoid_: want, need, queue length (which counts blocked tickets)
 
 **Share**:
-How many of the machine pool's sandbox slots one live run may hold now, its landing included:
-the pool split equally between live runs, none given more than its demand or cap. Unlike a run
-setting it changes during the run; a run above its share takes no new slot, and never loses one
-it holds.
+How many of the machine pool's sandbox slots one live run's tickets may hold now: the pool, less
+the landing slot while another run is live, split equally between live runs, none given more than
+its demand or cap. Unlike a run setting it changes during the run; a run above its share takes no
+new slot, and never loses one it holds.
 _Avoid_: quota, allocation, concurrency (the most a run ever wants, a run setting)
+
+**Landing slot**:
+The one slot of the machine pool kept, while more than one run is live, for any run's landing; a
+ticket takes it only when no landing is near.
+_Avoid_: kept slot, reserved slot
 
 **Cap**:
 A person's limit on one live run's share, set while it runs and gone when it ends.
