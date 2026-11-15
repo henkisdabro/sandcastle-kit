@@ -71,14 +71,15 @@ test("a docker a test puts ahead of the no-op one is the one that runs", () => {
   assert.equal(r.stdout, "own\n");
 });
 
-// The two Herdr homes the preload sets after scrubbing, inside the test's own cache: never the developer's.
-const HERDR_HOMES = ["HERDR_APP_HOME", "HERDR_CONFIG_PATH"];
+// The Herdr homes and plugin state directory the preload sets after scrubbing, inside the test's own cache: never
+// the developer's.
+const HERDR_HOMES = ["HERDR_APP_HOME", "HERDR_CONFIG_PATH", "HERDR_PLUGIN_STATE_DIR"];
 
 test("a test sees none of the host's Herdr, tmux or kit settings", () => {
   for (const name of Object.keys(process.env)) if (!HERDR_HOMES.includes(name)) assert.equal(scrubs(name), false, `${name} leaked into the test's environment`);
 });
 
-test("a test's Herdr app home and Herdr TUI config are inside its own cache, never the developer's", () => {
+test("a test's Herdr app home, Herdr TUI config and plugin state are inside its own cache, never the developer's", () => {
   for (const name of HERDR_HOMES) assert.ok(process.env[name]?.startsWith(`${process.env.XDG_CACHE_HOME}/`), `${name}: ${process.env[name]}`);
 });
 
@@ -104,7 +105,7 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
     TMPDIR: link,
     PATH: [hostBin, "/shim", process.env.PATH].join(delimiter),
     HERDR_ENV: "1", HERDR_PANE_ID: "p", TMUX: "x", TMUX_PANE: "%1", AUTONOMY_LEVEL: "3", CONCURRENCY: "9", USAGE_CHECK: "1",
-    SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", SANDCASTLE_TEST_MACHINE_CPU: "real", GH_TOKEN: "t", NO_COLOR: "1", FORCE_COLOR: "1", XDG_CONFIG_HOME: "/xdg", HERDR_APP_HOME: "/real/herdr-app", HERDR_CONFIG_PATH: "/real/herdr/config.toml",
+    SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", SANDCASTLE_TEST_MACHINE_CPU: "real", GH_TOKEN: "t", NO_COLOR: "1", FORCE_COLOR: "1", XDG_CONFIG_HOME: "/xdg", HERDR_APP_HOME: "/real/herdr-app", HERDR_CONFIG_PATH: "/real/herdr/config.toml", HERDR_PLUGIN_STATE_DIR: "/real/herdr/plugin-state",
     GIT_COMMITTER_NAME: "n", GIT_COMMITTER_EMAIL: "n@example.com", GIT_AUTHOR_NAME: "n", GIT_AUTHOR_EMAIL: "n@example.com", EMAIL: "n@example.com",
     GIT_CONFIG_GLOBAL: join(dir, "host-gitconfig"), GIT_CONFIG_NOSYSTEM: "0",
     GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "commit.gpgsign", GIT_CONFIG_VALUE_0: "false",
