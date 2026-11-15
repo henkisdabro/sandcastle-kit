@@ -155,12 +155,14 @@ _Avoid_: slot (a machine pool slot), sandbox pane (Herdr TUI's)
 ### Sharing the machine
 
 **Machine pool**:
-The sandboxes and gate runs one machine allows at once, across every project's runs - a sandbox
-limit and a gate limit, set per machine, never per project.
+The sandbox and gate limits one machine sets for every project's runs together, never per project.
+The sandbox limit bounds agent passes; a ticket waiting for or in its gates keeps its container
+outside it, up to the gate limit across the machine (ADR 0001).
 _Avoid_: pool (alone), concurrency (a run's own cap)
 
 **Slot**:
-One place in the machine pool, which a run holds while one ticket's sandbox or gate run lives.
+One place in the machine pool, which a run holds while one agent pass's sandbox or one gate run
+lives; a ticket waiting for or in its gates keeps its container without a sandbox slot.
 _Avoid_: lock (the file that records it), worker
 
 **Demand**:

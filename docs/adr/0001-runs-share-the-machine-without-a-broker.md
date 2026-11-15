@@ -27,3 +27,9 @@ slots work 1 + 1 tickets), so that a landing never waits for a ticket to end.
 
 A run that starts while another fills the pool waits for that run's tickets to finish, often
 tens of minutes. A run started by an older kit ignores shares until it ends.
+
+Amended 20261115, containers outside the sandbox limit (#790, #1002): a ticket waiting for or in
+its gates keeps its container outside `maxSandboxes`, so another ticket's agent pass can use the
+slot. Those containers are capped machine-wide at `maxGates`, not per run, and `sandcastle size`
+and doctor price `maxSandboxes + maxGates` containers, so the memory bound does not grow with the
+number of live runs. At the cap, a ticket keeps its counted slot while it waits.
