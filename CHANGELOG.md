@@ -9,6 +9,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pointers to README sections that moved into `docs/` now name the right file.** The warning
+  about an unconfigured Linear blocker key points at `docs/queue.md` (Blockers), `sandcastle help`
+  points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for
+  the default models. `docs/commands.md` now lists `sandcastle herdr configure` and the `run`
+  arguments `[TICKET ...] [--dry] [--concurrency N]`.
+
 ## [0.26.0] - 2026-11-14
 
 ### Upgrading

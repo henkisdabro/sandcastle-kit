@@ -248,7 +248,7 @@ Run them from inside a project; `sandcastle help` lists them, `sandcastle <comma
 | **Tickets** | `queue` (what is ready, and what holds the rest back), `queue --lint` (the queue's shape before a run), `blockers`, `requeue <n> --note "..."` |
 | **Run** | `run` (with `--detach` for a run that outlives your terminal), `wait`, `status`, `pause`, `resume`, `stop`, `cap`, `report` |
 | **After a run** | `preview` (which branches would conflict), `land <n>`, `clean` |
-| **Machine and kit** | `size` (the pool's limits), `usage` (the plan's usage), `preflight` (one reply from each model), `changes` and `updated` (after a kit update) |
+| **Machine and kit** | `size` (the pool's limits), `usage` (the plan's usage), `preflight` (one reply from each model), `changes` and `updated` (after a kit update), `herdr configure` (the Herdr plugin and app mod) |
 
 Only `run`, `preflight` and `lean --measure` call a model.
 

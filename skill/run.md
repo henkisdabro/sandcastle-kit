@@ -393,7 +393,7 @@ In the status view, a landing ticket holds no sandbox slot, and the RUN lane's e
 
 ## Models and effort
 
-The kit's defaults are in its README ("Environment variables"). To change them for a project, set
+The kit's defaults are in its docs/configuration.md ("Environment variables"). To change them for a project, set
 `model` or `effort` under `implement` or `review` in the project's `.sandcastle/config.ts` and
 commit it - for example `review: { effort: "medium" }`. For one run only, prefix the command with
 `IMPL_MODEL`, `IMPL_EFFORT`, `REVIEW_MODEL` or `REVIEW_EFFORT`; these win over the config. For the

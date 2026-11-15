@@ -78,7 +78,7 @@
 //                    one reply from every model, nothing else; asks first, as a run
 //                    does, when it would spend ANTHROPIC_API_KEY
 //   queue [--json]   the queue and what holds each ticket back (the tracker in use:
-//                    GitHub issues or ticket files; see README, Trackers); no model calls
+//                    GitHub issues or ticket files; see docs/queue.md, Trackers); no model calls
 //   queue --lint [TICKET ...]
 //                    the queue's shape before a run: blocker chain, Touches overlaps, wide
 //                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0;

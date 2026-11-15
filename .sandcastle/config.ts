@@ -1,6 +1,6 @@
 // Sandcastle project config - read by sandcastle-kit (https://github.com/henkisdabro/sandcastle-kit).
 // Only what differs from the kit's defaults belongs here. Every other key is listed commented out,
-// at its default or with an example, as in templates/config.ts; README -> Configuration says what each does.
+// at its default or with an example, as in templates/config.ts; the kit's docs/configuration.md says what each does.
 
 export default {
   name: "sandcastle-kit",
@@ -29,7 +29,7 @@ export default {
   // tracker: "github",
   // tracker: "files",                      // .scratch/<feature>/issues/NN-<slug>.md, `Status:` line
   // tracker: { type: "files", dir: "tickets", done: ["done", "shipped"] },
-  // Extra things a ticket may wait for: Linear issues, ticket files. README -> Blockers.
+  // Extra things a ticket may wait for: Linear issues, ticket files. The kit's docs/queue.md -> Blockers.
   // blockers: { linear: ["ENG"] },
 
   // Adds gitleaks: the repo's pre-commit hook refuses every commit without it.
