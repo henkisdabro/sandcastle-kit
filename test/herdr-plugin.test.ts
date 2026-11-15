@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { everyPidIsTheKit } from "./kit-process.ts";
@@ -185,9 +185,14 @@ test("configure --remove unlinks only this checkout's plugin", async () => {
   await quietly(() => configure(true, true));
   assert.equal(readFileSync(fake.config, "utf8"), "[ui]\nx = 1\n");
   assert.equal(fake.calls().some((c) => c.startsWith("plugin unlink")), false, fake.calls().join("\n"));
+  // Linked here, `--remove` also deletes the Agents-view flag: the one in the test's own state directory.
+  const flag = join(process.env.HERDR_PLUGIN_STATE_DIR as string, "sandboxes-first");
+  mkdirSync(dirname(flag), { recursive: true });
+  writeFileSync(flag, "");
   const here = fakeHerdr(PLUGIN_DIR);
   await quietly(() => configure(true, true));
   assert.ok(here.calls().includes(`plugin unlink ${PLUGIN_ID}`));
+  assert.equal(existsSync(flag), false);
 });
 
 test("configure puts the config and the old link back unless Herdr reloads it cleanly", async () => {

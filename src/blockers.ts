@@ -395,7 +395,7 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     const linear = new Set((project.blockers?.linear ?? []).map((k) => k.toUpperCase()));
     for (const m of stripCode(t.body ?? "").matchAll(new RegExp(`${TRIGGER}([A-Z][A-Z0-9]+)-\\d+`, "gi"))) {
       if (linear.has(m[1].toUpperCase())) continue;
-      lines.push(`${who} says "${m[0].trim()}", but ${m[1].toUpperCase()} is not in \`blockers.linear\` in .sandcastle/config.ts - the line is ignored and a run starts the ticket. Add the key there (README: Blockers), or remove the line.`);
+      lines.push(`${who} says "${m[0].trim()}", but ${m[1].toUpperCase()} is not in \`blockers.linear\` in .sandcastle/config.ts - the line is ignored and a run starts the ticket. Add the key there (docs/queue.md: Blockers), or remove the line.`);
     }
   }
   // Only a parent the run would take itself: one queued outside the named tickets is not implemented by it.

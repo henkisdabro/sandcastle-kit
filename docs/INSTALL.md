@@ -104,7 +104,7 @@ Then uncomment and fill in `~/.config/sandcastle-kit/.env`:
   <https://github.com/settings/personal-access-tokens/new>: repository access limited to the
   repos you will run, permissions **Issues: Read and write** and **Metadata: Read**.
 
-- `LINEAR_API_KEY` - only if tickets wait on Linear issues (README, Blockers); read-only is enough.
+- `LINEAR_API_KEY` - only if tickets wait on Linear issues ([Blockers](queue.md#-blockers-github-linear-ticket-files)); read-only is enough.
   It stays on the host.
 
 Leave unused keys commented out: an empty value stops a run. Machine-wide limits, keep-awake, an
@@ -165,7 +165,7 @@ is a link into the kit, but a session that was already open keeps the skill it l
 start: after pulling, start a new session (Claude Code, Codex or OpenCode) before the next
 `/sandcastle` action. A mod linked by the update loads only in a new session too.
 
-The sandbox image picks up new Claude Code and Codex releases by itself (README,
+The sandbox image picks up new Claude Code and Codex releases by itself (see
 [The image's agent versions](configuration.md#-the-images-agent-versions)), but not Debian and Node
 security updates: run `sandcastle build --force` now and then; `sandcastle doctor` warns once a
 project's base image is more than 30 days old.
