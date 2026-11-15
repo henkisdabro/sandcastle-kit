@@ -43,6 +43,7 @@ the same machine, `sandcastle help` and `sandcastle herdr line` (which Herdr run
 seconds) started in about 0.4 s against 0.8-1.2 s with tsx's loader. One constructor parameter
 property (`BaseRedError` in `src/gates.ts`) is the only syntax that stripping refuses. Taking it
 means raising `engines` to Node 22.18 or keeping tsx as the fallback for older Node 22 releases.
+That was taken: `engines` is `>=22.18`, and the kit runs on Node's own type stripping.
 
 Revisit Bun only if the kit stops needing Node: `@ai-hero/sandcastle`, the sandbox image
 (`node:24-trixie`) and the Codex install in it all assume it today.

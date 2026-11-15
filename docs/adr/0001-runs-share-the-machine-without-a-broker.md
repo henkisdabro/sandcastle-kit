@@ -6,6 +6,11 @@ by one run taking tickets from many projects. A run above its share stops taking
 never stopped: an agent stopped mid-ticket wastes the allowance it spent and costs the ticket one
 of its two attempts, so a share is reached as tickets finish, not at once.
 
+Amended 20261115, the landing slot (#754, #791): beside another live run, one slot of the pool is
+kept for any run's landing, and the shares split the pool less that slot; a ticket may take it only
+while no run has a landing near. Accepted cost: one idle slot beside another run (two runs on 3
+slots work 1 + 1 tickets), so that a landing never waits for a ticket to end.
+
 ## Considered Options
 
 - **A central service** that owns the pool and hands out slots. It could also enforce a shared

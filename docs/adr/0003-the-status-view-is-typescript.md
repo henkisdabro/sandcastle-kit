@@ -36,5 +36,9 @@ fractional timeouts, no event loop, and background jobs whose children outlive a
   interrupt the Herdr pane reuse and the quit mark rely on.
 - The switch ships in one release, behind no public setting, and `jq` stops being a prerequisite
   once `status.sh` is a wrapper.
+- In the Herdr app a run opens the Herdr app mod's pane in place of the terminal view (#959). The
+  mod draws natively from `sandcastle status --json --frame` (`frameFacts`, #955), the one model
+  both views take; the website demo runs a type-stripped copy of the renderer that a drift test
+  holds to the view (#709). Neither carries rules of its own.
 - Calling the Docker Engine or GitHub APIs directly, instead of their command-line tools, waits
   until a measurement shows it is needed.
