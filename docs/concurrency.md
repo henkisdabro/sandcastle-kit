@@ -133,6 +133,13 @@ The 2 GiB headroom and the 6 CPUs a gate wants are assumptions, and are printed 
 On native Linux Docker the VM's memory is the whole host's, so the 2 GiB covers less: the desktop
 and everything else share it.
 
+A ticket waiting for or in its gates keeps its container outside the sandbox limit (above), so the
+VM can hold more containers than `maxSandboxes`.
+The ruling (ADR 0001) caps those at `maxGates` across the machine and prices
+`maxSandboxes + maxGates` containers; until #1002 lands, the cap is `maxGates` per live run and the
+recommendation above does not count them, so leave memory for them when two or more runs share the
+VM.
+
 The two figures are **measured** once runs have been recorded, and both assumed (1.5 GiB, and the
 answer says so) until then.
 Every sandbox's peak memory is read from inside it, from the kernel's own high-water mark (cgroup v2
