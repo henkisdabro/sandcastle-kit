@@ -2043,8 +2043,9 @@ filter in the nested repository's config that must not run.
 A failure is the ticket's `tampered`, which stops the run. `sandcastle clean` (`cleanProject`) holds
 each kept worktree to it before `git worktree remove --force`, and a worktree that fails is left as
 it stands with its branch (git would refuse the branch's delete anyway), named with the reason,
-while the others are cleaned and the exit code is non-zero (`test/clean-checks.test.ts`); its start
-holds the baseline above before the pins.
+while the others are cleaned and the exit code is non-zero (`test/clean-checks.test.ts`).
+A worktree whose `git worktree remove` fails is left the same way, with git's reason, and clean
+goes on (`test/scratch-removal-failure.test.ts`); its start holds the baseline above before the pins.
 
 **What a sandbox can change in the shared `.git`, and how each is covered** (the whole `.git` is
 mounted read-write in every sandbox):

@@ -21,14 +21,14 @@ const TMP = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-scratch-fail-"))
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 const git = (cwd: string, ...args: string[]) => execFileSync(REAL_GIT, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
-// A git that fails `worktree remove` of any path ending in `sandcastle-a`, as a stale lock would, and passes the rest on.
+// A git that fails `worktree remove` of any path ending in `sandcastle-a` or `ticket-a`, as a stale lock would, and passes the rest on.
 const BIN = join(TMP, "bin");
 mkdirSync(BIN, { recursive: true });
 writeFileSync(
   join(BIN, "git"),
   `#!/bin/sh
 case "$*" in
-  "worktree remove --force "*/sandcastle-a) echo "fatal: cannot remove: index.lock exists" >&2; exit 128 ;;
+  "worktree remove --force "*/sandcastle-a|"worktree remove --force "*/ticket-a) echo "fatal: cannot remove: index.lock exists" >&2; exit 128 ;;
   "branch -D $FAIL_BRANCH") echo "error: cannot lock ref 'refs/heads/$FAIL_BRANCH'" >&2; exit 1 ;;
 esac
 exec ${JSON.stringify(REAL_GIT)} "$@"
@@ -101,6 +101,21 @@ test("`sandcastle clean` goes on past a scratch worktree git fails to remove, an
   assert.deepEqual(result.left.map((l) => [l.path, l.branch]), [[a, "sandcastle/a"]]);
   assert.match(result.left[0].reason, /index\.lock exists/);
   assert.deepEqual(scratchBranches(root), ["sandcastle/a"]);
+});
+
+test("`sandcastle clean` goes on past a ticket worktree git fails to remove, and reports it as left with its branch kept", async () => {
+  const root = repo();
+  for (const name of ["a", "b"]) git(root, "worktree", "add", "-q", "-b", `agent/${name}`, join(root, `.sandcastle/worktrees/ticket-${name}`));
+  const project = await loadProject(root);
+  const a = join(root, ".sandcastle/worktrees/ticket-a");
+  const b = join(root, ".sandcastle/worktrees/ticket-b");
+  const result = cleanProject(project, true);
+  assert.ok(result.worktrees.includes(b) && !existsSync(b));
+  assert.deepEqual(
+    result.left.filter((l) => l.path === a).map((l) => [l.branch, /index\.lock exists/.test(l.reason)]),
+    [["agent/a", true]],
+  );
+  assert.deepEqual(git(root, "branch", "--format=%(refname:short)", "--list", "agent/*"), "agent/a");
 });
 
 test("a run's exit removes what it can, never throws, and prints a stderr line naming the worktree it left and `sandcastle clean`", async () => {
