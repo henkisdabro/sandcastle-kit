@@ -26,6 +26,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   Herdr app had loaded the mod.** The remove leaves the app's own `jsconfig.json` and
   `gpui-kit.d.ts` behind, and the reinstall refused that folder as "not the kit's", as doctor
   warned. A stampless folder holding only those files is now treated as the kit's leftover (#987).
+- **A stopped run no longer leaves its scratch worktrees behind in silence when git fails on one.**
+  The first git removal that failed (a stale `index.lock`, a busy directory) ended the exit's
+  clean-up: the later worktrees and their `sandcastle/*` branches were never tried and nothing was
+  printed. Each is now tried, and the exit prints one line naming any it left, with
+  `sandcastle clean` - also when its `.git` check fails. `sandcastle clean` likewise goes on past
+  such a scratch worktree and lists it as left (#988).
 
 ## [0.26.0] - 2026-11-14
 
