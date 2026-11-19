@@ -353,7 +353,8 @@ In the status view, a landing ticket holds no sandbox slot, and the RUN lane's e
 ## Reading the summary
 
 - **`held`** branches were green but not landed automatically - the line says why: they change
-  hooks, CI, install scripts or a `protectedPaths` path, add a file over 50 MB, carry repair
+  hooks, CI, agent or editor config, install scripts, a root dotfile or a `protectedPaths` path
+  (docs/safety.md lists them; `unheldPaths` lets some land), add a file over 50 MB, carry repair
   commits no review passed or a conflict resolution that dropped merged lines - or a person marked
   the ticket `ready-for-human` during the run. `held` with "no commits" is a ticket an agent
   handed back: it needs an answer, not a merge. A held branch a person has since merged by hand

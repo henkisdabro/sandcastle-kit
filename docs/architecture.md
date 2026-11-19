@@ -849,6 +849,9 @@ state.
   that has not started (queued at `FIRST` or `RELEASED`) whose files (`hold.touched()`) share one
   with the resolve's own files or the files it conflicted on (`heldFor`): it takes the next queued
   ticket that is not held, and with only held ones queued it waits as a worker holding for a resolve does (`holdFresh`).
+  A pause takes that worker's slot back to the pool: the run tells no demand for it and the resolve
+  is parked until the resume, after which the worker asks the pool again
+  (`test/schedule-pause-held-fresh.test.ts`).
   A ticket that started before the wait began and reaches its gates during it still holds the
   resolve until it lands, so the resolve never meets a second conflict from one; the wait is bounded
   because no ticket that shares its files can start and join the list behind it. A held ticket adds
@@ -1663,7 +1666,8 @@ any already set: the host's pairs never reach a container, and a commit or merge
 otherwise start `git maintenance run --auto` and a detached `git gc --auto` repack and prune in the
 `.git` every sandbox shares, in a container that may be stopped before it ends; in the environment
 and not the image, so no rebuild, `test/sandbox-git-maintenance-off.test.ts`), command-running
-config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks;
+config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks,
+replace refs, `shallow`, `objects/info/alternates`;
 `info/refs` and `info/exclude` are left out: the first is a dumb-transport index `git repack`
 rewrites, the second holds ignore patterns only, runs nothing and is written by the operator's own
 tools mid-run (Claude Code's runtime block), while `info/attributes`, `grafts`, `sparse-checkout`
@@ -1690,6 +1694,69 @@ deleted or moved base stops with the `update-ref` that restores it, a worktree r
 container path is named, a sandbox's own worktree record held to what git writes before each host
 git command in that worktree (below), protected paths and files over 50 MB held for a person, run
 lock
+
+Protected paths (`protectedAmong`, `protectedRules`) are matched through `src/host-path.ts`, never on
+git's raw path bytes: a macOS or Windows host opens `.Husky/pre-commit` as the `.husky/` hook, so a
+raw prefix test let it land.
+The rule table is `DEFAULT_PROTECTED` in `src/guard.ts`: each entry a `PathRule` with the `runner`
+that executes it on the host, and the prompts' `{{KIT_PROTECTED}}` is rendered from it
+(`protectedPathsNote`).
+A `dir` rule also holds a file or symlink committed under the directory's own name (a bare
+`.codex`); a `prefix` covers every extension.
+`test/prompt-protected-paths.test.ts` fails when this list, `docs/safety.md` or the prompt note
+leaves out an entry of the table or of the inert root list:
+
+| Entry | Kind | Runs on the host |
+|---|---|---|
+| `.husky/`, `.githooks/` | dir, fixed | git commit hooks |
+| `.github/` | dir, fixed | CI, with the repository's secrets |
+| `.sandcastle/` | dir, fixed | the kit's own config and guards (`unheldPaths` lives here) |
+| `.claude/settings.json`, `.claude/settings.local.json` | prefix, fixed | Claude Code's settings and hooks |
+| `.claude/hooks/` | dir, fixed | Claude Code's hooks |
+| `.envrc`, `.mise.`, `mise.toml`, `mise.local.toml`, `.tool-versions` | prefix, fixed | direnv, mise and asdf, on entering the directory |
+| `.gitmodules`, `.gitattributes` | prefix | git's submodules and checkout filters |
+| `.claude/` | basename (any depth) | Claude Code's skills, agents and commands, whose frontmatter can run hooks |
+| `.mcp.json`, `opencode.json` | prefix | the agents' MCP servers and config |
+| `.codex/`, `.agents/`, `.opencode/` | dir | the agents' config |
+| `.vscode/`, `.devcontainer/` | dir | the editor, on opening the folder |
+| `.npmrc`, `pnpm-workspace.yaml`, `.pnpmfile.`, `.yarnrc` | prefix | the package manager, at the next install |
+| `.yarn/releases/`, `.yarn/plugins/` | dir | the yarn binary and its plugins |
+| `bunfig.toml` | file | bun's preload scripts |
+| `.lintstagedrc`, `lint-staged.config.`, `.pre-commit-config.yaml`, `lefthook.`, `lefthook-local.`, `.lefthook.`, `.lefthook-local.`, `.config/lefthook.`, `.config/lefthook-local.`, `.huskyrc`, `husky.config.`, `.simple-git-hooks.`, `simple-git-hooks.` | prefix | the commit-hook runner, at the next commit |
+| `.lefthook/`, `.lefthook-local/` | dir | lefthook's script directories |
+
+The tracked `core.hooksPath` directory and the project's `protectedPaths` are added as fixed rules.
+Any other root entry whose host form starts with a dot is held too, unless it is inert
+(`INERT_ROOT_ENTRIES`: `.gitignore`, `.gitkeep`, `.editorconfig`, `.nvmrc`, `.node-version`,
+`.prettierignore`, `.eslintignore`, `.dockerignore`, `.mailmap`, `.yarn/cache/`): a new tool's
+config usually lives at the root under a dot, and a list of the dangerous ones is always a tool
+behind.
+`unheldPaths` releases a path from the non-fixed rules and the root dot hold, matched exactly (a
+directory with `/`, otherwise that one file), never from a fixed rule; an unnormalisable path stays
+held. The config refuses an entry `hostKey` cannot normalise.
+The `package.json` install-script check finds manifests by a `basename` rule through the same
+matcher, so `Package.JSON` is read too.
+Held paths come back as git spelled them, so the hold and `git show` name the real file
+(`test/guard-bypasses.test.ts`, `test/host-path.test.ts`).
+
+What a branch changes is read once, by `branchChanges` (`src/guard.ts`): `git diff --raw -z
+--no-renames` from the base to the exact commit the gates passed (`o.head`, never the branch name),
+with `core.useReplaceRefs=false` on the call itself, since a sandbox can write `refs/replace/` in
+the shared `.git` and host git that honours it judges a benign commit while the real one lands
+(#992); `land`, `preview` and `queue --lint` do not all pin first.
+Its modes and blob ids feed every hold: a gitlink (`160000`) is held, and so is a symlink
+(`120000`) whose target, resolved against its own directory, is absolute, leaves the repository or
+names a protected path; an in-repo symlink elsewhere lands.
+`largeFiles` reads sizes and the `package.json` check reads manifests by blob id, never by a path
+through a ref.
+`protectedChanges` and `largeFiles` return a `Verdict` (`src/verdict.ts`): `allow`, `refuse` or
+`unknown`, each hold with a `ReasonCode`.
+A caller holds on `unknown` as on `refuse`: a git failure, a line that does not parse or a size
+that is not a number is `reader-failed`, and a manifest that does not parse on either side is
+`manifest-unparseable`.
+The landing's `held` record carries the code, so the ledger names a reader that failed
+(`test/landing-reader-verdict.test.ts`); `preview` shows such a branch as held, where a read that
+threw used to preview as clean.
 
 `landInSandbox` (`src/land.ts`) checks the fingerprint before its sandbox opens (against `expected`,
 below) and three times after: before its sandbox closes (with the worktree's records,
@@ -1956,8 +2023,21 @@ opened, since a blocking read would hang the whole run.
   a counted sandbox slot, so a change made on the host in between is the ticket's `tampered` and
   not a red a repair concludes is
   "environmental"; `test/pipeline-repair-git-check.test.ts`) and before each host write; the
-  command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
-  `core.hooksPath` and `core.fsmonitor` by environment.
+  command-running keys configured at the start are also pinned (`pinHostGitConfig`, with
+  `core.useReplaceRefs=false`), and `core.hooksPath` and `core.fsmonitor` by environment, with
+  `GIT_NO_REPLACE_OBJECTS=1` (`disableHostGitHooks`), so Sandcastle's host `git worktree add`
+  checks out the real tree a replace ref would hide.
+  `pinHostGitConfig` reads only git's exit 1 as "none of the keys is set"; any other failure (a
+  config git cannot parse) throws `NOT STARTED`, since reading it as none would leave a planted
+  program unpinned.
+- Object substitution (`replaceRefs`, `replaceRefsWarning`; `test/guard-replace-refs.test.ts`):
+  `files` also holds every `refs/replace/*` ref, read with `git for-each-ref` so a packed one counts
+  as a loose one does, keyed by the path its loose file would have (so a stop names it like a file)
+  with the object it stands in with as its value, and `shallow` and `objects/info/alternates`
+  (absent hashes as empty, so a new one is a difference).
+  Replace refs present at the start are not refused: the run and `sandcastle gates` print
+  `replaceRefsWarning`'s note, as the host reads branches with substitution off and only the
+  operator's own git honours them.
   A check also takes the exact absolute rewrite of a tracked hooks path mid-run
   (decided: pin and accept, never restore - the kit never writes `.git/config`, since restoring would
   make it a writer of the user's config, could race another writer and could hide a window of hookless
@@ -2108,6 +2188,29 @@ status, fetch and fast-forward, the cut's status and fast-forward - in which ano
 running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the
 time Sandcastle takes to remove the stopped container before its `git status`; elsewhere
 milliseconds, as between the landing's last check and its fast-forward (above).
+
+## `src/host-path.ts`
+
+One normaliser and one matcher for the paths a sandbox branch carries to the host; pure, with no
+git.
+`hostKey` gives the form a case-insensitive host resolves: NFC, the code points HFS+ ignores (the
+list git's `is_hfs_dotgit` skips) removed, each component's trailing dots and spaces stripped
+(NTFS), lowercased, `.` and empty components dropped.
+A path it cannot normalise - `..`, a control character, an absolute path, a component of only dots
+or spaces - comes back as `unknown`, not a string, and `matchRules` returns it as matched: unknown
+is held.
+A `PathRule` is `dir` (the entry itself and everything under it), `file`, `prefix` or `basename`
+(a component of that name at any depth), with the `runner` that executes it on the host; a rule's
+value is folded as a path is, but keeps its trailing dot, so `lefthook.` does not widen to
+`lefthookery`.
+`matchRules` returns the original paths, never the folded ones.
+`containedHostPath` is the #827 check `lean-apply` (`apply`, `src/lean.ts`) runs before it removes
+or writes a path in a fresh worktree: it `lstat`s every directory on the way and refuses a symlink
+among them.
+Only `ENOENT` reads as "nothing there"; any other error (`EACCES`, `ENOTDIR`) is `unknown`, so the
+path is left alone and said so, because what lies past it cannot be read
+(`test/lean-apply-symlink.test.ts`, the `lean-apply` rows of `test/guard-bypasses.test.ts`).
+The final component is the caller's: removing a symlink never follows it.
 
 ## `src/pool.ts`
 

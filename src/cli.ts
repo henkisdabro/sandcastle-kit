@@ -168,7 +168,7 @@ import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { assertBaseHasCommit, hooksThatRanClean, requireGreenBase } from "./gates.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, holdAndReap, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, tookLines, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, holdAndReap, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, replaceRefsWarning, tookLines, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -802,6 +802,8 @@ try {
       pinHostGitConfig(project.root);
       recordGitConfigStart(project, baseline);
       const fingerprint = gitFingerprint(project);
+      const replaceNote = replaceRefsWarning(fingerprint);
+      if (replaceNote) console.log(replaceNote);
       try {
         await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false, undefined, (when) => assertGitUnchanged(project, fingerprint, when, true));
       } finally {
