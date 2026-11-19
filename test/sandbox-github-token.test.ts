@@ -16,7 +16,7 @@ const xdg = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = xdg;
 mkdirSync(join(xdg, "sandcastle-kit"), { recursive: true });
 writeFileSync(join(xdg, "sandcastle-kit", ".env"), "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-fake\nGH_TOKEN=github_pat_fake\n");
-const { githubRemoteRepo, sandboxEnv } = await import("../src/sandbox.ts");
+const { githubRemoteRepo, sandboxEnvFor } = await import("../src/sandbox.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -30,13 +30,13 @@ const project = (root: string, kind: "files" | "github") => ({ root, tracker: fa
 
 test("tickets in files with no GitHub remote: the sandboxes get no GH_TOKEN", () => {
   const root = repo(["origin", "https://gitlab.com/o/r.git"]);
-  assert.equal(sandboxEnv(project(root, "files")).GH_TOKEN, undefined);
-  assert.equal(sandboxEnv(project(repo(), "files")).GH_TOKEN, undefined);
+  assert.equal(sandboxEnvFor(project(root, "files"), "ticket").GH_TOKEN, undefined);
+  assert.equal(sandboxEnvFor(project(repo(), "files"), "ticket").GH_TOKEN, undefined);
 });
 
 test("tickets in files beside a GitHub remote, or GitHub issues, keep GH_TOKEN", () => {
-  assert.equal(sandboxEnv(project(repo(["origin", "git@github.com:o/r.git"]), "files")).GH_TOKEN, "github_pat_fake");
-  assert.equal(sandboxEnv(project(repo(), "github")).GH_TOKEN, "github_pat_fake");
+  assert.equal(sandboxEnvFor(project(repo(["origin", "git@github.com:o/r.git"]), "files"), "ticket").GH_TOKEN, "github_pat_fake");
+  assert.equal(sandboxEnvFor(project(repo(), "github"), "ticket").GH_TOKEN, "github_pat_fake");
 });
 
 test("the GitHub remote is read from git's config, origin first, in any URL form", () => {
