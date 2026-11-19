@@ -75,6 +75,8 @@ export const SCRUBBED = [
   "FORCE_COLOR",
   // The ssh the newest-release lookup builds on (src/upgrading.ts): a developer's own command is not a test's.
   "GIT_SSH_COMMAND", "GIT_SSH",
+  // Set by the host's own pins (src/guard.ts `disableHostGitHooks`); exported by hand it hides the replace-ref repros.
+  "GIT_NO_REPLACE_OBJECTS",
   // The status view's pane size and colour depth (src/status-view.ts): a test of a frame gives its own.
   "TERM_COLS", "TERM_ROWS", "COLUMNS", "COLORTERM",
   // The live status view's test knobs (src/status-view.ts): how many frames it draws, where a frame's errors go.
