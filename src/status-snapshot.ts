@@ -22,6 +22,7 @@ import { isKit, liveness } from "../mod/hooks/run-live.ts";
 import { readTickets, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { KIT_CACHE, PLUGIN_MARKER } from "./live-runs.ts";
 import { inHerdr1 } from "./terminal-host.ts";
+import { plainAll, plainText } from "./plain-text.ts";
 import { runCaller, slotAddresses } from "./herdr-core.ts";
 
 /** One outcome of outcomes.json, as the view reads it: the run that wrote it, its kind (none from an older kit) and its line. */
@@ -166,20 +167,7 @@ export const latestPhaseLog = (logs: LogFact[], id: string): LogFact | undefined
 /** The newest log of any kind of a ticket: what its link opens. */
 export const latestLog = (logs: LogFact[], id: string): LogFact | undefined => newestLogs(logs, [`agent-issue-${id}-*-${id}.log`])[0];
 
-// Text from a log, the run record or the tracker reaches the terminal inside a frame: an escape sequence in it
-// could set the window title, write the clipboard (OSC 52) or clear the screen, and any control character moves
-// the cursor mid-frame. Whole sequences go first, so no `[2J` is left behind; then every other control.
-// oxlint-disable-next-line no-control-regex -- the escape byte is what the pattern removes
-const SEQUENCES = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-_])?/g;
-// oxlint-disable-next-line no-control-regex -- the control characters are what the pattern removes
-const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
-
-/** `s` with no escape sequence or control character left: a tab or line break is a space. */
-export const plainText = (s: string): string => s.replace(SEQUENCES, "").replace(/[\t\n\r]/g, " ").replace(CONTROLS, "");
-
-/** Every string in a value read from a file, keys too, as plain text. */
-const plainAll = (v: unknown): unknown =>
-  typeof v === "string" ? plainText(v) : Array.isArray(v) ? v.map(plainAll) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [plainText(k), plainAll(x)])) : v;
+// Text from a log, the run record or the tracker reaches the terminal inside a frame: read as plain text (src/plain-text.ts).
 
 const FRAMING = /^(Agent|Run|Capturing|Collecting|Syncing|Context)/;
 
