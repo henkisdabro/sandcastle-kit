@@ -2830,12 +2830,16 @@ below 75%, amber from 75%, red from 90%) that the status view draws by, and `USA
 (15 minutes) is when it greys a reading.
 **The guard prefers the agents' readings.** `usageStop(env, readers, agent, now)` is given the
 newest Claude reading of the run (`agent`: its `usage` entry) and, when it is younger than
-`AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache), decides from it
-alone: no request and no credential read, the stop line naming the windows as the endpoint's reading
+`AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache) and carries both
+windows (`fiveHour` and `week`), decides from it alone: no request and no credential read, the stop line naming the windows as the endpoint's reading
 does (`five_hour`, `seven_day`), a window whose reset has passed counted as spent no more, and
 `usageReadingLost()` false.
-Before the first reading, and once the newest is older than that, the endpoint answers exactly as
-before. `test/usage-pause.test.ts`.
+Before the first reading, once the newest is older than that, and while it lacks a window, the
+endpoint answers exactly as before.
+Claude Code writes the weekly window alone in each pass, so a week-only reading is often the
+freshest; deciding from it would leave the 5-hour window, the one that runs out within a run,
+unchecked.
+`test/usage-pause.test.ts`, `test/usage-stop-five-hour.test.ts`.
 
 **`sandcastle usage`** (`usageCommand(env, recorded, readers, now)`) prints the plan's usage between
 runs and writes nothing. `recordedUsage(logs)` gives each provider's newest reading in

@@ -11,6 +11,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the
+  weekly window - what Claude Code writes in each pass - stood in for the usage endpoint, so a
+  5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in
+  place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
+  for 10 minutes, so no extra request per ticket).
+
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
   issue titles listed from the tracker are printed as plain text, as the status view already did, so
