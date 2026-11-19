@@ -13,6 +13,7 @@ import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 import { pinnedHooksPath, REWRITE_NOTE, rewrittenHooksPath, trackedHooksPath as trackedHooksDir } from "./hooks-path.ts";
+import { matchRules, type PathRule } from "./host-path.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Git hooks on the host. `git merge --no-verify` still runs post-merge, and
@@ -1510,6 +1511,16 @@ const hooksDirProtected = (project: Project): string[] => {
   return DEFAULT_PROTECTED.includes(dir) ? [] : [dir];
 };
 const protectedPrefixes = (project: Project) => [...DEFAULT_PROTECTED, ...hooksDirProtected(project), ...(project.protectedPaths ?? [])];
+// An entry ending in `/` is a directory, which also covers a file or symlink committed under its own name (a bare
+// `.codex` link); any other entry keeps its prefix match (`.huskyrc` covers `.huskyrc.json`).
+const ruleFor = (value: string, runner: string): PathRule => ({ kind: value.endsWith("/") ? "dir" : "prefix", value, runner });
+/** The protected paths as rules: the defaults, the tracked `core.hooksPath` directory and the project's `protectedPaths`. */
+export const protectedRules = (project: Project): PathRule[] => [
+  ...DEFAULT_PROTECTED.map((v) => ruleFor(v, "host tooling")),
+  ...hooksDirProtected(project).map((v) => ruleFor(v, "git commit hooks")),
+  ...(project.protectedPaths ?? []).map((v) => ruleFor(v, "the project's protectedPaths")),
+];
+const MANIFEST_RULE: PathRule = { kind: "basename", value: "package.json", runner: "the package manager's install scripts" };
 // The top-level `package.json` keys a commit-hook runner reads its commands from (the same config as the rc files
 // above), held when their value differs between the base and the branch. `gitHooks` is yorkie's (Vue CLI), `precommit`
 // the pre-commit package's other spelling.
@@ -1529,15 +1540,18 @@ export const protectedPathsNote = (project: Project, role: "implement" | "review
       : "Change one only when the ticket needs it, never for a comment, a tidy-up or a formatting fix on the side.";
   return (
     "# Protected paths\n\n" +
-    `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}) or its commit-hook runner keys (${HOOK_RUNNER_KEYS.map((k) => `\`${k}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ${ask}\n`
+    `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}) or its commit-hook runner keys (${HOOK_RUNNER_KEYS.map((k) => `\`${k}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ` +
+    "Matching ignores case, and a directory also covers a file or symlink of its own name (`.codex` as well as `.codex/`). " +
+    `${ask}\n`
   );
 };
 
-/** The files among `files` that lie in a protected path: the default set and the project's `protectedPaths`. */
-export const protectedAmong = (project: Project, files: string[]): string[] => {
-  const prefixes = protectedPrefixes(project);
-  return files.filter((f) => prefixes.some((p) => f === p || f.startsWith(p)));
-};
+/**
+ * The files among `files` that lie in a protected path (the default set and the project's `protectedPaths`), matched
+ * on the form the host resolves (`hostKey`): a macOS or Windows host runs `.Husky/pre-commit` as `.husky/`'s. The
+ * files come back as given, so a hold names the real file.
+ */
+export const protectedAmong = (project: Project, files: string[]): string[] => matchRules(files, protectedRules(project));
 
 /**
  * The protected files a ticket body's `Touches:` line names, read against the base branch's tree.
@@ -1596,7 +1610,7 @@ export const protectedChanges = (project: Project, branch: string) => {
   const changed = changedPaths(project, branch);
   const hits = protectedAmong(project, changed);
   // package.json only when an install-time script or a hook runner's key changed.
-  for (const f of changed.filter((f) => f === "package.json" || f.endsWith("/package.json"))) {
+  for (const f of matchRules(changed, [MANIFEST_RULE])) {
     const manifest = (ref: string): Record<string, any> => {
       try {
         const parsed = JSON.parse(sh("git", ["show", `${ref}:${f}`], project.root));

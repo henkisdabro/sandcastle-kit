@@ -11,6 +11,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **Protected paths are matched as the host resolves them.** A branch that spelled a protected path
+  in another case (`.Husky/pre-commit`, `LEFTHOOK.yml`), with a trailing dot or an HFS+-ignorable
+  code point, or committed a protected directory's bare entry (a `.codex` file or symlink) landed
+  unheld; it is now held, and the hold names the path as the branch spelled it. A `Package.JSON`
+  install script is checked like `package.json`'s. `lean-apply` now leaves a path alone when a
+  directory on its way cannot be read (`EACCES`, `ENOTDIR`), not only when it crosses a symlink.
+  (#991, #995)
+
 - **Pointers to README sections that moved into `docs/` now name the right file.** The warning
   about an unconfigured Linear blocker key points at `docs/queue.md` (Blockers), `sandcastle help`
   points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for

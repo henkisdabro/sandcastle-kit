@@ -1681,6 +1681,16 @@ container path is named, a sandbox's own worktree record held to what git writes
 git command in that worktree (below), protected paths and files over 50 MB held for a person, run
 lock
 
+Protected paths (`protectedAmong`, `protectedRules`) are matched through `src/host-path.ts`, never on
+git's raw path bytes: a macOS or Windows host opens `.Husky/pre-commit` as the `.husky/` hook, so a
+raw prefix test let it land.
+An entry ending in `/` is a `dir` rule, which also holds a file or symlink committed under the
+directory's own name (a bare `.codex`); any other entry keeps its prefix match.
+The `package.json` install-script check finds manifests by a `basename` rule through the same
+matcher, so `Package.JSON` is read too.
+Held paths come back as git spelled them, so the hold and `git show` name the real file
+(`test/guard-bypasses.test.ts`, `test/host-path.test.ts`).
+
 `landInSandbox` (`src/land.ts`) checks the fingerprint before its sandbox opens (against `expected`,
 below) and three times after: before its sandbox closes (with the worktree's records,
 `checkBeforeClose`, below), after it closes, and again straight before the fast-forward of the base.
@@ -2092,6 +2102,29 @@ status, fetch and fast-forward, the cut's status and fast-forward - in which ano
 running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the
 time Sandcastle takes to remove the stopped container before its `git status`; elsewhere
 milliseconds, as between the landing's last check and its fast-forward (above).
+
+## `src/host-path.ts`
+
+One normaliser and one matcher for the paths a sandbox branch carries to the host; pure, with no
+git.
+`hostKey` gives the form a case-insensitive host resolves: NFC, the code points HFS+ ignores (the
+list git's `is_hfs_dotgit` skips) removed, each component's trailing dots and spaces stripped
+(NTFS), lowercased, `.` and empty components dropped.
+A path it cannot normalise - `..`, a control character, an absolute path, a component of only dots
+or spaces - comes back as `unknown`, not a string, and `matchRules` returns it as matched: unknown
+is held.
+A `PathRule` is `dir` (the entry itself and everything under it), `file`, `prefix` or `basename`
+(a component of that name at any depth), with the `runner` that executes it on the host; a rule's
+value is folded as a path is, but keeps its trailing dot, so `lefthook.` does not widen to
+`lefthookery`.
+`matchRules` returns the original paths, never the folded ones.
+`containedHostPath` is the #827 check `lean-apply` (`apply`, `src/lean.ts`) runs before it removes
+or writes a path in a fresh worktree: it `lstat`s every directory on the way and refuses a symlink
+among them.
+Only `ENOENT` reads as "nothing there"; any other error (`EACCES`, `ENOTDIR`) is `unknown`, so the
+path is left alone and said so, because what lies past it cannot be read
+(`test/lean-apply-symlink.test.ts`, the `lean-apply` rows of `test/guard-bypasses.test.ts`).
+The final component is the caller's: removing a symlink never follows it.
 
 ## `src/pool.ts`
 
