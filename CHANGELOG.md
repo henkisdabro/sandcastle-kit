@@ -32,6 +32,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   ones it trusts. The prompts' protected list, `docs/safety.md` and `docs/architecture.md` are
   tested against the table (#993, #994).
 
+- **A paused run no longer keeps a sandbox slot while a worker waits for a conflict's resolve.**
+  When every queued ticket was held back for a ticket sent back after a conflict, the worker that
+  waited for it kept its machine-wide slot for the whole pause - until the plan window reset, under
+  a usage pause - while the run told the other runs it needed none. It now gives the slot back for
+  the pause and asks for one again after the resume.
 - **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the
   weekly window - what Claude Code writes in each pass - stood in for the usage endpoint, so a
   5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in

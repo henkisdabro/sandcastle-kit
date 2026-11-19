@@ -849,6 +849,9 @@ state.
   that has not started (queued at `FIRST` or `RELEASED`) whose files (`hold.touched()`) share one
   with the resolve's own files or the files it conflicted on (`heldFor`): it takes the next queued
   ticket that is not held, and with only held ones queued it waits as a worker holding for a resolve does (`holdFresh`).
+  A pause takes that worker's slot back to the pool: the run tells no demand for it and the resolve
+  is parked until the resume, after which the worker asks the pool again
+  (`test/schedule-pause-held-fresh.test.ts`).
   A ticket that started before the wait began and reaches its gates during it still holds the
   resolve until it lands, so the resolve never meets a second conflict from one; the wait is bounded
   because no ticket that shares its files can start and join the list behind it. A held ticket adds
