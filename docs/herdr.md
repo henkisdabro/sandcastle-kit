@@ -290,6 +290,9 @@ A file the kit dropped since the last copy is removed with the next one, and `--
 files the stamp lists, then the folder if it is empty.
 A `mods/sandcastle/` with no stamp is not the kit's: `configure` refuses, naming the folder, and copies
 nothing; move it or remove it first.
+The one exception is the folder `--remove` leaves where the app had loaded the mod: no stamp, and nothing
+in it but the app's own `jsconfig.json` and `gpui-kit.d.ts` (the names `herdr-app/.gitignore` lists).
+That is the kit's leftover, so `configure` copies into it and doctor lists the mod as optional, not foreign.
 The mod and the plugin are independent: a plugin step that fails does not undo the mod's copy.
 
 Once installed, a run started in the app opens the mod pane in place of the terminal status view

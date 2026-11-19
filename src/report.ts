@@ -31,6 +31,7 @@ import { makeTracker, refOf, withOpenList } from "./tracker.ts";
 import { githubServerError, isSetupLine, OperatorError, sameExpansionFailure } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
+import { plainAll, plainLines } from "./plain-text.ts";
 import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunEstimate, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
 /**
@@ -746,7 +747,8 @@ const openedIssues = (project: Project): Opened[] => {
   if (project.tracker.kind !== "github") return [];
   try {
     const list = JSON.parse(sh("gh", ["issue", "list", "--state", "open", "--label", project.tracker.triage, "--limit", "500", "--json", "number,title,createdAt"], project.root));
-    return Array.isArray(list) ? (list as Opened[]) : [];
+    // A title on a public repository is anyone's text, printed to the terminal: plain text, as the run record is.
+    return Array.isArray(list) ? (plainAll(list) as Opened[]) : [];
   } catch {
     return [];
   }
@@ -870,8 +872,11 @@ const carriedTurns = async (project: Project, run: any, probe: Probe, opened: Op
   return carried;
 };
 
-/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. `run` is the record to report: run.json's by default. */
-export const gather = async (project: Project, probe: Probe = commandOf, run: any = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"))): Promise<Facts> => {
+/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. `record` is the record to report: run.json's by default. */
+export const gather = async (project: Project, probe: Probe = commandOf, record: any = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"))): Promise<Facts> => {
+  // The record holds agents' text (notes, unmet criteria, follow-ups and their evidence) and ticket titles, all printed
+  // to the user's terminal: read once as plain text, so no field and no record written before the strip is missed.
+  const run: any = plainAll(record, plainLines);
   const opened = openedIssues(project);
   const facts = await gatherTurn(project, run, probe, opened);
   const carried = await carriedTurns(project, run, probe, opened);
@@ -2003,9 +2008,10 @@ export const closingReport = async (project: Project, turn?: { level: Level; tur
 
 type HistoryRecord = { startedAt?: string; dryRun?: boolean; tickets?: unknown };
 
+// Plain text as `gather` reads run.json: every reader of history.jsonl (earlier turns, holds, `--run`) comes through here.
 const parseRecord = (text: string): HistoryRecord | undefined => {
   try {
-    const run = JSON.parse(text);
+    const run = plainAll(JSON.parse(text), plainLines) as any;
     return run && typeof run === "object" && !Array.isArray(run) ? run : undefined;
   } catch {
     return undefined;

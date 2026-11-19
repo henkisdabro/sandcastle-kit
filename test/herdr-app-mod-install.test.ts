@@ -121,10 +121,10 @@ test("--remove leaves another mod and a file the app wrote beside the kit's", as
   writeFileSync(join(mod, "jsconfig.json"), "{}");
   await quietly(() => configure(true, true, false, kit));
   assert.deepEqual(tree(join(home, "mods")), ["other/mod.json", "sandcastle/jsconfig.json"]);
-  rmSync(join(mod, "jsconfig.json"));
-  await quietly(() => configure(false, true, false, kit));
+  // No clean-up by hand: the app's file alone left there is the kit's leftover, so the reinstall copies into it (#987).
+  assert.equal((await quietly(() => configure(false, true, false, kit))).error, undefined);
   await quietly(() => configure(true, true, false, kit));
-  assert.deepEqual(tree(join(home, "mods")), ["other/mod.json"]);
+  assert.deepEqual(tree(join(home, "mods")), ["other/mod.json", "sandcastle/jsconfig.json"]);
 });
 
 test("an unstamped mods/sandcastle is refused and left in place, and doctor says it is not the kit's", async () => {

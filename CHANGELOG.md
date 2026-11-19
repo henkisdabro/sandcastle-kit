@@ -17,11 +17,21 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
   for 10 minutes, so no extra request per ticket).
 
+- **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
+  An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
+  issue titles listed from the tracker are printed as plain text, as the status view already did, so
+  none can write the clipboard, set the window title or clear the screen (the Herdr popup's
+  `less -R` included). Run records written before the fix are read the same way.
+
 - **Pointers to README sections that moved into `docs/` now name the right file.** The warning
   about an unconfigured Linear blocker key points at `docs/queue.md` (Blockers), `sandcastle help`
   points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for
   the default models. `docs/commands.md` now lists `sandcastle herdr configure` and the `run`
   arguments `[TICKET ...] [--dry] [--concurrency N]`.
+- **`sandcastle herdr configure --app` works again after `--remove --app` on a machine where the
+  Herdr app had loaded the mod.** The remove leaves the app's own `jsconfig.json` and
+  `gpui-kit.d.ts` behind, and the reinstall refused that folder as "not the kit's", as doctor
+  warned. A stampless folder holding only those files is now treated as the kit's leftover (#987).
 
 ## [0.26.0] - 2026-11-14
 
