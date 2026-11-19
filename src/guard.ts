@@ -1749,13 +1749,17 @@ const GITLINK = "160000";
 const hasBlob = (mode: string) => mode.startsWith("100") || mode === SYMLINK;
 
 // A symlink's target, resolved against its own directory as the host would follow it: absolute or out of the
-// repository is held whatever it names, and in it, held when it names a protected path. `undefined`: it may land.
+// repository is held whatever it names, and in it, held when it names a protected path or a `.git` (a link to
+// `.git/hooks/pre-commit` is one a script or an editor may write through), in any case the host folds.
+// `undefined`: it may land.
 const symlinkHold = (project: Project, e: BranchEntry): string | undefined => {
   const target = gitRaw(project.root, ["cat-file", "blob", e.newOid]);
   if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target) || target.startsWith("\\")) return `${e.path} (symlink to ${target}, outside the repository)`;
   const resolved = posix.normalize(posix.join(posix.dirname(e.path), target));
   if (resolved === ".." || resolved.startsWith("../")) return `${e.path} (symlink to ${target}, outside the repository)`;
   if (resolved === "." || matchRules([resolved], protectedRules(project)).length) return `${e.path} (symlink to ${target}, a protected path)`;
+  const key = hostKey(resolved);
+  if (typeof key !== "string" || key.split("/").includes(".git")) return `${e.path} (symlink to ${target}, into .git)`;
   return undefined;
 };
 

@@ -1772,8 +1772,9 @@ with `core.useReplaceRefs=false` on the call itself, since a sandbox can write `
 the shared `.git` and host git that honours it judges a benign commit while the real one lands
 (#992); `land`, `preview` and `queue --lint` do not all pin first.
 Its modes and blob ids feed every hold: a gitlink (`160000`) is held, and so is a symlink
-(`120000`) whose target, resolved against its own directory, is absolute, leaves the repository or
-names a protected path; an in-repo symlink elsewhere lands.
+(`120000`) whose target, resolved against its own directory, is absolute, leaves the repository,
+names a protected path or reaches into a `.git` (in any case `hostKey` folds); an in-repo symlink
+elsewhere lands.
 `largeFiles` reads sizes and the `package.json` check reads manifests by blob id, never by a path
 through a ref.
 `protectedChanges` and `largeFiles` return a `Verdict` (`src/verdict.ts`): `allow`, `refuse` or

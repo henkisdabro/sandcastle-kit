@@ -156,5 +156,7 @@
   {"guard": "git-guard", "input": {"command": "\"$(command -v git)\" push origin x"}, "expect": "refuse", "code": "unreadable", "issue": 998},
   {"guard": "git-guard", "input": {"command": "x=git; $x push origin x"}, "expect": "refuse", "code": "unreadable", "issue": 998},
   {"guard": "git-guard", "input": {"command": "`which git` push origin x"}, "expect": "refuse", "code": "unreadable", "issue": 998},
-  {"guard": "git-guard", "input": {"command": "$EDITOR notes.txt"}, "expect": "allow", "issue": 998}
+  {"guard": "git-guard", "input": {"command": "$EDITOR notes.txt"}, "expect": "allow", "issue": 998},
+  {"guard": "protected-changes", "input": {"change": {"src/a.ts": "a\n"}, "links": {"tools/h": "../.git/hooks/pre-commit"}}, "expect": "refuse", "code": "symlink-entry", "issue": 995},
+  {"guard": "protected-changes", "input": {"change": {"src/a.ts": "a\n"}, "links": {"tools/g": "../.GIT"}}, "expect": "refuse", "code": "symlink-entry", "issue": 995}
 ]

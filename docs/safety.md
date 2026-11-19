@@ -321,7 +321,8 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   dots and spaces), and a directory also covers a file or symlink of its own name, so
   `.Husky/pre-commit` and a bare `.codex` are held like `.husky/` and `.codex/`.
   The check reads the exact commit the gates passed, with replace refs off, and holds a symlink
-  that points into a protected path or out of the repository, and any submodule pointer.
+  that points into a protected path, into a `.git` or out of the repository, and any submodule
+  pointer.
   A branch the kit cannot read, or whose `package.json` does not parse, is held too, never landed;
   the hold says why (`reader-failed`, `manifest-unparseable`).
   A branch that adds a file over 50 MB is held the same way: GitHub refuses a push with one over 100

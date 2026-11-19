@@ -108,8 +108,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   write `refs/replace/` in the shared `.git` and map its real commit to a benign one, so the
   protected-path and large-file holds judged the benign one while the real one landed; the kit's
   git now reads with substitution off, and the holds read the exact commit the gates passed. A
-  branch that adds a symlink into a protected path or out of the repository, or a submodule
-  pointer, is held. A branch the kit cannot read, or whose `package.json` does not parse, is held
+  branch that adds a symlink into a protected path, into `.git` (`tools/h -> ../.git/hooks/pre-commit`)
+  or out of the repository, or a submodule pointer, is held. A branch the kit cannot read, or whose `package.json` does not parse, is held
   with the reason (`reader-failed`, `manifest-unparseable`) instead of landing or losing its ready
   line, and `sandcastle preview` shows it held. (#992, #995)
 - **A sandbox can no longer swap the objects the host reads without stopping the run.** The `.git`
