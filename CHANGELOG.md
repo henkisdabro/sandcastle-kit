@@ -16,6 +16,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for
   the default models. `docs/commands.md` now lists `sandcastle herdr configure` and the `run`
   arguments `[TICKET ...] [--dry] [--concurrency N]`.
+- **`sandcastle herdr configure --app` works again after `--remove --app` on a machine where the
+  Herdr app had loaded the mod.** The remove leaves the app's own `jsconfig.json` and
+  `gpui-kit.d.ts` behind, and the reinstall refused that folder as "not the kit's", as doctor
+  warned. A stampless folder holding only those files is now treated as the kit's leftover (#987).
 
 ## [0.26.0] - 2026-11-14
 
