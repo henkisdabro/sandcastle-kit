@@ -11,6 +11,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **A run now refuses a `GH_TOKEN` that can push to the repository.** The check `sandcastle doctor
+  --verify` made only on request (Contents: write) now runs at every run's start, before any
+  sandbox. If doctor gives a FIX on `GH_TOKEN cannot push`, edit the token on GitHub to Issues: read
+  and write and Metadata: read only. When GitHub does not answer or is rate-limited, a run goes
+  ahead only if the token was found unable to push within the last 7 days, so a first run needs
+  GitHub to answer. `SANDCASTLE_ALLOW_BROAD_TOKEN=1` is the one override, and a run prints a line
+  while it is set. (#997)
 - **More of a branch is held for you to merge: all of `.claude/`, editor and package-manager hooks,
   and unknown root dotfiles.** A ticket that edits the project's skills, agents or commands, a
   `.vscode/` or `.devcontainer/` file, `opencode.json`, or a root dotfile not on the inert list
@@ -22,6 +29,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **A run checks that `GH_TOKEN` cannot push, and doctor and the run decide alike.** Only a token
+  GitHub cannot see used to stop a run; a token with Contents: write, no connection and a
+  rate-limited 403 all went ahead. One verdict now serves both: a can-push token is refused, and an
+  unclear answer is refused unless a clean one for the same token (recorded by its hash in
+  `.sandcastle/.run/token-verdict.json`) is under 7 days old. Doctor reads a rate-limited 403 as
+  not checked rather than as "cannot push". A project whose tickets are in files and that has no
+  GitHub remote no longer passes `GH_TOKEN` to its sandboxes. (#997)
 - **Files that run on your machine without anyone reading them no longer land unheld.** The
   protected-path list is now a table naming what runs each entry, and gains pnpm's `.pnpmfile.*`,
   Yarn's `.yarnrc` and `.yarn/releases/` and `.yarn/plugins/`, `bunfig.toml`, the whole of
