@@ -789,12 +789,6 @@ export const credentials = (project: Project): Record<string, string> => {
 };
 
 /**
- * The `.env` keys a sandbox of `kind` is given (#996): an allowlist, never every key of the files. A gate-only sandbox
- * (a landing, the base and verify gates) runs the branch's code and no agent, so it gets only what `gateEnv` names - a
- * private-registry token its `setup` needs, say. A ticket's adds the agents' credentials and `agentEnv`, and keeps
- * `gateEnv`'s too: its `setup` and gates run in it as well.
- */
-/**
  * The credentials-file keys a `setup` step names that `gateEnv` does not, for doctor's warning: such a step ran with the
  * key before #996 and runs without it in a gate-only sandbox now, so an install from a private registry fails there.
  * The agents' own credentials are left out: `gateEnv` cannot name them. Read without `credentials`' checks.
@@ -808,7 +802,13 @@ export const setupWithheldKeys = (project: Project): string[] => {
     .sort();
 };
 
-export const forwardedKeys =(project: Project, kind: SandboxKind): string[] => {
+/**
+ * The `.env` keys a sandbox of `kind` is given (#996): an allowlist, never every key of the files. A gate-only sandbox
+ * (a landing, the base and verify gates) runs the branch's code and no agent, so it gets only what `gateEnv` names - a
+ * private-registry token its `setup` needs, say. A ticket's adds the agents' credentials and `agentEnv`, and keeps
+ * `gateEnv`'s too: its `setup` and gates run in it as well.
+ */
+export const forwardedKeys = (project: Project, kind: SandboxKind): string[] => {
   const gate = project.gateEnv ?? [];
   return kind === "gate" ? [...gate] : [...new Set([...KIT_CREDENTIALS, ...(project.agentEnv ?? []), ...gate])];
 };
