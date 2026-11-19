@@ -1465,16 +1465,29 @@ export const openOrAbandon = async <T>(project: Project, branch: string, open: (
  * process opened (`openOrAbandon` recorded them) and no run resumes. Not when `stoppedOnGuard` (a guard stop leaves
  * them for a person, `sandcastle clean` removing them once the stop is dealt with), and not when `check` - the run's
  * `.git` check at this moment - throws: a worktree's records may then be a sandbox's doing, and git must not run in
- * it. An earlier run's leftover is never in the record. Never throws: an exit handler has no one to tell.
+ * it. An earlier run's leftover is never in the record. Never throws; what it leaves - one git fails to remove, or every
+ * one when the check throws - it names in one stderr line, with `sandcastle clean`.
  */
 export const removeOwnScratchOnExit = (project: Project, check: (when: string) => unknown, stoppedOnGuard: boolean): string[] => {
   if (stoppedOnGuard || !ownScratchWorktrees().size) return [];
+  // The stop line promised the removal, so whatever is left is said here, on stderr: console.error writes synchronously
+  // from an `exit` listener, where nothing asynchronous runs.
+  const sayLeft = (paths: string[]) => {
+    if (paths.length) console.error(`Left ${paths.length === 1 ? "this throwaway worktree" : "these throwaway worktrees"} for \`sandcastle clean\`: ${paths.join(", ")}`);
+  };
   try {
     // First: a process a sandbox left running could write the shared `.git` between the check and the removal.
     for (const path of ownScratchWorktrees()) removeSandboxContainer(path);
     check("at the run's exit");
-    return removeScratchWorktrees(project, worktreeRefusal(project), ownScratchWorktrees()).removed;
+    const { removed, left } = removeScratchWorktrees(project, worktreeRefusal(project), ownScratchWorktrees());
+    sayLeft(left.map((l) => l.path));
+    return removed;
   } catch {
+    try {
+      sayLeft([...ownScratchWorktrees()].filter((path) => existsSync(path)));
+    } catch {
+      /* an exit handler has no one else to tell */
+    }
     return [];
   }
 };

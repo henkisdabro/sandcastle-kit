@@ -1844,8 +1844,14 @@ Not when the run stopped on the guard (`guardStopped`), and not when the run's `
 at the exit against the start's reading (the host git's after the base gates), fails: the
 worktree and its branch are then left for a person, as `test/base-gates-stop-leftovers.test.ts`
 holds.
+A git failure on one worktree (a stale `index.lock`, a busy directory) leaves that one in `left`
+with git's reason and the loop goes on to the next, for the exit and `sandcastle clean` alike
+(`test/scratch-removal-failure.test.ts`).
+Whatever the exit leaves - every recorded worktree still there when the check throws, or the ones
+git failed on - it names in one stderr line with `sandcastle clean`, written by `console.error`
+since an `exit` listener runs nothing asynchronous; the handler never throws.
 The library's line is printed before that check, so `reword` hedges it: the run removes the
-worktree on exit unless its `.git` check fails, and `sandcastle clean` does then
+worktree on exit, or names it for `sandcastle clean` if it cannot
 (`test/library-lines.test.ts`, `test/stop-removes-scratch-worktrees.test.ts`).
 The sites: a ticket's pipeline at its end (the settle's check, before the close and no longer after
 it) and at a pause (`HostGit.check`); the gate sandboxes (`gateBase`: the run's `HostGit.check` for
