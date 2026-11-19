@@ -547,6 +547,7 @@ export const ownScratchWorktrees = (): ReadonlySet<string> => openedScratch;
  * no work and no run resumes them. Never an `agent-issue-*` worktree or an `agent/*` branch. For each worktree: its
  * container is removed, `refuse` (guard.ts, `worktreeRefusal`) is asked - one it names is left as it stands, with the
  * reason - then it is unlocked, `git worktree remove --force` and `git branch -D` run, and the branch's fork forgotten.
+ * A worktree removed whose branch git would not delete is in `removed`, and its branch in `branchesLeft`, not `left`.
  * `only` limits it to those paths (a run's own, `ownScratchWorktrees`). Call with the project's run lock held, and
  * inside the host git mutex when a run's other host git is live.
  */
@@ -554,10 +555,11 @@ export const removeScratchWorktrees = (
   project: Project,
   refuse?: (worktree: string) => string | undefined,
   only?: ReadonlySet<string>,
-): { removed: string[]; branches: string[]; left: { path: string; branch?: string; reason: string }[] } => {
+): { removed: string[]; branches: string[]; left: { path: string; branch?: string; reason: string }[]; branchesLeft: { branch: string; reason: string }[] } => {
   const removed: string[] = [];
   const branches: string[] = [];
   const left: { path: string; branch?: string; reason: string }[] = [];
+  const branchesLeft: { branch: string; reason: string }[] = [];
   for (const { path, branch } of projectWorktrees(project)) {
     if (!isScratchWorktree(path) || (only && !only.has(path))) continue;
     removeSandboxContainer(path);
@@ -582,14 +584,15 @@ export const removeScratchWorktrees = (
       try {
         sh("git", ["branch", "-D", branch], project.root);
       } catch (error) {
-        left.push({ path, branch, reason: errorLine(error) });
+        // The worktree is gone: naming it as left sent a person to a path that is not there.
+        branchesLeft.push({ branch, reason: errorLine(error) });
         continue;
       }
       forgetFork(project.root, branch);
       branches.push(branch);
     }
   }
-  return { removed, branches, left };
+  return { removed, branches, left, branchesLeft };
 };
 
 /**

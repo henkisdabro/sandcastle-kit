@@ -29,6 +29,7 @@ writeFileSync(
   `#!/bin/sh
 case "$*" in
   "worktree remove --force "*/sandcastle-a) echo "fatal: cannot remove: index.lock exists" >&2; exit 128 ;;
+  "branch -D $FAIL_BRANCH") echo "error: cannot lock ref 'refs/heads/$FAIL_BRANCH'" >&2; exit 1 ;;
 esac
 exec ${JSON.stringify(REAL_GIT)} "$@"
 `,
@@ -130,4 +131,31 @@ test("a run's exit whose .git check throws removes nothing, never throws, and pr
   assert.ok(existsSync(a) && existsSync(b));
   assert.ok(out.includes(a) && out.includes(b), out);
   assert.match(out, /`sandcastle clean`/);
+});
+
+test("a scratch worktree removed whose branch git fails to delete is reported as a branch left, not a worktree", async () => {
+  process.env.FAIL_BRANCH = "sandcastle/b";
+  try {
+    const root = repo();
+    const project = await loadProject(root);
+    const b = join(root, ".sandcastle/worktrees/sandcastle-b");
+    const result = removeScratchWorktrees(project, undefined, new Set([b]));
+    assert.deepEqual(result.removed, [b]);
+    assert.deepEqual(result.left, []);
+    assert.deepEqual(result.branchesLeft.map((l) => l.branch), ["sandcastle/b"]);
+    assert.match(result.branchesLeft[0].reason, /cannot lock ref/);
+
+    const other = repo();
+    const otherB = join(other, ".sandcastle/worktrees/sandcastle-b");
+    recordScratchWorktree(otherB);
+    const otherProject = await loadProject(other);
+    let removed: string[] = [];
+    const out = stderrOf(() => (removed = removeOwnScratchOnExit(otherProject, () => undefined, false)));
+    assert.ok(removed.includes(otherB));
+    assert.ok(!out.includes(otherB), out);
+    assert.match(out, /throwaway branch .*sandcastle\/b/, out);
+    assert.match(out, /`sandcastle clean`/, out);
+  } finally {
+    delete process.env.FAIL_BRANCH;
+  }
 });

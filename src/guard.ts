@@ -1516,15 +1516,16 @@ export const removeOwnScratchOnExit = (project: Project, check: (when: string) =
   if (stoppedOnGuard || !ownScratchWorktrees().size) return [];
   // The stop line promised the removal, so whatever is left is said here, on stderr: console.error writes synchronously
   // from an `exit` listener, where nothing asynchronous runs.
-  const sayLeft = (paths: string[]) => {
+  const sayLeft = (paths: string[], branches: string[] = []) => {
     if (paths.length) console.error(`Left ${paths.length === 1 ? "this throwaway worktree" : "these throwaway worktrees"} for \`sandcastle clean\`: ${paths.join(", ")}`);
+    if (branches.length) console.error(`Left ${branches.length === 1 ? "this throwaway branch" : "these throwaway branches"} for \`sandcastle clean\`: ${branches.join(", ")}`);
   };
   try {
     // First: a process a sandbox left running could write the shared `.git` between the check and the removal.
     for (const path of ownScratchWorktrees()) removeSandboxContainer(path);
     check("at the run's exit");
-    const { removed, left } = removeScratchWorktrees(project, worktreeRefusal(project), ownScratchWorktrees());
-    sayLeft(left.map((l) => l.path));
+    const { removed, left, branchesLeft } = removeScratchWorktrees(project, worktreeRefusal(project), ownScratchWorktrees());
+    sayLeft(left.map((l) => l.path), branchesLeft.map((l) => `${l.branch} (${l.reason})`));
     return removed;
   } catch {
     try {
