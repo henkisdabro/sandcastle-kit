@@ -20,6 +20,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   ticket that moved its sandbox off the count to wait for or run its gates adds nothing to its run's
   demand until it asks for a slot again for a repair, so the run's share no longer covers slots it
   cannot use, and another run with tickets queued takes them instead of waiting for its share.
+- **Protected paths are matched as the host resolves them.** A branch that spelled a protected path
+  in another case (`.Husky/pre-commit`, `LEFTHOOK.yml`), with a trailing dot or an HFS+-ignorable
+  code point, or committed a protected directory's bare entry (a `.codex` file or symlink) landed
+  unheld; it is now held, and the hold names the path as the branch spelled it. A `Package.JSON`
+  install script is checked like `package.json`'s. `lean-apply` now leaves a path alone when a
+  directory on its way cannot be read (`EACCES`, `ENOTDIR`), not only when it crosses a symlink.
+  (#991, #995)
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the

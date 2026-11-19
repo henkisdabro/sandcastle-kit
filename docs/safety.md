@@ -257,6 +257,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`, package-manager config
   or install scripts - plus anything in `protectedPaths` - is labelled `ready-for-human` and left
   for you to merge; `sandcastle land` refuses it too.
+  Matching ignores case and the spellings a macOS or Windows host folds (Unicode form, trailing
+  dots and spaces), and a directory also covers a file or symlink of its own name, so
+  `.Husky/pre-commit` and a bare `.codex` are held like `.husky/` and `.codex/`.
   A branch that adds a file over 50 MB is held the same way: GitHub refuses a push with one over 100
   MB, and a file that size stays in the history for good.
   A ticket whose work lies in a protected path therefore always ends held, so
