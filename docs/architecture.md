@@ -1486,6 +1486,12 @@ it answers after is dropped.
 Every string a collector reads from the run record, the logs or the tracker loses its escape
 sequences and control characters as it comes in (`plainText`): an agent's log must not reach the
 terminal as a clipboard, title or screen-clearing code.
+The closing summary and `sandcastle report` strip agent text the same way, from the same import-free
+module (`src/plain-text.ts`): `gather` reads the run record through `plainAll` once, and every
+history.jsonl reader through `parseRecord`, so notes, unmet criteria, follow-ups, their evidence and
+titles - in records written before the strip too - lose their escapes, line breaks kept.
+The issue titles the report lists from the tracker are stripped as they are read, and the burndown
+stores a tag's text already plain (`oneLine`); the report's own colours are added after.
 A refresh that fails keeps the last good reading, `stale` with the error (`unavailable` with none
 yet); a source not yet answered is `loading`.
 A queue that fails says why under the band, its last tickets kept.

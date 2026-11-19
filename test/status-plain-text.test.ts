@@ -12,7 +12,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { palette, renderFrame } from "../src/status-render.ts";
 import { ticketRows } from "../src/status-rows.ts";
-import { plainText, readRecord, readTail, snapshotOf } from "../src/status-snapshot.ts";
+import { plainText } from "../src/plain-text.ts";
+import { readRecord, readTail, snapshotOf } from "../src/status-snapshot.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-plain-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
