@@ -30,7 +30,7 @@ import { readTickets, retriedNextTurn, type TicketRecord, type TicketState, WORD
 import type { TicketPass } from "./report.ts";
 import { KIT } from "./sandbox.ts";
 import { terminalHost } from "./terminal-host.ts";
-import { APP_STAMP, appFiles, appHash, appHome, appInstalled, appModDir, appModState, onPath, readStamp } from "./herdr-app.ts";
+import { APP_STAMP, appFiles, appHash, appHome, appInstalled, appModDir, appModState, isLeftover, onPath, readStamp } from "./herdr-app.ts";
 
 export const PLUGIN_ID = "sandcastle-kit";
 export const PLUGIN_DIR = join(KIT, "herdr");
@@ -247,7 +247,8 @@ const configureAppMod = async (remove: boolean, yes: boolean, byDefault: boolean
   const stamp = existsSync(dir) ? readStamp(dir) : undefined;
   if (remove) {
     if (!stamp) {
-      if (existsSync(dir)) console.log(`${dir} is not the kit's (no ${APP_STAMP} stamp in it), so it stays.`);
+      if (existsSync(dir) && isLeftover(kit, dir)) console.log(`The Herdr app mod is not in ${dir} (only the app's own files are): nothing removed.`);
+      else if (existsSync(dir)) console.log(`${dir} is not the kit's (no ${APP_STAMP} stamp in it), so it stays.`);
       return false;
     }
     const listed = [...stamp.files, APP_STAMP].filter((f) => inside(dir, f));
@@ -258,7 +259,7 @@ const configureAppMod = async (remove: boolean, yes: boolean, byDefault: boolean
     console.log(`Removed the Herdr app mod from ${dir}. \`sandcastle herdr configure --app\` copies it again.`);
     return false;
   }
-  if (existsSync(dir) && !stamp) {
+  if (existsSync(dir) && !stamp && !isLeftover(kit, dir)) {
     throw new OperatorError(`${dir} exists and is not the kit's (no ${APP_STAMP} stamp in it), so nothing was copied. Move it or remove it, then run \`sandcastle herdr configure --app --yes\` again.`);
   }
   const files = appFiles(kit);

@@ -565,10 +565,22 @@ export const removeScratchWorktrees = (
     }
     // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
     unlockWorktree(path, project.root);
-    sh("git", ["worktree", "remove", "--force", path], project.root);
+    // One failure (a stale `index.lock`, a busy directory) is left with git's reason, and the loop goes on: a throw
+    // here once left every later worktree behind, and a run's exit said nothing of any of them.
+    try {
+      sh("git", ["worktree", "remove", "--force", path], project.root);
+    } catch (error) {
+      left.push({ path, ...(branch ? { branch } : {}), reason: errorLine(error) });
+      continue;
+    }
     removed.push(path);
     if (branch?.startsWith("sandcastle/")) {
-      sh("git", ["branch", "-D", branch], project.root);
+      try {
+        sh("git", ["branch", "-D", branch], project.root);
+      } catch (error) {
+        left.push({ path, branch, reason: errorLine(error) });
+        continue;
+      }
       forgetFork(project.root, branch);
       branches.push(branch);
     }

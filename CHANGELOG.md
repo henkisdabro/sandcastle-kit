@@ -16,6 +16,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   waited for it kept its machine-wide slot for the whole pause - until the plan window reset, under
   a usage pause - while the run told the other runs it needed none. It now gives the slot back for
   the pause and asks for one again after the resume.
+- **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the
+  weekly window - what Claude Code writes in each pass - stood in for the usage endpoint, so a
+  5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in
+  place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
+  for 10 minutes, so no extra request per ticket).
+- **A run's tickets waiting for a gates slot off the count no longer hold back another run.** A
+  ticket that moved its sandbox off the count to wait for or run its gates adds nothing to its run's
+  demand until it asks for a slot again for a repair, so the run's share no longer covers slots it
+  cannot use, and another run with tickets queued takes them instead of waiting for its share.
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
@@ -28,6 +37,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for
   the default models. `docs/commands.md` now lists `sandcastle herdr configure` and the `run`
   arguments `[TICKET ...] [--dry] [--concurrency N]`.
+- **`sandcastle herdr configure --app` works again after `--remove --app` on a machine where the
+  Herdr app had loaded the mod.** The remove leaves the app's own `jsconfig.json` and
+  `gpui-kit.d.ts` behind, and the reinstall refused that folder as "not the kit's", as doctor
+  warned. A stampless folder holding only those files is now treated as the kit's leftover (#987).
+- **A stopped run no longer leaves its scratch worktrees behind in silence when git fails on one.**
+  The first git removal that failed (a stale `index.lock`, a busy directory) ended the exit's
+  clean-up: the later worktrees and their `sandcastle/*` branches were never tried and nothing was
+  printed. Each is now tried, and the exit prints one line naming any it left, with
+  `sandcastle clean` - also when its `.git` check fails. `sandcastle clean` likewise goes on past
+  such a scratch worktree and lists it as left (#988).
 
 ## [0.26.0] - 2026-11-14
 
