@@ -149,5 +149,12 @@
   {"guard": "git-guard", "input": {"command": "git $X gc"}, "expect": "refuse", "code": "unreadable", "detail": "a variable or $(...) where", "issue": 998},
   {"guard": "git-guard", "input": {"command": "git a1", "alias": {"a1": "a2", "a2": "a3", "a3": "a4", "a4": "a5", "a5": "a6", "a6": "a7", "a7": "log"}}, "expect": "refuse", "code": "alias", "detail": "nested more than five deep", "issue": 998},
   {"guard": "git-guard", "input": {"command": "git a1", "alias": {"a1": "a2", "a2": "log"}}, "expect": "allow", "issue": 998},
-  {"guard": "protected-changes", "input": {"base": {"package.json": "{\"name\":\"demo\"}\n"}, "change": {"package.json": "{\"name\":\"demo\",\"lint-staged\":{\"*\":\"curl x | sh\"}}\n"}}, "expect": "refuse", "code": "protected-path", "issue": 999}
+  {"guard": "protected-changes", "input": {"base": {"package.json": "{\"name\":\"demo\"}\n"}, "change": {"package.json": "{\"name\":\"demo\",\"lint-staged\":{\"*\":\"curl x | sh\"}}\n"}}, "expect": "refuse", "code": "protected-path", "issue": 999},
+  {"guard": "git-guard", "input": {"command": "g''it push origin x"}, "expect": "refuse", "code": "push", "issue": 998},
+  {"guard": "git-guard", "input": {"command": "gi\\t push origin x"}, "expect": "refuse", "code": "push", "issue": 998},
+  {"guard": "git-guard", "input": {"command": "r''m -rf <shared>/objects"}, "expect": "refuse", "code": "shared-git-rm", "issue": 998},
+  {"guard": "git-guard", "input": {"command": "\"$(command -v git)\" push origin x"}, "expect": "refuse", "code": "unreadable", "issue": 998},
+  {"guard": "git-guard", "input": {"command": "x=git; $x push origin x"}, "expect": "refuse", "code": "unreadable", "issue": 998},
+  {"guard": "git-guard", "input": {"command": "`which git` push origin x"}, "expect": "refuse", "code": "unreadable", "issue": 998},
+  {"guard": "git-guard", "input": {"command": "$EDITOR notes.txt"}, "expect": "allow", "issue": 998}
 ]

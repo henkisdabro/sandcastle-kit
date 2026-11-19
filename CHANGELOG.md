@@ -78,8 +78,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   command string, so `git --git-dir .git gc`, `git -p gc`, `git "gc"`, `env git gc`, `xargs git gc`,
   a git alias of `gc` and `git branch -m agent/...` got through. It now tokenises the command, strips
   wrappers, parses git's global options against git's own list, expands aliases, and refuses a git
-  command it cannot read (an unknown global option, an unclosed quote, a variable as the subcommand,
-  a shell alias). It also refuses `replace`, `repack`, `pack-refs`, `maintenance` and a writing
+  command it cannot read (an unknown global option, an unclosed quote, a variable as the subcommand
+  or as the command itself, a shell alias); a quoted or escaped name (`g''it`, `gi\t`, `r''m`) is read
+  as the shell reads it. It also refuses `replace`, `repack`, `pack-refs`, `maintenance` and a writing
   `symbolic-ref` in the shared repository, resolves `..` and symlinks before comparing a written or
   removed path with `.git`, and tags every refusal with a stable `[git-guard:<code>]`. (#998, #992)
 - **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the

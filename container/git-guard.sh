@@ -213,12 +213,14 @@ tokenise() {
 # anything unreadable refuses; line and nested for text it only carries (heredoc lines, quoted
 # strings), where the rules for what git does still apply but an unknown word is taken as prose.
 analyse() {
-  local mode=$2 depth=$3 toks texp subs subm t seg=() segx=() first=1
+  local mode=$2 depth=$3 toks texp subs subm t seg=() segx=() first=1 plain
   [ "$depth" -le 8 ] || return 0
-  # Text with no git, rm or mv word in it cannot meet a rule; most heredoc and message lines are prose.
-  [[ $1 =~ (^|[^[:alnum:]_.-])(git|rm|mv)([^[:alnum:]_.-]|$) ]] || return 0
+  # Text with no git, rm or mv word in it cannot meet a rule; most heredoc and message lines are prose. Looked for
+  # with quotes and backslashes taken out, as the shell takes them out: on the raw line, g''it and gi\t were no word.
+  plain=${1//[\'\"\\]/}
+  [[ $plain =~ (^|[^[:alnum:]_.-])(git|rm|mv)([^[:alnum:]_.-]|$) ]] || return 0
   tokenise "$1" "$mode"
-  if [ $UNTERM = 1 ] && [ "$mode" = strict ] && [[ $1 =~ (^|[^[:alnum:]_.-])git([^[:alnum:]_.-]|$) ]]; then
+  if [ $UNTERM = 1 ] && [ "$mode" = strict ] && [[ $plain =~ (^|[^[:alnum:]_.-])git([^[:alnum:]_.-]|$) ]]; then
     unreadable "a quote that is never closed"
   fi
   toks=("${TOK[@]}" "$SEP") texp=("${TEXP[@]}" 0) subs=("${SUBS[@]}") subm=("${SUBM[@]}")
@@ -257,7 +259,13 @@ simple() {
       *) break;;
     esac
   done
-  [ $i -lt $n ] && [ "${x[i]}" = 0 ] || return 0
+  [ $i -lt $n ] || return 0
+  # A command word that is an expansion ("$(command -v git)", $x, `which git`) has a value the guard cannot know. In a
+  # line that holds a git, rm or mv word it may be one of them, and what cannot be read is refused.
+  if [ "${x[i]}" = 1 ]; then
+    [ "$mode" = strict ] && [[ $plain =~ (^|[^[:alnum:]_.-])(git|rm|mv)([^[:alnum:]_.-]|$) ]] || return 0
+    unreadable "a variable or \$(...) where the command's name goes"
+  fi
   GA=("${w[@]:i+1}") GX=("${x[@]:i+1}")
   case ${w[i]##*/} in
     git) git_cmd 0;;
