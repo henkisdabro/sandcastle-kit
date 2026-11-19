@@ -64,8 +64,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   in a running container, so the fingerprint below stays the guard.
   Sandcastle's own git on your machine also runs with the repository's filters, drivers, hooks and
   remote helpers turned off; the kit's pins below hold beside it.
-- 📌 **Command-running config pinned.** For the run's own git calls, `core.fsmonitor` and commit
-  signing are off, and every filter, merge or diff driver, pager, editor and signing program
+- 📌 **Command-running config pinned.** For the run's own git calls, `core.fsmonitor`, commit
+  signing and replace refs (`refs/replace/`, which a sandbox can write to make your git read one
+  commit as another) are off, and every filter, merge or diff driver, pager, editor and signing program
   configured when the run starts keeps that value, through git's command-scope config. A value a
   sandbox writes into `.git/config` mid-run is never the one the host's git runs.
 - 📋 **Start baseline.** The pins and the fingerprint take the shared `.git` as they find it when a
@@ -260,6 +261,10 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   Matching ignores case and the spellings a macOS or Windows host folds (Unicode form, trailing
   dots and spaces), and a directory also covers a file or symlink of its own name, so
   `.Husky/pre-commit` and a bare `.codex` are held like `.husky/` and `.codex/`.
+  The check reads the exact commit the gates passed, with replace refs off, and holds a symlink
+  that points into a protected path or out of the repository, and any submodule pointer.
+  A branch the kit cannot read, or whose `package.json` does not parse, is held too, never landed;
+  the hold says why (`reader-failed`, `manifest-unparseable`).
   A branch that adds a file over 50 MB is held the same way: GitHub refuses a push with one over 100
   MB, and a file that size stays in the history for good.
   A ticket whose work lies in a protected path therefore always ends held, so

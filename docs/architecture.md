@@ -1701,6 +1701,25 @@ matcher, so `Package.JSON` is read too.
 Held paths come back as git spelled them, so the hold and `git show` name the real file
 (`test/guard-bypasses.test.ts`, `test/host-path.test.ts`).
 
+What a branch changes is read once, by `branchChanges` (`src/guard.ts`): `git diff --raw -z
+--no-renames` from the base to the exact commit the gates passed (`o.head`, never the branch name),
+with `core.useReplaceRefs=false` on the call itself, since a sandbox can write `refs/replace/` in
+the shared `.git` and host git that honours it judges a benign commit while the real one lands
+(#992); `land`, `preview` and `queue --lint` do not all pin first.
+Its modes and blob ids feed every hold: a gitlink (`160000`) is held, and so is a symlink
+(`120000`) whose target, resolved against its own directory, is absolute, leaves the repository or
+names a protected path; an in-repo symlink elsewhere lands.
+`largeFiles` reads sizes and the `package.json` check reads manifests by blob id, never by a path
+through a ref.
+`protectedChanges` and `largeFiles` return a `Verdict` (`src/verdict.ts`): `allow`, `refuse` or
+`unknown`, each hold with a `ReasonCode`.
+A caller holds on `unknown` as on `refuse`: a git failure, a line that does not parse or a size
+that is not a number is `reader-failed`, and a manifest that does not parse on either side is
+`manifest-unparseable`.
+The landing's `held` record carries the code, so the ledger names a reader that failed
+(`test/landing-reader-verdict.test.ts`); `preview` shows such a branch as held, where a read that
+threw used to preview as clean.
+
 `landInSandbox` (`src/land.ts`) checks the fingerprint before its sandbox opens (against `expected`,
 below) and three times after: before its sandbox closes (with the worktree's records,
 `checkBeforeClose`, below), after it closes, and again straight before the fast-forward of the base.
@@ -1966,8 +1985,10 @@ opened, since a blocking read would hang the whole run.
   a counted sandbox slot, so a change made on the host in between is the ticket's `tampered` and
   not a red a repair concludes is
   "environmental"; `test/pipeline-repair-git-check.test.ts`) and before each host write; the
-  command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
-  `core.hooksPath` and `core.fsmonitor` by environment.
+  command-running keys configured at the start are also pinned (`pinHostGitConfig`, with
+  `core.useReplaceRefs=false`), and `core.hooksPath` and `core.fsmonitor` by environment, with
+  `GIT_NO_REPLACE_OBJECTS=1` (`disableHostGitHooks`), so Sandcastle's host `git worktree add`
+  checks out the real tree a replace ref would hide.
   A check also takes the exact absolute rewrite of a tracked hooks path mid-run
   (decided: pin and accept, never restore - the kit never writes `.git/config`, since restoring would
   make it a writer of the user's config, could race another writer and could hide a window of hookless

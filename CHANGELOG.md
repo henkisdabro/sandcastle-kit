@@ -27,6 +27,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   install script is checked like `package.json`'s. `lean-apply` now leaves a path alone when a
   directory on its way cannot be read (`EACCES`, `ENOTDIR`), not only when it crosses a symlink.
   (#991, #995)
+- **The landing holds read the commit that was gated, with replace refs off.** A sandbox could
+  write `refs/replace/` in the shared `.git` and map its real commit to a benign one, so the
+  protected-path and large-file holds judged the benign one while the real one landed; the kit's
+  git now reads with substitution off, and the holds read the exact commit the gates passed. A
+  branch that adds a symlink into a protected path or out of the repository, or a submodule
+  pointer, is held. A branch the kit cannot read, or whose `package.json` does not parse, is held
+  with the reason (`reader-failed`, `manifest-unparseable`) instead of landing or losing its ready
+  line, and `sandcastle preview` shows it held. (#992, #995)
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the

