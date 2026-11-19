@@ -87,7 +87,7 @@ type Execs = {
 // any value that still turns up in their output is replaced. `gateEnv` cannot name one (src/config.ts).
 export const KIT_CREDENTIALS = ["GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY"];
 const secrets = new Set<string>();
-/** Registers credential values to cut out of gate output (credentials() calls it with every forwarded value). */
+/** Registers credential values to cut out of gate output (credentials() calls it with the agents' and every secret-looking one). */
 export const hideFromGates = (values: (string | undefined)[]) => {
   for (const v of values) if (v && v.length >= 8) secrets.add(v);
 };

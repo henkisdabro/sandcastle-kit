@@ -31,8 +31,11 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   and never an agent's credential, since a gate runs code an agent wrote.
   Every other key stops at the host, and the gates log names the keys withheld (names, never values).
   Sandcastle's own forwarding of every `.sandcastle/.env` key is switched off by the kit's patch to it.
-  A gate in a ticket's sandbox runs with every forwarded key but `gateEnv`'s unset, and every
-  forwarded value of 8 characters or more in gate output is replaced with `<redacted>`.
+  A gate in a ticket's sandbox runs with every forwarded key but `gateEnv`'s unset.
+  In gate output, a secret's value of 8 characters or more is replaced with `<redacted>`: the agents'
+  credentials, a key whose name says secret (`TOKEN`, `KEY`, `SECRET`, `PASS`, `AUTH` and the like),
+  and a token-shaped value (long, unbroken, letters with digits, not a plain URL).
+  `NODE_ENV=production` or a registry URL stays readable, so a red gate's output still says what it means.
   What `env -u` cannot reach: in a ticket's sandbox the agents' credentials stay in the container's own
   environment (PID 1's), which a gate's code can read back. They cannot move to the agent's command
   alone, since the prompt's shell expressions run `gh` with the container's environment; the token's

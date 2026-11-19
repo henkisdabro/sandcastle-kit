@@ -113,7 +113,7 @@ test("a ticket's sandbox keeps the agents' credentials, and other keys only when
   assert.equal(named.NPM_TOKEN, NPM);
 });
 
-test("every forwarded value is redacted, and gates are kept from every .env key gateEnv does not name", () => {
+test("every secret value is redacted, and gates are kept from every .env key gateEnv does not name", () => {
   const project = { ...setup(envFiles), gateEnv: ["NPM_TOKEN"] } as Project;
   credentials(project);
   assert.equal(redact(`a ${NPM} b service-key-fake-0000`), "a <redacted> b <redacted>");
@@ -126,4 +126,15 @@ test("doctor's setup check: the credentials-file keys a setup step names that ga
   assert.deepEqual(setupWithheldKeys({ ...setup(envFiles), setup: setupSteps, gateEnv: ["NPM_TOKEN", "SERVICE_KEY"] } as Project), []);
   // A name inside a longer word is no mention: MY_NPM_TOKEN_PATH is not NPM_TOKEN.
   assert.deepEqual(setupWithheldKeys({ ...setup(envFiles), setup: ["echo $MY_NPM_TOKEN_PATH"] } as Project), []);
+});
+
+test("a non-secret credentials-file value survives in gate output; a secret one and the agents' credentials do not", () => {
+  const files = `${envFiles}NODE_ENV=production\nNPM_REGISTRY=https://npm.example.com/\nDATABASE_URL=postgres://app:hunter2hunter2@db.example.com/app\n`;
+  credentials({ ...setup(files), gateEnv: ["NODE_ENV", "NPM_REGISTRY", "NPM_TOKEN"] } as Project);
+  const line = "built for production from https://npm.example.com/";
+  assert.equal(redact(line), line, "a value that is no secret is left in the output");
+  assert.equal(
+    redact(`${NPM} service-key-fake-0000 postgres://app:hunter2hunter2@db.example.com/app sk-ant-oat01-policy-fake github_pat_finegrainedfake000000`),
+    "<redacted> <redacted> <redacted> <redacted> <redacted>",
+  );
 });

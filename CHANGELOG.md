@@ -55,8 +55,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   GitHub remote no longer passes `GH_TOKEN` to its sandboxes. (#997)
 - **Gates no longer see credentials beyond the ones they are given.** A gate-only sandbox is opened
   with no key of the credentials files except those `gateEnv` names, and in a ticket's sandbox every
-  forwarded key but `gateEnv`'s is unset for each gate and its value redacted from the output, where
-  only the kit's three tokens were before. Sandcastle's own forwarding of every `.sandcastle/.env`
+  forwarded key but `gateEnv`'s is unset for each gate and, when it is a secret (its name says so, or
+  it has a token's shape), its value redacted from the output, where only the kit's three tokens were
+  before; `production` or a registry URL stays readable. Sandcastle's own forwarding of every `.sandcastle/.env`
   key into each container is switched off by the kit's patch. The agents' tokens still sit in a
   ticket's container environment, which `docs/safety.md` now states (#996).
 - **Files that run on your machine without anyone reading them no longer land unheld.** The

@@ -747,6 +747,13 @@ export const githubRemoteRepo = (root: string): string | undefined => {
 /** `apiKeySpend` over the project's two credentials files, as `credentials` reads them. */
 export const projectApiKeySpend = (project: Project) => apiKeySpend(credentialFiles(project));
 
+// A credentials-file value to cut out of gate output: its key's name says it is a secret, or it has a token's shape -
+// long, unbroken, letters with digits - and is not a URL with no credentials in it.
+const secretValue = (key: string, value: string | undefined) =>
+  !!value &&
+  (/TOKEN|SECRET|PASS|KEY|AUTH|CRED|PRIVATE|SESSION|COOKIE/i.test(key) ||
+    (value.length >= 16 && !/\s/.test(value) && /[A-Za-z]/.test(value) && /\d/.test(value) && !/^[a-z][\w+.-]*:\/\/[^@]*$/i.test(value)));
+
 export const credentials = (project: Project): Record<string, string> => {
   const files = credentialFiles(project);
   const env: Record<string, string | undefined> = { ...readEnv(files[0]), ...readEnv(files[1]) };
@@ -770,8 +777,9 @@ export const credentials = (project: Project): Record<string, string> => {
         "read on the repositories you run, and put it in " + files[0] + ".",
     );
   }
-  // Every value, not only the kit's own: a gate that printed a registry token put it in the gates log (#996).
-  hideFromGates(Object.values(env));
+  // Not only the kit's own: a gate that printed a registry token put it in the gates log (#996). Not every value either:
+  // `production` or a registry URL cut from gate output hid what a red gate said, wherever the word came up.
+  hideFromGates(Object.entries(env).filter(([k, v]) => KIT_CREDENTIALS.includes(k) || secretValue(k, v)).map(([, v]) => v));
   const gateEnv = project.gateEnv ?? [];
   withholdFromGates(Object.keys(env).filter((k) => !gateEnv.includes(k)));
   return env as Record<string, string>;
