@@ -6,12 +6,13 @@
 //   pnpm test:file test/guard-bypasses.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
+import { KIT } from "../src/sandbox.ts";
 import type { Verdict } from "../src/verdict.ts";
 import { quietly } from "./quiet.ts";
 
@@ -112,6 +113,35 @@ const guards: Record<string, (row: Row) => Promise<boolean> | boolean> = {
     } finally {
       for (const dir of locked) chmodSync(dir, 0o755);
     }
+  },
+  // container/git-guard.sh run as Claude Code runs it (git-guard.test.ts): the agent's cwd and project dir are a
+  // linked worktree of `<main>`, whose shared .git is `<shared>`; `<scratch>` is a separate repository. `input.symlink`
+  // links worktree paths to a placeholder, `input.alias` sets git aliases in the shared config. A refusal must
+  // carry the row's `[git-guard:<code>]`.
+  "git-guard": (row) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-bypass-guard-")));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_") && k !== "CLAUDE_PROJECT_DIR"));
+    const at = { main: join(root, "main"), worktree: join(root, "agent-1"), scratch: join(root, "scratch"), shared: join(root, "main/.git") };
+    const fill = (s: string) => s.replace(/<(main|worktree|scratch|shared)>/g, (_, k: keyof typeof at) => at[k]);
+    const git = (dir: string, ...args: string[]) =>
+      execFileSync("git", ["-C", dir, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8", env });
+    for (const dir of [at.main, at.scratch]) {
+      mkdirSync(dir);
+      git(dir, "init", "-q", "-b", "main");
+    }
+    git(at.main, "commit", "-q", "--allow-empty", "-m", "start");
+    git(at.main, "worktree", "add", "-q", "-b", "agent/issue-1", at.worktree);
+    for (const [name, target] of Object.entries(row.input.symlink ?? {})) symlinkSync(fill(target as string), join(at.worktree, name));
+    for (const [name, value] of Object.entries(row.input.alias ?? {})) git(at.main, "config", `alias.${name}`, value as string);
+    const tool_input = row.input.command ? { command: fill(row.input.command) } : { file_path: fill(row.input.file_path) };
+    const r = spawnSync("bash", [join(KIT, "container/git-guard.sh")], {
+      input: JSON.stringify({ cwd: at.worktree, tool_input }),
+      encoding: "utf8",
+      env: { ...env, CLAUDE_PROJECT_DIR: at.worktree },
+    });
+    assert.ok(r.status === 0 || r.status === 2, r.stderr);
+    if (r.status === 2 && row.code) assert.ok(r.stderr.includes(`[git-guard:${row.code}]`), r.stderr);
+    return r.status === 2;
   },
 };
 
