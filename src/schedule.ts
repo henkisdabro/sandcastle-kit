@@ -1149,6 +1149,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const pipelines = createQueue<Next<T>>((q) => q.rank);
       // The attempts off their worker, waiting for a gates slot on an uncounted lock (`at.gateWait`), and the retakes queued in `pipelines`.
       const uncounted = new Set<string>();
+      // The attempts off their worker that ask for no counted slot: `uncounted` loses a ticket once its gates slot is granted
+      // (`gateSlot`), while it still holds no counted slot. Demand leaves these out until a retake is queued (#1014).
+      const idleOff = new Set<string>();
       let retaking = 0;
       const retakes = new Set<Retake>();
       // The sandbox slots the run could use now (the machine pool's demand): the tickets in a
@@ -1175,8 +1178,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       let toldFinishing: string | undefined;
       // While paused only the tickets inside an attempt that hold a sandbox ask for a slot: one queued for a
       // worker, waiting at the start or parked at a juncture holds none.
-      // A ticket that has not started held for a waiting resolve is queued but cannot start: no demand either.
-      const active = () => (pausedSince === undefined ? inPipeline - resolving.size - heldTold.size : [...running].filter((id) => !parked.has(id)).length);
+      // A ticket that has not started held for a waiting resolve is queued but cannot start: no demand either. Nor does an
+      // attempt off its worker that has not asked for a slot again (`idleOff`): counted, its run's share would cover slots it
+      // cannot use, and another run with tickets queued would be held at its share while they sit free.
+      const active = () =>
+        pausedSince === undefined ? inPipeline - resolving.size - heldTold.size - idleOff.size : [...running].filter((id) => !parked.has(id) && !idleOff.has(id)).length;
       const demand = () => {
         const n = Math.min(cap, active() + (dealt < pushed ? 1 : 0));
         if (n === demanded) return;
@@ -1678,6 +1684,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         if (r.dead) return;
         r.dead = true;
         retakes.delete(r);
+        // Still off its worker, and asking for nothing until it asks again after its juncture.
+        idleOff.add(r.id);
         r.resolve(undefined);
       };
       // Settles once the attempt ends (rejecting with its failure) or goes off the worker (`gateWait`). One promise settled by the
@@ -1740,6 +1748,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           if (!work.gateWaiters || uncounted.size >= work.gateWaiters) return false;
           uncounted.add(t.id);
           seat.off = true;
+          idleOff.add(t.id);
+          demand();
           seat.settle?.();
           return true;
         };
@@ -1758,6 +1768,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             const r: Retake = { id: t.id, seat, slot: retaken, resolve, dead: false };
             retakes.add(r);
             retaking++;
+            // A repair asks for a counted slot: a demand again.
+            idleOff.delete(t.id);
+            demand();
             pipelines.push({ retake: r, rank: RETAKE });
             nudge();
           });
@@ -1859,6 +1872,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           slot?.release();
           retaken.slot?.release();
           uncounted.delete(t.id);
+          idleOff.delete(t.id);
           // Whatever the ending (red later, a requeue, a stop, a crash, a hold, a conflict found at gates): a green gate's want for the run's
           // claim stands only until the push, which already took it; a push leaves nothing for this to drop.
           landing.dropped(t.id);

@@ -16,6 +16,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in
   place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
   for 10 minutes, so no extra request per ticket).
+- **A run's tickets waiting for a gates slot off the count no longer hold back another run.** A
+  ticket that moved its sandbox off the count to wait for or run its gates adds nothing to its run's
+  demand until it asks for a slot again for a repair, so the run's share no longer covers slots it
+  cannot use, and another run with tickets queued takes them instead of waiting for its share.
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the

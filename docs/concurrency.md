@@ -60,6 +60,9 @@ plus one while a green branch waits to land, never more than its concurrency; a 
 blocker adds nothing until the blocker lands, and a run that has drained its queue asks for none,
 nor does a [paused](running.md#-pausing-a-run) run once the passes in flight have ended (its tickets give
 their slots back).
+A ticket waiting for or in its gates off the count adds nothing to demand until it asks for a slot
+again (a repair pass): it holds none and could use none, so its run's share covers no slot another
+run's queued tickets could take.
 The pool is divided equally between the runs that ask for slots, and a run that needs less than an
 equal part releases the rest to the others, again equally.
 A run's share is its part of the pool less the one slot kept for landing (below): with two runs
