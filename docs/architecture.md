@@ -3254,16 +3254,37 @@ Each template carries its own copy of the shared safety sentences, not a shared 
 Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `src/sandbox.ts`):
 `managed-settings.json` registers `git-guard.sh`, a `PreToolUse` hook on the Bash, Write and Edit
 tools that refuses commands and writes that damage the shared `.git` (`test/git-guard.test.ts`).
-Managed settings sit above project settings, so a branch cannot disable it. `update-ref`, `gc`,
-`prune` and `stash` (whose list every worktree shares; `stash list` and `show` always pass) pass
+Managed settings sit above project settings, so a branch cannot disable it.
+It reads a command before it decides (#998; a regex over the raw string let `git --git-dir .git gc`,
+`git "gc"` and `env git gc` through).
+The command is split into simple commands at `;`, `&`, `|`, parentheses and newlines, and each is
+tokenised with shell quoting.
+A `$(...)` or backtick body is read as code, and a heredoc line and every quoted string are read as
+text: their rules still apply, but a quoted string's first command is skipped (a commit message that
+starts `git push ...`) unless it follows `-c`, `eval` or `env -S`.
+Assignments and the wrappers `sudo`, `env`, `command`, `exec`, `nice`, `time`, `timeout`, `xargs`
+and `nohup` are stripped to find `git` (by basename, so `/usr/bin/git` and `\git` too).
+git's global options are parsed against git's own list with their arity.
+In the command itself, an option not on that list, an unclosed quote in a line naming git, a
+variable or `$(...)` where the subcommand goes, and a subcommand that is neither a git command
+(`git --list-cmds`) nor an alias already set refuse as unreadable.
+An alias is read with `git config --get alias.<name>` at the hook's cwd and judged as what it expands
+to, up to five deep; a `!` shell alias and `-c alias.*` (or `--config-env`) refuse.
+Each refusal carries a stable `[git-guard:<code>]` (`shared-repo`, `replace`, `stash`,
+`worktree-add`, `push`, `reflog-expire`, `worktree-prune`, `agent-branch`, `shared-git-rm`,
+`shared-git-write`, `unreadable`, `alias`) that `test/guard-bypasses.test.ts` asserts.
+`update-ref`, `gc`, `prune`, `repack`, `pack-refs`, `maintenance`, a writing `symbolic-ref` (two
+names or `-d`; one name only reads) and `replace` (but `-l`; refs/replace/ changes what every
+agent's git reads, #992) and `stash` (whose list every worktree shares; `stash list` and `show`
+always pass) pass
 when every `git -C <path>` of the command is absolute and resolves (`rev-parse --git-common-dir`) to
 a common dir other than the shared one (that of the dir Claude Code started in,
 `CLAUDE_PROJECT_DIR`, since the shell's cwd moves with a `cd`; without it they stay refused), so a
 scratch repository under the temp dir is usable and a worktree of the shared repo is not; a command
 with no `-C` (a leading `cd` is not parsed), a relative `-C` (git resolves it from the shell's cwd
-at run time, which a `cd` in the same line moves), a `GIT_DIR`, `GIT_COMMON_DIR` or `GIT_WORK_TREE`
-assignment anywhere in the line, or a path git cannot resolve is refused (a plain quoted path is
-unquoted first), variable assignments before `git` do not hide it from any rule, and `push` is
+at run time, which a `cd` in the same line moves), `--git-dir` or `--work-tree` in either spelling, a
+`GIT_DIR`, `GIT_COMMON_DIR` or `GIT_WORK_TREE` assignment anywhere in the line, or a path git cannot
+resolve is refused (a quoted path is unquoted first), and `push` is
 refused wherever it runs, since its danger is the destination. `worktree add` follows the same `-C`
 rule (it writes a record with the container's path into the shared `.git`, which a pass killed
 before its cleanup leaves behind), so a scratch repository may add one and the project may not; the
@@ -3272,15 +3293,22 @@ the base (`test/git-guard-worktree-add.test.ts`).
 The file-write rule and the `rm`/`mv` rule refuse the common dir of the hook's cwd and that of
 `CLAUDE_PROJECT_DIR`, so a `cd` into a scratch repository or out of every repository does not let a
 write reach the project's shared `.git` (`test/git-guard-project-common.test.ts`).
+They compare paths after resolving `..` and symlinks the way `realpath -m` does (`norm`, in bash,
+since macOS, where the tests also run the guard, has no `realpath -m`), so `<worktree>/../main/.git`
+and a symlink into `.git` are caught.
+A deleting or moving `git branch` flag (`-d`, `-D`, `-f`, `-m`, `-M`, `-c`, `-C`, bundled as `-fm`,
+or an abbreviation of `--delete`, `--force`, `--move` or `--copy`) refuses when the same command
+names an `agent/` branch.
 Every refusal that a scratch repository would have passed says how (`SCRATCH_HOW`): create the
 repository in an earlier command, then use `git -C /literal/absolute/path`, since the rule reads the
 command string before it runs and so cannot resolve a path the same command creates, or a variable
 (`test/git-guard-scratch-repo.test.ts`; `prompts/implement.md` and `prompts/review.md` say it too).
 The guard is not a security boundary, as its header says: a script file (`bash /tmp/x.sh`, a file
-the agent has just written) or `sh -c` gets past a command-string match, and it does not try to scan
-them - that would be a second parser for any shell, and the host's check of `.git` is what protects
-the repo.
-Needs bash and `jq` in the image.
+the agent has just written) gets past any reading of a command line, and it does not try to read
+them - the host's check of `.git` is what protects the repo.
+It is fail-closed only where it parses: an unknown global option costs an agent one retry, and the
+fix is to add the option to the table, not an override.
+Needs bash, `jq` and git in the image; it keeps to bash 3.2 because the tests run it on the host.
 
 `report.schema.json` is the shape of the report a Claude pass returns unless `REPORT_SCHEMA=0`
 (`--json-schema`, `claude()` in `src/agents.ts`, which reads the file on the host and puts it, compact, on

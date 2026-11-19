@@ -239,15 +239,19 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   until `sandcastle clean --all`.
 - 🚧 **Git guard.** A Claude Code managed hook (`container/`, mounted read-only at
   `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `stash`
-  (its list is shared by every worktree), `push`, `reflog expire`, `worktree prune`, `repair` and
-  `add` (a scratch repository's own is allowed), deleting an `agent/*` branch, `rm` or `mv` inside
-  the shared `.git`, and writes to it.
+  (its list is shared by every worktree), `repack`, `pack-refs`, `maintenance`, `replace`, a
+  writing `symbolic-ref`, `push`, `reflog expire`, `worktree prune`, `repair` and `add` (a scratch
+  repository's own is allowed), deleting, moving or copying an `agent/*` branch, `rm` or `mv`
+  inside the shared `.git`, and writes to it (paths compared after `..` and symlinks resolve).
+  It parses the command - quoting, wrappers such as `env` and `xargs`, git's global options and
+  aliases - and refuses a git command it cannot read (an unknown global option, an unclosed quote,
+  a variable as the subcommand, a shell alias), each refusal with a `[git-guard:<code>]`.
   Project hooks still run, and `reset --hard`, `clean`, `checkout .`, `stash list` and
   `worktree remove --force` stay allowed, as do `update-ref`, `gc`, `prune` and `stash` run as
   `git -C <absolute path>` in a scratch repository outside the project (`push` stays refused
   everywhere).
-  It reduces accidents and is not a boundary - `sh -c` or a script gets past a command match; the
-  host-side checks here are the real protection.
+  It reduces accidents and is not a boundary - a script file gets past any reading of a command
+  line; the host-side checks here are the real protection.
 - 🎯 **Landing checks.** Before a green branch merges, its ticket is read again - closed or
   labelled `ready-for-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.
