@@ -85,8 +85,9 @@ test("the gates log names the .env keys withheld from the gates, never their val
   const lines = await gated([{ name: "unit", command: "run-unit" }], [["run-unit", { exitCode: 0, stdout: ["ok"], stderr: "" }]]);
   const note = lines.find((l) => l.startsWith("# withheld from the gates"));
   assert.ok(note, lines.join("\n"));
-  assert.match(note, /GH_TOKEN, NPM_TOKEN/);
-  assert.match(note, /gateEnv/);
+  // gateEnv refuses an agent's credential (src/config.ts), so the line offers only the others.
+  assert.match(note, /list a key in gateEnv to pass it\): NPM_TOKEN;/);
+  assert.match(note, /agents' credentials, never passed: GH_TOKEN/);
   assert.ok(!lines.join("\n").includes("npm_xxxxxxxxxxxx"));
   withholdFromGates([]);
   const none = await gated([{ name: "unit", command: "run-unit" }], [["run-unit", { exitCode: 0, stdout: ["ok"], stderr: "" }]]);

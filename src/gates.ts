@@ -19,7 +19,7 @@ import { type Hook, hooksPathLines, hooksPathOutside, hostHooks } from "./lean.t
 import { type MachineCpu, type PassReadings, cpuFields, cpuHigh, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
 import { EXEC_TAIL_CHARS, forgetFork, limitMemory, oomKills, oomNote, sandboxConfig, sandcastleVersion, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
-import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree, withheldFromGates } from "./worktree-lock.ts";
+import { execGate, GATE_TIMEOUT_SECONDS, KIT_CREDENTIALS, unlockWorktree, withheldFromGates } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { shq } from "./generated.ts";
@@ -266,8 +266,17 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const head = await headOf(sandbox);
     // A gate that needed a credentials-file key (a private-registry install, say) goes red once the key stops at the
     // host (#996), and its own output rarely says why; the log names the keys kept back. Names only, never a value.
+    // gateEnv refuses the agents' credentials (src/config.ts), so the line offers it only for the others.
     const kept = withheldFromGates().sort();
-    if (log && kept.length) appendFileSync(log, `\n# withheld from the gates (list a key in gateEnv to pass it): ${kept.join(", ")}\n`);
+    const passable = kept.filter((k) => !KIT_CREDENTIALS.includes(k));
+    const agents = kept.filter((k) => KIT_CREDENTIALS.includes(k));
+    if (log && kept.length) {
+      const parts = [
+        ...(passable.length ? [`(list a key in gateEnv to pass it): ${passable.join(", ")}`] : []),
+        ...(agents.length ? [`the agents' credentials, never passed: ${agents.join(", ")}`] : []),
+      ];
+      appendFileSync(log, `\n# withheld from the gates ${parts.join("; ")}\n`);
+    }
     // A gate killed for memory exits 137 like any SIGKILL: the cgroup's counts say which it was, read after each gate so a
     // kill is told only to the gate it happened in.
     let oomAt = await oomKills(sandbox);
