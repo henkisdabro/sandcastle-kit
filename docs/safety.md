@@ -255,13 +255,38 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   `Sandcastle agent <agent@sandcastle.invalid>`; you stay the author.
   `git log --format='%h %an / %cn %s'` tells them from your own commits.
   GitHub issues and comments the agents write still show your GitHub account.
-- 🛡️ **Protected paths.** A green branch that changes hooks (git - the tracked directory
-  `core.hooksPath` names among them -, Claude Code, pre-commit tools, and the config of lint-staged, lefthook,
-  husky, simple-git-hooks and yorkie, in their own files or in a `package.json` key, and lefthook's script
-  directories `.lefthook/` and `.lefthook-local/`), CI, agent settings
-  (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`, package-manager config
-  or install scripts - plus anything in `protectedPaths` - is labelled `ready-for-human` and left
-  for you to merge; `sandcastle land` refuses it too.
+- 🛡️ **Protected paths.** A green branch that changes a file something runs on your machine - git
+  hooks, CI, agent and editor config, package-manager hooks, a commit-hook runner's config, or an
+  install script or hook-runner key in a `package.json` - is labelled `ready-for-human` and left for
+  you to merge; `sandcastle land` refuses it too. The gates ran the branch's own copy in a sandbox,
+  so they cannot vouch for it. The list, with what runs each entry:
+  - **Fixed** (`unheldPaths` cannot release these): git commit hooks `.husky/`, `.githooks/` and the
+    tracked directory `core.hooksPath` names; CI `.github/`; the kit's own `.sandcastle/`; Claude
+    Code's `.claude/settings.json`, `.claude/settings.local.json` and `.claude/hooks/`; and what
+    runs on entering the directory - direnv's `.envrc`, mise's `.mise.`, `mise.toml` and
+    `mise.local.toml`, and `.tool-versions`. Anything in `protectedPaths` is fixed too.
+  - git: `.gitmodules`, `.gitattributes` (checkout filters).
+  - Agents: `.claude/` whole, at any depth (skills, agents and commands, whose frontmatter can run
+    hooks), `.mcp.json`, `.codex/`, `.agents/`, `opencode.json`, `.opencode/`.
+  - Editors, on opening the folder: `.vscode/`, `.devcontainer/`.
+  - Package managers, at the next install: `.npmrc`, `pnpm-workspace.yaml`, `.pnpmfile.`, `.yarnrc`
+    (`.yarnrc.yml` too), `.yarn/releases/`, `.yarn/plugins/`, `bunfig.toml`.
+  - Commit-hook runners, at the next commit: `.lintstagedrc`, `lint-staged.config.`,
+    `.pre-commit-config.yaml`, lefthook's `lefthook.`, `lefthook-local.`, `.lefthook.`,
+    `.lefthook-local.`, `.config/lefthook.`, `.config/lefthook-local.` and its script directories
+    `.lefthook/` and `.lefthook-local/`, husky 4's `.huskyrc` and `husky.config.`, and
+    simple-git-hooks' `.simple-git-hooks.` and `simple-git-hooks.`.
+  - **Any other entry at the root whose name starts with a dot** (`.foorc`, `.config/`), because a new
+    tool's config usually lives there and a list of dangerous ones is always a tool behind. These are
+    not held: `.gitignore`, `.gitkeep`, `.editorconfig`, `.nvmrc`, `.node-version`, `.prettierignore`,
+    `.eslintignore`, `.dockerignore`, `.mailmap` and `.yarn/cache/`.
+
+  An entry with no trailing `/` also covers longer names (`.huskyrc` holds `.huskyrc.json`), except
+  `bunfig.toml`, which is that file alone.
+  To let some of these land, list them in `unheldPaths` in `.sandcastle/config.ts`: a directory
+  (`".claude/skills/"`) or one file (`".prettierrc.json"`, not `.prettierrc.json5`).
+  It cannot release a fixed entry, and as it lives in `.sandcastle/`, a branch that widens it is
+  itself held.
   Matching ignores case and the spellings a macOS or Windows host folds (Unicode form, trailing
   dots and spaces), and a directory also covers a file or symlink of its own name, so
   `.Husky/pre-commit` and a bare `.codex` are held like `.husky/` and `.codex/`.
@@ -273,9 +298,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   A run still starts one whose `Touches:` line names the path, and says so in its start plan
   (`#N will be held for a person to merge (paths)`); its `needs a human` line at landing names the
   paths too.
-  The implement and review prompts list the protected paths as well (the defaults and
-  `protectedPaths`), so an agent does not touch one the ticket did not need, and the review reverts
-  such a change.
+  The implement and review prompts list the protected paths as well (the defaults, the root dot
+  entries, `protectedPaths` and `unheldPaths`), so an agent does not touch one the ticket did not
+  need, and the review reverts such a change.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.

@@ -228,6 +228,18 @@ Declining is not skipping: every step still runs its check, and only the asking 
        red `out of memory: the VM ran out` is the VM's, not the limit's: propose a lower
        `maxSandboxes` (from `sandcastle size`), never a higher `memory`. `no limit (N of the 10
        gate samples ...)` and a green gates run: nothing to do.
+   23. **Paths now held** (**`unheld-paths`**). A branch that changes anything under `.claude/`,
+       `.vscode/`, `.devcontainer/` or `.opencode/`, `opencode.json`, or a root entry whose name
+       starts with a dot (other than `.gitignore`, `.editorconfig`, `.nvmrc` and the inert few the
+       kit's docs/safety.md lists) is held for a person. List what the project tracks there:
+       `git ls-files | grep -E '^\.|(^|/)\.claude/|^opencode\.json' | cut -d/ -f1-3 | sort -u`. For
+       each directory or file that tickets routinely change and nothing on the host runs without a
+       person reading it (skills edited as ordinary work, a `.prettierrc.json`), propose adding it
+       to `unheldPaths` in `.sandcastle/config.ts`, explaining that a branch changing it then lands
+       unread. Skip what `unheldPaths` already lists, and never propose a fixed entry (hooks, CI,
+       `.sandcastle/`, Claude Code's settings and hooks, `.envrc`, mise, `.tool-versions`): the
+       config keeps them held anyway. Nothing tracked there, or nothing the user wants released:
+       nothing to do.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

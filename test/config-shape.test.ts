@@ -38,6 +38,8 @@ test("wrong types are refused with what the key takes", async () => {
   await refused("concurrency: 0", /`concurrency` must be a whole number of 1 or more, not 0/);
   await refused("repair: { attempts: -1 }", /`repair\.attempts` must be a whole number of 0 or more/);
   await refused('protectedPaths: ".github"', /`protectedPaths` must be a list of strings/);
+  await refused('unheldPaths: ".claude/skills/"', /`unheldPaths` must be a list of strings, such as \[".claude\/skills\/"\]/);
+  await refused('unheldPaths: ["../.envrc"]', /`unheldPaths` entry "..\/.envrc" names no path in the project/);
   await refused("autonomy: 5", /`autonomy` must be 0, 1, 2, 3 or "drain"/);
   await refused('autonomy: "forever"', /`autonomy` must be 0, 1, 2, 3 or "drain", not "forever"/);
   await assert.rejects(load('export default { name: "t", gates: [{ name: "t" }] };\n'), /each gate needs a `name` and a `command`/);
@@ -49,7 +51,8 @@ test('autonomy: "drain" is accepted', async () => {
 });
 
 test("a valid config, repair off included, loads", async () => {
-  const p = await load(`export default { ${ok}, concurrency: 2, repair: { attempts: 0 }, protectedPaths: ["infra/"], lean: { keep: [], dropHooks: [] } };\n`);
+  const p = await load(`export default { ${ok}, concurrency: 2, repair: { attempts: 0 }, protectedPaths: ["infra/"], unheldPaths: [".claude/skills/", ".prettierrc.json"], lean: { keep: [], dropHooks: [] } };\n`);
   assert.equal(p.concurrency, 2);
   assert.equal(p.repair.attempts, 0);
+  assert.deepEqual(p.unheldPaths, [".claude/skills/", ".prettierrc.json"]);
 });

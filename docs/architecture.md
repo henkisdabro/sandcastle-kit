@@ -1695,8 +1695,42 @@ lock
 Protected paths (`protectedAmong`, `protectedRules`) are matched through `src/host-path.ts`, never on
 git's raw path bytes: a macOS or Windows host opens `.Husky/pre-commit` as the `.husky/` hook, so a
 raw prefix test let it land.
-An entry ending in `/` is a `dir` rule, which also holds a file or symlink committed under the
-directory's own name (a bare `.codex`); any other entry keeps its prefix match.
+The rule table is `DEFAULT_PROTECTED` in `src/guard.ts`: each entry a `PathRule` with the `runner`
+that executes it on the host, and the prompts' `{{KIT_PROTECTED}}` is rendered from it
+(`protectedPathsNote`).
+A `dir` rule also holds a file or symlink committed under the directory's own name (a bare
+`.codex`); a `prefix` covers every extension.
+`test/prompt-protected-paths.test.ts` fails when this list, `docs/safety.md` or the prompt note
+leaves out an entry of the table or of the inert root list:
+
+| Entry | Kind | Runs on the host |
+|---|---|---|
+| `.husky/`, `.githooks/` | dir, fixed | git commit hooks |
+| `.github/` | dir, fixed | CI, with the repository's secrets |
+| `.sandcastle/` | dir, fixed | the kit's own config and guards (`unheldPaths` lives here) |
+| `.claude/settings.json`, `.claude/settings.local.json` | prefix, fixed | Claude Code's settings and hooks |
+| `.claude/hooks/` | dir, fixed | Claude Code's hooks |
+| `.envrc`, `.mise.`, `mise.toml`, `mise.local.toml`, `.tool-versions` | prefix, fixed | direnv, mise and asdf, on entering the directory |
+| `.gitmodules`, `.gitattributes` | prefix | git's submodules and checkout filters |
+| `.claude/` | basename (any depth) | Claude Code's skills, agents and commands, whose frontmatter can run hooks |
+| `.mcp.json`, `opencode.json` | prefix | the agents' MCP servers and config |
+| `.codex/`, `.agents/`, `.opencode/` | dir | the agents' config |
+| `.vscode/`, `.devcontainer/` | dir | the editor, on opening the folder |
+| `.npmrc`, `pnpm-workspace.yaml`, `.pnpmfile.`, `.yarnrc` | prefix | the package manager, at the next install |
+| `.yarn/releases/`, `.yarn/plugins/` | dir | the yarn binary and its plugins |
+| `bunfig.toml` | file | bun's preload scripts |
+| `.lintstagedrc`, `lint-staged.config.`, `.pre-commit-config.yaml`, `lefthook.`, `lefthook-local.`, `.lefthook.`, `.lefthook-local.`, `.config/lefthook.`, `.config/lefthook-local.`, `.huskyrc`, `husky.config.`, `.simple-git-hooks.`, `simple-git-hooks.` | prefix | the commit-hook runner, at the next commit |
+| `.lefthook/`, `.lefthook-local/` | dir | lefthook's script directories |
+
+The tracked `core.hooksPath` directory and the project's `protectedPaths` are added as fixed rules.
+Any other root entry whose host form starts with a dot is held too, unless it is inert
+(`INERT_ROOT_ENTRIES`: `.gitignore`, `.gitkeep`, `.editorconfig`, `.nvmrc`, `.node-version`,
+`.prettierignore`, `.eslintignore`, `.dockerignore`, `.mailmap`, `.yarn/cache/`): a new tool's
+config usually lives at the root under a dot, and a list of the dangerous ones is always a tool
+behind.
+`unheldPaths` releases a path from the non-fixed rules and the root dot hold, matched exactly (a
+directory with `/`, otherwise that one file), never from a fixed rule; an unnormalisable path stays
+held. The config refuses an entry `hostKey` cannot normalise.
 The `package.json` install-script check finds manifests by a `basename` rule through the same
 matcher, so `Package.JSON` is read too.
 Held paths come back as git spelled them, so the hold and `git show` name the real file
