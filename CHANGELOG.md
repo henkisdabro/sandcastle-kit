@@ -11,6 +11,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the
+  weekly window - what Claude Code writes in each pass - stood in for the usage endpoint, so a
+  5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in
+  place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
+  for 10 minutes, so no extra request per ticket).
+
 - **Pointers to README sections that moved into `docs/` now name the right file.** The warning
   about an unconfigured Linear blocker key points at `docs/queue.md` (Blockers), `sandcastle help`
   points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for
