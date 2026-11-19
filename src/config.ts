@@ -13,6 +13,7 @@ import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } fro
 import { CLAUDE_CODE_TOOLS, managedDenied, nearestTool } from "./claude-tools.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { isClaudeSetting } from "./versions.ts";
+import { KIT_CREDENTIALS as AGENT_CREDENTIALS } from "./worktree-lock.ts";
 
 /** Tickets at once when neither `CONCURRENCY` nor the project's `concurrency` says. */
 export const DEFAULT_CONCURRENCY = 4;
@@ -157,6 +158,15 @@ export type ProjectConfig = {
   /** Commands run in each sandbox once it is up, e.g. dependency install. */
   setup?: string[];
   /**
+   * Keys of the credentials files (`~/.config/sandcastle-kit/.env`, `.sandcastle/.env`) that gates and `setup` may
+   * see, e.g. `["NPM_TOKEN"]` for an install from a private registry. Every other key is kept out of a gate-only
+   * sandbox, and unset and redacted for a gate in a ticket's. The agents' credentials (`GH_TOKEN`, the Claude ones,
+   * `CODEX_API_KEY`) cannot be named: a gate runs code an agent wrote.
+   */
+  gateEnv?: string[];
+  /** Keys of the credentials files a ticket's agents get besides their own credentials, e.g. a service key a skill uses. */
+  agentEnv?: string[];
+  /**
    * `true`: mount the host's pnpm store-dir (the parent of `pnpm store path`, asked of the host's
    * pnpm before each command) at `/home/agent/.pnpm-store` and point the sandbox's pnpm at it before `setup`, so
    * each sandbox's install hardlinks instead of downloading. The config holds no host path. Without
@@ -232,8 +242,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "memory" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow"> & {
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "memory" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow" | "gateEnv" | "agentEnv">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "loadPause" | "keepWarm" | "autoCompactWindow" | "gateEnv" | "agentEnv"> & {
     root: string;
     /** `memory` in bytes, or `false` for no limit; unset, the run resolves the default (`memoryLimit`, src/size.ts). */
     memory?: number | false;
@@ -274,7 +284,7 @@ export const hostPnpmStore = (root: string, timeout = 20_000): { path: string } 
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "memory", "herdr", "autonomy", "usagePause", "loadPause", "keepWarm", "autoCompactWindow", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "memory", "herdr", "autonomy", "usagePause", "loadPause", "keepWarm", "autoCompactWindow", "claudeCode", "dockerfile", "mounts", "setup", "gateEnv", "agentEnv", "pnpmStore", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "changelog", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -415,6 +425,14 @@ const checkShape = (config: ProjectConfig) => {
     refuse(`\`name\` ${JSON.stringify(config.name)} would give the project's image the repository \`${projectRepo(config)}\`, which is the kit's own - rename \`name\` in ${CONFIG_PATH}.`);
   }
   for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
+  for (const key of ["gateEnv", "agentEnv"] as const) {
+    const keys = config[key];
+    if (keys === undefined) continue;
+    if (!isStrings(keys) || keys.some((k) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))) refuse(`\`${key}\` must be a list of environment variable names, such as ["NPM_TOKEN"].`);
+    // A gate runs the branch's code: the agents' credentials never reach it (src/worktree-lock.ts).
+    const agents = key === "gateEnv" ? keys.filter((k) => AGENT_CREDENTIALS.includes(k)) : [];
+    if (agents.length) refuse(`\`gateEnv\` names ${agents.join(", ")}, an agent's credential: a gate runs code an agent wrote and never gets one.`);
+  }
   for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);
   for (const entry of config.lean?.keep ?? []) {
     if (!entry.startsWith("tool:")) continue;

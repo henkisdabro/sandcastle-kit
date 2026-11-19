@@ -18,7 +18,7 @@ const xdg = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = xdg;
 mkdirSync(join(xdg, "sandcastle-kit"), { recursive: true });
 writeFileSync(join(xdg, "sandcastle-kit", ".env"), "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-fake\nGH_TOKEN=github_pat_fake\n");
-const { sandboxEnv } = await import("../src/sandbox.ts");
+const { sandboxEnvFor } = await import("../src/sandbox.ts");
 const { hooksPathLines } = await import("../src/lean.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
@@ -46,9 +46,9 @@ const hooksPair = (env: Record<string, string>) => pairs(env).filter(([k]) => k 
 test("a sandbox is given the relative tracked hooks path, while the config holds it and after it is rewritten absolute", () => {
   const { root, git, project } = repo();
   git("config", "core.hooksPath", ".githooks");
-  assert.deepEqual(hooksPair(sandboxEnv(project)), [["core.hooksPath", ".githooks"]]);
+  assert.deepEqual(hooksPair(sandboxEnvFor(project, "ticket")), [["core.hooksPath", ".githooks"]]);
   git("config", "core.hooksPath", join(root, ".githooks"));
-  const env = sandboxEnv(project);
+  const env = sandboxEnvFor(project, "ticket");
   assert.deepEqual(hooksPair(env), [["core.hooksPath", ".githooks"]]);
   assert.deepEqual(pairs(env).slice(0, 2), [["gc.auto", "0"], ["maintenance.auto", "false"]], "beside the maintenance pairs");
 });
@@ -57,7 +57,7 @@ test("git, given that environment, reads the relative path even where the config
   const { root, git, project } = repo();
   git("config", "core.hooksPath", join(root, "gone", "hooks"));
   git("config", "core.hooksPath", join(root, ".githooks"));
-  const env = Object.fromEntries(Object.entries(sandboxEnv(project)).filter(([k]) => k.startsWith("GIT_CONFIG_")));
+  const env = Object.fromEntries(Object.entries(sandboxEnvFor(project, "ticket")).filter(([k]) => k.startsWith("GIT_CONFIG_")));
   const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_CONFIG"))) as Record<string, string>;
   const read = execFileSync("git", ["config", "--get", "core.hooksPath"], { cwd: root, encoding: "utf8", env: { ...clean, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...env } }).trim();
   assert.equal(read, ".githooks");
@@ -65,15 +65,15 @@ test("git, given that environment, reads the relative path even where the config
 
 test("no hooks path pair is added for no value, a path outside the project, or an untracked directory", () => {
   const { root, git, project } = repo();
-  assert.deepEqual(hooksPair(sandboxEnv(project)), []);
+  assert.deepEqual(hooksPair(sandboxEnvFor(project, "ticket")), []);
   git("config", "core.hooksPath", "/home/user/elsewhere/hooks");
-  assert.deepEqual(hooksPair(sandboxEnv(project)), []);
+  assert.deepEqual(hooksPair(sandboxEnvFor(project, "ticket")), []);
   git("config", "core.hooksPath", "../hooks");
-  assert.deepEqual(hooksPair(sandboxEnv(project)), []);
+  assert.deepEqual(hooksPair(sandboxEnvFor(project, "ticket")), []);
   git("config", "core.hooksPath", "untracked-dir");
-  assert.deepEqual(hooksPair(sandboxEnv(project)), []);
+  assert.deepEqual(hooksPair(sandboxEnvFor(project, "ticket")), []);
   git("config", "core.hooksPath", join(root, "untracked-dir"));
-  assert.deepEqual(hooksPair(sandboxEnv(project)), []);
+  assert.deepEqual(hooksPair(sandboxEnvFor(project, "ticket")), []);
 });
 
 test("the lines for the project's own absolute tracked path say sandboxes are given it; an untracked directory keeps the old words", () => {

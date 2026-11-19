@@ -9,7 +9,25 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **A key of the credentials files reaches a sandbox only when the project names it.** A sandbox
+  used to get every key of `~/.config/sandcastle-kit/.env` and `.sandcastle/.env`; now a ticket's
+  gets the agents' credentials plus the keys of the new `agentEnv` and `gateEnv` settings, and a
+  gate-only sandbox (a landing, the base and verify gates) only `gateEnv`'s. A `setup` step or gate
+  that read another key - a private-registry `NPM_TOKEN`, say - fails until the key is listed:
+  `gateEnv: ["NPM_TOKEN"]` in `.sandcastle/config.ts`. `sandcastle doctor` warns when `setup` names
+  a key `gateEnv` leaves out, and the gates log names every withheld key. Run `pnpm install` in the
+  kit: its Sandcastle patch changed. `/sandcastle update` walks through the keys.
+
 ### Fixed
+
+- **Gates no longer see credentials beyond the ones they are given.** A gate-only sandbox is opened
+  with no key of the credentials files except those `gateEnv` names, and in a ticket's sandbox every
+  forwarded key but `gateEnv`'s is unset for each gate and its value redacted from the output, where
+  only the kit's three tokens were before. Sandcastle's own forwarding of every `.sandcastle/.env`
+  key into each container is switched off by the kit's patch. The agents' tokens still sit in a
+  ticket's container environment, which `docs/safety.md` now states (#996).
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the

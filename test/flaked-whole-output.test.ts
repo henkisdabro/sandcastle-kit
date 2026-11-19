@@ -45,10 +45,10 @@ test("a stream longer than half the exec tail leaves the failing tests unset", a
 });
 
 test("every sandbox is given the exec tail cap", () => {
-  const options = dockerOptions({ root: mkdtempSync(join(tmpdir(), "sandcastle-test-")), tracker: fakeTracker(), mounts: [], cpus: false } as unknown as Parameters<typeof dockerOptions>[0], "image:tag");
+  const options = dockerOptions({ root: mkdtempSync(join(tmpdir(), "sandcastle-test-")), tracker: fakeTracker(), mounts: [], cpus: false } as unknown as Parameters<typeof dockerOptions>[0], "image:tag", "gate");
   assert.equal(options.maxOutputTailChars, EXEC_TAIL_CHARS);
   assert.equal(EXEC_TAIL_CHARS, 8 * 1024 * 1024);
-  assert.equal(options.imageName, "image:tag");
+  assert.equal(options.imageName, "image:tag", "gate");
 });
 
 const fail = (output: string, tests?: string[]): Failure => ({ name: "test", command: "run-tests", exitCode: 1, output, ...(tests ? { tests } : {}) });

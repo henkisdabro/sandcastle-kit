@@ -23,7 +23,7 @@ mkdirSync(join(xdg, "sandcastle-kit"), { recursive: true });
 const credentialsFile = "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-fake\nGH_TOKEN=github_pat_fake\n";
 writeFileSync(userEnv, credentialsFile);
 const { claudeEnv, configureAutoCompact, implAgent } = await import("../src/agents.ts");
-const { sandboxEnv } = await import("../src/sandbox.ts");
+const { sandboxEnvFor } = await import("../src/sandbox.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -89,11 +89,11 @@ test("the sandbox's env and the agent's share no key, so Sandcastle never refuse
   configureAutoCompact(300_000);
   try {
     writeFileSync(userEnv, credentialsFile);
-    const env = sandboxEnv(project);
+    const env = sandboxEnvFor(project, "ticket");
     assert.deepEqual(Object.keys(claudeEnv()).filter((k) => k in env), []);
     // The person's own .env naming the agent's keys: left out of the container's, where they would clash.
     writeFileSync(userEnv, `${credentialsFile}CLAUDE_CODE_DISABLE_AUTO_MEMORY=0\nCLAUDE_CODE_AUTO_COMPACT_WINDOW=200000\n`);
-    const theirs = sandboxEnv(project);
+    const theirs = sandboxEnvFor(project, "ticket");
     assert.deepEqual(Object.keys(claudeEnv()).filter((k) => k in theirs), []);
     assert.equal(theirs.GH_TOKEN, "github_pat_fake", "the credentials stay");
     const [command] = await passCommand(theirs);
@@ -104,11 +104,11 @@ test("the sandbox's env and the agent's share no key, so Sandcastle never refuse
   }
 });
 
-test("a key the agent's env does not set stays the person's: the window from .env when the project sets none", () => {
+test("a key the agent's env does not set stays the person's: the window from .env, named in agentEnv, when the project sets none", () => {
   configureAutoCompact(undefined);
   writeFileSync(userEnv, `${credentialsFile}CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000\n`);
   try {
-    assert.equal(sandboxEnv(project).CLAUDE_CODE_AUTO_COMPACT_WINDOW, "200000");
+    assert.equal(sandboxEnvFor({ ...project, agentEnv: ["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] }, "ticket").CLAUDE_CODE_AUTO_COMPACT_WINDOW, "200000");
   } finally {
     writeFileSync(userEnv, credentialsFile);
   }

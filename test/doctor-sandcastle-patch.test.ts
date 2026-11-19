@@ -1,6 +1,6 @@
 // doctor's "kit dependencies installed" holds the installed @ai-hero/sandcastle to the version package.json pins and
 // to the kit's pnpm patch: `npm install`, or a `git pull` with no `pnpm install` after it, leaves a dependency that runs
-// unpatched (#711, #782) while the directory exists. The probe takes the kit's directory, so a fake one stands in; the
+// unpatched (#711, #782, #996) while the directory exists. The probe takes the kit's directory, so a fake one stands in; the
 // real install must pass it. No Docker, model or network.
 //
 //   pnpm test:file test/doctor-sandcastle-patch.test.ts
@@ -53,12 +53,17 @@ test("a 30 s prompt expansion limit is the patch not applied (#782)", () => {
   assert.deepEqual(sandcastlePatchProblems(kit), ["the kit's patch is not applied: a prompt's shell expression has 30 s, too short for gh-retry.sh (#782)"]);
 });
 
+test("a sandbox open that forwards every key of .sandcastle/.env is the patch not applied (#996)", () => {
+  const kit = fakeKit((t) => t.replace(/const resolvedEnv = \{\}; \/\/ sandcastle-kit patch \(#996\)[^\n]*/, "const resolvedEnv = yield* resolveEnv(hostRepoDir);"));
+  assert.deepEqual(sandcastlePatchProblems(kit), ["the kit's patch is not applied: every sandbox gets every key of .sandcastle/.env (#996)"]);
+});
+
 test("another installed version than the pinned one names both", () => {
   assert.deepEqual(sandcastlePatchProblems(fakeKit(undefined, "0.12.0")), [`@ai-hero/sandcastle 0.12.0 is installed, the kit pins ${pinned}`]);
 });
 
 test("a dist it cannot find its anchors in names the patch, and none installed says so, without a throw", () => {
   const kit = fakeKit(() => "");
-  assert.equal(sandcastlePatchProblems(kit).length, 3);
+  assert.equal(sandcastlePatchProblems(kit).length, 4);
   assert.deepEqual(sandcastlePatchProblems(mkdtempSync(join(tmpdir(), "sandcastle-patch-none-"))), ["@ai-hero/sandcastle is not installed"]);
 });

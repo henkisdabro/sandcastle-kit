@@ -10,8 +10,19 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   sandbox. It cannot push, edit workflows or change settings (`sandcastle doctor --verify` checks it
   cannot push, and that it can see the repository: a fine-grained token whose Repository access
   leaves the repo out gets a FIX there, and `sandcastle run` refuses the same way before any sandbox
-  starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
-  without the kit's tokens, and a token value in gate output is replaced with `<redacted>`. So is
+  starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in.
+  The credentials files are an allowlist, not a pass-through: a ticket's sandbox gets the agents'
+  credentials (`GH_TOKEN`, the Claude key or token, `CODEX_API_KEY`) and the keys `agentEnv` and
+  `gateEnv` name; a gate-only sandbox (a landing, the base and verify gates) gets only `gateEnv`'s,
+  and never an agent's credential, since a gate runs code an agent wrote.
+  Every other key stops at the host, and the gates log names the keys withheld (names, never values).
+  Sandcastle's own forwarding of every `.sandcastle/.env` key is switched off by the kit's patch to it.
+  A gate in a ticket's sandbox runs with every forwarded key but `gateEnv`'s unset, and every
+  forwarded value of 8 characters or more in gate output is replaced with `<redacted>`.
+  What `env -u` cannot reach: in a ticket's sandbox the agents' credentials stay in the container's own
+  environment (PID 1's), which a gate's code can read back. They cannot move to the agent's command
+  alone, since the prompt's shell expressions run `gh` with the container's environment; the token's
+  narrow scope is the bound there. So is
   a token of Codex's login (`~/.codex/auth.json`, read when `CROSS_REVIEW=1`) in the
   output a crashed agent's log and crash note show.
   Of that login, a sandbox gets the access token and the ID token but **not the refresh token**: with

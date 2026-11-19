@@ -53,3 +53,12 @@ test("a valid config, repair off included, loads", async () => {
   assert.equal(p.concurrency, 2);
   assert.equal(p.repair.attempts, 0);
 });
+
+// #996: `gateEnv` and `agentEnv` name credentials-file keys a sandbox may see; a gate never gets an agent's credential.
+test("gateEnv and agentEnv take variable names, and gateEnv no agent credential", async () => {
+  await refused('gateEnv: "NPM_TOKEN"', /`gateEnv` must be a list of environment variable names/);
+  await refused('agentEnv: ["NOT A NAME"]', /`agentEnv` must be a list of environment variable names/);
+  await refused('gateEnv: ["NPM_TOKEN", "GH_TOKEN"]', /`gateEnv` names GH_TOKEN, an agent's credential/);
+  const project = await load(`export default { ${ok}, gateEnv: ["NPM_TOKEN"], agentEnv: ["SERVICE_KEY"] };\n`);
+  assert.deepEqual([project.gateEnv, project.agentEnv], [["NPM_TOKEN"], ["SERVICE_KEY"]]);
+});

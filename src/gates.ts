@@ -19,7 +19,7 @@ import { type Hook, hooksPathLines, hooksPathOutside, hostHooks } from "./lean.t
 import { type MachineCpu, type PassReadings, cpuFields, cpuHigh, cpuOf, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { type SlotClaim, withExtraSlot, withSlot } from "./pool.ts";
 import { EXEC_TAIL_CHARS, forgetFork, limitMemory, oomKills, oomNote, sandboxConfig, sandcastleVersion, setupFailure, sh, withContainerCpus } from "./sandbox.ts";
-import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
+import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree, withheldFromGates } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { shq } from "./generated.ts";
@@ -264,6 +264,10 @@ export const runGates = async (project: Project, sandbox: Parameters<typeof exec
     const failures: Failure[] = [];
     const before = await dirtyPaths(sandbox);
     const head = await headOf(sandbox);
+    // A gate that needed a credentials-file key (a private-registry install, say) goes red once the key stops at the
+    // host (#996), and its own output rarely says why; the log names the keys kept back. Names only, never a value.
+    const kept = withheldFromGates().sort();
+    if (log && kept.length) appendFileSync(log, `\n# withheld from the gates (list a key in gateEnv to pass it): ${kept.join(", ")}\n`);
     // A gate killed for memory exits 137 like any SIGKILL: the cgroup's counts say which it was, read after each gate so a
     // kill is told only to the gate it happened in.
     let oomAt = await oomKills(sandbox);
@@ -580,7 +584,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     // planted since the last check would run on the host. Checked last thing before it, after the wait for a slot; a
     // failure throws with nothing opened.
     await beforeOpen?.(`before opening the ${label} sandbox`);
-    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }).then((s) => limitMemory(s, project.memory)), exclusive);
+    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile, "gate") }).then((s) => limitMemory(s, project.memory)), exclusive);
     // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
     // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
     // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
