@@ -237,15 +237,18 @@ export const AGENT_READING_FRESH_SECONDS = 10 * 60;
 
 /**
  * Why no further issue should start, or undefined to carry on. The newest reading of the run's own Claude
- * agents (`agent`: `usage` in the run record) is used when it is younger than ten minutes, and then the
- * endpoint is not asked and no credential is read; before the first reading, and once the newest is older, the
- * endpoint answers as it always did. A window whose reset has passed since the reading counts as spent no more.
+ * agents (`agent`: `usage` in the run record) is used when it is younger than ten minutes and carries both
+ * windows, and then the endpoint is not asked and no credential is read; before the first reading, once the
+ * newest is older, and while it lacks a window, the endpoint answers as it always did. A window whose reset has
+ * passed since the reading counts as spent no more.
  */
 export const usageStop = async (env: Record<string, string>, readers: LoginReaders = hostLoginReaders, agent?: () => PlanUsage | undefined, now = Date.now) => {
   if (!USAGE_CHECK) return undefined;
   const seconds = Math.floor(now() / 1000);
   const newest = agent?.();
-  if (newest?.windows && newest.at !== undefined && seconds - newest.at < AGENT_READING_FRESH_SECONDS) {
+  // Claude Code writes the weekly window alone in each pass, so a week-only reading is usually the freshest:
+  // standing in for the endpoint, it would leave the 5-hour window - the one that runs out within a run - unchecked.
+  if (newest?.windows?.fiveHour && newest.windows.week && newest.at !== undefined && seconds - newest.at < AGENT_READING_FRESH_SECONDS) {
     lastReading = "got";
     const stop = usageStopPercent();
     const over = openWindows([newest], seconds).filter((w) => w.percent >= stop);

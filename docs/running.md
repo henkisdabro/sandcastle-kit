@@ -246,7 +246,7 @@ Herdr's sidebar and on the closing summary.
 It is the plan's own account of itself, so it needs no setting and no credential and is independent
 of the usage guard (`USAGE_CHECK`), which asks the plan's endpoint before each ticket and can stop
 the queue - though once an agent has reported, the guard reads the same numbers while the newest is
-under 10 minutes old, and makes no request.
+under 10 minutes old and carries both windows, and makes no request.
 `USAGE_PAUSE` ([Pausing a run](#-pausing-a-run)) acts on them too.
 With an API key there is no plan to show: no lane, and the RUN lane says `API credits`.
 A record from an older kit, or a run with no Claude model, has no `usage` and draws no lane.

@@ -28,6 +28,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   only the kit's three tokens were before. Sandcastle's own forwarding of every `.sandcastle/.env`
   key into each container is switched off by the kit's patch. The agents' tokens still sit in a
   ticket's container environment, which `docs/safety.md` now states (#996).
+- **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the
+  weekly window - what Claude Code writes in each pass - stood in for the usage endpoint, so a
+  5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in
+  place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
+  for 10 minutes, so no extra request per ticket).
+- **A run's tickets waiting for a gates slot off the count no longer hold back another run.** A
+  ticket that moved its sandbox off the count to wait for or run its gates adds nothing to its run's
+  demand until it asks for a slot again for a repair, so the run's share no longer covers slots it
+  cannot use, and another run with tickets queued takes them instead of waiting for its share.
+- **Protected paths are matched as the host resolves them.** A branch that spelled a protected path
+  in another case (`.Husky/pre-commit`, `LEFTHOOK.yml`), with a trailing dot or an HFS+-ignorable
+  code point, or committed a protected directory's bare entry (a `.codex` file or symlink) landed
+  unheld; it is now held, and the hold names the path as the branch spelled it. A `Package.JSON`
+  install script is checked like `package.json`'s. `lean-apply` now leaves a path alone when a
+  directory on its way cannot be read (`EACCES`, `ENOTDIR`), not only when it crosses a symlink.
+  (#991, #995)
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
@@ -44,6 +60,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   Herdr app had loaded the mod.** The remove leaves the app's own `jsconfig.json` and
   `gpui-kit.d.ts` behind, and the reinstall refused that folder as "not the kit's", as doctor
   warned. A stampless folder holding only those files is now treated as the kit's leftover (#987).
+- **A stopped run no longer leaves its scratch worktrees behind in silence when git fails on one.**
+  The first git removal that failed (a stale `index.lock`, a busy directory) ended the exit's
+  clean-up: the later worktrees and their `sandcastle/*` branches were never tried and nothing was
+  printed. Each is now tried, and the exit prints one line naming any it left, with
+  `sandcastle clean` - also when its `.git` check fails. `sandcastle clean` likewise goes on past
+  such a scratch worktree and lists it as left (#988).
 
 ## [0.26.0] - 2026-11-14
 

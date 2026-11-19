@@ -934,6 +934,10 @@ state.
   more agent passes than workers, and the uncounted lock goes once the slot is held. A pause answers a queued retake with nothing:
   the attempt parks at a juncture and asks again after the resume. A green ticket asks for none. A stopped run grants no slot,
   and the pass runs on the uncounted lock. `test/schedule-gate-wait-worker.test.ts`.
+  An attempt off its worker adds nothing to the run's demand from its `gateWait` until a retake is queued (`idleOff`, not
+  `uncounted`, which `gateSlot` empties while the ticket still holds no counted slot); a declined retake drops it out again.
+  Counted, its run's share would cover slots it cannot use and hold another run at its share while they sit free.
+  `test/schedule-demand-gate-wait.test.ts`, `test/pool-share-gate-wait.test.ts`.
   A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
   `src/burndown.ts`: the run record's `waitsForShare` and `waitsFor`, which the status view's next-to-start rows say,
   and the heartbeat's `waiting for a sandbox slot`). The demand is counted as before, from the push.
@@ -1687,6 +1691,16 @@ container path is named, a sandbox's own worktree record held to what git writes
 git command in that worktree (below), protected paths and files over 50 MB held for a person, run
 lock
 
+Protected paths (`protectedAmong`, `protectedRules`) are matched through `src/host-path.ts`, never on
+git's raw path bytes: a macOS or Windows host opens `.Husky/pre-commit` as the `.husky/` hook, so a
+raw prefix test let it land.
+An entry ending in `/` is a `dir` rule, which also holds a file or symlink committed under the
+directory's own name (a bare `.codex`); any other entry keeps its prefix match.
+The `package.json` install-script check finds manifests by a `basename` rule through the same
+matcher, so `Package.JSON` is read too.
+Held paths come back as git spelled them, so the hold and `git show` name the real file
+(`test/guard-bypasses.test.ts`, `test/host-path.test.ts`).
+
 `landInSandbox` (`src/land.ts`) checks the fingerprint before its sandbox opens (against `expected`,
 below) and three times after: before its sandbox closes (with the worktree's records,
 `checkBeforeClose`, below), after it closes, and again straight before the fast-forward of the base.
@@ -1860,8 +1874,14 @@ Not when the run stopped on the guard (`guardStopped`), and not when the run's `
 at the exit against the start's reading (the host git's after the base gates), fails: the
 worktree and its branch are then left for a person, as `test/base-gates-stop-leftovers.test.ts`
 holds.
+A git failure on one worktree (a stale `index.lock`, a busy directory) leaves that one in `left`
+with git's reason and the loop goes on to the next, for the exit and `sandcastle clean` alike
+(`test/scratch-removal-failure.test.ts`).
+Whatever the exit leaves - every recorded worktree still there when the check throws, or the ones
+git failed on - it names in one stderr line with `sandcastle clean`, written by `console.error`
+since an `exit` listener runs nothing asynchronous; the handler never throws.
 The library's line is printed before that check, so `reword` hedges it: the run removes the
-worktree on exit unless its `.git` check fails, and `sandcastle clean` does then
+worktree on exit, or names it for `sandcastle clean` if it cannot
 (`test/library-lines.test.ts`, `test/stop-removes-scratch-worktrees.test.ts`).
 The sites: a ticket's pipeline at its end (the settle's check, before the close and no longer after
 it) and at a pause (`HostGit.check`); the gate sandboxes (`gateBase`: the run's `HostGit.check` for
@@ -2118,6 +2138,29 @@ status, fetch and fast-forward, the cut's status and fast-forward - in which ano
 running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the
 time Sandcastle takes to remove the stopped container before its `git status`; elsewhere
 milliseconds, as between the landing's last check and its fast-forward (above).
+
+## `src/host-path.ts`
+
+One normaliser and one matcher for the paths a sandbox branch carries to the host; pure, with no
+git.
+`hostKey` gives the form a case-insensitive host resolves: NFC, the code points HFS+ ignores (the
+list git's `is_hfs_dotgit` skips) removed, each component's trailing dots and spaces stripped
+(NTFS), lowercased, `.` and empty components dropped.
+A path it cannot normalise - `..`, a control character, an absolute path, a component of only dots
+or spaces - comes back as `unknown`, not a string, and `matchRules` returns it as matched: unknown
+is held.
+A `PathRule` is `dir` (the entry itself and everything under it), `file`, `prefix` or `basename`
+(a component of that name at any depth), with the `runner` that executes it on the host; a rule's
+value is folded as a path is, but keeps its trailing dot, so `lefthook.` does not widen to
+`lefthookery`.
+`matchRules` returns the original paths, never the folded ones.
+`containedHostPath` is the #827 check `lean-apply` (`apply`, `src/lean.ts`) runs before it removes
+or writes a path in a fresh worktree: it `lstat`s every directory on the way and refuses a symlink
+among them.
+Only `ENOENT` reads as "nothing there"; any other error (`EACCES`, `ENOTDIR`) is `unknown`, so the
+path is left alone and said so, because what lies past it cannot be read
+(`test/lean-apply-symlink.test.ts`, the `lean-apply` rows of `test/guard-bypasses.test.ts`).
+The final component is the caller's: removing a symlink never follows it.
 
 ## `src/pool.ts`
 
@@ -2850,12 +2893,16 @@ below 75%, amber from 75%, red from 90%) that the status view draws by, and `USA
 (15 minutes) is when it greys a reading.
 **The guard prefers the agents' readings.** `usageStop(env, readers, agent, now)` is given the
 newest Claude reading of the run (`agent`: its `usage` entry) and, when it is younger than
-`AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache), decides from it
-alone: no request and no credential read, the stop line naming the windows as the endpoint's reading
+`AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache) and carries both
+windows (`fiveHour` and `week`), decides from it alone: no request and no credential read, the stop line naming the windows as the endpoint's reading
 does (`five_hour`, `seven_day`), a window whose reset has passed counted as spent no more, and
 `usageReadingLost()` false.
-Before the first reading, and once the newest is older than that, the endpoint answers exactly as
-before. `test/usage-pause.test.ts`.
+Before the first reading, once the newest is older than that, and while it lacks a window, the
+endpoint answers exactly as before.
+Claude Code writes the weekly window alone in each pass, so a week-only reading is often the
+freshest; deciding from it would leave the 5-hour window, the one that runs out within a run,
+unchecked.
+`test/usage-pause.test.ts`, `test/usage-stop-five-hour.test.ts`.
 
 **`sandcastle usage`** (`usageCommand(env, recorded, readers, now)`) prints the plan's usage between
 runs and writes nothing. `recordedUsage(logs)` gives each provider's newest reading in

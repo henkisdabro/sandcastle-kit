@@ -139,12 +139,13 @@ test("the scratch worktree an earlier run left is still there after a later run 
   assert.deepEqual(branches(root).filter((b) => b.startsWith("sandcastle/")), ["sandcastle/base-gates-1"]);
 });
 
-test("a SIGINT whose exit-time .git check fails leaves the worktree, and the printed line says the run removes it unless that check fails", async () => {
+test("a SIGINT whose exit-time .git check fails leaves the worktree, and the exit names it for `sandcastle clean`", async () => {
   const root = repo(false);
   const out = await stopped(root, true);
   assert.equal(scratchDirs(root).length, 1, out);
   assert.ok(branches(root).some((b) => /^sandcastle\/base-gates-\d+$/.test(b)));
-  assert.match(out, /To clean up: the run removes this throwaway worktree on exit unless its `\.git` check fails - then `sandcastle clean` does/);
+  assert.match(out, /To clean up: the run removes this throwaway worktree on exit, or names it for `sandcastle clean` if it cannot/);
+  assert.match(out, /Left this throwaway worktree for `sandcastle clean`: .*sandcastle-base-gates-/);
 });
 
 test("burndown() hands its exit the run's .git reading and skips the removal after a guard stop", () => {
