@@ -144,6 +144,11 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   content.
   `.git/modules/` (the git directories of submodules) is fingerprinted too, since a config a sandbox
   adds there would run on a `git status` that looks into a submodule.
+  So are the inputs that swap which objects git reads: every replace ref (`refs/replace/*`, loose or
+  packed, read through `git for-each-ref`), `.git/shallow` and `.git/objects/info/alternates`.
+  One added or changed mid-run stops the run, naming it, since it could hide what a branch changes.
+  Replace refs already there at the start are yours: the run prints a note saying your own
+  `git log` still honours them, and goes on.
   The records of worktrees you made by hand beside a run (`.git/worktrees/<name>/`: `commondir`,
   `gitdir` and `config.worktree`, present or absent, and their content) are watched as they stand at
   the start: one that changes stops the run, naming it, since your next git command in that worktree

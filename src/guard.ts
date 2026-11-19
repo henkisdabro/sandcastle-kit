@@ -75,8 +75,12 @@ export const pinHostGitConfig = (root: string) => {
   let entries = "";
   try {
     entries = sh("git", ["config", "-z", "--get-regexp", COMMAND_KEYS], root);
-  } catch {
-    // Exit 1: none of the keys is set.
+  } catch (error) {
+    // Exit 1 alone means none of the keys is set. Any other failure (a config git cannot parse or open) read as
+    // "none" would leave a planted program unpinned for the host's next git call.
+    if ((error as { status?: number }).status !== 1) {
+      throw new OperatorError(`NOT STARTED: git cannot read the config of ${root}, so the program-running keys in it cannot be pinned. Inspect \`git -C ${root} config --local --list\` before running any other git command there.`, { cause: error });
+    }
   }
   for (const entry of entries.split("\0").filter(Boolean)) {
     const at = entry.indexOf("\n");
@@ -226,6 +230,31 @@ const agentBranches = (root: string): Record<string, string> => {
 };
 
 /**
+ * Every `refs/replace/*` ref, keyed by the path its loose file would have (so a stop names it as it names a file), its
+ * value the object it stands in with. A replace ref makes git read another object wherever it meets the one named, so
+ * a sandbox could hide what a branch changes. Read through `for-each-ref`, not the directory: a packed ref has no file.
+ */
+const replaceRefs = (root: string, dir: string): Record<string, string> => {
+  const found: Record<string, string> = {};
+  for (const line of sh("git", ["for-each-ref", "--format=%(objectname) %(refname)", "refs/replace/"], root).split("\n")) {
+    const at = line.indexOf(" ");
+    if (at > 0) found[join(dir, line.slice(at + 1))] = `replace ${line.slice(0, at)}`;
+  }
+  return found;
+};
+
+/**
+ * The line a run's start prints when the shared `.git` already holds replace refs: they are the operator's own (one a
+ * sandbox makes mid-run stops the run), and the kit reads with substitution off, so they sway no decision - but the
+ * operator's own `git log` still honours them, and may show a branch other than the one that lands.
+ */
+export const replaceRefsWarning = (fingerprint: Fingerprint): string | undefined => {
+  const count = Object.values(fingerprint.files).filter((v) => v.startsWith("replace ")).length;
+  if (!count) return undefined;
+  return `Note: the repository holds ${count} replace ref${count === 1 ? "" : "s"} (\`git for-each-ref refs/replace/\`). The kit reads branches with them off, so they cannot change what it lands; your own \`git log\` and \`git diff\` still honour them, so read a branch with \`git --no-replace-objects\` to see what lands. One added or changed mid-run stops the run.`;
+};
+
+/**
  * With `share` (the run's own fingerprint), the branches and the in-flight set are that one's, not a
  * fresh reading: a check that a landing makes while pipelines run must not take an agent's commits,
  * or a pipeline that ended meanwhile, for a branch that moved.
@@ -248,11 +277,14 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   // already there waits for it). Listed only while it exists, so creating one, even an empty one, differs
   // from its absence, which an empty file's hash would not.
   const worktreeConfigPath = join(dir, "config.worktree");
-  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
+  // shallow and objects/info/alternates change which objects the host's git reads: a sandbox's history cut short, or
+  // objects taken from a directory of its choosing. Absent reads as the hash of nothing, so a new one is a difference.
+  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : []), join(dir, "shallow"), join(dir, "objects", "info", "alternates")];
   const files: Record<string, string> = {};
   const modes: Record<string, string> = {};
   const hashOf = entryHash;
   for (const f of paths) files[f] = hashOf(f);
+  Object.assign(files, replaceRefs(project.root, dir));
   // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
   // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
   Object.assign(files, hooksTree(dir, hashOf, modes));
@@ -1074,9 +1106,10 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
     const names = changed.map((f) => relative(realpathSync(root), f) + (before.files[f] === now.files[f] ? " (executable bit)" : "")).join(", ");
     const keys = changed.includes(now.config.path) && configWords.length ? ` In .git/config: ${configWords.join("; ")}.` : "";
     const worktreeKeys = changed.includes(now.worktreeConfig.path) ? ` In .git/config.worktree: ${worktreeWords.join("; ")}.` : "";
+    const replaced = changed.some((f) => (before.files[f] ?? now.files[f]).startsWith("replace "));
     throw new GuardStop(
       `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git.${keys}${worktreeKeys} ` +
-        `Inspect \`git -C ${root} config --local --list\` and .git/info/${worktreeKeys && ", and .git/config.worktree,"} before running any other git command there.`,
+        `Inspect \`git -C ${root} config --local --list\` and .git/info/${worktreeKeys && ", and .git/config.worktree,"}${replaced ? ` (and \`git -C ${root} for-each-ref refs/replace/\`)` : ""} before running any other git command there.`,
       { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`}${worktreeKeys && `; config.worktree: ${worktreeWords.join("; ")}`})` },
     );
   }

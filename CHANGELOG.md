@@ -35,6 +35,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   pointer, is held. A branch the kit cannot read, or whose `package.json` does not parse, is held
   with the reason (`reader-failed`, `manifest-unparseable`) instead of landing or losing its ready
   line, and `sandcastle preview` shows it held. (#992, #995)
+- **A sandbox can no longer swap the objects the host reads without stopping the run.** The `.git`
+  fingerprint now watches replace refs (`refs/replace/*`, loose or packed), `.git/shallow` and
+  `.git/objects/info/alternates`: one added or changed mid-run stops the run and names it.
+  Replace refs already there when a run or `sandcastle gates` starts print a note, not a refusal.
+  A `.git/config` git cannot read now stops a start at the pins with `NOT STARTED`, where it was
+  read as holding no program-running key.
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
