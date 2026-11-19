@@ -126,7 +126,7 @@ export const usageToken = (
   return { source: "CLAUDE_CODE_OAUTH_TOKEN", token: env.CLAUDE_CODE_OAUTH_TOKEN };
 };
 
-type Window = { kind: string; percent: number };
+type Window = { kind: string; percent: number; resetsAt?: number };
 // The reading, or the request for it that is in flight - one request serves
 // every worker, so parallel workers do not each spend the rate limit.
 let cache: { at: number; windows: Promise<Reading> } | undefined;
@@ -138,8 +138,11 @@ const parse = (payload: Record<string, unknown>): Window[] => {
   const limits = payload.limits as { kind?: string; percent?: number }[] | undefined;
   if (limits?.length) return limits.map((l) => ({ kind: String(l.kind ?? "?"), percent: Number(l.percent ?? 0) }));
   return Object.entries(payload).flatMap(([key, value]) => {
-    const w = value as { utilization?: number } | null;
-    return typeof w === "object" && w?.utilization != null ? [{ kind: key, percent: Number(w.utilization) }] : [];
+    const w = value as { utilization?: number; resets_at?: unknown } | null;
+    if (typeof w !== "object" || w?.utilization == null) return [];
+    // An ISO time; the usage pause needs it to know when to resume, the guard does not.
+    const resetsAt = typeof w.resets_at === "string" ? Math.floor(Date.parse(w.resets_at) / 1000) : NaN;
+    return [{ kind: key, percent: Number(w.utilization), ...(resetsAt > 0 && { resetsAt }) }];
   });
 };
 
@@ -264,6 +267,27 @@ export const usageStop = async (env: Record<string, string>, readers: LoginReade
   lastReading = Array.isArray(windows) ? "got" : "none";
   const over = Array.isArray(windows) ? windows.filter((w) => w.percent >= stop) : undefined;
   return over?.length ? `plan usage ${describe(over)} reached USAGE_STOP=${stop}%` : undefined;
+};
+
+/**
+ * Claude's windows from the usage endpoint, for the usage pause (`UsagePausePorts.endpoint`): through the guard's
+ * ten-minute cache, so the pause and `USAGE_STOP` share one request, and whether or not `USAGE_CHECK` is on. The
+ * credential is read only when the pause asks, which it does only for a window the agents' readings lack. A window
+ * the endpoint gives without a reset time is left out: the pause could not tell when to resume.
+ */
+export const usageEndpointWindows = async (env: Record<string, string | undefined>, readers: LoginReaders = hostLoginReaders): Promise<EndpointWindows> => {
+  const credential = usageToken(env, process.platform, readers);
+  if (!credential) return { why: "no subscription token (CLAUDE_CODE_OAUTH_TOKEN) to read it with" };
+  if (credential.source === "api key") return { why: "the sandboxes spend ANTHROPIC_API_KEY" };
+  if (!("token" in credential)) return { why: "the Claude Code login has expired" };
+  const reading = await read(credential.token);
+  if (!Array.isArray(reading)) return { why: reading.why };
+  const windows: NonNullable<PlanUsage["windows"]> = {};
+  for (const window of CLAUDE_WINDOWS) {
+    const w = reading.find((r) => r.kind === ENDPOINT_KIND[window]);
+    if (w?.resetsAt && Number.isFinite(w.percent)) windows[window] = { percent: Math.min(100, Math.max(0, Math.round(w.percent))), resetsAt: w.resetsAt };
+  }
+  return Object.keys(windows).length ? { windows } : { why: "the usage endpoint's answer had no window with a reset time" };
 };
 
 // ---------------------------------------------------------------------------
@@ -842,7 +866,8 @@ export const usageCommand = async ({
 // `sandcastle pause` itself when a window of Claude's plan reaches the threshold, or when an agent hits the
 // limit anyway, and resumes by itself a minute after that window's reset. A Codex window at the threshold never
 // pauses the run: the cross-review it pays for is skipped instead (`crossReviewSpentFor`). It reads the same agent readings the
-// status view shows (`watchUsage`), so it needs no request and no credential. The pause is the control file
+// status view shows (`watchUsage`), and the guard's endpoint (cached, `usageEndpointWindows`) only for a Claude window those
+// readings lack: Claude Code reports the week alone, and the 5-hour window is the one that runs out within a run. The pause is the control file
 // `sandcastle pause` writes (src/detach.ts), with the cause in it: that is what lets a person's `sandcastle
 // resume` end it early, and a person's `sandcastle pause` take it over so the timer never undoes it.
 // ---------------------------------------------------------------------------
@@ -967,7 +992,22 @@ export type UsagePausePorts = {
   now?: () => number;
   /** The windows a person resumed the run through. A test gives its own; a run keeps one for the process (`RESUMED`). */
   resumed?: Set<string>;
+  /**
+   * Claude's windows from the usage endpoint (`usageEndpointWindows`), asked only when the agents' reading lacks a window the
+   * pause judges. Absent, the pause judges the readings alone.
+   */
+  endpoint?: () => Promise<EndpointWindows>;
+  /** One line to the run's log: that a window the readings lack could not be read from the endpoint. */
+  say?(line: string): void;
 };
+
+/** Claude's windows as the usage endpoint gives them, with their reset times, or why there are none. */
+export type EndpointWindows = { windows: NonNullable<PlanUsage["windows"]> } | { why: string };
+
+const CLAUDE_WINDOWS = ["fiveHour", "week"] as const;
+
+/** How long the pause goes between asks of the endpoint: as long as the endpoint's own cache keeps a reading. */
+const ENDPOINT_ASK_SECONDS = 10 * 60;
 
 // One for the process, not for a turn: each turn of a multi-turn run (autonomy 2, 3, drain) builds its own
 // usage pause, and a person's early resume of a window must not be undone by the next turn's first reading.
@@ -997,6 +1037,35 @@ export const createUsagePause = (threshold: number, ports: UsagePausePorts): Usa
   const resumed = ports.resumed ?? RESUMED;
   let seen: UsagePaused | undefined;
   let latest: PlanUsage[] = [];
+  // The endpoint's last windows, when it was last asked (seconds), whether an ask is in flight, and whether a failure was said.
+  let fromEndpoint: NonNullable<PlanUsage["windows"]> = {};
+  let askedAt: number | undefined;
+  let asking = false;
+  let saidUnread = false;
+  // The windows Claude's reading lacks: none, or one that has reset.
+  const lacking = (usage: PlanUsage[], now: number) => {
+    const claude = usage.find((u) => u.provider === "claude");
+    if (!claude?.windows) return [];
+    const open = new Set(openWindows([claude], now).map((w) => w.window));
+    return CLAUDE_WINDOWS.filter((w) => !open.has(w));
+  };
+  // Claude's reading with each window it lacks taken from the endpoint's last answer: only that window, so a window
+  // the agents do report is never second-guessed by an older endpoint reading.
+  const filled = (usage: PlanUsage[], now: number): PlanUsage[] => {
+    const missing = lacking(usage, now).filter((w) => fromEndpoint[w]);
+    if (!missing.length) return usage;
+    return usage.map((u) => (u.provider === "claude" && u.windows ? { ...u, windows: { ...u.windows, ...Object.fromEntries(missing.map((w) => [w, fromEndpoint[w]])) } } : u));
+  };
+  // The newest readings as the agents gave them, and the pause they call for with the endpoint's windows filled in.
+  let raw: PlanUsage[] = [];
+  const judge = () => {
+    observe();
+    const now = seconds();
+    latest = filled(raw, now);
+    const pause = usagePauseFor(latest, threshold, now, (w) => resumed.has(windowKey(w)));
+    if (pause) ports.hold(pause, now);
+    return pause;
+  };
   // Looks at the control file and remembers what became of the usage pause. Read before every decision as well as by the
   // schedule's poll: a reading that came in the second after a person's resume must not write the pause again before it was noticed.
   const observe = (): StandingPause | undefined => {
@@ -1017,24 +1086,47 @@ export const createUsagePause = (threshold: number, ports: UsagePausePorts): Usa
   return {
     source: { read: observe },
     reading: (usage) => {
-      observe();
-      latest = usage;
+      raw = usage;
+      const pause = judge();
       const now = seconds();
-      const pause = usagePauseFor(usage, threshold, now, (w) => resumed.has(windowKey(w)));
-      if (pause) ports.hold(pause, now);
+      // At most one ask each ten minutes, whatever it got: the endpoint's own cache keeps a reading that long, and a failed
+      // one is not cached there, so without this every reading (about three a pass) would ask again.
+      const ask = ports.endpoint;
+      if (ask && !asking && lacking(usage, now).length && (askedAt === undefined || now - askedAt >= ENDPOINT_ASK_SECONDS)) {
+        asking = true;
+        askedAt = now;
+        void ask()
+          .then((got) => {
+            if ("windows" in got) {
+              fromEndpoint = got.windows;
+              // The newest readings, which may have come in while the endpoint answered.
+              judge();
+            }
+            const unread = lacking(raw, seconds()).filter((w) => !fromEndpoint[w]);
+            if (unread.length && !saidUnread) {
+              saidUnread = true;
+              const why = "why" in got ? got.why : "the usage endpoint's answer did not give it";
+              ports.say?.(`Usage pause: Claude's ${unread.map((w) => (w === "week" ? "weekly" : "5-hour")).join(" and ")} window could not be read (${why}); the pause judges the windows it has.`);
+            }
+          })
+          // The pause is a courtesy, not a gate: a hold that cannot be written leaves the run as it was, as a reading's does.
+          .catch(() => {})
+          .finally(() => (asking = false));
+      }
       return pause;
     },
     crossReviewSpent: () => crossReviewSpentFor(latest, threshold, seconds()),
     limit: (usage, provider) => {
       const standing = observe();
-      latest = usage;
       const now = seconds();
+      // The endpoint's last answer can name the window the agent ran into when its readings lack it; nothing is asked here.
+      latest = filled(usage, now);
       // A person's pause: the ticket parks at its juncture and runs its pass again after the resume, and nothing here changes it.
       if (standing && !standing.usage) return true;
       // The run's own, which a limit that resets later than the standing window's moves on; or none yet. A window must be
       // near its end to be the one the agent hit: below the threshold the reading would have paused already, and below 90% the
       // limit is not the plan's windows' (`USAGE_RED`).
-      const pause = usageLimitPauseFor(usage, now, provider, Math.min(threshold, USAGE_RED));
+      const pause = usageLimitPauseFor(latest, now, provider, Math.min(threshold, USAGE_RED));
       if (pause) ports.hold(pause, now);
       return pause !== undefined || standing !== undefined;
     },
