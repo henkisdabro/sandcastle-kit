@@ -934,6 +934,10 @@ state.
   more agent passes than workers, and the uncounted lock goes once the slot is held. A pause answers a queued retake with nothing:
   the attempt parks at a juncture and asks again after the resume. A green ticket asks for none. A stopped run grants no slot,
   and the pass runs on the uncounted lock. `test/schedule-gate-wait-worker.test.ts`.
+  An attempt off its worker adds nothing to the run's demand from its `gateWait` until a retake is queued (`idleOff`, not
+  `uncounted`, which `gateSlot` empties while the ticket still holds no counted slot); a declined retake drops it out again.
+  Counted, its run's share would cover slots it cannot use and hold another run at its share while they sit free.
+  `test/schedule-demand-gate-wait.test.ts`, `test/pool-share-gate-wait.test.ts`.
   A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
   `src/burndown.ts`: the run record's `waitsForShare` and `waitsFor`, which the status view's next-to-start rows say,
   and the heartbeat's `waiting for a sandbox slot`). The demand is counted as before, from the push.
