@@ -2,10 +2,10 @@
 // Sandcastle bind-mounts the repo's whole `.git` into every container, so
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { DockerAnswerError, ownScratchWorktrees, reapOrphans, recordFork, recordScratchWorktree, removeSandboxContainer, removeScratchWorktrees, sh, stopSandboxContainer } from "./sandbox.ts";
@@ -13,7 +13,8 @@ import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 import { pinnedHooksPath, REWRITE_NOTE, rewrittenHooksPath, trackedHooksPath as trackedHooksDir } from "./hooks-path.ts";
-import { matchRules, type PathRule } from "./host-path.ts";
+import { hostKey, matchRules, type PathRule } from "./host-path.ts";
+import { ALLOW, readerFailed, type ReasonCode, refuses, type Verdict } from "./verdict.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Git hooks on the host. `git merge --no-verify` still runs post-merge, and
@@ -35,7 +36,14 @@ const hostGitConfig = (key: string, value: string) => {
   process.env.GIT_CONFIG_COUNT = String(n + 1);
 };
 
-export const disableHostGitHooks = () => hostGitConfig("core.hooksPath", "/dev/null");
+// A sandbox can also write `refs/replace/` in the shared `.git`, and host git that honours it reads a benign object in
+// place of the real one: the holds judge one commit and the landing moves the base to another (#992). Off here, for
+// this process and every git it starts, so Sandcastle's host `git worktree add` also checks out the real tree that
+// the landing gates then test; `pinHostGitConfig` pins `core.useReplaceRefs=false` as well.
+export const disableHostGitHooks = () => {
+  hostGitConfig("core.hooksPath", "/dev/null");
+  process.env.GIT_NO_REPLACE_OBJECTS = "1";
+};
 
 // A landing merge on the host runs while sandboxes add and remove worktrees. Since git 2.29 the
 // commands that used to start an auto gc start `git maintenance run --auto`, which only
@@ -61,13 +69,18 @@ const COMMAND_KEYS =
 
 export const pinHostGitConfig = (root: string) => {
   hostGitConfig("core.fsmonitor", "false");
+  hostGitConfig("core.useReplaceRefs", "false");
   hostGitConfig("commit.gpgSign", "false");
   hostGitConfig("tag.gpgSign", "false");
   let entries = "";
   try {
     entries = sh("git", ["config", "-z", "--get-regexp", COMMAND_KEYS], root);
-  } catch {
-    // Exit 1: none of the keys is set.
+  } catch (error) {
+    // Exit 1 alone means none of the keys is set. Any other failure (a config git cannot parse or open) read as
+    // "none" would leave a planted program unpinned for the host's next git call.
+    if ((error as { status?: number }).status !== 1) {
+      throw new OperatorError(`NOT STARTED: git cannot read the config of ${root}, so the program-running keys in it cannot be pinned. Inspect \`git -C ${root} config --local --list\` before running any other git command there.`, { cause: error });
+    }
   }
   for (const entry of entries.split("\0").filter(Boolean)) {
     const at = entry.indexOf("\n");
@@ -217,6 +230,31 @@ const agentBranches = (root: string): Record<string, string> => {
 };
 
 /**
+ * Every `refs/replace/*` ref, keyed by the path its loose file would have (so a stop names it as it names a file), its
+ * value the object it stands in with. A replace ref makes git read another object wherever it meets the one named, so
+ * a sandbox could hide what a branch changes. Read through `for-each-ref`, not the directory: a packed ref has no file.
+ */
+const replaceRefs = (root: string, dir: string): Record<string, string> => {
+  const found: Record<string, string> = {};
+  for (const line of sh("git", ["for-each-ref", "--format=%(objectname) %(refname)", "refs/replace/"], root).split("\n")) {
+    const at = line.indexOf(" ");
+    if (at > 0) found[join(dir, line.slice(at + 1))] = `replace ${line.slice(0, at)}`;
+  }
+  return found;
+};
+
+/**
+ * The line a run's start prints when the shared `.git` already holds replace refs: they are the operator's own (one a
+ * sandbox makes mid-run stops the run), and the kit reads with substitution off, so they sway no decision - but the
+ * operator's own `git log` still honours them, and may show a branch other than the one that lands.
+ */
+export const replaceRefsWarning = (fingerprint: Fingerprint): string | undefined => {
+  const count = Object.values(fingerprint.files).filter((v) => v.startsWith("replace ")).length;
+  if (!count) return undefined;
+  return `Note: the repository holds ${count} replace ref${count === 1 ? "" : "s"} (\`git for-each-ref refs/replace/\`). The kit reads branches with them off, so they cannot change what it lands; your own \`git log\` and \`git diff\` still honour them, so read a branch with \`git --no-replace-objects\` to see what lands. One added or changed mid-run stops the run.`;
+};
+
+/**
  * With `share` (the run's own fingerprint), the branches and the in-flight set are that one's, not a
  * fresh reading: a check that a landing makes while pipelines run must not take an agent's commits,
  * or a pipeline that ended meanwhile, for a branch that moved.
@@ -239,11 +277,14 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   // already there waits for it). Listed only while it exists, so creating one, even an empty one, differs
   // from its absence, which an empty file's hash would not.
   const worktreeConfigPath = join(dir, "config.worktree");
-  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
+  // shallow and objects/info/alternates change which objects the host's git reads: a sandbox's history cut short, or
+  // objects taken from a directory of its choosing. Absent reads as the hash of nothing, so a new one is a difference.
+  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : []), join(dir, "shallow"), join(dir, "objects", "info", "alternates")];
   const files: Record<string, string> = {};
   const modes: Record<string, string> = {};
   const hashOf = entryHash;
   for (const f of paths) files[f] = hashOf(f);
+  Object.assign(files, replaceRefs(project.root, dir));
   // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
   // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
   Object.assign(files, hooksTree(dir, hashOf, modes));
@@ -1065,9 +1106,10 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
     const names = changed.map((f) => relative(realpathSync(root), f) + (before.files[f] === now.files[f] ? " (executable bit)" : "")).join(", ");
     const keys = changed.includes(now.config.path) && configWords.length ? ` In .git/config: ${configWords.join("; ")}.` : "";
     const worktreeKeys = changed.includes(now.worktreeConfig.path) ? ` In .git/config.worktree: ${worktreeWords.join("; ")}.` : "";
+    const replaced = changed.some((f) => (before.files[f] ?? now.files[f]).startsWith("replace "));
     throw new GuardStop(
       `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git.${keys}${worktreeKeys} ` +
-        `Inspect \`git -C ${root} config --local --list\` and .git/info/${worktreeKeys && ", and .git/config.worktree,"} before running any other git command there.`,
+        `Inspect \`git -C ${root} config --local --list\` and .git/info/${worktreeKeys && ", and .git/config.worktree,"}${replaced ? ` (and \`git -C ${root} for-each-ref refs/replace/\`)` : ""} before running any other git command there.`,
       { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`}${worktreeKeys && `; config.worktree: ${worktreeWords.join("; ")}`})` },
     );
   }
@@ -1500,20 +1542,57 @@ export const removeOwnScratchOnExit = (project: Project, check: (when: string) =
 // standing for a human merge.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PROTECTED = [
-  ".husky/", ".githooks/", ".github/", ".gitmodules", ".gitattributes",
-  ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/",
-  ".mcp.json", ".codex/", ".agents/", ".sandcastle/",
-  ".npmrc", "pnpm-workspace.yaml", ".yarnrc.yml",
-  ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml",
+/** A protected-path rule; `fixed` ones hold whatever the project's `unheldPaths` says. */
+export type ProtectedRule = PathRule & { fixed?: boolean };
+const rule = (kind: PathRule["kind"], runner: string, fixed: boolean, ...values: string[]): ProtectedRule[] =>
+  values.map((value) => ({ kind, value, runner, ...(fixed ? { fixed } : {}) }));
+
+// Each entry names what runs it on the host: the gates ran the branch's own copy in a sandbox, so they cannot vouch for
+// it. A `dir` rule also holds a file or symlink committed under the directory's own name (a bare `.codex` link); a
+// `prefix` covers every extension (`.huskyrc` holds `.huskyrc.json`). The fixed entries are the kit's own guards and
+// what runs the moment a shell enters the directory: a project's `unheldPaths` cannot let one land.
+const DEFAULT_PROTECTED: ProtectedRule[] = [
+  ...rule("dir", "git commit hooks", true, ".husky/", ".githooks/"),
+  ...rule("dir", "CI, with the repository's secrets", true, ".github/"),
+  ...rule("dir", "the kit's own config and guards", true, ".sandcastle/"),
+  ...rule("prefix", "Claude Code's settings and hooks, on the host", true, ".claude/settings.json", ".claude/settings.local.json"),
+  ...rule("dir", "Claude Code's settings and hooks, on the host", true, ".claude/hooks/"),
+  ...rule("prefix", "direnv, mise and asdf, on entering the directory", true, ".envrc", ".mise.", "mise.toml", "mise.local.toml", ".tool-versions"),
+  ...rule("prefix", "git's checkout filters and submodules", false, ".gitmodules", ".gitattributes"),
+  // Claude Code loads skills, agents, commands, output styles and whatever comes next from `.claude/`, in a package
+  // directory too, and their frontmatter can carry hooks that run on the host.
+  ...rule("basename", "Claude Code: skills, agents and commands, whose frontmatter can run hooks", false, ".claude/"),
+  ...rule("prefix", "the agents' MCP servers and config", false, ".mcp.json", "opencode.json"),
+  ...rule("dir", "the agents' MCP servers and config", false, ".codex/", ".agents/", ".opencode/"),
+  ...rule("dir", "the editor, on opening the folder", false, ".vscode/", ".devcontainer/"),
+  // pnpm `require`s `.pnpmfile.cjs` on every install; `.yarnrc` (Yarn 1's `yarn-path`, and `.yarnrc.yml`'s
+  // `yarnPath`) names the yarn binary, which lives in `.yarn/releases/`; bun preloads what `bunfig.toml` names.
+  ...rule("prefix", "the package manager, at the next install", false, ".npmrc", "pnpm-workspace.yaml", ".pnpmfile.", ".yarnrc"),
+  ...rule("dir", "the package manager, at the next install", false, ".yarn/releases/", ".yarn/plugins/"),
+  ...rule("file", "the package manager, at the next install", false, "bunfig.toml"),
   // Commit-hook runners' own config: their commands run on the host at the person's next commit. lefthook reads
   // `lefthook`, `.lefthook` and the `-local` variants (yml, yaml, json, toml) at the root and in `.config/`; husky 4
   // reads `.huskyrc*` and `husky.config.*`; simple-git-hooks `.simple-git-hooks.*` and `simple-git-hooks.*`. lefthook
   // also runs the scripts in its `source_dir` and `source_dir_local`, `.lefthook/` and `.lefthook-local/` by default.
-  "lefthook.", "lefthook-local.", ".lefthook.", ".lefthook-local.", ".config/lefthook.", ".config/lefthook-local.",
-  ".lefthook/", ".lefthook-local/",
-  ".huskyrc", "husky.config.", ".simple-git-hooks.", "simple-git-hooks.",
+  ...rule("prefix", "the commit-hook runner, at the next commit", false,
+    ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml",
+    "lefthook.", "lefthook-local.", ".lefthook.", ".lefthook-local.", ".config/lefthook.", ".config/lefthook-local.",
+    ".huskyrc", "husky.config.", ".simple-git-hooks.", "simple-git-hooks."),
+  ...rule("dir", "the commit-hook runner, at the next commit", false, ".lefthook/", ".lefthook-local/"),
 ];
+
+// Root dot entries that no tool runs: ignore lists, editor whitespace, a runtime's version pin, an empty marker and
+// yarn's package archives. Any other dot entry at the root is held, because a new tool's config usually lives there and
+// a list of the dangerous ones is always one tool behind.
+export const INERT_ROOT_ENTRIES: PathRule[] = [
+  ...[".gitignore", ".gitkeep", ".editorconfig", ".nvmrc", ".node-version", ".prettierignore", ".eslintignore", ".dockerignore", ".mailmap"]
+    .map((value): PathRule => ({ kind: "file", value, runner: "nothing" })),
+  { kind: "dir", value: ".yarn/cache/", runner: "nothing" },
+];
+const rootDot = (path: string) => {
+  const key = hostKey(path);
+  return typeof key === "string" && key.startsWith(".");
+};
 // The tracked directory the local `core.hooksPath` names: its scripts run on the person's own next commit as the
 // defaults' `.husky/` and `.githooks/` do, and the start takes such a path without a question after a clean end.
 const hooksDirProtected = (project: Project): string[] => {
@@ -1521,18 +1600,24 @@ const hooksDirProtected = (project: Project): string[] => {
   const value = pinnedHooksPath(project.root);
   if (!value) return [];
   const dir = `${value.split("/").filter((p) => p && p !== ".").join("/")}/`;
-  return DEFAULT_PROTECTED.includes(dir) ? [] : [dir];
+  return DEFAULT_PROTECTED.some((r) => r.value === dir) ? [] : [dir];
 };
-const protectedPrefixes = (project: Project) => [...DEFAULT_PROTECTED, ...hooksDirProtected(project), ...(project.protectedPaths ?? [])];
-// An entry ending in `/` is a directory, which also covers a file or symlink committed under its own name (a bare
-// `.codex` link); any other entry keeps its prefix match (`.huskyrc` covers `.huskyrc.json`).
+// A project entry ending in `/` is a directory, which also covers a file or symlink committed under its own name; any
+// other `protectedPaths` entry keeps its prefix match.
 const ruleFor = (value: string, runner: string): PathRule => ({ kind: value.endsWith("/") ? "dir" : "prefix", value, runner });
-/** The protected paths as rules: the defaults, the tracked `core.hooksPath` directory and the project's `protectedPaths`. */
-export const protectedRules = (project: Project): PathRule[] => [
-  ...DEFAULT_PROTECTED.map((v) => ruleFor(v, "host tooling")),
-  ...hooksDirProtected(project).map((v) => ruleFor(v, "git commit hooks")),
-  ...(project.protectedPaths ?? []).map((v) => ruleFor(v, "the project's protectedPaths")),
+/**
+ * The protected paths as rules: the defaults, the tracked `core.hooksPath` directory and the project's `protectedPaths`.
+ * The hooks directory and the project's own entries are fixed: `unheldPaths` releases only the kit's defaults.
+ */
+export const protectedRules = (project: Project): ProtectedRule[] => [
+  ...DEFAULT_PROTECTED,
+  ...hooksDirProtected(project).map((v) => ({ ...ruleFor(v, "git commit hooks"), fixed: true })),
+  ...(project.protectedPaths ?? []).map((v) => ({ ...ruleFor(v, "the project's protectedPaths"), fixed: true })),
 ];
+// What a project's `unheldPaths` lets land. Exact, unlike `protectedPaths`' prefixes: `.prettierrc.json` releases
+// that file and not `.prettierrc.json5`, so a release is never wider than the person wrote.
+const unheldRules = (project: Project): PathRule[] =>
+  (project.unheldPaths ?? []).map((value) => ({ kind: value.endsWith("/") ? "dir" : "file", value, runner: "the project's unheldPaths" }));
 const MANIFEST_RULE: PathRule = { kind: "basename", value: "package.json", runner: "the package manager's install scripts" };
 // The top-level `package.json` keys a commit-hook runner reads its commands from (the same config as the rc files
 // above), held when their value differs between the base and the branch. `gitHooks` is yorkie's (Vue CLI), `precommit`
@@ -1541,12 +1626,14 @@ const HOOK_RUNNER_KEYS = ["lint-staged", "husky", "simple-git-hooks", "pre-commi
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
 
 /**
- * The prompts' `{{KIT_PROTECTED}}`: the protected paths (the defaults and the project's `protectedPaths`) and what a
- * change to one costs. An agent that is not told adds a comment to one for no reason, and the branch it spent a pipeline
- * on is held for a person. The review is told to revert such a change when the ticket did not need it.
+ * The prompts' `{{KIT_PROTECTED}}`: the protected paths (the rule table, the root dot entries, and the project's
+ * `protectedPaths` and `unheldPaths`) and what a change to one costs. An agent that is not told adds a comment to one
+ * for no reason, and the branch it spent a pipeline on is held for a person. The review is told to revert such a change when the ticket did not need it.
  */
 export const protectedPathsNote = (project: Project, role: "implement" | "review"): string => {
-  const list = protectedPrefixes(project).map((p) => `\`${p}\``).join(", ");
+  const code = (values: string[]) => values.map((v) => `\`${v}\``).join(", ");
+  const list = protectedRules(project).map((r) => (r.kind === "basename" ? `\`${r.value}\` (at any depth)` : `\`${r.value}\``)).join(", ");
+  const unheld = project.unheldPaths ?? [];
   const ask =
     role === "review"
       ? "If the branch changes one and the ticket did not need that change, revert it in a commit of your own: the rest of the work then lands by itself."
@@ -1554,6 +1641,8 @@ export const protectedPathsNote = (project: Project, role: "implement" | "review
   return (
     "# Protected paths\n\n" +
     `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}) or its commit-hook runner keys (${HOOK_RUNNER_KEYS.map((k) => `\`${k}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ` +
+    `So does any other new or changed entry at the root whose name starts with a dot (a \`.foorc\`, a \`.config/\`), except ${code(INERT_ROOT_ENTRIES.map((r) => r.value))}. ` +
+    (unheld.length ? `This project's \`unheldPaths\` lets these land all the same: ${code(unheld)}; never a path under ${code(protectedRules(project).filter((r) => r.fixed).map((r) => r.value))}. ` : "") +
     "Matching ignores case, and a directory also covers a file or symlink of its own name (`.codex` as well as `.codex/`). " +
     `${ask}\n`
   );
@@ -1564,7 +1653,15 @@ export const protectedPathsNote = (project: Project, role: "implement" | "review
  * on the form the host resolves (`hostKey`): a macOS or Windows host runs `.Husky/pre-commit` as `.husky/`'s. The
  * files come back as given, so a hold names the real file.
  */
-export const protectedAmong = (project: Project, files: string[]): string[] => matchRules(files, protectedRules(project));
+export const protectedAmong = (project: Project, files: string[]): string[] => {
+  const rules = protectedRules(project);
+  // An unnormalisable path comes back from every matchRules call, so it is held by the fixed rules and never released.
+  const fixed = new Set(matchRules(files, rules.filter((r) => r.fixed)));
+  const held = new Set(matchRules(files, rules.filter((r) => !r.fixed)));
+  for (const f of files) if (rootDot(f) && !matchRules([f], INERT_ROOT_ENTRIES).length) held.add(f);
+  const released = new Set(matchRules(files, unheldRules(project)));
+  return files.filter((f) => fixed.has(f) || (held.has(f) && !released.has(f)));
+};
 
 /**
  * The protected files a ticket body's `Touches:` line names, read against the base branch's tree.
@@ -1584,7 +1681,8 @@ export const protectedForTicket = (project: Project, id: string, body: string): 
   const branch = `agent/issue-${id}`;
   try {
     sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], project.root);
-    for (const p of protectedChanges(project, branch)) if (!paths.includes(p)) paths.push(p);
+    const v = protectedChanges(project, branch);
+    for (const p of refuses(v) ? (v.paths ?? []) : []) if (!paths.includes(p)) paths.push(p);
   } catch {
     // No branch, or an unreadable one: the Touches line alone.
   }
@@ -1605,52 +1703,136 @@ export const protectedPlanLines = (project: Project, tickets: { id: string; body
     return paths.length ? [`${ref(t.id)} will be held for a person to merge (${paths.join(", ")})`] : [];
   });
 
-/**
- * The paths a branch changes since it left `base`, as git holds them: `--no-renames` lists a rename as the delete of
- * its source and the add of its target (the default pairs them and names only the target, so a protected file moved
- * away goes unseen), and `-z` with `core.quotePath=false` returns a non-ASCII name raw, not as a quoted octal escape
- * that no prefix test matches. `filter` is git's `--diff-filter`.
- */
-const changedPaths = (project: Project, branch: string, filter?: string): string[] =>
-  sh(
-    "git",
-    ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", ...(filter ? [`--diff-filter=${filter}`] : []), `${project.baseBranch}...${branch}`],
-    project.root,
-  ).split("\0").filter(Boolean);
+// Every host read of a branch turns object substitution off on the call itself: a sandbox can write
+// `refs/replace/` in the shared `.git`, and host git that honours it judges a benign commit while the real one
+// lands (#992). On the call, not only in the process: `land`, `preview` and `queue --lint` do not all pin first.
+const READ = ["-c", "core.useReplaceRefs=false", "-c", "core.quotePath=false"];
+// Untrimmed: a symlink's target is its blob's bytes exactly, and `sh` trims.
+const gitRaw = (root: string, args: string[]) => execFileSync("git", [...READ, ...args], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 });
 
-export const protectedChanges = (project: Project, branch: string) => {
-  const base = project.baseBranch;
-  const changed = changedPaths(project, branch);
-  const hits = protectedAmong(project, changed);
-  // package.json only when an install-time script or a hook runner's key changed.
-  for (const f of matchRules(changed, [MANIFEST_RULE])) {
-    const manifest = (ref: string): Record<string, any> => {
-      try {
-        const parsed = JSON.parse(sh("git", ["show", `${ref}:${f}`], project.root));
-        return parsed && typeof parsed === "object" ? parsed : {};
-      } catch {
-        return {};
-      }
-    };
-    const [a, b] = [manifest(base), manifest(branch)];
-    const [sa, sb] = [a.scripts ?? {}, b.scripts ?? {}];
-    const moved = INSTALL_SCRIPTS.filter((s) => sa[s] !== sb[s]);
-    if (moved.length) hits.push(`${f} (scripts: ${moved.join(", ")})`);
-    const runners = HOOK_RUNNER_KEYS.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
-    if (runners.length) hits.push(`${f} (${runners.join(", ")})`);
+/** One entry of `git diff --raw`: a path with its mode and blob on each side; an absent side is mode `000000`. */
+export type BranchEntry = { path: string; oldMode: string; newMode: string; oldOid: string; newOid: string; status: string };
+
+const RAW = /^:([0-7]{6}) ([0-7]{6}) ([0-9a-f]{40,64}) ([0-9a-f]{40,64}) ([ACDMRTUX])[0-9]*$/;
+
+/**
+ * What `tip` changes since it left `base`, read once for every landing guard. `tip` is the exact commit the gates
+ * passed, never the branch name, so the verdict is about what lands. `--raw` gives each side's mode and blob: modes
+ * show symlinks and gitlinks, and the blobs are read by id, never by a path through a ref. `--no-renames` lists a
+ * rename as the delete of its source and the add of its target (paired, only the target is named, and a protected
+ * file moved away goes unseen), and `-z` with `core.quotePath=false` returns a non-ASCII name raw. A git failure or a
+ * line that does not parse is `unknown`: a reader that cannot tell holds.
+ */
+export const branchChanges = (project: Project, base: string, tip: string): BranchEntry[] | Verdict => {
+  let out: string;
+  try {
+    out = gitRaw(project.root, ["diff", "--raw", "-z", "--no-abbrev", "--no-renames", "--no-ext-diff", "--no-textconv", `${base}...${tip}`, "--"]);
+  } catch (error) {
+    return readerFailed(`git diff ${base}...${tip}`, error);
   }
-  return hits;
+  const fields = out.split("\0");
+  if (fields.at(-1) === "") fields.pop();
+  const entries: BranchEntry[] = [];
+  for (let i = 0; i < fields.length; i += 2) {
+    const m = RAW.exec(fields[i]);
+    const path = fields[i + 1];
+    if (!m || path === undefined) return { kind: "unknown", code: "reader-failed", detail: `git diff ${base}...${tip}: unparseable line ${JSON.stringify(fields[i].slice(0, 120))}` };
+    entries.push({ path, oldMode: m[1], newMode: m[2], oldOid: m[3], newOid: m[4], status: m[5] });
+  }
+  return entries;
+};
+
+const SYMLINK = "120000";
+const GITLINK = "160000";
+const hasBlob = (mode: string) => mode.startsWith("100") || mode === SYMLINK;
+
+// A symlink's target, resolved against its own directory as the host would follow it: absolute or out of the
+// repository is held whatever it names, and in it, held when it names a protected path. `undefined`: it may land.
+const symlinkHold = (project: Project, e: BranchEntry): string | undefined => {
+  const target = gitRaw(project.root, ["cat-file", "blob", e.newOid]);
+  if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target) || target.startsWith("\\")) return `${e.path} (symlink to ${target}, outside the repository)`;
+  const resolved = posix.normalize(posix.join(posix.dirname(e.path), target));
+  if (resolved === ".." || resolved.startsWith("../")) return `${e.path} (symlink to ${target}, outside the repository)`;
+  if (resolved === "." || matchRules([resolved], protectedRules(project)).length) return `${e.path} (symlink to ${target}, a protected path)`;
+  return undefined;
+};
+
+// One side of a changed `package.json`, read by blob id: absent is `{}`, and anything but a JSON object is
+// `undefined` - not readable as a manifest, so what it runs at install is not known.
+const manifestAt = (project: Project, mode: string, oid: string): Record<string, any> | undefined => {
+  if (mode === "000000") return {};
+  if (!mode.startsWith("100")) return undefined;
+  try {
+    const parsed = JSON.parse(gitRaw(project.root, ["cat-file", "blob", oid]));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Whether `tip` changes how the repo executes on the host: a protected path, a symlink into one or out of the
+ * repository, a gitlink, or a `package.json` install script or hook runner's key. `refuse` names each held entry
+ * as git holds it; `unknown` (held too) when the branch or a manifest could not be read.
+ */
+export const protectedChanges = (project: Project, tip: string): Verdict => {
+  const entries = branchChanges(project, project.baseBranch, tip);
+  if (!Array.isArray(entries)) return entries;
+  try {
+    const hits: { path: string; code: ReasonCode }[] = protectedAmong(project, entries.map((e) => e.path)).map((path) => ({ path, code: "protected-path" }));
+    for (const e of entries) {
+      if (e.newMode === GITLINK || e.oldMode === GITLINK) hits.push({ path: `${e.path} (gitlink: submodules are not supported in sandboxes)`, code: "gitlink" });
+      else if (e.newMode === SYMLINK && !hits.some((h) => h.path === e.path)) {
+        const hold = symlinkHold(project, e);
+        if (hold) hits.push({ path: hold, code: "symlink-entry" });
+      }
+    }
+    // package.json only when an install-time script or a hook runner's key changed.
+    const manifests = new Set(matchRules(entries.map((e) => e.path), [MANIFEST_RULE]));
+    for (const e of entries.filter((x) => manifests.has(x.path))) {
+      const [a, b] = [manifestAt(project, e.oldMode, e.oldOid), manifestAt(project, e.newMode, e.newOid)];
+      if (!a || !b) {
+        hits.push({ path: `${e.path} (does not parse as a manifest on the ${!a ? "base" : "branch"})`, code: "manifest-unparseable" });
+        continue;
+      }
+      const [sa, sb] = [a.scripts ?? {}, b.scripts ?? {}];
+      const moved = INSTALL_SCRIPTS.filter((s) => sa[s] !== sb[s]);
+      if (moved.length) hits.push({ path: `${e.path} (scripts: ${moved.join(", ")})`, code: "protected-path" });
+      const runners = HOOK_RUNNER_KEYS.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+      if (runners.length) hits.push({ path: `${e.path} (${runners.join(", ")})`, code: "protected-path" });
+    }
+    if (!hits.length) return ALLOW;
+    // A manifest that could not be read is not known to be safe: the verdict says so even beside a plain hold.
+    const unread = hits.find((h) => h.code === "manifest-unparseable");
+    const paths = hits.map((h) => h.path);
+    return { kind: unread ? "unknown" : "refuse", code: (unread ?? hits[0]).code, detail: paths.join(", "), paths };
+  } catch (error) {
+    return readerFailed(`reading ${tip}`, error);
+  }
 };
 
 // GitHub warns on a file over 50 MB and refuses a push with one over 100 MB, and a blob that size
 // stays in the history for good. A branch that adds or grows one is held like a protected path.
 const LARGE_BYTES = 50 * 1024 * 1024;
-export const largeFiles = (project: Project, branch: string): string[] =>
-  changedPaths(project, branch, "AM")
-    .flatMap((f) => {
-      const bytes = Number(sh("git", ["cat-file", "-s", `${branch}:${f}`], project.root));
-      return bytes > LARGE_BYTES ? [`${f} (${Math.round(bytes / 1024 / 1024)} MB)`] : [];
-    });
+/** Whether `tip` adds or grows a file over 50 MB, read by blob id; a size that cannot be read holds. */
+export const largeFiles = (project: Project, tip: string): Verdict => {
+  const entries = branchChanges(project, project.baseBranch, tip);
+  if (!Array.isArray(entries)) return entries;
+  const paths: string[] = [];
+  for (const e of entries.filter((x) => x.status !== "D" && hasBlob(x.newMode))) {
+    let out: string;
+    try {
+      out = gitRaw(project.root, ["cat-file", "-s", e.newOid]).trim();
+    } catch (error) {
+      return readerFailed(`the size of ${e.path}`, error);
+    }
+    // `Number("")` is 0 and `NaN > LIMIT` is false: an answer that is not a size would pass the file.
+    if (!/^\d+$/.test(out)) return { kind: "unknown", code: "reader-failed", detail: `the size of ${e.path}: ${JSON.stringify(out.slice(0, 80))}` };
+    const bytes = Number(out);
+    if (bytes > LARGE_BYTES) paths.push(`${e.path} (${Math.round(bytes / 1024 / 1024)} MB)`);
+  }
+  return paths.length ? { kind: "refuse", code: "large-file", detail: paths.join(", "), paths } : ALLOW;
+};
 
 /** Why a large file needs a person, and what else to do with it. */
 export const largeFilesNote = (files: string[]) =>

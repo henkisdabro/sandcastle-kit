@@ -48,6 +48,9 @@ export default {
 
   // Paths a branch may not change and still land by itself, on top of the kit's own list.
   // protectedPaths: ["migrations/"],
+  // Paths of the kit's own list (not its fixed entries: hooks, CI, .sandcastle/, .envrc) or root dotfiles that may land
+  // by themselves: a directory ending in "/" or one exact file.
+  // unheldPaths: [".claude/skills/", ".prettierrc.json"],
 
   rules: ".sandcastle/rules.md",
 

@@ -75,8 +75,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   in a running container, so the fingerprint below stays the guard.
   Sandcastle's own git on your machine also runs with the repository's filters, drivers, hooks and
   remote helpers turned off; the kit's pins below hold beside it.
-- 📌 **Command-running config pinned.** For the run's own git calls, `core.fsmonitor` and commit
-  signing are off, and every filter, merge or diff driver, pager, editor and signing program
+- 📌 **Command-running config pinned.** For the run's own git calls, `core.fsmonitor`, commit
+  signing and replace refs (`refs/replace/`, which a sandbox can write to make your git read one
+  commit as another) are off, and every filter, merge or diff driver, pager, editor and signing program
   configured when the run starts keeps that value, through git's command-scope config. A value a
   sandbox writes into `.git/config` mid-run is never the one the host's git runs.
 - 📋 **Start baseline.** The pins and the fingerprint take the shared `.git` as they find it when a
@@ -154,6 +155,11 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   content.
   `.git/modules/` (the git directories of submodules) is fingerprinted too, since a config a sandbox
   adds there would run on a `git status` that looks into a submodule.
+  So are the inputs that swap which objects git reads: every replace ref (`refs/replace/*`, loose or
+  packed, read through `git for-each-ref`), `.git/shallow` and `.git/objects/info/alternates`.
+  One added or changed mid-run stops the run, naming it, since it could hide what a branch changes.
+  Replace refs already there at the start are yours: the run prints a note saying your own
+  `git log` still honours them, and goes on.
   The records of worktrees you made by hand beside a run (`.git/worktrees/<name>/`: `commondir`,
   `gitdir` and `config.worktree`, present or absent, and their content) are watched as they stand at
   the start: one that changes stops the run, naming it, since your next git command in that worktree
@@ -261,16 +267,45 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   `Sandcastle agent <agent@sandcastle.invalid>`; you stay the author.
   `git log --format='%h %an / %cn %s'` tells them from your own commits.
   GitHub issues and comments the agents write still show your GitHub account.
-- 🛡️ **Protected paths.** A green branch that changes hooks (git - the tracked directory
-  `core.hooksPath` names among them -, Claude Code, pre-commit tools, and the config of lint-staged, lefthook,
-  husky, simple-git-hooks and yorkie, in their own files or in a `package.json` key, and lefthook's script
-  directories `.lefthook/` and `.lefthook-local/`), CI, agent settings
-  (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`, package-manager config
-  or install scripts - plus anything in `protectedPaths` - is labelled `ready-for-human` and left
-  for you to merge; `sandcastle land` refuses it too.
+- 🛡️ **Protected paths.** A green branch that changes a file something runs on your machine - git
+  hooks, CI, agent and editor config, package-manager hooks, a commit-hook runner's config, or an
+  install script or hook-runner key in a `package.json` - is labelled `ready-for-human` and left for
+  you to merge; `sandcastle land` refuses it too. The gates ran the branch's own copy in a sandbox,
+  so they cannot vouch for it. The list, with what runs each entry:
+  - **Fixed** (`unheldPaths` cannot release these): git commit hooks `.husky/`, `.githooks/` and the
+    tracked directory `core.hooksPath` names; CI `.github/`; the kit's own `.sandcastle/`; Claude
+    Code's `.claude/settings.json`, `.claude/settings.local.json` and `.claude/hooks/`; and what
+    runs on entering the directory - direnv's `.envrc`, mise's `.mise.`, `mise.toml` and
+    `mise.local.toml`, and `.tool-versions`. Anything in `protectedPaths` is fixed too.
+  - git: `.gitmodules`, `.gitattributes` (checkout filters).
+  - Agents: `.claude/` whole, at any depth (skills, agents and commands, whose frontmatter can run
+    hooks), `.mcp.json`, `.codex/`, `.agents/`, `opencode.json`, `.opencode/`.
+  - Editors, on opening the folder: `.vscode/`, `.devcontainer/`.
+  - Package managers, at the next install: `.npmrc`, `pnpm-workspace.yaml`, `.pnpmfile.`, `.yarnrc`
+    (`.yarnrc.yml` too), `.yarn/releases/`, `.yarn/plugins/`, `bunfig.toml`.
+  - Commit-hook runners, at the next commit: `.lintstagedrc`, `lint-staged.config.`,
+    `.pre-commit-config.yaml`, lefthook's `lefthook.`, `lefthook-local.`, `.lefthook.`,
+    `.lefthook-local.`, `.config/lefthook.`, `.config/lefthook-local.` and its script directories
+    `.lefthook/` and `.lefthook-local/`, husky 4's `.huskyrc` and `husky.config.`, and
+    simple-git-hooks' `.simple-git-hooks.` and `simple-git-hooks.`.
+  - **Any other entry at the root whose name starts with a dot** (`.foorc`, `.config/`), because a new
+    tool's config usually lives there and a list of dangerous ones is always a tool behind. These are
+    not held: `.gitignore`, `.gitkeep`, `.editorconfig`, `.nvmrc`, `.node-version`, `.prettierignore`,
+    `.eslintignore`, `.dockerignore`, `.mailmap` and `.yarn/cache/`.
+
+  An entry with no trailing `/` also covers longer names (`.huskyrc` holds `.huskyrc.json`), except
+  `bunfig.toml`, which is that file alone.
+  To let some of these land, list them in `unheldPaths` in `.sandcastle/config.ts`: a directory
+  (`".claude/skills/"`) or one file (`".prettierrc.json"`, not `.prettierrc.json5`).
+  It cannot release a fixed entry, and as it lives in `.sandcastle/`, a branch that widens it is
+  itself held.
   Matching ignores case and the spellings a macOS or Windows host folds (Unicode form, trailing
   dots and spaces), and a directory also covers a file or symlink of its own name, so
   `.Husky/pre-commit` and a bare `.codex` are held like `.husky/` and `.codex/`.
+  The check reads the exact commit the gates passed, with replace refs off, and holds a symlink
+  that points into a protected path or out of the repository, and any submodule pointer.
+  A branch the kit cannot read, or whose `package.json` does not parse, is held too, never landed;
+  the hold says why (`reader-failed`, `manifest-unparseable`).
   A branch that adds a file over 50 MB is held the same way: GitHub refuses a push with one over 100
   MB, and a file that size stays in the history for good.
   A ticket whose work lies in a protected path therefore always ends held, so
@@ -279,9 +314,9 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
   A run still starts one whose `Touches:` line names the path, and says so in its start plan
   (`#N will be held for a person to merge (paths)`); its `needs a human` line at landing names the
   paths too.
-  The implement and review prompts list the protected paths as well (the defaults and
-  `protectedPaths`), so an agent does not touch one the ticket did not need, and the review reverts
-  such a change.
+  The implement and review prompts list the protected paths as well (the defaults, the root dot
+  entries, `protectedPaths` and `unheldPaths`), so an agent does not touch one the ticket did not
+  need, and the review reverts such a change.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.

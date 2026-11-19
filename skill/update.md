@@ -134,7 +134,7 @@ Declining is not skipping: every step still runs its check, and only the asking 
       `ANTHROPIC_API_KEY` and `CODEX_API_KEY`. Run `git grep -nE 'GH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY'`
       in the project: if a gate's command or a test it runs reads one, it sees nothing. Propose
       giving that test its own variable in `.sandcastle/.env` (a token scoped to what the test
-      needs) and naming it in `gateEnv` (step 23), then `sandcastle gates`.
+      needs) and naming it in `gateEnv` (step 24), then `sandcastle gates`.
    10. **Chains and overlaps.** Run `sandcastle queue --lint` (read-only, no model calls).
        - A `Blocked by` chain of queued tickets drains in one run whatever the autonomy level. If
          the lint shows tickets that share an unmergeable file or are likely to conflict, and
@@ -228,7 +228,19 @@ Declining is not skipping: every step still runs its check, and only the asking 
        red `out of memory: the VM ran out` is the VM's, not the limit's: propose a lower
        `maxSandboxes` (from `sandcastle size`), never a higher `memory`. `no limit (N of the 10
        gate samples ...)` and a green gates run: nothing to do.
-   23. **Credentials a sandbox no longer gets.** A sandbox gets only the agents' credentials and
+   23. **Paths now held** (**`unheld-paths`**). A branch that changes anything under `.claude/`,
+       `.vscode/`, `.devcontainer/` or `.opencode/`, `opencode.json`, or a root entry whose name
+       starts with a dot (other than `.gitignore`, `.editorconfig`, `.nvmrc` and the inert few the
+       kit's docs/safety.md lists) is held for a person. List what the project tracks there:
+       `git ls-files | grep -E '^\.|(^|/)\.claude/|^opencode\.json' | cut -d/ -f1-3 | sort -u`. For
+       each directory or file that tickets routinely change and nothing on the host runs without a
+       person reading it (skills edited as ordinary work, a `.prettierrc.json`), propose adding it
+       to `unheldPaths` in `.sandcastle/config.ts`, explaining that a branch changing it then lands
+       unread. Skip what `unheldPaths` already lists, and never propose a fixed entry (hooks, CI,
+       `.sandcastle/`, Claude Code's settings and hooks, `.envrc`, mise, `.tool-versions`): the
+       config keeps them held anyway. Nothing tracked there, or nothing the user wants released:
+       nothing to do.
+   24. **Credentials a sandbox no longer gets.** A sandbox gets only the agents' credentials and
        the keys `gateEnv` and `agentEnv` name from `~/.config/sandcastle-kit/.env` and
        `.sandcastle/.env`. List both files' keys (names only - never print a value: `cut -d= -f1`)
        and read `sandcastle doctor` for a `warn \`setup\` names ...` line. For each key other than

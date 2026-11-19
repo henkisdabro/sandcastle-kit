@@ -356,7 +356,10 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
       case "held": {
         const also = c.report ? `\n\n${c.report}` : "";
         const text =
-          landed.by === "protected"
+          landed.code === "reader-failed"
+            ? `Gated green on \`${g.branch}\` (${c.gateNames}), but not merged automatically: the kit could not read what it ` +
+              `changes (${landed.reason}), and a branch it cannot read is held, never landed. Review and merge by hand.${also}`
+            : landed.by === "protected"
             ? `Gated green on \`${g.branch}\` (${c.gateNames}), but not merged automatically: it changes how the repo ` +
               `executes (${landed.paths.join(", ")}), which its own gates cannot vouch for. Review and merge by hand.${also}`
             : landed.by === "large"

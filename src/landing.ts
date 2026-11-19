@@ -32,6 +32,7 @@ import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, forgetFork, ownCommitList, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { readTicketState, refOf, type Tracker } from "./tracker.ts";
+import { heldWords, type ReasonCode, refuses } from "./verdict.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
 
 // "with #12" names the branches merged before it that changed the same files.
@@ -435,8 +436,8 @@ export type Landed =
    * `seen`: every failing test was one the branch's own ticket gates failed in this run, so `with` is empty: the failure is not a landed ticket's.
    */
   | { kind: "red"; with: string[]; gates: string[]; failing?: string[]; seen?: true }
-  /** `by`: what held it - a protected path, a large file, or a repair no review passed. */
-  | { kind: "held"; paths: string[]; reason: string; by: "protected" | "large" | "unreviewed" }
+  /** `by`: what held it - a protected path, a large file, or a repair no review passed. `code`: the guard's reason, `reader-failed` when it could not read the branch. */
+  | { kind: "held"; paths: string[]; reason: string; by: "protected" | "large" | "unreviewed"; code?: ReasonCode }
   | { kind: "withdrawn"; reason: string }
   | { kind: "taken-back" }
   | { kind: "closed-earlier" }
@@ -510,15 +511,11 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   } catch {
     overrun = [];
   }
-  const touched = protectedChanges(project, o.branch);
-  if (touched.length) {
-    const held: Landed = { kind: "held", paths: touched, reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${touched.join(", ")}`, by: "protected" };
-    if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
-    return held;
-  }
-  const large = largeFiles(project, o.branch);
-  if (large.length) {
-    const held: Landed = { kind: "held", paths: large, reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${large.join(", ")}`, by: "large" };
+  // Read at the commit the gates passed (checked above), never the branch name. Unknown holds as refuse does: a
+  // reader that failed is a hold the ledger names, never a landing.
+  for (const [v, by] of [[protectedChanges(project, o.head!), "protected"], [largeFiles(project, o.head!), "large"]] as const) {
+    if (!refuses(v)) continue;
+    const held: Landed = { kind: "held", paths: v.paths ?? [], reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${heldWords(v).join(", ")}`, by, code: v.code };
     if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
     return held;
   }
