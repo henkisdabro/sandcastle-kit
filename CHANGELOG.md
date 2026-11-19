@@ -11,6 +11,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
+  An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
+  issue titles listed from the tracker are printed as plain text, as the status view already did, so
+  none can write the clipboard, set the window title or clear the screen (the Herdr popup's
+  `less -R` included). Run records written before the fix are read the same way.
+
 - **Pointers to README sections that moved into `docs/` now name the right file.** The warning
   about an unconfigured Linear blocker key points at `docs/queue.md` (Blockers), `sandcastle help`
   points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for

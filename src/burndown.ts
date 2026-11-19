@@ -71,6 +71,7 @@ import { type Attempted, type Change, type Conflict, createFixBoard, createSched
 import { holdForUsage, readPause } from "./detach.ts";
 import { commitOf, expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
+import { plainText } from "./plain-text.ts";
 
 // Where they lived before landing.ts and ledger.ts; callers and tests still import them from here.
 export { abortLanding, mergeBranch } from "./landing.ts";
@@ -397,8 +398,10 @@ const ownLineMatches = (text: string, tag: string, withAttrs = false): { attrs: 
 };
 const ownLineTags = (text: string, tag: string): string[] => ownLineMatches(text, tag).map((m) => m.text);
 // A tag's text, or a report's item, as one line: whitespace folded; empty and the echoed placeholder "..." are no line.
+// Plain text first: the line is stored in the run record and printed in the summary, and an agent can be steered into
+// writing an escape sequence that would reach the user's terminal there.
 const oneLine = (raw: string | undefined): string | undefined => {
-  const said = raw?.replace(/\s+/g, " ").trim();
+  const said = raw === undefined ? undefined : plainText(raw).replace(/\s+/g, " ").trim();
   return said && said !== "..." ? said : undefined;
 };
 const lineOf = (tag: string) => (text: string): string | undefined => {
