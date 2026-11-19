@@ -1902,24 +1902,31 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // While every queued ticket a worker could take is held for a waiting resolve (beside the ones the workers already asking
       // will take, `claimed`), the worker waits as `holdForResolve` does: with its slot if it keeps one, unless a landing of the
       // run waits for one. Woken at every stage change, as a ticket is queued and when a resolve is pushed again.
+      // A pause takes its slot too: the run tells no demand for it, and the resolve it waits for is parked for the whole
+      // pause, so a kept slot would sit locked in the pool until the resume. The resume wakes it to ask again (`work.slot`).
       const holdFresh = async (held: { slot?: Slot }, claimed: () => number) => {
-        for (;;) {
+        for (sync(); ; sync()) {
           const h = tellHeld();
           if (pipelines.closed || !h.size || pipelines.size - h.size > claimed()) return;
-          if (held.slot && work.landingWaits?.()) {
+          const paused = pausedSince !== undefined && !stop.startsNothing;
+          if (held.slot && (paused || work.landingWaits?.())) {
             held.slot.release();
             held.slot = undefined;
           }
           await new Promise<void>((wake) => {
             const done = () => {
               clearTimeout(timer);
-              const at = nudges.indexOf(done);
-              if (at >= 0) nudges.splice(at, 1);
+              // Out of every list that may wake it: one left behind would pile up across an hours-long pause.
+              for (const list of [nudges, wakers]) {
+                const at = list.indexOf(done);
+                if (at >= 0) list.splice(at, 1);
+              }
               wake();
             };
             const timer = setTimeout(done, 1000);
             settles.push(done);
             nudges.push(done);
+            if (paused) wakers.push(done);
           });
         }
       };

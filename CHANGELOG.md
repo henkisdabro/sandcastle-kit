@@ -11,6 +11,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **A paused run no longer keeps a sandbox slot while a worker waits for a conflict's resolve.**
+  When every queued ticket was held back for a ticket sent back after a conflict, the worker that
+  waited for it kept its machine-wide slot for the whole pause - until the plan window reset, under
+  a usage pause - while the run told the other runs it needed none. It now gives the slot back for
+  the pause and asks for one again after the resume.
+
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
   issue titles listed from the tracker are printed as plain text, as the status view already did, so
