@@ -75,3 +75,20 @@ test("a credential in a gate's stderr is redacted in the log", async () => {
   assert.ok(!text.includes("not-a-real-value"), text);
   assert.ok(text.includes("printed: <redacted>"), text);
 });
+
+// #996: a key a gate needed (a private-registry token, say) now stops at the host unless `gateEnv` names it; the log
+// names what was kept back, so a gate gone red after the upgrade says why. Names only, never a value.
+test("the gates log names the .env keys withheld from the gates, never their values", async () => {
+  const { withholdFromGates } = await import("../src/worktree-lock.ts");
+  withholdFromGates(["NPM_TOKEN", "GH_TOKEN"]);
+  hideFromGates(["npm_xxxxxxxxxxxx"]);
+  const lines = await gated([{ name: "unit", command: "run-unit" }], [["run-unit", { exitCode: 0, stdout: ["ok"], stderr: "" }]]);
+  const note = lines.find((l) => l.startsWith("# withheld from the gates"));
+  assert.ok(note, lines.join("\n"));
+  assert.match(note, /GH_TOKEN, NPM_TOKEN/);
+  assert.match(note, /gateEnv/);
+  assert.ok(!lines.join("\n").includes("npm_xxxxxxxxxxxx"));
+  withholdFromGates([]);
+  const none = await gated([{ name: "unit", command: "run-unit" }], [["run-unit", { exitCode: 0, stdout: ["ok"], stderr: "" }]]);
+  assert.ok(!none.some((l) => l.startsWith("# withheld")), none.join("\n"));
+});

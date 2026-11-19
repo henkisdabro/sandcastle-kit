@@ -17,7 +17,7 @@ process.env.USAGE_CHECK = "1";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-usage-login-xdg-"));
 const { hostLoginReaders, usageToken, usageLine, usageStop } = await import("../src/usage.ts");
 const { fakeTracker } = await import("./fixtures.ts");
-const { sandboxEnv, sandboxMounts } = await import("../src/sandbox.ts");
+const { sandboxEnvFor, sandboxMounts } = await import("../src/sandbox.ts");
 
 const NOW = Date.UTC(2026, 9, 4, 12);
 const login = (accessToken: unknown, expiresAt: unknown = NOW + 3_600_000) => JSON.stringify({ claudeAiOauth: { accessToken, expiresAt, refreshToken: "refresh-secret" } });
@@ -137,7 +137,7 @@ test("the login's token never reaches the sandbox environment or mounts the kit 
   process.env.CLAUDE_CONFIG_DIR = config;
   try {
     const project = { root: mkdtempSync(join(tmpdir(), "sandcastle-usage-login-proj-")), mounts: [], tracker: fakeTracker() } as never;
-    const sandbox = sandboxEnv(project);
+    const sandbox = sandboxEnvFor(project, "ticket");
     assert.equal(sandbox.CLAUDE_CODE_OAUTH_TOKEN, "setup-token");
     const everything = JSON.stringify({ env: sandbox, mounts: sandboxMounts(project) });
     assert.doesNotMatch(everything, /login-token-xyz|refresh-secret|credentials\.json/);

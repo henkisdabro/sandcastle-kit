@@ -263,7 +263,7 @@ export const landInSandbox = async (
 export const sandboxOpener =
   (project: Project, image: string, planFile: string, exclusive?: Exclusive): Opener =>
   async (branch) => {
-    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }).then((s) => limitMemory(s, project.memory)), exclusive);
+    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile, "gate") }).then((s) => limitMemory(s, project.memory)), exclusive);
     lockWorktree(s.worktreePath);
     return {
       worktreePath: s.worktreePath,

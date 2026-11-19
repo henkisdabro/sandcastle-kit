@@ -460,7 +460,7 @@ export const passReport = (agent: object): ReportCapture | undefined => captures
 // Auto memory is off and the tools are cut to TOOLS: both are fixed prompt prefix paid on every turn,
 // and a sandbox's memory directory dies with its container, so nothing it wrote would be read again.
 // Sandcastle (0.14.0 on) puts this env on each Claude command as `export KEY='value'; ` and refuses a key the sandbox's
-// own env also names, so `sandboxEnv` (src/sandbox.ts) leaves these keys out of the container's.
+// own env also names, so `sandboxEnvFor` (src/sandbox.ts) leaves these keys out of the container's.
 export const claudeEnv = (): Record<string, string> => ({
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
   ...(AUTO_COMPACT_WINDOW === undefined ? {} : { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(AUTO_COMPACT_WINDOW) }),

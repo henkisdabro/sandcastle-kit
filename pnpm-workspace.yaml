@@ -4,5 +4,7 @@ allowBuilds:
 # a host `git fetch origin <branch>` plus a fast-forward outside it, with a 30 s limit: an origin that
 # does not answer fails every open. The patch skips that refresh. Remove it once upstream has an option
 # to skip the origin refresh. See issue #711 of this repository.
+# It also stops Sandcastle forwarding every key of .sandcastle/.env into each container, past the
+# kit's allowlisted sandbox environment (#996).
 patchedDependencies:
   '@ai-hero/sandcastle@0.14.0': patches/@ai-hero__sandcastle@0.14.0.patch

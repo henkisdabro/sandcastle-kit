@@ -18,6 +18,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   ahead only if the token was found unable to push within the last 7 days, so a first run needs
   GitHub to answer. `SANDCASTLE_ALLOW_BROAD_TOKEN=1` is the one override, and a run prints a line
   while it is set. (#997)
+- **A key of the credentials files reaches a sandbox only when the project names it.** A sandbox
+  used to get every key of `~/.config/sandcastle-kit/.env` and `.sandcastle/.env`; now a ticket's
+  gets the agents' credentials plus the keys of the new `agentEnv` and `gateEnv` settings, and a
+  gate-only sandbox (a landing, the base and verify gates) only `gateEnv`'s. A `setup` step or gate
+  that read another key - a private-registry `NPM_TOKEN`, say - fails until the key is listed:
+  `gateEnv: ["NPM_TOKEN"]` in `.sandcastle/config.ts`. `sandcastle doctor` warns when `setup` names
+  a key `gateEnv` leaves out, and the gates log names every withheld key. Run `pnpm install` in the
+  kit: its Sandcastle patch changed. `/sandcastle update` walks through the keys.
 - **More of a branch is held for you to merge: all of `.claude/`, editor and package-manager hooks,
   and unknown root dotfiles.** A ticket that edits the project's skills, agents or commands, a
   `.vscode/` or `.devcontainer/` file, `opencode.json`, or a root dotfile not on the inert list
@@ -36,6 +44,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `.sandcastle/.run/token-verdict.json`) is under 7 days old. Doctor reads a rate-limited 403 as
   not checked rather than as "cannot push". A project whose tickets are in files and that has no
   GitHub remote no longer passes `GH_TOKEN` to its sandboxes. (#997)
+- **Gates no longer see credentials beyond the ones they are given.** A gate-only sandbox is opened
+  with no key of the credentials files except those `gateEnv` names, and in a ticket's sandbox every
+  forwarded key but `gateEnv`'s is unset for each gate and its value redacted from the output, where
+  only the kit's three tokens were before. Sandcastle's own forwarding of every `.sandcastle/.env`
+  key into each container is switched off by the kit's patch. The agents' tokens still sit in a
+  ticket's container environment, which `docs/safety.md` now states (#996).
 - **Files that run on your machine without anyone reading them no longer land unheld.** The
   protected-path list is now a table naming what runs each entry, and gains pnpm's `.pnpmfile.*`,
   Yarn's `.yarnrc` and `.yarn/releases/` and `.yarn/plugins/`, `bunfig.toml`, the whole of

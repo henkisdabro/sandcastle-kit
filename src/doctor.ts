@@ -23,7 +23,7 @@ import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
 import { poolWarningsNow, sizePointerNow } from "./size.ts";
-import { apiKeySpend, baseImage, githubRemoteRepo, githubToken, KIT, machineSettings, sandcastlePatchProblems, USER_CONFIG } from "./sandbox.ts";
+import { apiKeySpend, baseImage, githubRemoteRepo, githubToken, KIT, machineSettings, sandcastlePatchProblems, setupWithheldKeys, USER_CONFIG } from "./sandbox.ts";
 import { kitRelease, kitVersion, newestRelease, releaseOut, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
@@ -796,6 +796,10 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", `Move the LINEAR_API_KEY line from ${projectEnv} to ${envFile}: Sandcastle would forward it into every sandbox.`);
       if (p.GH_TOKEN) check(p.GH_TOKEN.startsWith("github_pat_"), ".sandcastle/.env GH_TOKEN is fine-grained (it overrides the shared one)", `Replace it in ${projectEnv} with a fine-grained token, or delete its GH_TOKEN line to use the shared one.`);
     }
+    // Advisory: a key the setup needs only for some installs (a private registry) may be harmless to withhold, and
+    // the gates log names every withheld key anyway. A gate-only sandbox gets no credentials-file key `gateEnv` omits.
+    const setupNeeds = project ? setupWithheldKeys(project) : [];
+    if (setupNeeds.length) console.log(`warn \`setup\` names ${setupNeeds.join(", ")} from the credentials files, which gates and their setup no longer get\n       -> add ${setupNeeds.length > 1 ? "them" : "it"} to \`gateEnv\` in ${CONFIG_PATH} if the setup needs ${setupNeeds.length > 1 ? "them" : "it"}`);
     // A FIX: git finds no hooks in a sandbox with this value, and nothing else says so. Not for the exact absolute form of
     // a tracked hooks directory: every sandbox is given the relative path through its environment, so that is a warning.
     const outsideHooks = hooksPathOutside(repoRoot);

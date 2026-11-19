@@ -1,5 +1,5 @@
 // The project's tracked `core.hooksPath`, in one place for the three that must agree on it: the sandboxes' pin
-// (`sandboxEnv`, src/sandbox.ts), the guard's acceptance of the exact absolute rewrite and the hooks directory it keeps
+// (`sandboxEnvFor`, src/sandbox.ts), the guard's acceptance of the exact absolute rewrite and the hooks directory it keeps
 // protected (src/guard.ts), and what doctor and `lean` say of an absolute value (src/lean.ts). Reads git and the file
 // system only, and imports nothing from the kit, so `sandbox.ts` and `guard.ts` can both use it. It writes nothing:
 // the kit never writes `.git/config`.

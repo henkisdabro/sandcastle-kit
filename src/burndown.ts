@@ -4245,7 +4245,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     overrides,
     // A setup step that failed throws `SetupFailed` inside the open, so the open's clean-up removes what it made: the attempt
     // is lost, and the scheduler sends the ticket back once (src/schedule.ts).
-    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }).then((s) => assertSetup(s, project.setup, branch)).then((s) => limitMemory(s, project.memory)), host.exclusive),
+    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile, "ticket") }).then((s) => assertSetup(s, project.setup, branch)).then((s) => limitMemory(s, project.memory)), host.exclusive),
     gate: (box, id, rerunOnRed, onSlot) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed, undefined, onSlot),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>

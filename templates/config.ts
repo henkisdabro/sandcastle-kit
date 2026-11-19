@@ -40,6 +40,12 @@ export default {
   // either side and running `regen` in a sandbox. The kit's docs/setup.md -> A gate for generated files.
   // generated: [{ paths: ["dist/site.css"], regen: "pnpm run build:css" }],
 
+  // Keys of the credentials files (.sandcastle/.env, ~/.config/sandcastle-kit/.env) a sandbox may see.
+  // Every other key stops at the host: gates and setup get only gateEnv's, agents their own
+  // credentials plus agentEnv's. The kit's docs/safety.md -> Credentials.
+  // gateEnv: ["NPM_TOKEN"],                // a private-registry install in setup
+  // agentEnv: ["SERVICE_KEY"],             // a key an agent's tool needs
+
   // Paths a branch may not change and still land by itself, on top of the kit's own list.
   // protectedPaths: ["migrations/"],
   // Paths of the kit's own list (not its fixed entries: hooks, CI, .sandcastle/, .envrc) or root dotfiles that may land

@@ -1661,7 +1661,7 @@ its write is never replaced (`test/pause-race.test.ts`).
 ## `src/guard.ts`
 
 Host safety: git hooks, auto-gc and background maintenance off (on the host, `disableHostGitGc`, and
-in every sandbox too, by `GIT_CONFIG_*` pairs that `sandboxEnv` in `src/sandbox.ts` appends after
+in every sandbox too, by `GIT_CONFIG_*` pairs that `sandboxEnvFor` in `src/sandbox.ts` appends after
 any already set: the host's pairs never reach a container, and a commit or merge in a sandbox would
 otherwise start `git maintenance run --auto` and a detached `git gc --auto` repack and prune in the
 `.git` every sandbox shares, in a container that may be stopped before it ends; in the environment
@@ -1827,7 +1827,27 @@ script's waits.
 On 0.14.0 the first change replaces the else arm of a ternary in `create`
 (`dirty ? warn : fastForwardFromOrigin(...)` becomes `dirty ? warn : Effect_exports.void`); upstream's
 unreleased reshaping of `createSandbox` moves the `pruneStale` hunk again on the next bump.
+A fourth change empties the `.sandcastle/.env` merge in `startSandboxOnWorktree`, the container start
+`createSandbox` makes: unpatched, Sandcastle put every key of that file into each container's
+environment under the kit's own, so a gate-only sandbox got the project's tokens past the allowlist
+below (#996).
 `sandcastle doctor` checks the patch is applied (`kit dependencies installed`).
+
+**A sandbox's environment is an allowlist** (`sandboxEnvFor(project, kind)`, `src/sandbox.ts`).
+Every kind gets `TZ`, the committer, the git pins and `CLAUDE_CODE_TMPDIR`, and of the credentials
+files only `forwardedKeys`: a gate-only sandbox (`"gate"`: a landing, the base and verify gates,
+`sandcastle gates` and `land`) the keys `gateEnv` names, a ticket's (`"ticket"`) the agents'
+credentials (`KIT_CREDENTIALS`, `src/worktree-lock.ts`) and the keys of `agentEnv` and `gateEnv`.
+`loadProject` refuses a `gateEnv` that names an agent's credential.
+`credentials()` registers every value of the two files with `hideFromGates`, and every key `gateEnv`
+does not name with `withholdFromGates`; `execGate` runs each gate under `env -u` of those keys and the
+kit's own, and `runGates` writes their names (never values) into the gates log, so a gate that went red
+for a key it no longer gets says why.
+`env -u` reaches the gate's process tree only: in a ticket's sandbox the agents' credentials stay in
+the container's environment, where a gate can read them (`/proc/1/environ`). They cannot travel on the
+agent's command alone (`withAgentEnv`), since the prompt's shell expressions (`gh-retry.sh`) run
+through `sandbox.exec` with the container's environment; `docs/safety.md` states the residual.
+`test/credentials-policy.test.ts`, `test/gate-secrets.test.ts` and `test/gate-log-stderr.test.ts` hold it.
 
 **Capabilities.** Every sandbox container starts without `NET_RAW` (`capDrop: ["NET_RAW"]` in
 `dockerOptions`, `src/sandbox.ts`): no raw or packet sockets, so nothing in a sandbox can spoof
@@ -2052,7 +2072,7 @@ opened, since a blocking read would hang the whole run.
   reads the key during the run: the host's git runs with `core.hooksPath=/dev/null`
   (`disableHostGitHooks`) and every sandbox with the pinned path, `pinnedHooksPath` - the local
   `core.hooksPath` when it passes `trackedHooksPath`, or the relative path `ownAbsoluteHooksPath` names
-  for it when that is a tracked directory; `sandboxEnv` appends it as one more `GIT_CONFIG_*` pair
+  for it when that is a tracked directory; `sandboxEnvFor` appends it as one more `GIT_CONFIG_*` pair
   beside the maintenance pairs (command-scope config outranks the file, git 2.31+). `hooksDirProtected`
   uses the same derivation, so the tracked hooks directory stays protected after the flip. The
   rewrite the guard accepted is remembered by project root (`acceptedRewrite`), so
@@ -2868,7 +2888,7 @@ the login's own expiry (about 8 hours) ends it - an expired login is "no reading
 again before the next ticket) and does not fall back, since the setup token would only get the 403
 that turns the guard off for the run; a missing or unreadable login (no entry, a reader that throws,
 malformed JSON, no access token) falls back to `CLAUDE_CODE_OAUTH_TOKEN`; the token is never
-written, never added to the env the run holds, never in `sandboxEnv` or `sandboxMounts`
+written, never added to the env the run holds, never in `sandboxEnvFor` or `sandboxMounts`
 (`src/sandbox.ts`) and never printed - `sandcastle doctor --verify` reports which source the guard
 would use, where it looks for the login (`loginLocation`: the keychain service's name or the
 credentials file's path) and the endpoint's HTTP status only. `test/usage-login.test.ts`,
@@ -3447,10 +3467,10 @@ settings deny); `configureTools` sets it from `loadProject`, as `configureModels
 and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` when `autoCompactWindow` is set), which Sandcastle puts on each
 pass's command as `export KEY='value'; ` before it (`withAgentEnv`, from 0.14.0: 0.12.0 dropped it,
 so auto memory stayed on); the container's environment is the sandbox's alone.
-Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnv`
-(`src/sandbox.ts`) leaves the agent's keys out, a person's `.env` naming one included: the exported
+Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnvFor`
+(`src/sandbox.ts`) leaves the agent's keys out, one a project's `agentEnv` names included: the exported
 value would win anyway (`test/agent-env.test.ts`, `test/claude-tools-allow-list.test.ts`).
-`sandboxEnv` also gives every sandbox `CLAUDE_CODE_TMPDIR` (`CLAUDE_TMPDIR`, `/home/agent/.claude-tmp`), beside
+`sandboxEnvFor` also gives every sandbox `CLAUDE_CODE_TMPDIR` (`CLAUDE_TMPDIR`, `/home/agent/.claude-tmp`), beside
 `TZ` and the committer: a project cloned under `/tmp/claude-<uid>/` has its `.git` mounted at that path, Docker
 makes the parents root-owned and Claude Code refuses `/tmp/claude-<uid>` unless its user owns it, which crashed
 every Claude pass (`test/sandbox-claude-tmpdir.test.ts`). It sits among the keys the agent's own env removes.
@@ -3462,7 +3482,7 @@ the input price, against 1.25 times for a 5-minute one; a review or resolve pass
 turns is a few minutes, so it never used the hour.
 An implement or repair pass waits on long test runs, often past five minutes, so it keeps Claude
 Code's own choice and its command names no TTL.
-`sandboxEnv` leaves `CLAUDE_CODE_PROMPT_CACHE_TTL` out of the container's environment as well, though
+`sandboxEnvFor` leaves `CLAUDE_CODE_PROMPT_CACHE_TTL` out of the container's environment as well, though
 the implementer's environment does not name it: a person's `.env` naming it would make Sandcastle
 refuse every review and resolve pass (`test/agent-cache-ttl.test.ts`).
 The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does

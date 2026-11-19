@@ -109,8 +109,8 @@ blockers: {
 ```
 
 - **Linear** needs a personal API key (read-only is enough) as `LINEAR_API_KEY` in
-  `~/.config/sandcastle-kit/.env`, not the project's `.sandcastle/.env` (Sandcastle forwards that
-  file into every container, so the kit refuses the key there).
+  `~/.config/sandcastle-kit/.env`, not the project's `.sandcastle/.env` (unpatched, Sandcastle
+  forwards that file into every container, so the kit refuses the key there).
   It stays on the host.
   `sandcastle doctor` checks it when `blockers.linear` is set.
 - **Ticket files** are read from the base branch, not your working tree, so a blocker counts as done
