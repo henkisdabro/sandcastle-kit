@@ -6,6 +6,7 @@
 
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
+import { guardFault } from "./verdict.ts";
 
 /** A path that cannot be normalised. A guard holds it: what it would resolve to on the host is not known. */
 export type Unnormalisable = { kind: "unknown"; detail: string };
@@ -88,6 +89,7 @@ export const containedHostPath = (root: string, rel: string): { kind: "allow" } 
   for (let i = 1; i < parts.length; i++) {
     const prefix = parts.slice(0, i).join("/");
     try {
+      guardFault("contained-host-path");
       if (lstatSync(join(root, prefix)).isSymbolicLink()) return { kind: "refuse", detail: `${prefix} is a symlink in this worktree` };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") return { kind: "allow" };

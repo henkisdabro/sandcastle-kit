@@ -1,13 +1,15 @@
 // The bypass corpus: one row per reproduction in the guard audit issues, each run against the guard it names in a
 // throwaway directory. A ticket that closes a bypass adds its rows here before its fix, so they fail at HEAD; a row
 // that later passes a bypass back through fails here, whichever guard changed.
-// Row: { guard, input, expect: "refuse" | "allow", code?, issue, protectedPaths?, unheldPaths? } (test/fixtures/guard-bypasses.json).
+// Row: { guard, input, expect: "refuse" | "allow", code?, detail?, issue, protectedPaths?, unheldPaths? } (test/fixtures/guard-bypasses.json).
 //
 //   pnpm test:file test/guard-bypasses.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -20,8 +22,9 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { largeFiles, protectedAmong, protectedChanges } = await import("../src/guard.ts");
 const { refuses } = await import("../src/verdict.ts");
 const { apply } = await import("../src/lean.ts");
+const { tokenVerdict } = await import("../src/doctor.ts");
 
-type Row = { guard: string; input: any; expect: "refuse" | "allow"; code?: string; issue: number; protectedPaths?: string[]; unheldPaths?: string[] };
+type Row = { guard: string; input: any; expect: "refuse" | "allow"; code?: string; detail?: string; issue: number; protectedPaths?: string[]; unheldPaths?: string[] };
 const rows: Row[] = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/guard-bypasses.json"), "utf8"));
 
 const repo = () => {
@@ -47,6 +50,7 @@ const held = (row: Row, v: Verdict) => {
 // `input.base` on main, then a branch with `input.change`, `input.links` (symlinks: path -> target) and
 // `input.gitlinks` (submodule pointers). `input.replace`: the #992 repro - a replace ref maps the branch's real
 // commit to a benign one (the base's tree), so a reader that honours replace refs sees nothing changed.
+// `input.tip`: the tip the guard is given in place of the branch's, such as a commit that is not there.
 const branchRepo = (row: Row) => {
   const { root, git } = repo();
   write(root, { "README.md": "base\n", ...row.input.base });
@@ -68,7 +72,7 @@ const branchRepo = (row: Row) => {
     git("replace", real, benign);
     assert.equal(git("diff", "--name-only", `main...${real}`).trim(), "", "the replace ref must hide the change from plain git");
   }
-  return { root, tip: real };
+  return { root, tip: row.input.tip ?? real };
 };
 
 // Each guard's run of a row: true when it refuses (holds, skips) the input.
@@ -88,6 +92,27 @@ const guards: Record<string, (row: Row) => Promise<boolean> | boolean> = {
   "large-files": (row) => {
     const { root, tip } = branchRepo({ ...row, input: { ...row.input, big: true } });
     return held(row, largeFiles({ root, baseBranch: "main" } as Project, tip));
+  },
+  // tokenVerdict against a stubbed GitHub that answers the issue read `input.read` (200) and the push probe
+  // `input.write` (403), rate-limited with `input.limited`; `input.offline` points it at a port nobody answers.
+  token: async (row) => {
+    const api = createServer((req, res) => {
+      res.statusCode = req.method === "POST" ? (row.input.write ?? 403) : (row.input.read ?? 200);
+      if (req.method === "POST") res.setHeader("x-ratelimit-remaining", row.input.limited ? "0" : "4999");
+      res.end("{}");
+    });
+    await new Promise<void>((done) => api.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
+    if (row.input.offline) await new Promise((done) => api.close(done));
+    const before = process.env.SANDCASTLE_TEST_GITHUB_API;
+    process.env.SANDCASTLE_TEST_GITHUB_API = url;
+    try {
+      return held(row, await tokenVerdict("github_pat_fake", "octo/demo"));
+    } finally {
+      if (before === undefined) delete process.env.SANDCASTLE_TEST_GITHUB_API;
+      else process.env.SANDCASTLE_TEST_GITHUB_API = before;
+      api.close();
+    }
   },
   // `input.fs` lays out the worktree ("dir", "file", "dir-noaccess", or "symlink-out" to a directory outside it);
   // the plan hides `input.path`. Refused when lean-apply leaves the path alone and says so.
@@ -117,7 +142,8 @@ const guards: Record<string, (row: Row) => Promise<boolean> | boolean> = {
   // container/git-guard.sh run as Claude Code runs it (git-guard.test.ts): the agent's cwd and project dir are a
   // linked worktree of `<main>`, whose shared .git is `<shared>`; `<scratch>` is a separate repository. `input.symlink`
   // links worktree paths to a placeholder, `input.alias` sets git aliases in the shared config. A refusal must
-  // carry the row's `[git-guard:<code>]`.
+  // carry the row's `[git-guard:<code>]`, and its `detail` where two branches give one code: the row is then
+  // refused by the branch it names, not by a later one that happens to catch it too.
   "git-guard": (row) => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-bypass-guard-")));
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_") && k !== "CLAUDE_PROJECT_DIR"));
@@ -141,6 +167,7 @@ const guards: Record<string, (row: Row) => Promise<boolean> | boolean> = {
     });
     assert.ok(r.status === 0 || r.status === 2, r.stderr);
     if (r.status === 2 && row.code) assert.ok(r.stderr.includes(`[git-guard:${row.code}]`), r.stderr);
+    if (r.status === 2 && row.detail) assert.ok(r.stderr.includes(row.detail), r.stderr);
     return r.status === 2;
   },
 };

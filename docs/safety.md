@@ -3,6 +3,15 @@
 What an unattended agent can and cannot reach, and what holds a branch for a person.
 
 
+Every guard on this page keeps one rule (ADR 0006): a thing crosses from a sandbox to the host only once
+the guard has established, on a normalised reading of it, that it is in a known-safe class.
+What a guard cannot read, parse or classify - a git call that failed, a manifest that does not
+parse, a token GitHub would not answer for, a command the git guard cannot read - is refused (held,
+stopped or denied), never let through, and the refusal says what could not be established and the
+one way past it on your side: a merge by hand, `unheldPaths`, or `SANDCASTLE_ALLOW_BROAD_TOKEN=1`.
+An override lives on the host or in `.sandcastle/` config, which a branch cannot change unheld, and
+a run says so each time one is in force.
+
 Agents run unattended with permission prompts off, inside Docker, as a plain user without raw
 sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows what can cross it:
 

@@ -37,6 +37,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **Every guard refusal is now tested, and a reader that fails always refuses.** A `package.json` that
+  git could not read on a branch is held as a reader failure rather than as a manifest that does not
+  parse, and a token check whose probe throws is "could not tell" rather than an error. The rule all
+  guards keep - what cannot be established as safe does not cross - is written down once, in
+  `docs/safety.md` and ADR 0006. (#1010)
 - **A live run no longer flashes as ended in the status view when `ps` fails under load.** One
   failed process probe (a fork refused on a busy machine) read the run as gone, and that frame
   dropped its plan usage. The view now asks `ps` again, and a run whose process still exists stays

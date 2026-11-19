@@ -3,14 +3,23 @@
 // "nothing here" and the branch landed. Every guard answers `allow`, `refuse` or `unknown`, and a caller holds on
 // both of the last two: unknown is never allowed.
 
-/** Why a guard held: a closed set, so a ledger line or a lint can say why without parsing words. */
-export type ReasonCode =
-  | "protected-path"
-  | "symlink-entry"
-  | "gitlink"
-  | "manifest-unparseable"
-  | "large-file"
-  | "reader-failed";
+/**
+ * Why a guard refused: a closed set, so a ledger line or a lint can say why without parsing words. A list, not only a
+ * type, so `test/guard-refusal-coverage.test.ts` can require a bypass-corpus row for each: a code no row produces is a
+ * refusal branch that could be deleted unnoticed.
+ */
+export const REASON_CODES = [
+  "protected-path",
+  "symlink-entry",
+  "gitlink",
+  "manifest-unparseable",
+  "large-file",
+  "reader-failed",
+  "repo-invisible",
+  "token-can-push",
+  "token-unverified",
+] as const;
+export type ReasonCode = (typeof REASON_CODES)[number];
 
 /**
  * A guard's answer. `paths` names what a hold is for, as git holds the names, so a hold message and `git show` name
@@ -37,3 +46,22 @@ export const readerFailed = (what: string, error: unknown): Verdict => ({
  * detail - an empty list would read as "nothing held".
  */
 export const heldWords = (v: Verdict): string[] => (!refuses(v) ? [] : v.paths?.length ? v.paths : [`${v.code}: ${v.detail}`]);
+
+/**
+ * The readers a guard's verdict rests on. `injectGuardFault` makes one throw, so `test/guard-faults.test.ts` can drive
+ * the branch every guard takes when its reader fails - a branch no real repository reaches on demand, and the one
+ * that, written as an empty result, let a branch land unread.
+ */
+export const GUARD_READERS = ["branch-changes", "manifest", "size", "token-probe", "contained-host-path", "fingerprint"] as const;
+export type GuardReader = (typeof GUARD_READERS)[number];
+let fault: GuardReader | undefined;
+
+/** Makes `reader` throw at its next reads (a test's seam, as `injectWorktreeLimit`); with no argument, none does. */
+export const injectGuardFault = (reader?: GuardReader) => {
+  fault = reader;
+};
+
+/** Called by each reader just before it reads: throws while that reader's fault is injected. */
+export const guardFault = (reader: GuardReader) => {
+  if (fault === reader) throw new Error(`injected fault in ${reader}`);
+};
