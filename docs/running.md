@@ -429,12 +429,18 @@ With `USAGE_PAUSE=90` (or `usagePause: 90` in `.sandcastle/config.ts`; the envir
 pauses itself when the 5-hour or the weekly window of Claude's plan reaches that percent, and
 **resumes by itself a minute after that window's reset** - a pause of days costs nothing, and the
 keep-awake helper ends as for any pause with nothing in flight.
-It reads the agents' own readings, the numbers of the status view's plan lane, so it needs no
-request and no credential, and it does nothing for a run that shows no plan usage (an API key): the
-start line says either way - `Usage pause: at 90%, resumes at the window's reset`.
+It reads the agents' own readings, the numbers of the status view's plan lane, and it does nothing
+for a run that shows no plan usage (an API key): the start line says either way -
+`Usage pause: at 90%, resumes at the window's reset`.
 With both windows over the threshold it waits for the one that resets later.
-It judges the windows the readings have: a window the agents' events do not carry is kept from the
-last event that had it, or, with none, not judged.
+A window the agents' events do not carry is kept from the last event that had it.
+Claude Code reports the weekly window alone in each pass, so the readings often lack the 5-hour
+window, the one that runs out within a run: for a window the readings lack, and only for it, the
+pause reads the plan's usage endpoint, with the credential and the ten-minute cache `USAGE_CHECK`
+uses (one request serves both, and it asks whether or not `USAGE_CHECK` is on).
+With both windows in the readings it makes no request and reads no credential.
+When the endpoint cannot be read, the pause judges the windows it has and says so once:
+`Usage pause: Claude's 5-hour window could not be read (...); the pause judges the windows it has.`
 A Codex window (the cross-review's plan) never pauses the run: the cross-review is a second
 opinion, not a gate, so while a Codex window is at the percent and not yet reset the ticket's
 cross-review is skipped, the run prints `#7: cross-review skipped - Codex 5-hour usage 98%, resets

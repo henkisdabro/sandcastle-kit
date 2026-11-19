@@ -7,10 +7,14 @@ Agents run unattended with permission prompts off, inside Docker, as a plain use
 sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows what can cross it:
 
 - 🔑 **Tokens.** Only a fine-grained GitHub token (issues and metadata on chosen repos) enters the
-  sandbox. It cannot push, edit workflows or change settings (`sandcastle doctor --verify` checks it
-  cannot push, and that it can see the repository: a fine-grained token whose Repository access
-  leaves the repo out gets a FIX there, and `sandcastle run` refuses the same way before any sandbox
-  starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
+  sandbox. It cannot push, edit workflows or change settings: `sandcastle run` asks GitHub before any
+  sandbox starts and refuses a token that can push to the repository, or one whose Repository access
+  leaves the repo out (`sandcastle doctor --verify` makes the same check and gives a FIX).
+  When GitHub gives no clear answer (no connection, a rate limit), the run goes ahead only if the same
+  token was found unable to push within the last 7 days; that record, in `.sandcastle/.run/`, holds a
+  hash of the token, never the token. `SANDCASTLE_ALLOW_BROAD_TOKEN=1` is the one way past both, and
+  a run says so each time it is set. A project whose tickets are in files and that has no GitHub
+  remote gives its sandboxes no `GH_TOKEN` at all. Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
   without the kit's tokens, and a token value in gate output is replaced with `<redacted>`. So is
   a token of Codex's login (`~/.codex/auth.json`, read when `CROSS_REVIEW=1`) in the
   output a crashed agent's log and crash note show.

@@ -720,6 +720,26 @@ export const githubToken = (project: Project): string | undefined => {
   return local!.GH_TOKEN || user!.GH_TOKEN || undefined;
 };
 
+/**
+ * The `owner/name` of the repository's GitHub remote (origin first, then any other), read from git's own config
+ * with no network call; undefined when no remote is on github.com. A files tracker with none never needs GH_TOKEN.
+ */
+export const githubRemoteRepo = (root: string): string | undefined => {
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", root, "remote", "-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return undefined;
+  }
+  const remotes = out.split("\n").map((line) => line.split(/\s+/)).filter((f) => f.length >= 2);
+  remotes.sort((a, b) => Number(b[0] === "origin") - Number(a[0] === "origin"));
+  for (const [, url] of remotes) {
+    const m = /^(?:[a-z][\w+.-]*:\/\/)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url!);
+    if (m && /^(?:.+\.)?github\.com$/i.test(m[1]!)) return `${m[2]}/${m[3]}`;
+  }
+  return undefined;
+};
+
 /** `apiKeySpend` over the project's two credentials files, as `credentials` reads them. */
 export const projectApiKeySpend = (project: Project) => apiKeySpend(credentialFiles(project));
 
@@ -1115,6 +1135,9 @@ export const sandboxEnv = (project: Project): Record<string, string> => {
   // review or resolve pass sets (`CACHE_TTL_KEY`), even though an implement pass's env does not name it.
   const env: Record<string, string> = { ...credentials(project), CLAUDE_CODE_TMPDIR: CLAUDE_TMPDIR };
   for (const key of [...Object.keys(claudeEnv()), CACHE_TTL_KEY]) delete env[key];
+  // Tickets in files with no GitHub remote: nothing in a sandbox needs GitHub, and no check at the run's start can
+  // say what such a token could push to, so it stays on the host.
+  if (project.tracker.kind === "files" && !githubRemoteRepo(project.root)) delete env.GH_TOKEN;
   // The project's tracked hooks path, pinned: a worktree tool may rewrite the shared `.git/config` value to its absolute
   // host form, which does not exist in a container, and command-scope config outranks the file (git 2.31+). The kit
   // writes nothing to `.git/config`; no tracked hooks path pins nothing.
