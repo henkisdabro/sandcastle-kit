@@ -939,7 +939,7 @@ try {
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
       if (left.length) {
-        console.log(`\nLeft as they are, git was not run in them:\n${left.map((l) => `  ${l.path}: ${l.reason}`).join("\n")}`);
+        console.log(`\nLeft as they are, with the reason:\n${left.map((l) => `  ${l.path}: ${l.reason}`).join("\n")}`);
         process.exitCode = 1;
       }
       if (!containers.length && !images.length && !worktrees.length && !deleted.length && !backups.length && !kept.length && !left.length) console.log("Nothing to clean.");
