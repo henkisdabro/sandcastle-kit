@@ -27,6 +27,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   install script is checked like `package.json`'s. `lean-apply` now leaves a path alone when a
   directory on its way cannot be read (`EACCES`, `ENOTDIR`), not only when it crosses a symlink.
   (#991, #995)
+- **A sandbox can no longer swap the objects the host reads without stopping the run.** The `.git`
+  fingerprint now watches replace refs (`refs/replace/*`, loose or packed), `.git/shallow` and
+  `.git/objects/info/alternates`: one added or changed mid-run stops the run and names it.
+  Replace refs already there when a run or `sandcastle gates` starts print a note, not a refusal.
+  A `.git/config` git cannot read now stops a start at the pins with `NOT STARTED`, where it was
+  read as holding no program-running key.
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the

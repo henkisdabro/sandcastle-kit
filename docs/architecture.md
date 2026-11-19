@@ -1663,7 +1663,8 @@ any already set: the host's pairs never reach a container, and a commit or merge
 otherwise start `git maintenance run --auto` and a detached `git gc --auto` repack and prune in the
 `.git` every sandbox shares, in a container that may be stopped before it ends; in the environment
 and not the image, so no rebuild, `test/sandbox-git-maintenance-off.test.ts`), command-running
-config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks;
+config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks,
+replace refs, `shallow`, `objects/info/alternates`;
 `info/refs` and `info/exclude` are left out: the first is a dumb-transport index `git repack`
 rewrites, the second holds ignore patterns only, runs nothing and is written by the operator's own
 tools mid-run (Claude Code's runtime block), while `info/attributes`, `grafts`, `sparse-checkout`
@@ -1968,6 +1969,17 @@ opened, since a blocking read would hang the whole run.
   "environmental"; `test/pipeline-repair-git-check.test.ts`) and before each host write; the
   command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
   `core.hooksPath` and `core.fsmonitor` by environment.
+  `pinHostGitConfig` reads only git's exit 1 as "none of the keys is set"; any other failure (a
+  config git cannot parse) throws `NOT STARTED`, since reading it as none would leave a planted
+  program unpinned.
+- Object substitution (`replaceRefs`, `replaceRefsWarning`; `test/guard-replace-refs.test.ts`):
+  `files` also holds every `refs/replace/*` ref, read with `git for-each-ref` so a packed one counts
+  as a loose one does, keyed by the path its loose file would have (so a stop names it like a file)
+  with the object it stands in with as its value, and `shallow` and `objects/info/alternates`
+  (absent hashes as empty, so a new one is a difference).
+  Replace refs present at the start are not refused: the run and `sandcastle gates` print
+  `replaceRefsWarning`'s note, as the host reads branches with substitution off and only the
+  operator's own git honours them.
   A check also takes the exact absolute rewrite of a tracked hooks path mid-run
   (decided: pin and accept, never restore - the kit never writes `.git/config`, since restoring would
   make it a writer of the user's config, could race another writer and could hide a window of hookless
