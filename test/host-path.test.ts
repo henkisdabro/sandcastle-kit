@@ -26,7 +26,7 @@ const prng = (seed: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 
-const IGNORABLE = ["‌", "‍", "‎", "‏", "‪", "‮", "⁪", "⁯", "﻿"];
+const IGNORABLE = ["\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202e", "\u206a", "\u206f", "\ufeff"];
 
 // One spelling of `path` that a case-insensitive, HFS+ or NTFS host resolves to the same file.
 const respell = (path: string, rand: () => number) => {
@@ -105,8 +105,8 @@ test("near misses stay unmatched", () => {
 test("hostKey folds a path to the form the host opens", () => {
   assert.equal(hostKey(".Husky/Pre-Commit"), ".husky/pre-commit");
   assert.equal(hostKey("./.github./workflows /ci.yml"), ".github/workflows/ci.yml");
-  assert.equal(hostKey(".g‌it/config"), ".git/config");
-  assert.equal(hostKey("Infrå/x"), "infrå/x");
+  assert.equal(hostKey(".g\u200cit/config"), ".git/config");
+  assert.equal(hostKey("Infra\u030a/x"), "infrå/x");
   assert.equal(hostKey("a//b/"), "a/b");
 });
 

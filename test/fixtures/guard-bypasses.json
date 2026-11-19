@@ -5,7 +5,7 @@
   { "guard": "protected-path", "input": ".Lefthook/a.sh", "expect": "refuse", "issue": 991 },
   { "guard": "protected-path", "input": "LEFTHOOK.yml", "expect": "refuse", "issue": 991 },
   { "guard": "protected-path", "input": "Infra/x", "protectedPaths": ["infra/"], "expect": "refuse", "issue": 991 },
-  { "guard": "protected-path", "input": ".hus‌ky/pre-commit", "expect": "refuse", "issue": 991 },
+  { "guard": "protected-path", "input": ".hus\u200cky/pre-commit", "expect": "refuse", "issue": 991 },
   { "guard": "protected-path", "input": ".github./workflows/ci.yml", "expect": "refuse", "issue": 991 },
   { "guard": "protected-path", "input": "src/husky.ts", "expect": "allow", "issue": 991 },
   {

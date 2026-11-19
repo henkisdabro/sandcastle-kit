@@ -10,8 +10,8 @@ import { join } from "node:path";
 /** A path that cannot be normalised. A guard holds it: what it would resolve to on the host is not known. */
 export type Unnormalisable = { kind: "unknown"; detail: string };
 
-// The code points git's `is_hfs_dotgit` skips, because HFS+ drops them from a name: `.git‌` opens `.git`.
-const HFS_IGNORABLE = /[‌-‏‪-‮⁪-⁯﻿]/gu;
+// The code points git's `is_hfs_dotgit` skips, because HFS+ drops them from a name: `.git\u200c` opens `.git`.
+const HFS_IGNORABLE = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/gu;
 // oxlint-disable-next-line no-control-regex -- the control characters are the point: a name with one is refused
 const CONTROL = /[\u0000-\u001f\u007f]/u;
 
