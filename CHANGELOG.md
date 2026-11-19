@@ -16,6 +16,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in
   place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
   for 10 minutes, so no extra request per ticket).
+- **`USAGE_PAUSE` pauses for Claude's 5-hour window again.** It judged only the agents' readings,
+  which Claude Code fills with the weekly window alone, so the 5-hour window - the one that runs
+  out within a run - never paused the run. For a window the readings lack, and only that one, the
+  pause now reads the usage endpoint through `USAGE_CHECK`'s 10-minute cache and credential,
+  whether or not `USAGE_CHECK` is on; when it cannot, it says so once and judges the windows it has.
 
 - **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
   An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the

@@ -58,7 +58,7 @@ import { closingReport, summary, turnOfHead } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
-import { createPauseHandling, createUsagePause, crossReviewSkippedWords, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
+import { createPauseHandling, createUsagePause, crossReviewSkippedWords, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usageEndpointWindows, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { execGate, lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -3879,6 +3879,10 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       : createUsagePause(settings.usagePause, {
           standing: (now) => readPause(project.root, process.pid, now),
           hold: (pause, now) => holdForUsage(project.root, process.pid, pause, now),
+          // Asked only for a window the agents' readings lack: Claude Code reports the week alone in each pass, and without
+          // the endpoint the pause would never see the 5-hour window run out.
+          endpoint: () => usageEndpointWindows(env),
+          say: (line) => console.log(line),
         });
   // `LOAD_PAUSE`: every gate pass of this turn - the base gates, a ticket's, a landing's and the verify - is held while the machine's CPU pressure is high (src/load-pause.ts).
   if (turn?.loadPause && settings.loadPause !== undefined) {

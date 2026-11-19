@@ -2856,7 +2856,19 @@ is an `OperatorError` named like `USAGE_STOP`'s, from `resolveSettings` before a
 project's `usagePause` is checked by `checkShape` in `src/config.ts` and the environment beats it)
 is the same readings acted on. `createUsagePause(threshold, ports)` is the run's controller, over
 the control file and a clock it is given (`standing`, `hold`, `now`): `reading(usage)` is called
-with every provider's newest reading as `watchUsage` writes one, and `usagePauseFor` chooses the
+with every provider's newest reading as `watchUsage` writes one.
+Claude Code writes the weekly window alone in each pass, so Claude's reading often lacks the 5-hour
+window; for a window it lacks (none, or one that has reset), and only that one, the `endpoint` port
+(`usageEndpointWindows`, which `burndown()` wires: the guard's `usageToken` and its ten-minute `read`
+cache, whether or not `USAGE_CHECK` is on, with each window's reset time from `resets_at`) fills it in.
+The ask is asynchronous and made at most once each ten minutes whatever it got - a failed reading is
+not cached by `read`, and readings come about three a pass - and its answer is judged against the
+newest readings when it arrives; with both windows in the reading the port is never called, so no
+credential is read.
+A failure, or an answer without the window, leaves the pause judging the windows it has, and is said
+once through the `say` port. `limit` uses the endpoint's last answer the same way, without asking.
+`test/usage-pause-five-hour.test.ts`.
+`usagePauseFor` chooses the
 window - of those at or above the threshold that have not reset (`resetsAt` plus
 `USAGE_RESUME_GRACE_SECONDS`, 60, still ahead: a stale reading says nothing of a window open again
 since), the one that resets last, since resuming at an earlier reset would only pause again - and

@@ -42,7 +42,7 @@ This continues SKILL.md: run its "Before every action" first.
      HTTP 403 and cannot use the guard, and `sandcastle doctor --verify` shows which credential it
      would use and whose plan that is). Or `USAGE_PAUSE=90`, which has the run pause itself when a
      Claude plan window reaches that percent and resume by itself after the window's reset (a pause a person can
-     end with `sandcastle resume`; only a Claude window pauses the run - a Codex window at the percent skips the cross-review instead); it reads the agents' own readings, so it needs no credential.
+     end with `sandcastle resume`; only a Claude window pauses the run - a Codex window at the percent skips the cross-review instead); it reads the agents' own readings, and the cached usage endpoint only for a window they lack (usually the 5-hour one).
    - **Load pause.** On by default: a run holds each gate pass, before it takes its gates slot, while the
      machine's CPU pressure (`some` `avg60`; on macOS an estimate from the load average) is at or over 60%,
      releases after 2 minutes under it, and holds at most 30 minutes in all per run. Agent passes go on, so a
