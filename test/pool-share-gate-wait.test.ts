@@ -69,6 +69,11 @@ test("a run whose tickets only wait for gates leaves the free sandbox slots to a
   const third = ticket("a2", { keep: true });
   await until(() => third.taken, `A's third ticket, with 3 of 6 slots free (waits for ${JSON.stringify(third.why)}, members ${JSON.stringify(members())})`);
   assert.equal(mine(), 3);
-  await steady(() => heldBy() === "1,3", "the slot kept for landing stays free");
+  // Two more of A's tickets ask: the first takes the last slot of A's share, and the second competes for the one slot
+  // left, the one kept for landing while another run is live, which it must not get.
+  const fourth = ticket("a3", { keep: true });
+  await until(() => fourth.taken, `A's fourth ticket (waits for ${JSON.stringify(fourth.why)})`);
+  const fifth = ticket("a4", { keep: true });
+  await steady(() => heldBy() === "1,4" && !fifth.taken, "the slot kept for landing stays free while A's fifth ticket asks for it");
   await b.end();
 });
