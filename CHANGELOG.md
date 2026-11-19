@@ -42,6 +42,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   parse, and a token check whose probe throws is "could not tell" rather than an error. The rule all
   guards keep - what cannot be established as safe does not cross - is written down once, in
   `docs/safety.md` and ADR 0006. (#1010)
+- **A live run no longer flashes as ended in the status view when `ps` fails under load.** One
+  failed process probe (a fork refused on a busy machine) read the run as gone, and that frame
+  dropped its plan usage. The view now asks `ps` again, and a run whose process still exists stays
+  live.
 - **A run checks that `GH_TOKEN` cannot push, and doctor and the run decide alike.** Only a token
   GitHub cannot see used to stop a run; a token with Contents: write, no connection and a
   rate-limited 403 all went ahead. One verdict now serves both: a can-push token is refused, and an
