@@ -849,6 +849,9 @@ state.
   that has not started (queued at `FIRST` or `RELEASED`) whose files (`hold.touched()`) share one
   with the resolve's own files or the files it conflicted on (`heldFor`): it takes the next queued
   ticket that is not held, and with only held ones queued it waits as a worker holding for a resolve does (`holdFresh`).
+  A pause takes that worker's slot back to the pool: the run tells no demand for it and the resolve
+  is parked until the resume, after which the worker asks the pool again
+  (`test/schedule-pause-held-fresh.test.ts`).
   A ticket that started before the wait began and reaches its gates during it still holds the
   resolve until it lands, so the resolve never meets a second conflict from one; the wait is bounded
   because no ticket that shares its files can start and join the list behind it. A held ticket adds
@@ -934,6 +937,10 @@ state.
   more agent passes than workers, and the uncounted lock goes once the slot is held. A pause answers a queued retake with nothing:
   the attempt parks at a juncture and asks again after the resume. A green ticket asks for none. A stopped run grants no slot,
   and the pass runs on the uncounted lock. `test/schedule-gate-wait-worker.test.ts`.
+  An attempt off its worker adds nothing to the run's demand from its `gateWait` until a retake is queued (`idleOff`, not
+  `uncounted`, which `gateSlot` empties while the ticket still holds no counted slot); a declined retake drops it out again.
+  Counted, its run's share would cover slots it cannot use and hold another run at its share while they sit free.
+  `test/schedule-demand-gate-wait.test.ts`, `test/pool-share-gate-wait.test.ts`.
   A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
   `src/burndown.ts`: the run record's `waitsForShare` and `waitsFor`, which the status view's next-to-start rows say,
   and the heartbeat's `waiting for a sandbox slot`). The demand is counted as before, from the push.
@@ -1474,6 +1481,11 @@ tracker imported (its code is synchronous); a ticket state's group and word are
 `mod/hooks/run-record.ts`'s `GROUPS` and `WORDS` and a run's liveness `mod/hooks/run-live.ts`'s,
 never a copy; and every fixture's `status 0` shows a ticket in each state in the group the shared
 table gives it (`test/status-facts.test.ts`, by the fact reader of `test/status-run.ts`).
+The view's process check (`commandOf` in `src/status-snapshot.ts`) tells a pid that is gone (a
+signal of 0 fails) from a `ps` that cannot answer (a fork refused under load): it asks `ps` twice,
+and a pid that still exists then reads as the run's, so a live run is not drawn as ended for a frame.
+A display errs towards live; `src/live-runs.ts`'s `commandOf`, which decides locks and pool shares,
+does not (`test/status-live-probe.test.ts`).
 
 The snapshot's **collectors** (GLOSSARY.md; `createCollector`, and `createSources`, a project's
 five) read one source each: the run record and logs (the plan's usage is a field of the record, so
@@ -1486,6 +1498,12 @@ it answers after is dropped.
 Every string a collector reads from the run record, the logs or the tracker loses its escape
 sequences and control characters as it comes in (`plainText`): an agent's log must not reach the
 terminal as a clipboard, title or screen-clearing code.
+The closing summary and `sandcastle report` strip agent text the same way, from the same import-free
+module (`src/plain-text.ts`): `gather` reads the run record through `plainAll` once, and every
+history.jsonl reader through `parseRecord`, so notes, unmet criteria, follow-ups, their evidence and
+titles - in records written before the strip too - lose their escapes, line breaks kept.
+The issue titles the report lists from the tracker are stripped as they are read, and the burndown
+stores a tag's text already plain (`oneLine`); the report's own colours are added after.
 A refresh that fails keeps the last good reading, `stale` with the error (`unavailable` with none
 yet); a source not yet answered is `loading`.
 A queue that fails says why under the band, its last tickets kept.
@@ -1647,13 +1665,36 @@ its write is never replaced (`test/pause-race.test.ts`).
 
 ## `src/guard.ts`
 
+**The rule every guard keeps** (ADR 0006): a guard lets a thing cross from a sandbox to the host - a
+branch, a file, a command, a credential - only once it has established, on a normalised reading,
+that the thing is in a known-safe class.
+What it cannot read, parse, normalise or classify is refused (held, stopped or denied), and the
+refusal names what could not be established and the one operator-side way past it.
+A guard answers `allow`, `refuse` or `unknown` (`Verdict`, `src/verdict.ts`), every caller treats
+`unknown` as `refuse`, and a `catch` in a guard answers `unknown`, never `allow` or an empty result.
+An override is a host environment variable or a key in `.sandcastle/` config (itself held), named in
+the refusal and announced by every run it is active in.
+Two tests hold the rule.
+`test/guard-refusal-coverage.test.ts` requires a row of the bypass corpus
+(`test/fixtures/guard-bypasses.json`) for every `REASON_CODES` entry and every `[git-guard:<code>]`
+the script can print, read from the script; a row may also name the refusal's `detail` where two
+branches share a code.
+`test/guard-faults.test.ts` drives every reader in `GUARD_READERS` (the branch diff, the manifest
+read, the size read, the token probe, `containedHostPath`, the fingerprint's replace-ref read) to
+throw through `injectGuardFault`, the seam each reader calls as `guardFault(<reader>)` before it
+reads, and checks the same input is allowed without the fault and refused with it, a landing hold
+with `reader-failed`; a `git` on PATH that answers garbage covers the shape checks no throw reaches.
+A manifest blob git cannot read is `reader-failed`, not `manifest-unparseable`: only a blob that was
+read and does not parse is the latter.
+
 Host safety: git hooks, auto-gc and background maintenance off (on the host, `disableHostGitGc`, and
-in every sandbox too, by `GIT_CONFIG_*` pairs that `sandboxEnv` in `src/sandbox.ts` appends after
+in every sandbox too, by `GIT_CONFIG_*` pairs that `sandboxEnvFor` in `src/sandbox.ts` appends after
 any already set: the host's pairs never reach a container, and a commit or merge in a sandbox would
 otherwise start `git maintenance run --auto` and a detached `git gc --auto` repack and prune in the
 `.git` every sandbox shares, in a container that may be stopped before it ends; in the environment
 and not the image, so no rebuild, `test/sandbox-git-maintenance-off.test.ts`), command-running
-config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks;
+config pinned, `.git` fingerprint (config, the main worktree's `config.worktree`, HEAD, info, hooks,
+replace refs, `shallow`, `objects/info/alternates`;
 `info/refs` and `info/exclude` are left out: the first is a dumb-transport index `git repack`
 rewrites, the second holds ignore patterns only, runs nothing and is written by the operator's own
 tools mid-run (Claude Code's runtime block), while `info/attributes`, `grafts`, `sparse-checkout`
@@ -1680,6 +1721,70 @@ deleted or moved base stops with the `update-ref` that restores it, a worktree r
 container path is named, a sandbox's own worktree record held to what git writes before each host
 git command in that worktree (below), protected paths and files over 50 MB held for a person, run
 lock
+
+Protected paths (`protectedAmong`, `protectedRules`) are matched through `src/host-path.ts`, never on
+git's raw path bytes: a macOS or Windows host opens `.Husky/pre-commit` as the `.husky/` hook, so a
+raw prefix test let it land.
+The rule table is `DEFAULT_PROTECTED` in `src/guard.ts`: each entry a `PathRule` with the `runner`
+that executes it on the host, and the prompts' `{{KIT_PROTECTED}}` is rendered from it
+(`protectedPathsNote`).
+A `dir` rule also holds a file or symlink committed under the directory's own name (a bare
+`.codex`); a `prefix` covers every extension.
+`test/prompt-protected-paths.test.ts` fails when this list, `docs/safety.md` or the prompt note
+leaves out an entry of the table or of the inert root list:
+
+| Entry | Kind | Runs on the host |
+|---|---|---|
+| `.husky/`, `.githooks/` | dir, fixed | git commit hooks |
+| `.github/` | dir, fixed | CI, with the repository's secrets |
+| `.sandcastle/` | dir, fixed | the kit's own config and guards (`unheldPaths` lives here) |
+| `.claude/settings.json`, `.claude/settings.local.json` | prefix, fixed | Claude Code's settings and hooks |
+| `.claude/hooks/` | dir, fixed | Claude Code's hooks |
+| `.envrc`, `.mise.`, `mise.toml`, `mise.local.toml`, `.tool-versions` | prefix, fixed | direnv, mise and asdf, on entering the directory |
+| `.gitmodules`, `.gitattributes` | prefix | git's submodules and checkout filters |
+| `.claude/` | basename (any depth) | Claude Code's skills, agents and commands, whose frontmatter can run hooks |
+| `.mcp.json`, `opencode.json` | prefix | the agents' MCP servers and config |
+| `.codex/`, `.agents/`, `.opencode/` | dir | the agents' config |
+| `.vscode/`, `.devcontainer/` | dir | the editor, on opening the folder |
+| `.npmrc`, `pnpm-workspace.yaml`, `.pnpmfile.`, `.yarnrc` | prefix | the package manager, at the next install |
+| `.yarn/releases/`, `.yarn/plugins/` | dir | the yarn binary and its plugins |
+| `bunfig.toml` | file | bun's preload scripts |
+| `.lintstagedrc`, `lint-staged.config.`, `.pre-commit-config.yaml`, `lefthook.`, `lefthook-local.`, `.lefthook.`, `.lefthook-local.`, `.config/lefthook.`, `.config/lefthook-local.`, `.huskyrc`, `husky.config.`, `.simple-git-hooks.`, `simple-git-hooks.` | prefix | the commit-hook runner, at the next commit |
+| `.lefthook/`, `.lefthook-local/` | dir | lefthook's script directories |
+
+The tracked `core.hooksPath` directory and the project's `protectedPaths` are added as fixed rules.
+Any other root entry whose host form starts with a dot is held too, unless it is inert
+(`INERT_ROOT_ENTRIES`: `.gitignore`, `.gitkeep`, `.editorconfig`, `.nvmrc`, `.node-version`,
+`.prettierignore`, `.eslintignore`, `.dockerignore`, `.mailmap`, `.yarn/cache/`): a new tool's
+config usually lives at the root under a dot, and a list of the dangerous ones is always a tool
+behind.
+`unheldPaths` releases a path from the non-fixed rules and the root dot hold, matched exactly (a
+directory with `/`, otherwise that one file), never from a fixed rule; an unnormalisable path stays
+held. The config refuses an entry `hostKey` cannot normalise.
+The `package.json` install-script check finds manifests by a `basename` rule through the same
+matcher, so `Package.JSON` is read too.
+Held paths come back as git spelled them, so the hold and `git show` name the real file
+(`test/guard-bypasses.test.ts`, `test/host-path.test.ts`).
+
+What a branch changes is read once, by `branchChanges` (`src/guard.ts`): `git diff --raw -z
+--no-renames` from the base to the exact commit the gates passed (`o.head`, never the branch name),
+with `core.useReplaceRefs=false` on the call itself, since a sandbox can write `refs/replace/` in
+the shared `.git` and host git that honours it judges a benign commit while the real one lands
+(#992); `land`, `preview` and `queue --lint` do not all pin first.
+Its modes and blob ids feed every hold: a gitlink (`160000`) is held, and so is a symlink
+(`120000`) whose target, resolved against its own directory, is absolute, leaves the repository,
+names a protected path or reaches into a `.git` (in any case `hostKey` folds); an in-repo symlink
+elsewhere lands.
+`largeFiles` reads sizes and the `package.json` check reads manifests by blob id, never by a path
+through a ref.
+`protectedChanges` and `largeFiles` return a `Verdict` (`src/verdict.ts`): `allow`, `refuse` or
+`unknown`, each hold with a `ReasonCode`.
+A caller holds on `unknown` as on `refuse`: a git failure, a line that does not parse or a size
+that is not a number is `reader-failed`, and a manifest that does not parse on either side is
+`manifest-unparseable`.
+The landing's `held` record carries the code, so the ledger names a reader that failed
+(`test/landing-reader-verdict.test.ts`); `preview` shows such a branch as held, where a read that
+threw used to preview as clean.
 
 `landInSandbox` (`src/land.ts`) checks the fingerprint before its sandbox opens (against `expected`,
 below) and three times after: before its sandbox closes (with the worktree's records,
@@ -1750,7 +1855,27 @@ script's waits.
 On 0.14.0 the first change replaces the else arm of a ternary in `create`
 (`dirty ? warn : fastForwardFromOrigin(...)` becomes `dirty ? warn : Effect_exports.void`); upstream's
 unreleased reshaping of `createSandbox` moves the `pruneStale` hunk again on the next bump.
+A fourth change empties the `.sandcastle/.env` merge in `startSandboxOnWorktree`, the container start
+`createSandbox` makes: unpatched, Sandcastle put every key of that file into each container's
+environment under the kit's own, so a gate-only sandbox got the project's tokens past the allowlist
+below (#996).
 `sandcastle doctor` checks the patch is applied (`kit dependencies installed`).
+
+**A sandbox's environment is an allowlist** (`sandboxEnvFor(project, kind)`, `src/sandbox.ts`).
+Every kind gets `TZ`, the committer, the git pins and `CLAUDE_CODE_TMPDIR`, and of the credentials
+files only `forwardedKeys`: a gate-only sandbox (`"gate"`: a landing, the base and verify gates,
+`sandcastle gates` and `land`) the keys `gateEnv` names, a ticket's (`"ticket"`) the agents'
+credentials (`KIT_CREDENTIALS`, `src/worktree-lock.ts`) and the keys of `agentEnv` and `gateEnv`.
+`loadProject` refuses a `gateEnv` that names an agent's credential.
+`credentials()` registers every value of the two files with `hideFromGates`, and every key `gateEnv`
+does not name with `withholdFromGates`; `execGate` runs each gate under `env -u` of those keys and the
+kit's own, and `runGates` writes their names (never values) into the gates log, so a gate that went red
+for a key it no longer gets says why.
+`env -u` reaches the gate's process tree only: in a ticket's sandbox the agents' credentials stay in
+the container's environment, where a gate can read them (`/proc/1/environ`). They cannot travel on the
+agent's command alone (`withAgentEnv`), since the prompt's shell expressions (`gh-retry.sh`) run
+through `sandbox.exec` with the container's environment; `docs/safety.md` states the residual.
+`test/credentials-policy.test.ts`, `test/gate-secrets.test.ts` and `test/gate-log-stderr.test.ts` hold it.
 
 **Capabilities.** Every sandbox container starts without `NET_RAW` (`capDrop: ["NET_RAW"]` in
 `dockerOptions`, `src/sandbox.ts`): no raw or packet sockets, so nothing in a sandbox can spoof
@@ -1834,8 +1959,14 @@ Not when the run stopped on the guard (`guardStopped`), and not when the run's `
 at the exit against the start's reading (the host git's after the base gates), fails: the
 worktree and its branch are then left for a person, as `test/base-gates-stop-leftovers.test.ts`
 holds.
+A git failure on one worktree (a stale `index.lock`, a busy directory) leaves that one in `left`
+with git's reason and the loop goes on to the next, for the exit and `sandcastle clean` alike
+(`test/scratch-removal-failure.test.ts`).
+Whatever the exit leaves - every recorded worktree still there when the check throws, or the ones
+git failed on - it names in one stderr line with `sandcastle clean`, written by `console.error`
+since an `exit` listener runs nothing asynchronous; the handler never throws.
 The library's line is printed before that check, so `reword` hedges it: the run removes the
-worktree on exit unless its `.git` check fails, and `sandcastle clean` does then
+worktree on exit, or names it for `sandcastle clean` if it cannot
 (`test/library-lines.test.ts`, `test/stop-removes-scratch-worktrees.test.ts`).
 The sites: a ticket's pipeline at its end (the settle's check, before the close and no longer after
 it) and at a pause (`HostGit.check`); the gate sandboxes (`gateBase`: the run's `HostGit.check` for
@@ -1940,8 +2071,21 @@ opened, since a blocking read would hang the whole run.
   a counted sandbox slot, so a change made on the host in between is the ticket's `tampered` and
   not a red a repair concludes is
   "environmental"; `test/pipeline-repair-git-check.test.ts`) and before each host write; the
-  command-running keys configured at the start are also pinned (`pinHostGitConfig`), and
-  `core.hooksPath` and `core.fsmonitor` by environment.
+  command-running keys configured at the start are also pinned (`pinHostGitConfig`, with
+  `core.useReplaceRefs=false`), and `core.hooksPath` and `core.fsmonitor` by environment, with
+  `GIT_NO_REPLACE_OBJECTS=1` (`disableHostGitHooks`), so Sandcastle's host `git worktree add`
+  checks out the real tree a replace ref would hide.
+  `pinHostGitConfig` reads only git's exit 1 as "none of the keys is set"; any other failure (a
+  config git cannot parse) throws `NOT STARTED`, since reading it as none would leave a planted
+  program unpinned.
+- Object substitution (`replaceRefs`, `replaceRefsWarning`; `test/guard-replace-refs.test.ts`):
+  `files` also holds every `refs/replace/*` ref, read with `git for-each-ref` so a packed one counts
+  as a loose one does, keyed by the path its loose file would have (so a stop names it like a file)
+  with the object it stands in with as its value, and `shallow` and `objects/info/alternates`
+  (absent hashes as empty, so a new one is a difference).
+  Replace refs present at the start are not refused: the run and `sandcastle gates` print
+  `replaceRefsWarning`'s note, as the host reads branches with substitution off and only the
+  operator's own git honours them.
   A check also takes the exact absolute rewrite of a tracked hooks path mid-run
   (decided: pin and accept, never restore - the kit never writes `.git/config`, since restoring would
   make it a writer of the user's config, could race another writer and could hide a window of hookless
@@ -1956,7 +2100,7 @@ opened, since a blocking read would hang the whole run.
   reads the key during the run: the host's git runs with `core.hooksPath=/dev/null`
   (`disableHostGitHooks`) and every sandbox with the pinned path, `pinnedHooksPath` - the local
   `core.hooksPath` when it passes `trackedHooksPath`, or the relative path `ownAbsoluteHooksPath` names
-  for it when that is a tracked directory; `sandboxEnv` appends it as one more `GIT_CONFIG_*` pair
+  for it when that is a tracked directory; `sandboxEnvFor` appends it as one more `GIT_CONFIG_*` pair
   beside the maintenance pairs (command-scope config outranks the file, git 2.31+). `hooksDirProtected`
   uses the same derivation, so the tracked hooks directory stays protected after the flip. The
   rewrite the guard accepted is remembered by project root (`acceptedRewrite`), so
@@ -2092,6 +2236,29 @@ status, fetch and fast-forward, the cut's status and fast-forward - in which ano
 running can write `.git` (the closing sandbox's own container is stopped by then): for a close, the
 time Sandcastle takes to remove the stopped container before its `git status`; elsewhere
 milliseconds, as between the landing's last check and its fast-forward (above).
+
+## `src/host-path.ts`
+
+One normaliser and one matcher for the paths a sandbox branch carries to the host; pure, with no
+git.
+`hostKey` gives the form a case-insensitive host resolves: NFC, the code points HFS+ ignores (the
+list git's `is_hfs_dotgit` skips) removed, each component's trailing dots and spaces stripped
+(NTFS), lowercased, `.` and empty components dropped.
+A path it cannot normalise - `..`, a control character, an absolute path, a component of only dots
+or spaces - comes back as `unknown`, not a string, and `matchRules` returns it as matched: unknown
+is held.
+A `PathRule` is `dir` (the entry itself and everything under it), `file`, `prefix` or `basename`
+(a component of that name at any depth), with the `runner` that executes it on the host; a rule's
+value is folded as a path is, but keeps its trailing dot, so `lefthook.` does not widen to
+`lefthookery`.
+`matchRules` returns the original paths, never the folded ones.
+`containedHostPath` is the #827 check `lean-apply` (`apply`, `src/lean.ts`) runs before it removes
+or writes a path in a fresh worktree: it `lstat`s every directory on the way and refuses a symlink
+among them.
+Only `ENOENT` reads as "nothing there"; any other error (`EACCES`, `ENOTDIR`) is `unknown`, so the
+path is left alone and said so, because what lies past it cannot be read
+(`test/lean-apply-symlink.test.ts`, the `lean-apply` rows of `test/guard-bypasses.test.ts`).
+The final component is the caller's: removing a symlink never follows it.
 
 ## `src/pool.ts`
 
@@ -2749,7 +2916,7 @@ the login's own expiry (about 8 hours) ends it - an expired login is "no reading
 again before the next ticket) and does not fall back, since the setup token would only get the 403
 that turns the guard off for the run; a missing or unreadable login (no entry, a reader that throws,
 malformed JSON, no access token) falls back to `CLAUDE_CODE_OAUTH_TOKEN`; the token is never
-written, never added to the env the run holds, never in `sandboxEnv` or `sandboxMounts`
+written, never added to the env the run holds, never in `sandboxEnvFor` or `sandboxMounts`
 (`src/sandbox.ts`) and never printed - `sandcastle doctor --verify` reports which source the guard
 would use, where it looks for the login (`loginLocation`: the keychain service's name or the
 credentials file's path) and the endpoint's HTTP status only. `test/usage-login.test.ts`,
@@ -2824,12 +2991,16 @@ below 75%, amber from 75%, red from 90%) that the status view draws by, and `USA
 (15 minutes) is when it greys a reading.
 **The guard prefers the agents' readings.** `usageStop(env, readers, agent, now)` is given the
 newest Claude reading of the run (`agent`: its `usage` entry) and, when it is younger than
-`AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache), decides from it
-alone: no request and no credential read, the stop line naming the windows as the endpoint's reading
+`AGENT_READING_FRESH_SECONDS` (10 minutes - as long as the endpoint's own cache) and carries both
+windows (`fiveHour` and `week`), decides from it alone: no request and no credential read, the stop line naming the windows as the endpoint's reading
 does (`five_hour`, `seven_day`), a window whose reset has passed counted as spent no more, and
 `usageReadingLost()` false.
-Before the first reading, and once the newest is older than that, the endpoint answers exactly as
-before. `test/usage-pause.test.ts`.
+Before the first reading, once the newest is older than that, and while it lacks a window, the
+endpoint answers exactly as before.
+Claude Code writes the weekly window alone in each pass, so a week-only reading is often the
+freshest; deciding from it would leave the 5-hour window, the one that runs out within a run,
+unchecked.
+`test/usage-pause.test.ts`, `test/usage-stop-five-hour.test.ts`.
 
 **`sandcastle usage`** (`usageCommand(env, recorded, readers, now)`) prints the plan's usage between
 runs and writes nothing. `recordedUsage(logs)` gives each provider's newest reading in
@@ -2846,7 +3017,19 @@ is an `OperatorError` named like `USAGE_STOP`'s, from `resolveSettings` before a
 project's `usagePause` is checked by `checkShape` in `src/config.ts` and the environment beats it)
 is the same readings acted on. `createUsagePause(threshold, ports)` is the run's controller, over
 the control file and a clock it is given (`standing`, `hold`, `now`): `reading(usage)` is called
-with every provider's newest reading as `watchUsage` writes one, and `usagePauseFor` chooses the
+with every provider's newest reading as `watchUsage` writes one.
+Claude Code writes the weekly window alone in each pass, so Claude's reading often lacks the 5-hour
+window; for a window it lacks (none, or one that has reset), and only that one, the `endpoint` port
+(`usageEndpointWindows`, which `burndown()` wires: the guard's `usageToken` and its ten-minute `read`
+cache, whether or not `USAGE_CHECK` is on, with each window's reset time from `resets_at`) fills it in.
+The ask is asynchronous and made at most once each ten minutes whatever it got - a failed reading is
+not cached by `read`, and readings come about three a pass - and its answer is judged against the
+newest readings when it arrives; with both windows in the reading the port is never called, so no
+credential is read.
+A failure, or an answer without the window, leaves the pause judging the windows it has, and is said
+once through the `say` port. `limit` uses the endpoint's last answer the same way, without asking.
+`test/usage-pause-five-hour.test.ts`.
+`usagePauseFor` chooses the
 window - of those at or above the threshold that have not reset (`resetsAt` plus
 `USAGE_RESUME_GRACE_SECONDS`, 60, still ahead: a stale reading says nothing of a window open again
 since), the one that resets last, since resuming at an earlier reset would only pause again - and
@@ -3189,16 +3372,37 @@ Each template carries its own copy of the shared safety sentences, not a shared 
 Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `src/sandbox.ts`):
 `managed-settings.json` registers `git-guard.sh`, a `PreToolUse` hook on the Bash, Write and Edit
 tools that refuses commands and writes that damage the shared `.git` (`test/git-guard.test.ts`).
-Managed settings sit above project settings, so a branch cannot disable it. `update-ref`, `gc`,
-`prune` and `stash` (whose list every worktree shares; `stash list` and `show` always pass) pass
+Managed settings sit above project settings, so a branch cannot disable it.
+It reads a command before it decides (#998; a regex over the raw string let `git --git-dir .git gc`,
+`git "gc"` and `env git gc` through).
+The command is split into simple commands at `;`, `&`, `|`, parentheses and newlines, and each is
+tokenised with shell quoting.
+A `$(...)` or backtick body is read as code, and a heredoc line and every quoted string are read as
+text: their rules still apply, but a quoted string's first command is skipped (a commit message that
+starts `git push ...`) unless it follows `-c`, `eval` or `env -S`.
+Assignments and the wrappers `sudo`, `env`, `command`, `exec`, `nice`, `time`, `timeout`, `xargs`
+and `nohup` are stripped to find `git` (by basename, so `/usr/bin/git` and `\git` too).
+git's global options are parsed against git's own list with their arity.
+In the command itself, an option not on that list, an unclosed quote in a line naming git, a
+variable or `$(...)` where the subcommand goes, and a subcommand that is neither a git command
+(`git --list-cmds`) nor an alias already set refuse as unreadable.
+An alias is read with `git config --get alias.<name>` at the hook's cwd and judged as what it expands
+to, up to five deep; a `!` shell alias and `-c alias.*` (or `--config-env`) refuse.
+Each refusal carries a stable `[git-guard:<code>]` (`shared-repo`, `replace`, `stash`,
+`worktree-add`, `push`, `reflog-expire`, `worktree-prune`, `agent-branch`, `shared-git-rm`,
+`shared-git-write`, `unreadable`, `alias`) that `test/guard-bypasses.test.ts` asserts.
+`update-ref`, `gc`, `prune`, `repack`, `pack-refs`, `maintenance`, a writing `symbolic-ref` (two
+names or `-d`; one name only reads) and `replace` (but `-l`; refs/replace/ changes what every
+agent's git reads, #992) and `stash` (whose list every worktree shares; `stash list` and `show`
+always pass) pass
 when every `git -C <path>` of the command is absolute and resolves (`rev-parse --git-common-dir`) to
 a common dir other than the shared one (that of the dir Claude Code started in,
 `CLAUDE_PROJECT_DIR`, since the shell's cwd moves with a `cd`; without it they stay refused), so a
 scratch repository under the temp dir is usable and a worktree of the shared repo is not; a command
 with no `-C` (a leading `cd` is not parsed), a relative `-C` (git resolves it from the shell's cwd
-at run time, which a `cd` in the same line moves), a `GIT_DIR`, `GIT_COMMON_DIR` or `GIT_WORK_TREE`
-assignment anywhere in the line, or a path git cannot resolve is refused (a plain quoted path is
-unquoted first), variable assignments before `git` do not hide it from any rule, and `push` is
+at run time, which a `cd` in the same line moves), `--git-dir` or `--work-tree` in either spelling, a
+`GIT_DIR`, `GIT_COMMON_DIR` or `GIT_WORK_TREE` assignment anywhere in the line, or a path git cannot
+resolve is refused (a quoted path is unquoted first), and `push` is
 refused wherever it runs, since its danger is the destination. `worktree add` follows the same `-C`
 rule (it writes a record with the container's path into the shared `.git`, which a pass killed
 before its cleanup leaves behind), so a scratch repository may add one and the project may not; the
@@ -3207,15 +3411,23 @@ the base (`test/git-guard-worktree-add.test.ts`).
 The file-write rule and the `rm`/`mv` rule refuse the common dir of the hook's cwd and that of
 `CLAUDE_PROJECT_DIR`, so a `cd` into a scratch repository or out of every repository does not let a
 write reach the project's shared `.git` (`test/git-guard-project-common.test.ts`).
+They compare paths after resolving `..` and symlinks the way `realpath -m` does (`norm`, in bash,
+since macOS, where the tests also run the guard, has no `realpath -m`), so `<worktree>/../main/.git`
+and a symlink into `.git` are caught.
+A deleting or moving `git branch` flag (`-d`, `-D`, `-f`, `-m`, `-M`, `-c`, `-C`, bundled as `-fm`,
+or an abbreviation of `--delete`, `--force`, `--move` or `--copy`) refuses when the same command
+names an `agent/` branch.
 Every refusal that a scratch repository would have passed says how (`SCRATCH_HOW`): create the
 repository in an earlier command, then use `git -C /literal/absolute/path`, since the rule reads the
 command string before it runs and so cannot resolve a path the same command creates, or a variable
 (`test/git-guard-scratch-repo.test.ts`; `prompts/implement.md` and `prompts/review.md` say it too).
 The guard is not a security boundary, as its header says: a script file (`bash /tmp/x.sh`, a file
-the agent has just written) or `sh -c` gets past a command-string match, and it does not try to scan
-them - that would be a second parser for any shell, and the host's check of `.git` is what protects
-the repo.
-Needs bash and `jq` in the image.
+the agent has just written) gets past any reading of a command line, and it does not try to read
+them - the host's check of `.git` is what protects the repo.
+It is fail-closed only where it parses (the rule is stated once, under `src/guard.ts`): an unknown
+global option costs an agent one retry, and the fix is to add the option to the table, not an
+override.
+Needs bash, `jq` and git in the image; it keeps to bash 3.2 because the tests run it on the host.
 
 `report.schema.json` is the shape of the report a Claude pass returns unless `REPORT_SCHEMA=0`
 (`--json-schema`, `claude()` in `src/agents.ts`, which reads the file on the host and puts it, compact, on
@@ -3312,10 +3524,10 @@ settings deny); `configureTools` sets it from `loadProject`, as `configureModels
 and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` when `autoCompactWindow` is set), which Sandcastle puts on each
 pass's command as `export KEY='value'; ` before it (`withAgentEnv`, from 0.14.0: 0.12.0 dropped it,
 so auto memory stayed on); the container's environment is the sandbox's alone.
-Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnv`
-(`src/sandbox.ts`) leaves the agent's keys out, a person's `.env` naming one included: the exported
+Sandcastle refuses a pass whose agent and sandbox environments name the same key, so `sandboxEnvFor`
+(`src/sandbox.ts`) leaves the agent's keys out, one a project's `agentEnv` names included: the exported
 value would win anyway (`test/agent-env.test.ts`, `test/claude-tools-allow-list.test.ts`).
-`sandboxEnv` also gives every sandbox `CLAUDE_CODE_TMPDIR` (`CLAUDE_TMPDIR`, `/home/agent/.claude-tmp`), beside
+`sandboxEnvFor` also gives every sandbox `CLAUDE_CODE_TMPDIR` (`CLAUDE_TMPDIR`, `/home/agent/.claude-tmp`), beside
 `TZ` and the committer: a project cloned under `/tmp/claude-<uid>/` has its `.git` mounted at that path, Docker
 makes the parents root-owned and Claude Code refuses `/tmp/claude-<uid>` unless its user owns it, which crashed
 every Claude pass (`test/sandbox-claude-tmpdir.test.ts`). It sits among the keys the agent's own env removes.
@@ -3327,7 +3539,7 @@ the input price, against 1.25 times for a 5-minute one; a review or resolve pass
 turns is a few minutes, so it never used the hour.
 An implement or repair pass waits on long test runs, often past five minutes, so it keeps Claude
 Code's own choice and its command names no TTL.
-`sandboxEnv` leaves `CLAUDE_CODE_PROMPT_CACHE_TTL` out of the container's environment as well, though
+`sandboxEnvFor` leaves `CLAUDE_CODE_PROMPT_CACHE_TTL` out of the container's environment as well, though
 the implementer's environment does not name it: a person's `.env` naming it would make Sandcastle
 refuse every review and resolve pass (`test/agent-cache-ttl.test.ts`).
 The deny list above stays as the safety net, for an older Claude Code and anything `--tools` does

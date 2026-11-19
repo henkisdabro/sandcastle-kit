@@ -163,7 +163,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@ai-hero/sandcastle@0.14.0': b5ca58788ac1b8808401017eb9e95ba918c8d4995fff0c1b9bfe528aeade2880
+  '@ai-hero/sandcastle@0.14.0': 50601f0de2298721ba5043422a06d2fbc6f0e449fe44f478b58c787db2df6f1c
 
 importers:
 
@@ -171,7 +171,7 @@ importers:
     dependencies:
       '@ai-hero/sandcastle':
         specifier: 0.14.0
-        version: 0.14.0(patch_hash=b5ca58788ac1b8808401017eb9e95ba918c8d4995fff0c1b9bfe528aeade2880)
+        version: 0.14.0(patch_hash=50601f0de2298721ba5043422a06d2fbc6f0e449fe44f478b58c787db2df6f1c)
     devDependencies:
       '@types/node':
         specifier: ^24.19.2
@@ -494,7 +494,7 @@ packages:
 
 snapshots:
 
-  '@ai-hero/sandcastle@0.14.0(patch_hash=b5ca58788ac1b8808401017eb9e95ba918c8d4995fff0c1b9bfe528aeade2880)':
+  '@ai-hero/sandcastle@0.14.0(patch_hash=50601f0de2298721ba5043422a06d2fbc6f0e449fe44f478b58c787db2df6f1c)':
     dependencies:
       '@clack/prompts': 1.8.1
 

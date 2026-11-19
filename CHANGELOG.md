@@ -9,13 +9,138 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **A run now refuses a `GH_TOKEN` that can push to the repository.** The check `sandcastle doctor
+  --verify` made only on request (Contents: write) now runs at every run's start, before any
+  sandbox. If doctor gives a FIX on `GH_TOKEN cannot push`, edit the token on GitHub to Issues: read
+  and write and Metadata: read only. When GitHub does not answer or is rate-limited, a run goes
+  ahead only if the token was found unable to push within the last 7 days, so a first run needs
+  GitHub to answer. `SANDCASTLE_ALLOW_BROAD_TOKEN=1` is the one override, and a run prints a line
+  while it is set. (#997)
+- **A key of the credentials files reaches a sandbox only when the project names it.** A sandbox
+  used to get every key of `~/.config/sandcastle-kit/.env` and `.sandcastle/.env`; now a ticket's
+  gets the agents' credentials plus the keys of the new `agentEnv` and `gateEnv` settings, and a
+  gate-only sandbox (a landing, the base and verify gates) only `gateEnv`'s. A `setup` step or gate
+  that read another key - a private-registry `NPM_TOKEN`, say - fails until the key is listed:
+  `gateEnv: ["NPM_TOKEN"]` in `.sandcastle/config.ts`. `sandcastle doctor` warns when `setup` names
+  a key `gateEnv` leaves out, and the gates log names every withheld key. Run `pnpm install` in the
+  kit: its Sandcastle patch changed. `/sandcastle update` walks through the keys.
+- **More of a branch is held for you to merge: all of `.claude/`, editor and package-manager hooks,
+  and unknown root dotfiles.** A ticket that edits the project's skills, agents or commands, a
+  `.vscode/` or `.devcontainer/` file, `opencode.json`, or a root dotfile not on the inert list
+  (`.prettierrc`, `.eslintrc.*`, a new tool's config) now ends held rather than landing. To let such
+  paths land as before, list them in `unheldPaths` in `.sandcastle/config.ts`
+  (`unheldPaths: [".claude/skills/", ".prettierrc.json"]`): a directory, or one exact file.
+  `/sandcastle update` looks for them. Hooks, CI, `.sandcastle/`, Claude Code's settings and hooks,
+  `.envrc`, mise's config and `.tool-versions` stay held whatever it says.
+
 ### Fixed
+
+- **Every guard refusal is now tested, and a reader that fails always refuses.** A `package.json` that
+  git could not read on a branch is held as a reader failure rather than as a manifest that does not
+  parse, and a token check whose probe throws is "could not tell" rather than an error. The rule all
+  guards keep - what cannot be established as safe does not cross - is written down once, in
+  `docs/safety.md` and ADR 0006. (#1010)
+- **A live run no longer flashes as ended in the status view when `ps` fails under load.** One
+  failed process probe (a fork refused on a busy machine) read the run as gone, and that frame
+  dropped its plan usage. The view now asks `ps` again, and a run whose process still exists stays
+  live.
+- **A run checks that `GH_TOKEN` cannot push, and doctor and the run decide alike.** Only a token
+  GitHub cannot see used to stop a run; a token with Contents: write, no connection and a
+  rate-limited 403 all went ahead. One verdict now serves both: a can-push token is refused, and an
+  unclear answer is refused unless a clean one for the same token (recorded by its hash in
+  `.sandcastle/.run/token-verdict.json`) is under 7 days old. Doctor reads a rate-limited 403 as
+  not checked rather than as "cannot push". A project whose tickets are in files and that has no
+  GitHub remote no longer passes `GH_TOKEN` to its sandboxes. (#997)
+- **Gates no longer see credentials beyond the ones they are given.** A gate-only sandbox is opened
+  with no key of the credentials files except those `gateEnv` names, and in a ticket's sandbox every
+  forwarded key but `gateEnv`'s is unset for each gate and, when it is a secret (its name says so, or
+  it has a token's shape), its value redacted from the output, where only the kit's three tokens were
+  before; `production` or a registry URL stays readable. Sandcastle's own forwarding of every `.sandcastle/.env`
+  key into each container is switched off by the kit's patch. The agents' tokens still sit in a
+  ticket's container environment, which `docs/safety.md` now states (#996).
+- **Files that run on your machine without anyone reading them no longer land unheld.** The
+  protected-path list is now a table naming what runs each entry, and gains pnpm's `.pnpmfile.*`,
+  Yarn's `.yarnrc` and `.yarn/releases/` and `.yarn/plugins/`, `bunfig.toml`, the whole of
+  `.claude/` at any depth (skills, agents and commands can carry hooks), `opencode.json` and
+  `.opencode/`, `.vscode/`, `.devcontainer/`, `.envrc`, mise's config and `.tool-versions`. Any
+  other root entry whose name starts with a dot is held too, except an inert few (`.gitignore`,
+  `.editorconfig`, `.nvmrc` and the like); the new `unheldPaths` setting lets a project release the
+  ones it trusts. The prompts' protected list, `docs/safety.md` and `docs/architecture.md` are
+  tested against the table (#993, #994).
+
+- **A paused run no longer keeps a sandbox slot while a worker waits for a conflict's resolve.**
+  When every queued ticket was held back for a ticket sent back after a conflict, the worker that
+  waited for it kept its machine-wide slot for the whole pause - until the plan window reset, under
+  a usage pause - while the run told the other runs it needed none. It now gives the slot back for
+  the pause and asks for one again after the resume.
+- **The in-sandbox git guard reads a command before it decides.** It was a regex over the raw
+  command string, so `git --git-dir .git gc`, `git -p gc`, `git "gc"`, `env git gc`, `xargs git gc`,
+  a git alias of `gc` and `git branch -m agent/...` got through. It now tokenises the command, strips
+  wrappers, parses git's global options against git's own list, expands aliases, and refuses a git
+  command it cannot read (an unknown global option, an unclosed quote, a variable as the subcommand
+  or as the command itself, a shell alias); a quoted or escaped name (`g''it`, `gi\t`, `r''m`) is read
+  as the shell reads it. It also refuses `replace`, `repack`, `pack-refs`, `maintenance` and a writing
+  `symbolic-ref` in the shared repository, resolves `..` and symlinks before comparing a written or
+  removed path with `.git`, and tags every refusal with a stable `[git-guard:<code>]`. (#998, #992)
+- **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the
+  weekly window - what Claude Code writes in each pass - stood in for the usage endpoint, so a
+  5-hour window at the stop no longer stopped the queue. The guard now uses the agents' reading in
+  place of the endpoint only when it carries both windows, and otherwise asks the endpoint (cached
+  for 10 minutes, so no extra request per ticket).
+- **`USAGE_PAUSE` pauses for Claude's 5-hour window again.** It judged only the agents' readings,
+  which Claude Code fills with the weekly window alone, so the 5-hour window - the one that runs
+  out within a run - never paused the run. For a window the readings lack, and only that one, the
+  pause now reads the usage endpoint through `USAGE_CHECK`'s 10-minute cache and credential,
+  whether or not `USAGE_CHECK` is on; when it cannot, it says so once and judges the windows it has.
+- **A run's tickets waiting for a gates slot off the count no longer hold back another run.** A
+  ticket that moved its sandbox off the count to wait for or run its gates adds nothing to its run's
+  demand until it asks for a slot again for a repair, so the run's share no longer covers slots it
+  cannot use, and another run with tickets queued takes them instead of waiting for its share.
+- **Protected paths are matched as the host resolves them.** A branch that spelled a protected path
+  in another case (`.Husky/pre-commit`, `LEFTHOOK.yml`), with a trailing dot or an HFS+-ignorable
+  code point, or committed a protected directory's bare entry (a `.codex` file or symlink) landed
+  unheld; it is now held, and the hold names the path as the branch spelled it. A `Package.JSON`
+  install script is checked like `package.json`'s. `lean-apply` now leaves a path alone when a
+  directory on its way cannot be read (`EACCES`, `ENOTDIR`), not only when it crosses a symlink.
+  (#991, #995)
+- **The landing holds read the commit that was gated, with replace refs off.** A sandbox could
+  write `refs/replace/` in the shared `.git` and map its real commit to a benign one, so the
+  protected-path and large-file holds judged the benign one while the real one landed; the kit's
+  git now reads with substitution off, and the holds read the exact commit the gates passed. A
+  branch that adds a symlink into a protected path, into `.git` (`tools/h -> ../.git/hooks/pre-commit`)
+  or out of the repository, or a submodule pointer, is held. A branch the kit cannot read, or whose `package.json` does not parse, is held
+  with the reason (`reader-failed`, `manifest-unparseable`) instead of landing or losing its ready
+  line, and `sandcastle preview` shows it held. (#992, #995)
+- **A sandbox can no longer swap the objects the host reads without stopping the run.** The `.git`
+  fingerprint now watches replace refs (`refs/replace/*`, loose or packed), `.git/shallow` and
+  `.git/objects/info/alternates`: one added or changed mid-run stops the run and names it.
+  Replace refs already there when a run or `sandcastle gates` starts print a note, not a refusal.
+  A `.git/config` git cannot read now stops a start at the pins with `NOT STARTED`, where it was
+  read as holding no program-running key.
+
+- **The closing summary and `sandcastle report` no longer pass terminal escape sequences through.**
+  An agent's follow-ups and their evidence, its notes and unmet criteria, ticket titles and the
+  issue titles listed from the tracker are printed as plain text, as the status view already did, so
+  none can write the clipboard, set the window title or clear the screen (the Herdr popup's
+  `less -R` included). Run records written before the fix are read the same way.
 
 - **Pointers to README sections that moved into `docs/` now name the right file.** The warning
   about an unconfigured Linear blocker key points at `docs/queue.md` (Blockers), `sandcastle help`
   points at `docs/queue.md` for trackers, and the skill's run action at `docs/configuration.md` for
   the default models. `docs/commands.md` now lists `sandcastle herdr configure` and the `run`
   arguments `[TICKET ...] [--dry] [--concurrency N]`.
+- **`sandcastle herdr configure --app` works again after `--remove --app` on a machine where the
+  Herdr app had loaded the mod.** The remove leaves the app's own `jsconfig.json` and
+  `gpui-kit.d.ts` behind, and the reinstall refused that folder as "not the kit's", as doctor
+  warned. A stampless folder holding only those files is now treated as the kit's leftover (#987).
+- **A stopped run no longer leaves its scratch worktrees behind in silence when git fails on one.**
+  The first git removal that failed (a stale `index.lock`, a busy directory) ended the exit's
+  clean-up: the later worktrees and their `sandcastle/*` branches were never tried and nothing was
+  printed. Each is now tried, and the exit prints one line naming any it left, with
+  `sandcastle clean` - also when its `.git` check fails. `sandcastle clean` likewise goes on past
+  such a scratch worktree and lists it as left (#988).
 
 ## [0.26.0] - 2026-11-14
 

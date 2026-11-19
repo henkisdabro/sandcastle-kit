@@ -130,11 +130,11 @@ Declining is not skipping: every step still runs its check, and only the asking 
       generated files" recipe in the kit's docs/setup.md, or any gate that runs a build and diffs its output) and `generated`
       is not set in `.sandcastle/config.ts`, propose declaring those paths with the command that
       writes them.
-   9. **Gates and the kit's tokens** (**`gate-token`**). Gates run without `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and
-      `ANTHROPIC_API_KEY`. Run `git grep -nE 'GH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY'`
+   9. **Gates and the kit's tokens** (**`gate-token`**). Gates run without `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+      `ANTHROPIC_API_KEY` and `CODEX_API_KEY`. Run `git grep -nE 'GH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY'`
       in the project: if a gate's command or a test it runs reads one, it sees nothing. Propose
       giving that test its own variable in `.sandcastle/.env` (a token scoped to what the test
-      needs), then `sandcastle gates`.
+      needs) and naming it in `gateEnv` (step 25), then `sandcastle gates`.
    10. **Chains and overlaps.** Run `sandcastle queue --lint` (read-only, no model calls).
        - A `Blocked by` chain of queued tickets drains in one run whatever the autonomy level. If
          the lint shows tickets that share an unmergeable file or are likely to conflict, and
@@ -228,6 +228,35 @@ Declining is not skipping: every step still runs its check, and only the asking 
        red `out of memory: the VM ran out` is the VM's, not the limit's: propose a lower
        `maxSandboxes` (from `sandcastle size`), never a higher `memory`. `no limit (N of the 10
        gate samples ...)` and a green gates run: nothing to do.
+   23. **Paths now held** (**`unheld-paths`**). A branch that changes anything under `.claude/`,
+       `.vscode/`, `.devcontainer/` or `.opencode/`, `opencode.json`, or a root entry whose name
+       starts with a dot (other than `.gitignore`, `.editorconfig`, `.nvmrc` and the inert few the
+       kit's docs/safety.md lists) is held for a person. List what the project tracks there:
+       `git ls-files | grep -E '^\.|(^|/)\.claude/|^opencode\.json' | cut -d/ -f1-3 | sort -u`. For
+       each directory or file that tickets routinely change and nothing on the host runs without a
+       person reading it (skills edited as ordinary work, a `.prettierrc.json`), propose adding it
+       to `unheldPaths` in `.sandcastle/config.ts`, explaining that a branch changing it then lands
+       unread. Skip what `unheldPaths` already lists, and never propose a fixed entry (hooks, CI,
+       `.sandcastle/`, Claude Code's settings and hooks, `.envrc`, mise, `.tool-versions`): the
+       config keeps them held anyway. Nothing tracked there, or nothing the user wants released:
+       nothing to do.
+   24. **A token that can push.** A run refuses a `GH_TOKEN` with Contents: write on the
+       repository. Ask the user to run `sandcastle doctor --verify` from the project's root (it asks
+       GitHub, with no model call). A FIX on `GH_TOKEN cannot push to <repo>` means the next run
+       would stop: the user edits the token on GitHub to Issues: read and write and Metadata: read
+       only. An `opt ... not checked` line means GitHub did not answer: run it again later, since a
+       run that cannot ask GitHub goes ahead only on a clean check of the token under 7 days old.
+       An `ok GH_TOKEN cannot push` line, or no GitHub remote: nothing to do.
+   25. **Credentials a sandbox no longer gets.** A sandbox gets only the agents' credentials and
+       the keys `gateEnv` and `agentEnv` name from `~/.config/sandcastle-kit/.env` and
+       `.sandcastle/.env`. List both files' keys (names only - never print a value: `cut -d= -f1`)
+       and read `sandcastle doctor` for a `warn \`setup\` names ...` line. For each key other than
+       `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY` and
+       `LINEAR_API_KEY`, ask what needs it: `setup` or a gate (a private-registry token) goes in
+       `gateEnv`, an agent's tool in `agentEnv`, and nothing leaves it on the host. Edit only what the
+       user agrees to, then `sandcastle gates`: a gate gone red for a missing key shows
+       `# withheld from the gates ...` in its log. No other key, or every one already listed:
+       nothing to do.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

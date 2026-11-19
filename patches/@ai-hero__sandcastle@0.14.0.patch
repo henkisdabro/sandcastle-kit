@@ -12,7 +12,7 @@ index f0364bc719336a66a05d72ab0290d2bd1907ed40..9a28ab5a6280b8cee81a51b59282378e
        }
        return yield* new WorktreeError({
 diff --git a/dist/index.js b/dist/index.js
-index d668894af9d0bba075c89521e6482bf602814eea..69d82a2782456e83b7eb3dc520ca3b216e6186af 100644
+index d668894af9d0bba075c89521e6482bf602814eea..46e49d0756c42f730ca59051eb9eb85e4ceda0e3 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -73,7 +73,7 @@ var agentStreamEmitterLayer = (onEvent) => Layer_exports.succeed(AgentStreamEmit
@@ -24,6 +24,15 @@ index d668894af9d0bba075c89521e6482bf602814eea..69d82a2782456e83b7eb3dc520ca3b21
  var SHELL_BLOCK_MARKER = "";
  var MARKED_SHELL_BLOCK_PATTERN = new RegExp(
    `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,
+@@ -2211,7 +2211,7 @@ var startSandboxOnWorktree = ({
+       providerHandle: options._test.bindMountHandle
+     };
+   }
+-  const resolvedEnv = yield* resolveEnv(hostRepoDir);
++  const resolvedEnv = {}; // sandcastle-kit patch (#996): the kit hands each sandbox an allowlisted env; never every key of .sandcastle/.env
+   const env = mergeProviderEnv({
+     resolvedEnv,
+     agentProviderEnv: {},
 @@ -2318,9 +2318,7 @@ var createSandbox = async (options) => {
    const { hostRepoDir, worktreePath, providerHandle, sandbox, sandboxRepoDir } = await Effect_exports.runPromise(
      Effect_exports.gen(function* () {

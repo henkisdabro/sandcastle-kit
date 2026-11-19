@@ -18,10 +18,11 @@ import { spawn } from "node:child_process";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { isKit, liveness } from "../mod/hooks/run-live.ts";
+import { isKit, liveness, RUN_COMMAND } from "../mod/hooks/run-live.ts";
 import { readTickets, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { KIT_CACHE, PLUGIN_MARKER } from "./live-runs.ts";
 import { inHerdr1 } from "./terminal-host.ts";
+import { plainAll, plainText } from "./plain-text.ts";
 import { runCaller, slotAddresses } from "./herdr-core.ts";
 
 /** One outcome of outcomes.json, as the view reads it: the run that wrote it, its kind (none from an older kit) and its line. */
@@ -166,20 +167,7 @@ export const latestPhaseLog = (logs: LogFact[], id: string): LogFact | undefined
 /** The newest log of any kind of a ticket: what its link opens. */
 export const latestLog = (logs: LogFact[], id: string): LogFact | undefined => newestLogs(logs, [`agent-issue-${id}-*-${id}.log`])[0];
 
-// Text from a log, the run record or the tracker reaches the terminal inside a frame: an escape sequence in it
-// could set the window title, write the clipboard (OSC 52) or clear the screen, and any control character moves
-// the cursor mid-frame. Whole sequences go first, so no `[2J` is left behind; then every other control.
-// oxlint-disable-next-line no-control-regex -- the escape byte is what the pattern removes
-const SEQUENCES = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-_])?/g;
-// oxlint-disable-next-line no-control-regex -- the control characters are what the pattern removes
-const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
-
-/** `s` with no escape sequence or control character left: a tab or line break is a space. */
-export const plainText = (s: string): string => s.replace(SEQUENCES, "").replace(/[\t\n\r]/g, " ").replace(CONTROLS, "");
-
-/** Every string in a value read from a file, keys too, as plain text. */
-const plainAll = (v: unknown): unknown =>
-  typeof v === "string" ? plainText(v) : Array.isArray(v) ? v.map(plainAll) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [plainText(k), plainAll(x)])) : v;
+// Text from a log, the run record or the tracker reaches the terminal inside a frame: read as plain text (src/plain-text.ts).
 
 const FRAMING = /^(Agent|Run|Capturing|Collecting|Syncing|Context)/;
 
@@ -316,15 +304,34 @@ const git = async (dir: string, env: NodeJS.ProcessEnv, args: string[], signal: 
   return r.status === 0 ? r.stdout : undefined;
 };
 
-/** The command line of a running process (live-runs.ts `commandOf`, without blocking), or undefined when there is none. */
-const commandOf = async (pid: number, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string | undefined> => {
+/** `ps` could not answer for a pid that exists: not the same as no process. */
+const UNANSWERED = Symbol("ps could not answer");
+
+/** Whether a process with this pid exists (EPERM: it does, another user's). */
+const pidExists = (pid: number) => {
   try {
     process.kill(pid, 0);
+    return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EPERM") return undefined;
+    return (error as NodeJS.ErrnoException).code === "EPERM";
   }
-  const r = await run("ps", ["-p", String(pid), "-o", "command="], signal, { env });
-  return r.status === 0 ? r.stdout.trim() || undefined : undefined;
+};
+
+/**
+ * The command line of a running process (live-runs.ts `commandOf`, without blocking), undefined when there is
+ * none, or UNANSWERED when `ps` failed twice for a pid that still exists. Under load a `ps` can fail on its own (a
+ * fork refused): read as "no such process", one failed probe drew a live run as ended. A display errs towards
+ * live; the run-command check still applies whenever `ps` answers. live-runs.ts keeps its own, stricter rule: it
+ * decides locks and pool shares, where a dead run read as live would hold work back.
+ */
+const commandOf = async (pid: number, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string | undefined | typeof UNANSWERED> => {
+  if (!pidExists(pid)) return undefined;
+  for (let tries = 0; tries < 2; tries++) {
+    const r = await run("ps", ["-p", String(pid), "-o", "command="], signal, { env });
+    if (r.status === 0) return r.stdout.trim() || undefined;
+  }
+  // `ps` also fails for a pid that ended since the signal: only one that is still there is unanswered.
+  return pidExists(pid) ? UNANSWERED : undefined;
 };
 
 const readJson = async (file: string): Promise<unknown> => {
@@ -406,7 +413,9 @@ export const readRecord = async (dir: string, env: NodeJS.ProcessEnv, signal: Ab
   const tickets = readTickets(raw);
   const pid = typeof record.pid === "number" && Number.isInteger(record.pid) && record.pid > 0 ? record.pid : undefined;
   const command = pid !== undefined ? await commandOf(pid, env, signal) : undefined;
-  const live = hasRecord && liveness({ record }, (p) => (p === pid ? command : undefined)).state === "live";
+  // Unanswered reads as the run's own command, so the rest of the rule (a finished record) still decides.
+  const probe = (p: number) => (p !== pid ? undefined : command === UNANSWERED ? RUN_COMMAND : command);
+  const live = hasRecord && liveness({ record }, probe).state === "live";
 
   let logs: LogFact[] = [];
   try {
@@ -671,16 +680,7 @@ export const readPool = async (env: NodeJS.ProcessEnv, signal: AbortSignal): Pro
   const alive = new Map<number, boolean>();
   for (const pid of new Set(owners.values())) {
     const command = await commandOf(pid, env, signal);
-    let exists = command !== undefined;
-    if (!exists) {
-      try {
-        process.kill(pid, 0);
-        exists = true;
-      } catch (error) {
-        exists = (error as NodeJS.ErrnoException).code === "EPERM";
-      }
-    }
-    alive.set(pid, command !== undefined ? isKit(command) : exists);
+    alive.set(pid, command === UNANSWERED || isKit(command));
   }
   // `<pool>-waiting-<run>-<n>.lock` is a sandbox moved off the count while it waits for, and then holds, a gates slot
   // (src/pool.ts `uncountSlot`): counted apart, so the gauge keeps to the limit as the run's start line does.

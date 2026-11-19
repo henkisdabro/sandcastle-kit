@@ -133,7 +133,9 @@ test("preview writes nothing to the repo and removes its scratch directory", (t)
 test("previewLines gives the exact report", () => {
   const r = repo();
   const at = r.git("rev-parse", "--short", "main");
-  const row = (id: string, result: PreviewRow["result"], files: string[] = [], detail?: string): PreviewRow => ({ branch: `agent/issue-${id}`, id, head: "x", result, files, detail });
+  // A real commit: a clean row is read for holds at its head, and one that cannot be read is held.
+  const head = r.git("rev-parse", "main").trim();
+  const row = (id: string, result: PreviewRow["result"], files: string[] = [], detail?: string): PreviewRow => ({ branch: `agent/issue-${id}`, id, head, result, files, detail });
   assert.deepEqual(
     previewLines(r.project, "main", [row("12", "clean"), row("15", "conflict", ["src/a.css", "data/x.json"]), row("18", "error", [], "boom")]),
     [
@@ -149,6 +151,9 @@ test("previewLines gives the exact report", () => {
   assert.equal(seven[1], "  CONFLICT  #1  agent/issue-1: 1, 2, 3, 4, 5 and 2 more");
   assert.equal(seven.at(-1), "1 conflicting.");
   assert.deepEqual(previewLines(r.project, "main", []), ["No unlanded agent/issue-* branches."]);
+  // A head that cannot be read is held, with why: before, a read that threw previewed as clean.
+  const unread = previewLines(r.project, "main", [{ ...row("2", "clean"), head: "0".repeat(40) }]);
+  assert.match(unread[1], /^ {2}held {6}#2 {2}agent\/issue-2: merges cleanly, but needs a human merge - reader-failed: git diff main\.\.\.0{40}/);
 });
 
 test("a runner that fails is an operator error; no branches never calls the runner", () => {
@@ -167,6 +172,7 @@ test("a runner that fails is an operator error; no branches never calls the runn
 
 test("a clean branch that landing would hold - a protected path, a file over 50 MB - reads as held, with why", async () => {
   const { largeFiles } = await import("../src/guard.ts");
+  const { heldWords } = await import("../src/verdict.ts");
   const r = repo();
   r.git("checkout", "-q", "-b", "agent/issue-30", "main");
   mkdirSync(join(r.root, ".githooks"));
@@ -179,8 +185,8 @@ test("a clean branch that landing would hold - a protected path, a file over 50 
   r.git("add", "-A");
   r.git("commit", "-q", "-m", "big");
   r.git("checkout", "-q", "main");
-  assert.deepEqual(largeFiles(r.project, "agent/issue-31"), ["data.bin (51 MB)"]);
-  const row = (id: string): PreviewRow => ({ branch: `agent/issue-${id}`, id, head: "x", result: "clean", files: [] });
+  assert.deepEqual(heldWords(largeFiles(r.project, "agent/issue-31")), ["data.bin (51 MB)"]);
+  const row = (id: string): PreviewRow => ({ branch: `agent/issue-${id}`, id, head: r.git("rev-parse", `agent/issue-${id}`).trim(), result: "clean", files: [] });
   const out = previewLines(r.project, "main", [row("30"), row("31")]);
   assert.equal(out[1], "  held      #30  agent/issue-30: merges cleanly, but needs a human merge - .githooks/post-merge");
   assert.equal(out[2], "  held      #31  agent/issue-31: merges cleanly, but needs a human merge - data.bin (51 MB)");

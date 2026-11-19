@@ -33,7 +33,8 @@ import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, repairCheck, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart, removeOwnScratchOnExit, type Fingerprint } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart, removeOwnScratchOnExit, replaceRefsWarning, type Fingerprint } from "./guard.ts";
+import { heldWords } from "./verdict.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { terminalHost } from "./terminal-host.ts";
@@ -58,7 +59,7 @@ import { closingReport, summary, turnOfHead } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { type LoadPause, loadPauseLine, loadRecord } from "./load-pause.ts";
-import { createPauseHandling, createUsagePause, crossReviewSkippedWords, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
+import { createPauseHandling, createUsagePause, crossReviewSkippedWords, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usageEndpointWindows, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { execGate, lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -71,6 +72,7 @@ import { type Attempted, type Change, type Conflict, createFixBoard, createSched
 import { holdForUsage, readPause } from "./detach.ts";
 import { commitOf, expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
+import { plainText } from "./plain-text.ts";
 
 // Where they lived before landing.ts and ledger.ts; callers and tests still import them from here.
 export { abortLanding, mergeBranch } from "./landing.ts";
@@ -397,8 +399,10 @@ const ownLineMatches = (text: string, tag: string, withAttrs = false): { attrs: 
 };
 const ownLineTags = (text: string, tag: string): string[] => ownLineMatches(text, tag).map((m) => m.text);
 // A tag's text, or a report's item, as one line: whitespace folded; empty and the echoed placeholder "..." are no line.
+// Plain text first: the line is stored in the run record and printed in the summary, and an agent can be steered into
+// writing an escape sequence that would reach the user's terminal there.
 const oneLine = (raw: string | undefined): string | undefined => {
-  const said = raw?.replace(/\s+/g, " ").trim();
+  const said = raw === undefined ? undefined : plainText(raw).replace(/\s+/g, " ").trim();
   return said && said !== "..." ? said : undefined;
 };
 const lineOf = (tag: string) => (text: string): string | undefined => {
@@ -3381,6 +3385,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // sandbox, the run's first, opens behind a check against it (the run's own fingerprint is taken once that sandbox
   // has closed). Sandcastle's open runs host git in the project, and the image build and preflight come between.
   const atStart = gitFingerprint(project);
+  const replaceNote = replaceRefsWarning(atStart);
+  if (replaceNote) console.log(replaceNote);
   // A held branch merged by hand leaves its backup entry behind: only a landing drops one. One deleted by hand
   // unmerged keeps its entry, the only copy of that work, until `clean --all`.
   const swept = pruneBackup(project);
@@ -3876,6 +3882,10 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
       : createUsagePause(settings.usagePause, {
           standing: (now) => readPause(project.root, process.pid, now),
           hold: (pause, now) => holdForUsage(project.root, process.pid, pause, now),
+          // Asked only for a window the agents' readings lack: Claude Code reports the week alone in each pass, and without
+          // the endpoint the pause would never see the 5-hour window run out.
+          endpoint: () => usageEndpointWindows(env),
+          say: (line) => console.log(line),
         });
   // `LOAD_PAUSE`: every gate pass of this turn - the base gates, a ticket's, a landing's and the verify - is held while the machine's CPU pressure is high (src/load-pause.ts).
   if (turn?.loadPause && settings.loadPause !== undefined) {
@@ -4187,10 +4197,12 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     if (earlier >= 0) results.splice(earlier, 1);
   };
   // What will hold a green branch for a person at landing. Said as its pipeline ends: before, a
-  // human merge was news only at the end of the run.
+  // human merge was news only at the end of the run. Read at the gated commit, as the landing reads it; a reader
+  // that failed is named, not thrown into `bookkeep`, where the ready line was lost with it.
   const heldAtLanding = (o: Outcome): string[] => {
     if (o.status !== "green") return [];
-    const held = [...protectedChanges(project, o.branch), ...largeFiles(project, o.branch)];
+    const tip = o.head ?? o.branch;
+    const held = [...heldWords(protectedChanges(project, tip)), ...heldWords(largeFiles(project, tip))];
     if (o.unreviewed) held.push("repair not reviewed");
     return held;
   };
@@ -4233,7 +4245,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     overrides,
     // A setup step that failed throws `SetupFailed` inside the open, so the open's clean-up removes what it made: the attempt
     // is lost, and the scheduler sends the ticket back once (src/schedule.ts).
-    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }).then((s) => assertSetup(s, project.setup, branch)).then((s) => limitMemory(s, project.memory)), host.exclusive),
+    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile, "ticket") }).then((s) => assertSetup(s, project.setup, branch)).then((s) => limitMemory(s, project.memory)), host.exclusive),
     gate: (box, id, rerunOnRed, onSlot) => runGates(box, id, undefined, false, undefined, rerunOnRed, rerunOnRed, undefined, onSlot),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
     baseGate: (id) =>

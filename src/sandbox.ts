@@ -16,7 +16,7 @@ import { pinnedHooksPath } from "./hooks-path.ts";
 import { commandOf, KIT_CACHE } from "./live-runs.ts";
 import { kitRunning } from "../mod/hooks/run-live.ts";
 import { withLock } from "./pool.ts";
-import { hideFromGates, KIT_CREDENTIALS, unlockWorktree } from "./worktree-lock.ts";
+import { hideFromGates, KIT_CREDENTIALS, unlockWorktree, withholdFromGates } from "./worktree-lock.ts";
 import { resolveVersions, type Versions } from "./versions.ts";
 
 export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -38,7 +38,7 @@ export const sandcastleVersion = (kit = KIT): string => {
  * What is wrong with the installed `@ai-hero/sandcastle` for this kit, one line each (none: it is the pinned version,
  * patched). `pnpm install` applies the kit's patch (`patchedDependencies`); `npm install`, or a `git pull` with no
  * install after it, leaves a dependency that runs unpatched - a host fetch from origin on every open (#711), Sandcastle's
- * own worktree prune outside the host-git mutex, a 30 s limit on a prompt's shell expression (#782) - with nothing
+ * own worktree prune outside the host-git mutex, every key of `.sandcastle/.env` in every sandbox (#996), a 30 s limit on a prompt's shell expression (#782) - with nothing
  * failing until a run does. Each `dist/*.js` is read, since chunk names change with every release; text it cannot find
  * is a problem named, never a crash.
  */
@@ -74,6 +74,10 @@ export const sandcastlePatchProblems = (kit = KIT): string[] => {
   if (reuse === undefined || /fastForwardFromOrigin\s*\(/.test(reuse)) problems.push("the kit's patch is not applied: a sandbox open refreshes its branch from origin (#711)");
   const open = slice("var createSandbox = async (options) =>", "yield* create(");
   if (open === undefined || /pruneStale\s*\(/.test(open)) problems.push("the kit's patch is not applied: a sandbox open prunes worktrees outside the kit's lock (#711)");
+  // Sandcastle merges every key of `.sandcastle/.env` into each container's env under the kit's own; the kit hands
+  // each sandbox an allowlist (`sandboxEnvFor`), which a gate-only one would otherwise get past.
+  const start = slice("var startSandboxOnWorktree = (", "startProviderSandbox(");
+  if (start === undefined || /resolveEnv\s*\(/.test(start)) problems.push("the kit's patch is not applied: every sandbox gets every key of .sandcastle/.env (#996)");
   const limit = texts.map((t) => /PROMPT_EXPANSION_TIMEOUT_MS = (\d+(?:e\d+)?);/.exec(t)?.[1]).find(Boolean);
   if (!(Number(limit) >= 120_000)) problems.push("the kit's patch is not applied: a prompt's shell expression has 30 s, too short for gh-retry.sh (#782)");
   return problems;
@@ -543,6 +547,7 @@ export const ownScratchWorktrees = (): ReadonlySet<string> => openedScratch;
  * no work and no run resumes them. Never an `agent-issue-*` worktree or an `agent/*` branch. For each worktree: its
  * container is removed, `refuse` (guard.ts, `worktreeRefusal`) is asked - one it names is left as it stands, with the
  * reason - then it is unlocked, `git worktree remove --force` and `git branch -D` run, and the branch's fork forgotten.
+ * A worktree removed whose branch git would not delete is in `removed`, and its branch in `branchesLeft`, not `left`.
  * `only` limits it to those paths (a run's own, `ownScratchWorktrees`). Call with the project's run lock held, and
  * inside the host git mutex when a run's other host git is live.
  */
@@ -550,10 +555,11 @@ export const removeScratchWorktrees = (
   project: Project,
   refuse?: (worktree: string) => string | undefined,
   only?: ReadonlySet<string>,
-): { removed: string[]; branches: string[]; left: { path: string; branch?: string; reason: string }[] } => {
+): { removed: string[]; branches: string[]; left: { path: string; branch?: string; reason: string }[]; branchesLeft: { branch: string; reason: string }[] } => {
   const removed: string[] = [];
   const branches: string[] = [];
   const left: { path: string; branch?: string; reason: string }[] = [];
+  const branchesLeft: { branch: string; reason: string }[] = [];
   for (const { path, branch } of projectWorktrees(project)) {
     if (!isScratchWorktree(path) || (only && !only.has(path))) continue;
     removeSandboxContainer(path);
@@ -565,15 +571,28 @@ export const removeScratchWorktrees = (
     }
     // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
     unlockWorktree(path, project.root);
-    sh("git", ["worktree", "remove", "--force", path], project.root);
+    // One failure (a stale `index.lock`, a busy directory) is left with git's reason, and the loop goes on: a throw
+    // here once left every later worktree behind, and a run's exit said nothing of any of them.
+    try {
+      sh("git", ["worktree", "remove", "--force", path], project.root);
+    } catch (error) {
+      left.push({ path, ...(branch ? { branch } : {}), reason: errorLine(error) });
+      continue;
+    }
     removed.push(path);
     if (branch?.startsWith("sandcastle/")) {
-      sh("git", ["branch", "-D", branch], project.root);
+      try {
+        sh("git", ["branch", "-D", branch], project.root);
+      } catch (error) {
+        // The worktree is gone: naming it as left sent a person to a path that is not there.
+        branchesLeft.push({ branch, reason: errorLine(error) });
+        continue;
+      }
       forgetFork(project.root, branch);
       branches.push(branch);
     }
   }
-  return { removed, branches, left };
+  return { removed, branches, left, branchesLeft };
 };
 
 /**
@@ -708,15 +727,42 @@ export const githubToken = (project: Project): string | undefined => {
   return local!.GH_TOKEN || user!.GH_TOKEN || undefined;
 };
 
+/**
+ * The `owner/name` of the repository's GitHub remote (origin first, then any other), read from git's own config
+ * with no network call; undefined when no remote is on github.com. A files tracker with none never needs GH_TOKEN.
+ */
+export const githubRemoteRepo = (root: string): string | undefined => {
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", root, "remote", "-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return undefined;
+  }
+  const remotes = out.split("\n").map((line) => line.split(/\s+/)).filter((f) => f.length >= 2);
+  remotes.sort((a, b) => Number(b[0] === "origin") - Number(a[0] === "origin"));
+  for (const [, url] of remotes) {
+    const m = /^(?:[a-z][\w+.-]*:\/\/)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url!);
+    if (m && /^(?:.+\.)?github\.com$/i.test(m[1]!)) return `${m[2]}/${m[3]}`;
+  }
+  return undefined;
+};
+
 /** `apiKeySpend` over the project's two credentials files, as `credentials` reads them. */
 export const projectApiKeySpend = (project: Project) => apiKeySpend(credentialFiles(project));
+
+// A credentials-file value to cut out of gate output: its key's name says it is a secret, or it has a token's shape -
+// long, unbroken, letters with digits - and is not a URL with no credentials in it.
+const secretValue = (key: string, value: string | undefined) =>
+  !!value &&
+  (/TOKEN|SECRET|PASS|KEY|AUTH|CRED|PRIVATE|SESSION|COOKIE/i.test(key) ||
+    (value.length >= 16 && !/\s/.test(value) && /[A-Za-z]/.test(value) && /\d/.test(value) && !/^[a-z][\w+.-]*:\/\/[^@]*$/i.test(value)));
 
 export const credentials = (project: Project): Record<string, string> => {
   const files = credentialFiles(project);
   const env: Record<string, string | undefined> = { ...readEnv(files[0]), ...readEnv(files[1]) };
   for (const k of HOST_ONLY_KEYS) delete env[k];
-  // Sandcastle forwards every key of the project's .sandcastle/.env into the
-  // container by itself, past the filter above, so a host-only key cannot live there.
+  // Unpatched, Sandcastle forwards every key of the project's .sandcastle/.env into the container by itself, past
+  // the filter above; the kit's patch stops that (#996), and a host-only key still may not live there in case it is lost.
   const inProject = HOST_ONLY_KEYS.filter((k) => readEnv(files[1])[k]);
   if (inProject.length) throw new OperatorError(`${inProject.join(", ")} in ${files[1]} would reach the sandbox. Move it to ${files[0]}.`);
   const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
@@ -734,8 +780,37 @@ export const credentials = (project: Project): Record<string, string> => {
         "read on the repositories you run, and put it in " + files[0] + ".",
     );
   }
-  hideFromGates(KIT_CREDENTIALS.map((k) => env[k]));
+  // Not only the kit's own: a gate that printed a registry token put it in the gates log (#996). Not every value either:
+  // `production` or a registry URL cut from gate output hid what a red gate said, wherever the word came up.
+  hideFromGates(Object.entries(env).filter(([k, v]) => KIT_CREDENTIALS.includes(k) || secretValue(k, v)).map(([, v]) => v));
+  const gateEnv = project.gateEnv ?? [];
+  withholdFromGates(Object.keys(env).filter((k) => !gateEnv.includes(k)));
   return env as Record<string, string>;
+};
+
+/**
+ * The credentials-file keys a `setup` step names that `gateEnv` does not, for doctor's warning: such a step ran with the
+ * key before #996 and runs without it in a gate-only sandbox now, so an install from a private registry fails there.
+ * The agents' own credentials are left out: `gateEnv` cannot name them. Read without `credentials`' checks.
+ */
+export const setupWithheldKeys = (project: Project): string[] => {
+  const [user, local] = credentialFiles(project).map(readEnv);
+  const named = (key: string) => project.setup.some((step) => new RegExp(`(^|[^A-Za-z0-9_])${key}([^A-Za-z0-9_]|$)`).test(step));
+  return Object.keys({ ...user, ...local })
+    .filter((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !HOST_ONLY_KEYS.includes(k) && !KIT_CREDENTIALS.includes(k) && !(project.gateEnv ?? []).includes(k))
+    .filter(named)
+    .sort();
+};
+
+/**
+ * The `.env` keys a sandbox of `kind` is given (#996): an allowlist, never every key of the files. A gate-only sandbox
+ * (a landing, the base and verify gates) runs the branch's code and no agent, so it gets only what `gateEnv` names - a
+ * private-registry token its `setup` needs, say. A ticket's adds the agents' credentials and `agentEnv`, and keeps
+ * `gateEnv`'s too: its `setup` and gates run in it as well.
+ */
+export const forwardedKeys = (project: Project, kind: SandboxKind): string[] => {
+  const gate = project.gateEnv ?? [];
+  return kind === "gate" ? [...gate] : [...new Set([...KIT_CREDENTIALS, ...(project.agentEnv ?? []), ...gate])];
 };
 
 // ---------------------------------------------------------------------------
@@ -1095,14 +1170,19 @@ export const CLAUDE_TMPDIR = "/home/agent/.claude-tmp";
 
 // Not part of credentials(): doctor and the token checks read that as what the user configured.
 // Every sandbox - a ticket's, a landing's, a gate-only one - is built from this through `sandboxConfig`,
-// so gates run in the host's zone too, not CI's usual UTC.
-export const sandboxEnv = (project: Project): Record<string, string> => {
+// so gates run in the host's zone too, not CI's usual UTC. Of the credentials files it takes only `forwardedKeys`.
+export const sandboxEnvFor = (project: Project, kind: SandboxKind): Record<string, string> => {
   const TZ = hostTimeZone();
   // A key the agent's own env sets (`claudeEnv`) stays out: Sandcastle refuses every pass whose agent and sandbox name
   // the same key, and the agent's value, exported before its command, would win anyway. So does the prompt cache TTL a
   // review or resolve pass sets (`CACHE_TTL_KEY`), even though an implement pass's env does not name it.
-  const env: Record<string, string> = { ...credentials(project), CLAUDE_CODE_TMPDIR: CLAUDE_TMPDIR };
+  const all = credentials(project);
+  const env: Record<string, string> = { CLAUDE_CODE_TMPDIR: CLAUDE_TMPDIR };
+  for (const key of forwardedKeys(project, kind)) if (all[key]) env[key] = all[key];
   for (const key of [...Object.keys(claudeEnv()), CACHE_TTL_KEY]) delete env[key];
+  // Tickets in files with no GitHub remote: nothing in a sandbox needs GitHub, and no check at the run's start can
+  // say what such a token could push to, so it stays on the host.
+  if (project.tracker.kind === "files" && !githubRemoteRepo(project.root)) delete env.GH_TOKEN;
   // The project's tracked hooks path, pinned: a worktree tool may rewrite the shared `.git/config` value to its absolute
   // host form, which does not exist in a container, and command-scope config outranks the file (git 2.31+). The kit
   // writes nothing to `.git/config`; no tracked hooks path pins nothing.
@@ -1392,9 +1472,9 @@ export const cpusLine = (project: Pick<Project, "cpus">, ticket: number | undefi
 export const EXEC_TAIL_CHARS = 8 * 1024 * 1024;
 
 /** What every docker sandbox is built from. */
-export const dockerOptions = (project: Project, image: string) => ({
+export const dockerOptions = (project: Project, image: string, kind: SandboxKind) => ({
   imageName: image,
-  env: sandboxEnv(project),
+  env: sandboxEnvFor(project, kind),
   mounts: sandboxMounts(project),
   maxOutputTailChars: EXEC_TAIL_CHARS,
   // Raw sockets only (spoofed packets, ARP tricks on the runtime's network). Not "ALL": Sandcastle itself runs
@@ -1472,8 +1552,8 @@ export const assertSetup = async <S extends { exec(command: string): Promise<{ s
 // each fresh worktree before the agent sees it. A numeric `project.cpus` caps each container: a
 // run, `sandcastle gates` and `sandcastle land` set it from `sandboxCpus` (per kind of sandbox)
 // before their first sandbox, so gates.ts and land.ts take no argument for it.
-export const sandboxConfig = (project: Project, image: string, leanPlan: string) => ({
-  sandbox: docker(dockerOptions(project, image)),
+export const sandboxConfig = (project: Project, image: string, leanPlan: string, kind: SandboxKind) => ({
+  sandbox: docker(dockerOptions(project, image, kind)),
   hooks: {
     host: {
       onWorktreeReady: [{ command: `"${KIT}/bin/sandcastle" lean-apply "${leanPlan}"` }],

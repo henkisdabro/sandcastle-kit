@@ -169,6 +169,8 @@ _Avoid_: lock (the file that records it), worker
 How many sandbox slots a live run could use now: the tickets in a sandbox or ready to start,
 plus a landing that waits, never more than its concurrency. Blocked tickets add nothing until their blocker lands,
 and a paused run's parked tickets add nothing: it asks for none once nothing is in flight.
+A ticket that moved its sandbox off the count to wait for or run its gates (an idle gate waiter)
+adds nothing either, until it asks for a counted slot again, for a repair.
 _Avoid_: want, need, queue length (which counts blocked tickets)
 
 **Share**:

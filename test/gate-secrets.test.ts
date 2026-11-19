@@ -8,16 +8,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { execGate, hideFromGates } from "../src/worktree-lock.ts";
+import { execGate, hideFromGates, withholdFromGates } from "../src/worktree-lock.ts";
 
 const GH = "github_pat_FAKE0000000000000000000000";
 const OAUTH = "sk-ant-oat01-FAKE000000000000000000";
+const NPM = "npm_xxxxxxxxxxxx";
 // What a container would run, with the credentials in its environment as the sandbox has them.
 const box = {
   exec: async (cmd: string, options?: { onLine?: (line: string) => void }) => {
     const r = spawnSync("sh", ["-c", cmd.replace(/^timeout -k \d+ \d+ /, "")], {
       encoding: "utf8",
-      env: { ...process.env, GH_TOKEN: GH, CLAUDE_CODE_OAUTH_TOKEN: OAUTH, PROJECT_SECRET: "kept-for-the-tests" },
+      env: { ...process.env, GH_TOKEN: GH, CLAUDE_CODE_OAUTH_TOKEN: OAUTH, PROJECT_SECRET: "kept-for-the-tests", NPM_TOKEN: NPM },
     });
     for (const line of r.stdout.split("\n").filter(Boolean)) options?.onLine?.(line);
     return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
@@ -39,4 +40,16 @@ test("a credential value in gate output is redacted in the result and in each st
   assert.match(r.stdout, /token <redacted> and <redacted>/);
   assert.match(r.stdout, /short stays/);
   assert.ok(!lines.join("\n").includes(GH), lines.join("\n"));
+});
+
+// #996: every `.env` key the run forwarded and `gateEnv` does not name is unset for a gate, not only the kit's own.
+test("a forwarded .env key gateEnv does not name is unset for the gate and its value redacted", async () => {
+  withholdFromGates(["NPM_TOKEN"]);
+  hideFromGates([NPM]);
+  const r = await execGate(box, `printf "npm=%s gh=%s\\n" "\${NPM_TOKEN:-unset}" "\${GH_TOKEN:-unset}"; echo "read back ${NPM}"`);
+  assert.match(r.stdout, /npm=unset gh=unset/);
+  assert.match(r.stdout, /read back <redacted>/);
+  withholdFromGates([]);
+  const kept = await execGate(box, 'printf "npm=%s gh=%s\\n" "${NPM_TOKEN:+set}" "${GH_TOKEN:-unset}"');
+  assert.equal(kept.stdout.trim(), "npm=set gh=unset", "a key gateEnv names stays; the kit's credentials never do");
 });

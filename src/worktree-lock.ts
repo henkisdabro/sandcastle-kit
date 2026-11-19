@@ -81,16 +81,27 @@ type Execs = {
   exec(cmd: string, options?: { onLine?: (line: string) => void }): Promise<ExecResult>;
 };
 
-// The kit's own credentials. A gate is the project's code - on a branch, code an agent wrote - and
+// The agents' credentials. A gate is the project's code - on a branch, code an agent wrote - and
 // never needs them: run with them in its environment, a test that printed its environment put both
 // tokens in the gate log, the terminal and the repair agent's prompt. So gates run without them, and
-// any value that still turns up in their output is replaced.
-export const KIT_CREDENTIALS = ["GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
+// any value that still turns up in their output is replaced. `gateEnv` cannot name one (src/config.ts).
+export const KIT_CREDENTIALS = ["GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY"];
 const secrets = new Set<string>();
-/** Registers credential values to cut out of gate output (credentials() calls it). */
+/** Registers credential values to cut out of gate output (credentials() calls it with the agents' and every secret-looking one). */
 export const hideFromGates = (values: (string | undefined)[]) => {
   for (const v of values) if (v && v.length >= 8) secrets.add(v);
 };
+// The `.env` keys a gate must not see beyond the kit's own: every key the credentials files hold that `gateEnv` does
+// not name (#996). An unset list let any other secret - a registry token, a service key - reach a gate's environment
+// and, printed, its log. Replaced, not added to, on each `credentials()`: the project's config says what is withheld.
+let withheld: string[] = [];
+/** Sets the `.env` keys gates run without (credentials() calls it). */
+export const withholdFromGates = (keys: string[]) => {
+  // Each goes unquoted into the gate's shell command, so a name that is no shell variable's is left out.
+  withheld = [...new Set(keys)].filter((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k));
+};
+/** The `.env` keys gates run without, for the gates log (names, never values). */
+export const withheldFromGates = () => [...withheld];
 export const redact = (text: string) => {
   let out = text;
   for (const v of secrets) out = out.split(v).join("<redacted>");
@@ -102,7 +113,11 @@ export const execGate = async (
   cmd: string,
   options?: { onLine?: (line: string) => void },
 ): Promise<ExecResult> => {
-  const unset = KIT_CREDENTIALS.map((k) => `-u ${k}`).join(" ");
+  // `env -u` removes the keys from this gate's process and its children only. In a ticket's sandbox the agents'
+  // credentials stay in the container's own environment (PID 1's, and that of every process started without this
+  // wrapper), which a gate can read back: the prompt's shell expressions run `gh` there (docs/safety.md). A gate-only
+  // sandbox has none of them in its environment at all (`sandboxEnvFor`, src/sandbox.ts). The keys `gateEnv` names stay.
+  const unset = [...new Set([...KIT_CREDENTIALS, ...withheld])].map((k) => `-u ${k}`).join(" ");
   const bounded = `timeout -k 30 ${GATE_TIMEOUT_SECONDS} env ${unset} sh -c '${cmd.replace(/'/g, "'\\''")}'`;
   const onLine = options?.onLine;
   options = onLine ? { ...options, onLine: (line) => onLine(redact(line)) } : options;

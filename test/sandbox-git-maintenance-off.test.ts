@@ -18,7 +18,7 @@ const userEnv = join(xdg, "sandcastle-kit", ".env");
 mkdirSync(join(xdg, "sandcastle-kit"), { recursive: true });
 const credentialsFile = "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-fake\nGH_TOKEN=github_pat_fake\n";
 writeFileSync(userEnv, credentialsFile);
-const { sandboxEnv } = await import("../src/sandbox.ts");
+const { sandboxEnvFor } = await import("../src/sandbox.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -30,26 +30,26 @@ const pairs = (env: Record<string, string>) =>
 
 test("a sandbox's environment turns off git's auto gc and background maintenance", () => {
   writeFileSync(userEnv, credentialsFile);
-  const env = sandboxEnv(project);
+  const env = sandboxEnvFor(project, "ticket");
   assert.deepEqual(pairs(env), [["gc.auto", "0"], ["maintenance.auto", "false"]]);
   assert.equal(env.GH_TOKEN, "github_pat_fake", "the credentials stay");
 });
 
-test("pairs the credentials files already carry stay, and the maintenance pairs follow them", () => {
+test("pairs the credentials files already carry (named in agentEnv) stay, and the maintenance pairs follow them", () => {
   writeFileSync(userEnv, `${credentialsFile}GIT_CONFIG_COUNT=1\nGIT_CONFIG_KEY_0=core.abbrev\nGIT_CONFIG_VALUE_0=12\n`);
-  const env = sandboxEnv(project);
+  const env = sandboxEnvFor({ ...project, agentEnv: ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"] }, "ticket");
   assert.deepEqual(pairs(env), [["core.abbrev", "12"], ["gc.auto", "0"], ["maintenance.auto", "false"]]);
   assert.equal(env.GIT_CONFIG_COUNT, "3");
 });
 
 test("a count that is not a whole number is read as none, not as a hole in the pairs", () => {
   writeFileSync(userEnv, `${credentialsFile}GIT_CONFIG_COUNT=lots\n`);
-  assert.deepEqual(pairs(sandboxEnv(project)), [["gc.auto", "0"], ["maintenance.auto", "false"]]);
+  assert.deepEqual(pairs(sandboxEnvFor({ ...project, agentEnv: ["GIT_CONFIG_COUNT"] }, "ticket")), [["gc.auto", "0"], ["maintenance.auto", "false"]]);
 });
 
 test("git, given that environment, reads both settings off even where the repository's own config says on", () => {
   writeFileSync(userEnv, credentialsFile);
-  const env = sandboxEnv(project);
+  const env = sandboxEnvFor(project, "ticket");
   const repo = mkdtempSync(join(tmpdir(), "sandcastle-maintenance-repo-"));
   const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_CONFIG"))) as Record<string, string>;
   const git = (...args: string[]) =>
@@ -66,11 +66,11 @@ test("git, given that environment, reads both settings off even where the reposi
 
 test("every sandbox the kit opens is built from that environment", () => {
   const source = readFileSync(new URL("../src/sandbox.ts", import.meta.url), "utf8");
-  assert.match(source, /env: sandboxEnv\(project\)/, "sandboxConfig hands the container sandboxEnv");
+  assert.match(source, /env: sandboxEnvFor\(project, kind\)/, "sandboxConfig hands the container sandboxEnvFor");
   // A ticket's, a landing's and a gate-only sandbox all open through sandboxConfig; nothing else builds one.
   for (const file of ["burndown.ts", "land.ts", "gates.ts"]) {
-    assert.match(readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8"), /\.\.\.sandboxConfig\(project, image, planFile\)/, file);
+    assert.match(readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8"), /\.\.\.sandboxConfig\(project, image, planFile, "(?:ticket|gate)"\)/, file);
   }
   assert.equal(source.match(/\bdocker\(/g)?.length, 1, "one place builds a docker sandbox");
-  assert.match(source, /\bdocker\(dockerOptions\(project, image\)\)/, "from dockerOptions, which carries the env");
+  assert.match(source, /\bdocker\(dockerOptions\(project, image, kind\)\)/, "from dockerOptions, which carries the env");
 });

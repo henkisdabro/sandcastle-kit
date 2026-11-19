@@ -2,7 +2,8 @@
 // to be read by a person or by a coding agent helping them set up.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
@@ -10,6 +11,7 @@ import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject, LOCAL_CONFIG_PATH, MountRefused, type Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
+import { guardFault, type ReasonCode } from "./verdict.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pinnedFor } from "./hooks-path.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
@@ -22,7 +24,7 @@ import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
 import { poolWarningsNow, sizePointerNow } from "./size.ts";
-import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, sandcastlePatchProblems, USER_CONFIG } from "./sandbox.ts";
+import { apiKeySpend, baseImage, githubRemoteRepo, githubToken, KIT, machineSettings, sandcastlePatchProblems, setupWithheldKeys, USER_CONFIG } from "./sandbox.ts";
 import { kitRelease, kitVersion, newestRelease, releaseOut, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
@@ -192,16 +194,20 @@ export const probeGithubToken = async (token: string): Promise<{ ok: boolean; st
  * Whether a token can write a repository's code, without writing anything: creating a branch at a
  * commit that cannot exist is refused with 403 when the token lacks Contents: write, and with 422
  * (no such object) when it has it. The sandbox's token is meant to do nothing worse than comment.
+ * `limited`: GitHub answers a spent rate limit with a 403 too, marked by `x-ratelimit-remaining: 0`,
+ * and that 403 says nothing about the token.
  */
-export const probeGithubWrite = async (token: string, repo: string): Promise<number | undefined> => {
+const githubWriteAnswer = async (token: string, repo: string): Promise<{ status: number; limited: boolean } | undefined> => {
   const res = await fetch(`${process.env.SANDCASTLE_TEST_GITHUB_API || "https://api.github.com"}/repos/${repo}/git/refs`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit", "content-type": "application/json" },
     body: JSON.stringify({ ref: "refs/heads/sandcastle-doctor-probe-never-created", sha: "0".repeat(40) }),
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined);
-  return res?.status;
+  return res && { status: res.status, limited: res.headers.get("x-ratelimit-remaining") === "0" };
 };
+
+export const probeGithubWrite = async (token: string, repo: string): Promise<number | undefined> => (await githubWriteAnswer(token, repo))?.status;
 
 /**
  * The HTTP status GitHub gives a token that reads a repository's issues (what every ticket's prompt does
@@ -223,19 +229,91 @@ export const repoInvisible = (repo: string) => ({
 });
 
 /**
- * The run's start check, no model call: refuses when the project's GH_TOKEN gets 404 for the repo. Only a
- * 404 refuses - no connection, a rate limit or a 403 prove nothing about the token, so the run goes ahead.
+ * What GH_TOKEN may do to a repository, decided once for doctor and the run's start so the two never disagree; a
+ * `Verdict` (src/verdict.ts) narrowed to the token's codes. `allow` only on a clean "cannot push" (a 403 that
+ * is not a rate limit, or a 404); a 422 can push; anything else - no answer, a rate limit, a 5xx, a probe that
+ * threw - proves nothing either way and is `unknown`, never `allow`.
+ */
+export type TokenVerdict =
+  | { kind: "allow" }
+  | { kind: "refuse" | "unknown"; code: Extract<ReasonCode, "repo-invisible" | "token-can-push" | "token-unverified">; detail: string };
+
+export const tokenVerdict = async (token: string, repo: string, root?: string): Promise<TokenVerdict> => {
+  let read: number | undefined;
+  let write: Awaited<ReturnType<typeof githubWriteAnswer>>;
+  try {
+    guardFault("token-probe");
+    read = await probeGithubRead(token, repo);
+    write = read === 404 ? undefined : await githubWriteAnswer(token, repo);
+  } catch (error) {
+    return { kind: "unknown", code: "token-unverified", detail: `the probe failed: ${String((error as Error)?.message ?? error).split("\n")[0].slice(0, 200)}` };
+  }
+  if (read === 404) return { kind: "refuse", code: "repo-invisible", detail: "HTTP 404" };
+  if (write?.status === 422) return { kind: "refuse", code: "token-can-push", detail: "HTTP 422" };
+  if (write && ((write.status === 403 && !write.limited) || write.status === 404)) {
+    if (root) recordTokenAllowed(root, token);
+    return { kind: "allow" };
+  }
+  return { kind: "unknown", code: "token-unverified", detail: write ? `HTTP ${write.status}${write.limited ? ", rate-limited" : ""}` : "no connection" };
+};
+
+// The last clean "cannot push", so a start that cannot reach GitHub can go ahead on a recent one. Keyed by the
+// token's sha256, never the token: the file sits in the project directory, not with the secrets in the user's config.
+const TOKEN_RECORD = ".sandcastle/.run/token-verdict.json";
+const TOKEN_RECORD_MS = 7 * 86_400_000;
+const tokenKey = (token: string) => createHash("sha256").update(token).digest("hex");
+
+const recordTokenAllowed = (root: string, token: string) => {
+  const file = join(root, TOKEN_RECORD);
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ [tokenKey(token)]: Date.now() }) + "\n");
+  } catch {
+    // An unwritten record only means a later start without GitHub's answer is refused, which is the safe side.
+  }
+};
+
+const tokenRecentlyAllowed = (root: string, token: string) => {
+  let at: unknown;
+  try {
+    at = (JSON.parse(readFileSync(join(root, TOKEN_RECORD), "utf8")) as Record<string, unknown>)?.[tokenKey(token)];
+  } catch {
+    return false;
+  }
+  const age = Date.now() - (typeof at === "number" ? at : NaN);
+  return age >= 0 && age < TOKEN_RECORD_MS;
+};
+
+const TOKEN_FIX = "Edit the token on GitHub (Settings -> Developer settings -> Fine-grained tokens) to Issues: read and write and Metadata: read only.";
+
+/**
+ * The run's start check, no model call. Refuses when the project's GH_TOKEN gets 404 for the repo (GitHub issues
+ * only), when it can push there, and when GitHub could not say and no clean answer for this token is under 7 days
+ * old. SANDCASTLE_ALLOW_BROAD_TOKEN=1 lets the last two through, and the run says so every time.
  */
 export const requireRepoAccess = async (project: Project, repoRoot = project.root) => {
-  if (project.tracker.kind !== "github") return;
+  const broad = process.env.SANDCASTLE_ALLOW_BROAD_TOKEN === "1";
+  if (broad) console.log(`SANDCASTLE_ALLOW_BROAD_TOKEN=1 is set: this run does not refuse a GH_TOKEN that can push or that GitHub could not check. ${TOKEN_FIX} Then unset it.`);
   const token = githubToken(project);
   if (!token) return; // credentials() refuses a missing token with its own words
-  const repo = run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], repoRoot);
-  if (!repo) return;
-  if ((await probeGithubRead(token, repo)) === 404) {
-    const { label, fix } = repoInvisible(repo);
+  const issues = project.tracker.kind === "github";
+  // Tickets in files: the sandboxes get the token only beside a GitHub remote (sandboxEnv), and there it could push.
+  const repo = issues ? run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], repoRoot) : githubRemoteRepo(repoRoot);
+  if (!issues && !repo) return;
+  const seen: TokenVerdict = repo ? await tokenVerdict(token, repo, project.root) : { kind: "unknown", code: "token-unverified", detail: "`gh repo view` named no repository" };
+  if (seen.kind === "allow") return;
+  if (seen.code === "repo-invisible") {
+    if (!issues) return; // never read with the token, and a token that cannot see the repo cannot push to it
+    const { label, fix } = repoInvisible(repo!);
     throw new OperatorError(`${label}: ${fix}`);
   }
+  if (broad || (seen.code === "token-unverified" && tokenRecentlyAllowed(project.root, token))) return;
+  const where = repo ?? "this repository";
+  throw new OperatorError(
+    seen.code === "token-can-push"
+      ? `GH_TOKEN can push to ${where} (${seen.detail}): it has Contents: write there, so an agent misled by a ticket could push code past the landing hold. ${TOKEN_FIX} SANDCASTLE_ALLOW_BROAD_TOKEN=1 runs with it anyway (a throwaway repo only).`
+      : `The run's start could not tell whether GH_TOKEN can push to ${where} (${seen.detail}), and no check in the last 7 days found this token unable to. Run again once GitHub answers (\`sandcastle doctor --verify\` shows what it says). The token should have Issues: read and write and Metadata: read only; SANDCASTLE_ALLOW_BROAD_TOKEN=1 goes ahead without the check.`,
+  );
 };
 
 /** The HTTP status Anthropic's model list gives an API key (401 for a bad one), undefined when there was no answer. Listing models is free: no model call, no tokens spent. */
@@ -598,18 +676,16 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       // In a project: the sandboxes get this token, and a prompt-injected agent has it too.
       const repo = key === "GH_TOKEN" && seen === "ok" && inProject ? run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], repoRoot) : undefined;
       if (repo) {
-        const read = await probeGithubRead(found.value, repo);
-        const write = await probeGithubWrite(found.value, repo);
-        // The read decides whether the token sees the repo; a push probe's 404 is no push access, so neither
-        // can be mistaken for "can push" (only 422 is). Tickets in files are never read with the token, so
+        // The run's start decides with the same verdict. Tickets in files are never read with the token, so
         // there the shared token may leave this repo out.
-        if (read === 404) {
+        const token = await tokenVerdict(found.value, repo, repoRoot);
+        if (token.kind === "allow") console.log(`ok   GH_TOKEN cannot push to ${repo} (no Contents: write)`);
+        else if (token.code === "repo-invisible") {
           const { label, fix } = repoInvisible(repo);
           check(false, label + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), fix, !needsGh);
         }
-        else if (write === 422) check(false, `GH_TOKEN cannot push to ${repo}`, `It has Contents: write there, so an agent misled by a ticket could push code. Edit the token on GitHub (Settings -> Developer settings -> Fine-grained tokens) to Issues: read and write and Metadata: read only.`);
-        else if (write === 403 || write === 404) console.log(`ok   GH_TOKEN cannot push to ${repo} (no Contents: write)`);
-        else console.log(`opt  GH_TOKEN push access to ${repo} - not checked (${write === undefined ? "no connection" : `HTTP ${write}`})`);
+        else if (token.code === "token-can-push") check(false, `GH_TOKEN cannot push to ${repo}`, `It has Contents: write there, so an agent misled by a ticket could push code, and \`sandcastle run\` refuses it. ${TOKEN_FIX}`);
+        else console.log(`opt  GH_TOKEN push access to ${repo} - not checked (${token.detail})`);
       }
       else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`${setup}\``);
       else console.log(`opt  ${print} - not checked (${status === undefined ? "no connection" : `HTTP ${status}`})`);
@@ -729,6 +805,10 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", `Move the LINEAR_API_KEY line from ${projectEnv} to ${envFile}: Sandcastle would forward it into every sandbox.`);
       if (p.GH_TOKEN) check(p.GH_TOKEN.startsWith("github_pat_"), ".sandcastle/.env GH_TOKEN is fine-grained (it overrides the shared one)", `Replace it in ${projectEnv} with a fine-grained token, or delete its GH_TOKEN line to use the shared one.`);
     }
+    // Advisory: a key the setup needs only for some installs (a private registry) may be harmless to withhold, and
+    // the gates log names every withheld key anyway. A gate-only sandbox gets no credentials-file key `gateEnv` omits.
+    const setupNeeds = project ? setupWithheldKeys(project) : [];
+    if (setupNeeds.length) console.log(`warn \`setup\` names ${setupNeeds.join(", ")} from the credentials files, which gates and their setup no longer get\n       -> add ${setupNeeds.length > 1 ? "them" : "it"} to \`gateEnv\` in ${CONFIG_PATH} if the setup needs ${setupNeeds.length > 1 ? "them" : "it"}`);
     // A FIX: git finds no hooks in a sandbox with this value, and nothing else says so. Not for the exact absolute form of
     // a tracked hooks directory: every sandbox is given the relative path through its environment, so that is a warning.
     const outsideHooks = hooksPathOutside(repoRoot);

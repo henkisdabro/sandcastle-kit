@@ -34,7 +34,7 @@ mkdirSync(join(repo, ".sandcastle"));
 writeFileSync(join(repo, ".sandcastle/.env"), "ANTHROPIC_API_KEY=made-up\n");
 
 const project = { root: repo, setup: ["echo setup"], mounts: [], generated: [], tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
-const hooks = () => sandboxConfig(project, "image", "plan.json").hooks.sandbox.onSandboxReady;
+const hooks = () => sandboxConfig(project, "image", "plan.json", "ticket").hooks.sandbox.onSandboxReady;
 
 test("a ready hook sets the host identity, beside the project's setup", () => {
   const [first, second] = hooks();
@@ -44,7 +44,7 @@ test("a ready hook sets the host identity, beside the project's setup", () => {
 
 test("setup's steps run in order, in one hook: Sandcastle runs its ready hooks at once", () => {
   const steps = ["echo one >>order # first", "echo two >>order"];
-  const all = sandboxConfig({ ...project, setup: steps } as Project, "image", "plan.json").hooks.sandbox.onSandboxReady;
+  const all = sandboxConfig({ ...project, setup: steps } as Project, "image", "plan.json", "ticket").hooks.sandbox.onSandboxReady;
   assert.equal(all.length, 2);
   // The hook's record (`setupHook`) moved out of /tmp into this test's own directory.
   const cwd = mkdtempSync(join(tmp, "order-"));
@@ -90,7 +90,7 @@ test("the identity hook needs no lock on ~/.gitconfig, and a setup step's identi
 
 test("the committer stays the agent: the identity is global config, not GIT_AUTHOR_* in the environment", () => {
   assert.equal(AGENT_COMMITTER.GIT_COMMITTER_NAME, "Sandcastle agent");
-  const env = sandboxConfig(project, "image", "plan.json").sandbox as unknown as { env?: Record<string, string> };
+  const env = sandboxConfig(project, "image", "plan.json", "ticket").sandbox as unknown as { env?: Record<string, string> };
   assert.ok(!JSON.stringify(env).includes("GIT_AUTHOR"));
 });
 

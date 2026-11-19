@@ -23,7 +23,7 @@ mkdirSync(join(xdg, "sandcastle-kit"), { recursive: true });
 const credentialsFile = "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-fake\nGH_TOKEN=github_pat_fake\n";
 writeFileSync(userEnv, credentialsFile);
 const { implAgent, resolveAgent, reviewWithFallback } = await import("../src/agents.ts");
-const { sandboxEnv } = await import("../src/sandbox.ts");
+const { sandboxEnvFor } = await import("../src/sandbox.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
@@ -108,7 +108,7 @@ test("an implement pass's command leaves the cache TTL to Claude Code", async ()
 test("a .env naming CLAUDE_CODE_PROMPT_CACHE_TTL stays out of the container, and the review pass is not refused", async () => {
   writeFileSync(userEnv, `${credentialsFile}CLAUDE_CODE_PROMPT_CACHE_TTL=1h\n`);
   try {
-    const env = sandboxEnv(project);
+    const env = sandboxEnvFor(project, "ticket");
     assert.ok(!("CLAUDE_CODE_PROMPT_CACHE_TTL" in env));
     assert.equal(env.GH_TOKEN, "github_pat_fake", "the credentials stay");
     const command = await reviewWithFallback("#1", (agent) => passCommand(agent, env));

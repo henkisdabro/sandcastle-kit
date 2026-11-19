@@ -25,7 +25,7 @@ type Project = import("../src/config.ts").Project;
 const project = { root: mkdtempSync(join(tmpdir(), "sandcastle-cap-drop-")), tracker: fakeTracker(), mounts: [] } as unknown as Project;
 
 test("a sandbox drops NET_RAW, and keeps what Sandcastle's own root exec needs (so not ALL)", () => {
-  assert.deepEqual(dockerOptions(project, "img").capDrop, ["NET_RAW"]);
+  assert.deepEqual(dockerOptions(project, "img", "ticket").capDrop, ["NET_RAW"]);
 });
 
 test("Sandcastle's docker provider still chowns a file mount's parent directory as root: the reason ALL is not dropped", () => {

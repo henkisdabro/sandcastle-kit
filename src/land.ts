@@ -11,6 +11,7 @@ import { OperatorError } from "./errors.ts";
 import { clip, exitWords, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { assertGitUnchanged, checkBeforeClose, dropBackup, type Exclusive, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
+import { heldWords, refuses } from "./verdict.ts";
 import { remainderNote } from "./autonomy.ts";
 import { recordHandLanding } from "./ledger.ts";
 import { handMergeCommand, mergeSubject } from "./landing.ts";
@@ -262,7 +263,7 @@ export const landInSandbox = async (
 export const sandboxOpener =
   (project: Project, image: string, planFile: string, exclusive?: Exclusive): Opener =>
   async (branch) => {
-    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }).then((s) => limitMemory(s, project.memory)), exclusive);
+    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile, "gate") }).then((s) => limitMemory(s, project.memory)), exclusive);
     lockWorktree(s.worktreePath);
     return {
       worktreePath: s.worktreePath,
@@ -323,20 +324,23 @@ export const landTicket = async (
     throw new OperatorError(`Every commit of ${branch} is already on ${base}. Nothing to land.`);
   }
   // The merge a refusal tells the person to type: the kit's own subject, "part of" where a criterion is recorded unmet (as the landing below words it).
-  const byHand = () => handMergeCommand(branch, ref, !!recordedUnmet(project, id, branch, sh("git", ["rev-parse", branch], project.root)));
-  const paths = protectedChanges(project, branch);
-  if (paths.length) {
-    throw new OperatorError(
-      `${branch} changes how the repo executes (${paths.join(", ")}), which its own gates cannot vouch for. Review it and merge it by hand: \`git log -p ${base}..${branch}\`, then \`${byHand()}\`.`,
-    );
+  // One commit for the checks and the landing: what is checked is what lands, whatever the branch does meanwhile.
+  const head = sh("git", ["rev-parse", branch], project.root);
+  const byHand = () => handMergeCommand(branch, ref, !!recordedUnmet(project, id, branch, head));
+  const touched = protectedChanges(project, head);
+  if (refuses(touched)) {
+    const why = touched.code === "reader-failed" ? `could not be read (${touched.detail}), and a branch the kit cannot read is never landed by it` : `changes how the repo executes (${heldWords(touched).join(", ")}), which its own gates cannot vouch for`;
+    throw new OperatorError(`${branch} ${why}. Review it and merge it by hand: \`git log -p ${base}..${branch}\`, then \`${byHand()}\`.`);
   }
-  const large = largeFiles(project, branch);
-  if (large.length) throw new OperatorError(`${branch} ${largeFilesNote(large)}: \`${byHand()}\`.`);
+  const large = largeFiles(project, head);
+  if (refuses(large)) {
+    if (large.code === "reader-failed") throw new OperatorError(`${branch}: ${large.detail}, so the kit will not land it. Merge it by hand: \`${byHand()}\`.`);
+    throw new OperatorError(`${branch} ${largeFilesNote(heldWords(large))}: \`${byHand()}\`.`);
+  }
 
   // Counted now: once merged, none of the branch's commits are ahead of the base.
   const commits = ownCommits(base, branch, project.root);
   const { open } = await prepare();
-  const head = sh("git", ["rev-parse", branch], project.root);
   const log = gatesLog(project, id);
   // The section a hand landing's gates are: without it they read as part of the last run's.
   markLog(log, undefined, "sandcastle land gates on the merged tree");

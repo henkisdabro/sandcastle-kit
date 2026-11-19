@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
 import { protectedChanges, protectedPathsNote } from "../src/guard.ts";
+import { heldWords } from "../src/verdict.ts";
 
 const repo = () => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-hooks-path-"));
@@ -33,14 +34,14 @@ const repo = () => {
 
 test("a hook edited in the tracked directory core.hooksPath names holds the branch", () => {
   const { project, git } = repo();
-  assert.deepEqual(protectedChanges(project, "agent/issue-1"), []);
+  assert.deepEqual(heldWords(protectedChanges(project, "agent/issue-1")), []);
   git("config", "core.hooksPath", "scripts/git-hooks");
-  assert.deepEqual(protectedChanges(project, "agent/issue-1"), ["scripts/git-hooks/pre-commit"]);
+  assert.deepEqual(heldWords(protectedChanges(project, "agent/issue-1")), ["scripts/git-hooks/pre-commit"]);
   assert.match(protectedPathsNote(project, "implement"), /`scripts\/git-hooks\/`/);
 });
 
 test("a hooks path outside the repo protects nothing more", () => {
   const { project, git } = repo();
   git("config", "core.hooksPath", "/usr/share/hooks");
-  assert.deepEqual(protectedChanges(project, "agent/issue-1"), []);
+  assert.deepEqual(heldWords(protectedChanges(project, "agent/issue-1")), []);
 });

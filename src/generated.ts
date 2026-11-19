@@ -32,7 +32,7 @@ export const shq = (t: string) => `'${t.replaceAll("'", "'\\''")}'`;
 // Sandcastle sets the container's git identity only when an agent run starts, and the kit's
 // own sandboxes (landing, base gates, a requeue's gates) run no agent: `sandboxConfig` sets it
 // from this in every sandbox's ready hook. The host's is the author; the container's
-// AGENT_COMMITTER env (sandboxEnv) is the committer.
+// AGENT_COMMITTER env (sandboxEnvFor) is the committer.
 export const hostIdentityParts = (root: string) => {
   const who = (key: string, fallback: string) => {
     try {

@@ -1149,6 +1149,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const pipelines = createQueue<Next<T>>((q) => q.rank);
       // The attempts off their worker, waiting for a gates slot on an uncounted lock (`at.gateWait`), and the retakes queued in `pipelines`.
       const uncounted = new Set<string>();
+      // The attempts off their worker that ask for no counted slot: `uncounted` loses a ticket once its gates slot is granted
+      // (`gateSlot`), while it still holds no counted slot. Demand leaves these out until a retake is queued (#1014).
+      const idleOff = new Set<string>();
       let retaking = 0;
       const retakes = new Set<Retake>();
       // The sandbox slots the run could use now (the machine pool's demand): the tickets in a
@@ -1175,8 +1178,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       let toldFinishing: string | undefined;
       // While paused only the tickets inside an attempt that hold a sandbox ask for a slot: one queued for a
       // worker, waiting at the start or parked at a juncture holds none.
-      // A ticket that has not started held for a waiting resolve is queued but cannot start: no demand either.
-      const active = () => (pausedSince === undefined ? inPipeline - resolving.size - heldTold.size : [...running].filter((id) => !parked.has(id)).length);
+      // A ticket that has not started held for a waiting resolve is queued but cannot start: no demand either. Nor does an
+      // attempt off its worker that has not asked for a slot again (`idleOff`): counted, its run's share would cover slots it
+      // cannot use, and another run with tickets queued would be held at its share while they sit free.
+      const active = () =>
+        pausedSince === undefined ? inPipeline - resolving.size - heldTold.size - idleOff.size : [...running].filter((id) => !parked.has(id) && !idleOff.has(id)).length;
       const demand = () => {
         const n = Math.min(cap, active() + (dealt < pushed ? 1 : 0));
         if (n === demanded) return;
@@ -1678,6 +1684,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         if (r.dead) return;
         r.dead = true;
         retakes.delete(r);
+        // Still off its worker, and asking for nothing until it asks again after its juncture.
+        idleOff.add(r.id);
         r.resolve(undefined);
       };
       // Settles once the attempt ends (rejecting with its failure) or goes off the worker (`gateWait`). One promise settled by the
@@ -1740,6 +1748,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           if (!work.gateWaiters || uncounted.size >= work.gateWaiters) return false;
           uncounted.add(t.id);
           seat.off = true;
+          idleOff.add(t.id);
+          demand();
           seat.settle?.();
           return true;
         };
@@ -1758,6 +1768,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             const r: Retake = { id: t.id, seat, slot: retaken, resolve, dead: false };
             retakes.add(r);
             retaking++;
+            // A repair asks for a counted slot: a demand again.
+            idleOff.delete(t.id);
+            demand();
             pipelines.push({ retake: r, rank: RETAKE });
             nudge();
           });
@@ -1859,6 +1872,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           slot?.release();
           retaken.slot?.release();
           uncounted.delete(t.id);
+          idleOff.delete(t.id);
           // Whatever the ending (red later, a requeue, a stop, a crash, a hold, a conflict found at gates): a green gate's want for the run's
           // claim stands only until the push, which already took it; a push leaves nothing for this to drop.
           landing.dropped(t.id);
@@ -1902,24 +1916,31 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // While every queued ticket a worker could take is held for a waiting resolve (beside the ones the workers already asking
       // will take, `claimed`), the worker waits as `holdForResolve` does: with its slot if it keeps one, unless a landing of the
       // run waits for one. Woken at every stage change, as a ticket is queued and when a resolve is pushed again.
+      // A pause takes its slot too: the run tells no demand for it, and the resolve it waits for is parked for the whole
+      // pause, so a kept slot would sit locked in the pool until the resume. The resume wakes it to ask again (`work.slot`).
       const holdFresh = async (held: { slot?: Slot }, claimed: () => number) => {
-        for (;;) {
+        for (sync(); ; sync()) {
           const h = tellHeld();
           if (pipelines.closed || !h.size || pipelines.size - h.size > claimed()) return;
-          if (held.slot && work.landingWaits?.()) {
+          const paused = pausedSince !== undefined && !stop.startsNothing;
+          if (held.slot && (paused || work.landingWaits?.())) {
             held.slot.release();
             held.slot = undefined;
           }
           await new Promise<void>((wake) => {
             const done = () => {
               clearTimeout(timer);
-              const at = nudges.indexOf(done);
-              if (at >= 0) nudges.splice(at, 1);
+              // Out of every list that may wake it: one left behind would pile up across an hours-long pause.
+              for (const list of [nudges, wakers]) {
+                const at = list.indexOf(done);
+                if (at >= 0) list.splice(at, 1);
+              }
               wake();
             };
             const timer = setTimeout(done, 1000);
             settles.push(done);
             nudges.push(done);
+            if (paused) wakers.push(done);
           });
         }
       };
