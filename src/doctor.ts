@@ -11,6 +11,7 @@ import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject, LOCAL_CONFIG_PATH, MountRefused, type Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
+import { guardFault, type ReasonCode } from "./verdict.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pinnedFor } from "./hooks-path.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
@@ -228,18 +229,26 @@ export const repoInvisible = (repo: string) => ({
 });
 
 /**
- * What GH_TOKEN may do to a repository, decided once for doctor and the run's start so the two never disagree
- * (local to this module until a shared verdict type exists). `allow` only on a clean "cannot push" (a 403 that
- * is not a rate limit, or a 404); a 422 can push; anything else - no answer, a rate limit, a 5xx - proves
- * nothing either way and is `unknown`, never `allow`.
+ * What GH_TOKEN may do to a repository, decided once for doctor and the run's start so the two never disagree; a
+ * `Verdict` (src/verdict.ts) narrowed to the token's codes. `allow` only on a clean "cannot push" (a 403 that
+ * is not a rate limit, or a 404); a 422 can push; anything else - no answer, a rate limit, a 5xx, a probe that
+ * threw - proves nothing either way and is `unknown`, never `allow`.
  */
 export type TokenVerdict =
   | { kind: "allow" }
-  | { kind: "refuse" | "unknown"; code: "repo-invisible" | "token-can-push" | "token-unverified"; detail: string };
+  | { kind: "refuse" | "unknown"; code: Extract<ReasonCode, "repo-invisible" | "token-can-push" | "token-unverified">; detail: string };
 
 export const tokenVerdict = async (token: string, repo: string, root?: string): Promise<TokenVerdict> => {
-  if ((await probeGithubRead(token, repo)) === 404) return { kind: "refuse", code: "repo-invisible", detail: "HTTP 404" };
-  const write = await githubWriteAnswer(token, repo);
+  let read: number | undefined;
+  let write: Awaited<ReturnType<typeof githubWriteAnswer>>;
+  try {
+    guardFault("token-probe");
+    read = await probeGithubRead(token, repo);
+    write = read === 404 ? undefined : await githubWriteAnswer(token, repo);
+  } catch (error) {
+    return { kind: "unknown", code: "token-unverified", detail: `the probe failed: ${String((error as Error)?.message ?? error).split("\n")[0].slice(0, 200)}` };
+  }
+  if (read === 404) return { kind: "refuse", code: "repo-invisible", detail: "HTTP 404" };
   if (write?.status === 422) return { kind: "refuse", code: "token-can-push", detail: "HTTP 422" };
   if (write && ((write.status === 403 && !write.limited) || write.status === 404)) {
     if (root) recordTokenAllowed(root, token);

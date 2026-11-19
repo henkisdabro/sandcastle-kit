@@ -37,6 +37,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **Every guard refusal is now tested, and a reader that fails always refuses.** A `package.json` that
+  git could not read on a branch is held as a reader failure rather than as a manifest that does not
+  parse, and a token check whose probe throws is "could not tell" rather than an error. The rule all
+  guards keep - what cannot be established as safe does not cross - is written down once, in
+  `docs/safety.md` and ADR 0006. (#1010)
 - **A run checks that `GH_TOKEN` cannot push, and doctor and the run decide alike.** Only a token
   GitHub cannot see used to stop a run; a token with Contents: write, no connection and a
   rate-limited 403 all went ahead. One verdict now serves both: a can-push token is refused, and an

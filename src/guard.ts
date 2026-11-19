@@ -14,7 +14,7 @@ import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 import { pinnedHooksPath, REWRITE_NOTE, rewrittenHooksPath, trackedHooksPath as trackedHooksDir } from "./hooks-path.ts";
 import { hostKey, matchRules, type PathRule } from "./host-path.ts";
-import { ALLOW, readerFailed, type ReasonCode, refuses, type Verdict } from "./verdict.ts";
+import { ALLOW, guardFault, readerFailed, type ReasonCode, refuses, type Verdict } from "./verdict.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Git hooks on the host. `git merge --no-verify` still runs post-merge, and
@@ -236,6 +236,7 @@ const agentBranches = (root: string): Record<string, string> => {
  */
 const replaceRefs = (root: string, dir: string): Record<string, string> => {
   const found: Record<string, string> = {};
+  guardFault("fingerprint");
   for (const line of sh("git", ["for-each-ref", "--format=%(objectname) %(refname)", "refs/replace/"], root).split("\n")) {
     const at = line.indexOf(" ");
     if (at > 0) found[join(dir, line.slice(at + 1))] = `replace ${line.slice(0, at)}`;
@@ -1726,6 +1727,7 @@ const RAW = /^:([0-7]{6}) ([0-7]{6}) ([0-9a-f]{40,64}) ([0-9a-f]{40,64}) ([ACDMR
 export const branchChanges = (project: Project, base: string, tip: string): BranchEntry[] | Verdict => {
   let out: string;
   try {
+    guardFault("branch-changes");
     out = gitRaw(project.root, ["diff", "--raw", "-z", "--no-abbrev", "--no-renames", "--no-ext-diff", "--no-textconv", `${base}...${tip}`, "--"]);
   } catch (error) {
     return readerFailed(`git diff ${base}...${tip}`, error);
@@ -1758,12 +1760,15 @@ const symlinkHold = (project: Project, e: BranchEntry): string | undefined => {
 };
 
 // One side of a changed `package.json`, read by blob id: absent is `{}`, and anything but a JSON object is
-// `undefined` - not readable as a manifest, so what it runs at install is not known.
+// `undefined` - not readable as a manifest, so what it runs at install is not known. A blob git cannot read throws, to
+// `protectedChanges`' catch: the reader failed, which is not the same as a manifest that does not parse.
 const manifestAt = (project: Project, mode: string, oid: string): Record<string, any> | undefined => {
   if (mode === "000000") return {};
   if (!mode.startsWith("100")) return undefined;
+  guardFault("manifest");
+  const text = gitRaw(project.root, ["cat-file", "blob", oid]);
   try {
-    const parsed = JSON.parse(gitRaw(project.root, ["cat-file", "blob", oid]));
+    const parsed = JSON.parse(text);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
   } catch {
     return undefined;
@@ -1822,6 +1827,7 @@ export const largeFiles = (project: Project, tip: string): Verdict => {
   for (const e of entries.filter((x) => x.status !== "D" && hasBlob(x.newMode))) {
     let out: string;
     try {
+      guardFault("size");
       out = gitRaw(project.root, ["cat-file", "-s", e.newOid]).trim();
     } catch (error) {
       return readerFailed(`the size of ${e.path}`, error);

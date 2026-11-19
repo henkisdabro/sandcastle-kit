@@ -1660,6 +1660,28 @@ its write is never replaced (`test/pause-race.test.ts`).
 
 ## `src/guard.ts`
 
+**The rule every guard keeps** (ADR 0006): a guard lets a thing cross from a sandbox to the host - a
+branch, a file, a command, a credential - only once it has established, on a normalised reading,
+that the thing is in a known-safe class.
+What it cannot read, parse, normalise or classify is refused (held, stopped or denied), and the
+refusal names what could not be established and the one operator-side way past it.
+A guard answers `allow`, `refuse` or `unknown` (`Verdict`, `src/verdict.ts`), every caller treats
+`unknown` as `refuse`, and a `catch` in a guard answers `unknown`, never `allow` or an empty result.
+An override is a host environment variable or a key in `.sandcastle/` config (itself held), named in
+the refusal and announced by every run it is active in.
+Two tests hold the rule.
+`test/guard-refusal-coverage.test.ts` requires a row of the bypass corpus
+(`test/fixtures/guard-bypasses.json`) for every `REASON_CODES` entry and every `[git-guard:<code>]`
+the script can print, read from the script; a row may also name the refusal's `detail` where two
+branches share a code.
+`test/guard-faults.test.ts` drives every reader in `GUARD_READERS` (the branch diff, the manifest
+read, the size read, the token probe, `containedHostPath`, the fingerprint's replace-ref read) to
+throw through `injectGuardFault`, the seam each reader calls as `guardFault(<reader>)` before it
+reads, and checks the same input is allowed without the fault and refused with it, a landing hold
+with `reader-failed`; a `git` on PATH that answers garbage covers the shape checks no throw reaches.
+A manifest blob git cannot read is `reader-failed`, not `manifest-unparseable`: only a blob that was
+read and does not parse is the latter.
+
 Host safety: git hooks, auto-gc and background maintenance off (on the host, `disableHostGitGc`, and
 in every sandbox too, by `GIT_CONFIG_*` pairs that `sandboxEnvFor` in `src/sandbox.ts` appends after
 any already set: the host's pairs never reach a container, and a commit or merge in a sandbox would
@@ -3396,8 +3418,9 @@ command string before it runs and so cannot resolve a path the same command crea
 The guard is not a security boundary, as its header says: a script file (`bash /tmp/x.sh`, a file
 the agent has just written) gets past any reading of a command line, and it does not try to read
 them - the host's check of `.git` is what protects the repo.
-It is fail-closed only where it parses: an unknown global option costs an agent one retry, and the
-fix is to add the option to the table, not an override.
+It is fail-closed only where it parses (the rule is stated once, under `src/guard.ts`): an unknown
+global option costs an agent one retry, and the fix is to add the option to the table, not an
+override.
 Needs bash, `jq` and git in the image; it keeps to bash 3.2 because the tests run it on the host.
 
 `report.schema.json` is the shape of the report a Claude pass returns unless `REPORT_SCHEMA=0`
