@@ -24,6 +24,27 @@ export const appInstalled = () => onPath("herdr-app");
 export const appHome = (env: NodeJS.ProcessEnv = process.env) => env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
 export const appModDir = () => join(appHome(), "mods", MOD_NAME);
 
+/** The names `herdr-app/.gitignore` lists: the files the app itself writes into a mod folder it loads. */
+const appWritten = (kit: string) => {
+  const ignore = join(kit, "herdr-app", ".gitignore");
+  return new Set(
+    (existsSync(ignore) ? readFileSync(ignore, "utf8") : "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#")),
+  );
+};
+
+/**
+ * A stampless `dir` holding only files the app writes: what `configure --remove --app` leaves on a machine where the
+ * app loaded the mod (#987). It is the kit's leftover, not a stranger's folder, so a reinstall may copy into it -
+ * otherwise the remove's own "copies it again" promise fails until the user deletes the folder by hand.
+ */
+export const isLeftover = (kit: string, dir: string) => {
+  const written = appWritten(kit);
+  return readdirSync(dir, { withFileTypes: true }).every((e) => e.isFile() && written.has(e.name));
+};
+
 /**
  * The kit's tracked `herdr-app/` files (relative to it, sorted), not the app's own `jsconfig.json` and
  * `gpui-kit.d.ts` that it writes into a mod folder it loads: `herdr-app/.gitignore` names those. Read from the
@@ -31,12 +52,7 @@ export const appModDir = () => join(appHome(), "mods", MOD_NAME);
  */
 export const appFiles = (kit: string) => {
   const root = join(kit, "herdr-app");
-  const ignored = new Set(
-    (existsSync(join(root, ".gitignore")) ? readFileSync(join(root, ".gitignore"), "utf8") : "")
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith("#")),
-  );
+  const ignored = appWritten(kit);
   const out: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -65,8 +81,8 @@ export const readStamp = (dir: string): AppStamp | undefined => {
 };
 
 /**
- * The mod's state, what doctor's line says: undefined without `herdr-app` on PATH; `absent` (no folder), `foreign`
- * (a folder with no stamp), `stale` (the stamp is not this kit's files) or `current`.
+ * The mod's state, what doctor's line says: undefined without `herdr-app` on PATH; `absent` (no folder, or only the
+ * app's own files left in it: `isLeftover`), `foreign` (any other folder with no stamp), `stale` (the stamp is not this kit's files) or `current`.
  */
 export type ModState = "absent" | "foreign" | "stale" | "current";
 export const appModState = (kit: string, installed = appInstalled): ModState | undefined => {
@@ -74,7 +90,7 @@ export const appModState = (kit: string, installed = appInstalled): ModState | u
   const dir = appModDir();
   if (!existsSync(dir)) return "absent";
   const stamp = readStamp(dir);
-  if (!stamp) return "foreign";
+  if (!stamp) return isLeftover(kit, dir) ? "absent" : "foreign";
   return stamp.hash === appHash(kit, appFiles(kit)) ? "current" : "stale";
 };
 
