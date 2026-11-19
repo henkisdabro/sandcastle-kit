@@ -623,7 +623,13 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
       continue;
     }
     unlockWorktree(path, cwd);
-    sh("git", ["worktree", "remove", "--force", path], cwd);
+    // As for scratch worktrees above: one git failure is left with its reason (its branch kept), not the end of clean.
+    try {
+      sh("git", ["worktree", "remove", "--force", path], cwd);
+    } catch (error) {
+      left.push({ path, ...(branch ? { branch } : {}), reason: errorLine(error) });
+      continue;
+    }
     worktrees.push(path);
   }
   sh("git", ["worktree", "prune"], cwd);

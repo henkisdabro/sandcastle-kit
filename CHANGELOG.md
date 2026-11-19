@@ -37,6 +37,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- `sandcastle clean` no longer stops at the first ticket worktree git fails to remove (a stale
+  `index.lock`, a busy directory): that worktree is left with git's reason and its branch, and the
+  rest are cleaned, as scratch worktrees already were.
 - **Every guard refusal is now tested, and a reader that fails always refuses.** A `package.json` that
   git could not read on a branch is held as a reader failure rather than as a manifest that does not
   parse, and a token check whose probe throws is "could not tell" rather than an error. The rule all
