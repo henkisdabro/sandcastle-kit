@@ -1481,6 +1481,11 @@ tracker imported (its code is synchronous); a ticket state's group and word are
 `mod/hooks/run-record.ts`'s `GROUPS` and `WORDS` and a run's liveness `mod/hooks/run-live.ts`'s,
 never a copy; and every fixture's `status 0` shows a ticket in each state in the group the shared
 table gives it (`test/status-facts.test.ts`, by the fact reader of `test/status-run.ts`).
+The view's process check (`commandOf` in `src/status-snapshot.ts`) tells a pid that is gone (a
+signal of 0 fails) from a `ps` that cannot answer (a fork refused under load): it asks `ps` twice,
+and a pid that still exists then reads as the run's, so a live run is not drawn as ended for a frame.
+A display errs towards live; `src/live-runs.ts`'s `commandOf`, which decides locks and pool shares,
+does not (`test/status-live-probe.test.ts`).
 
 The snapshot's **collectors** (GLOSSARY.md; `createCollector`, and `createSources`, a project's
 five) read one source each: the run record and logs (the plan's usage is a field of the record, so

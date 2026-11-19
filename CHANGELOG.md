@@ -22,6 +22,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **A live run no longer flashes as ended in the status view when `ps` fails under load.** One
+  failed process probe (a fork refused on a busy machine) read the run as gone, and that frame
+  dropped its plan usage. The view now asks `ps` again, and a run whose process still exists stays
+  live.
 - **Files that run on your machine without anyone reading them no longer land unheld.** The
   protected-path list is now a table naming what runs each entry, and gains pnpm's `.pnpmfile.*`,
   Yarn's `.yarnrc` and `.yarn/releases/` and `.yarn/plugins/`, `bunfig.toml`, the whole of
