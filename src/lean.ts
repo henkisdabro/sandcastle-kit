@@ -27,6 +27,7 @@ import { IMPL_MODEL, toolsFor } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { dockerRunTimeout } from "./errors.ts";
 import { ownAbsoluteHooksPath, pinnedFor, REWRITE_NOTE } from "./hooks-path.ts";
+import { containedHostPath } from "./host-path.ts";
 import { credentials, sh } from "./sandbox.ts";
 
 export type Item = {
@@ -218,24 +219,12 @@ export const writePlan = (project: Project, dir = join(project.root, ".sandcastl
 // agent's `git add -A`.
 export const apply = (p: Plan, cwd = process.cwd()) => {
   // The worktree holds a sandbox branch's tree, so a path in it may be a symlink the branch committed to somewhere on
-  // the host (`.claude` -> the operator's own). A path that goes through one is left alone, and said so: the removal
-  // and the write below run on the host, before any guard check.
-  const through = (path: string) => {
-    const parts = path.split("/").filter(Boolean);
-    for (let i = 1; i < parts.length; i++) {
-      const prefix = parts.slice(0, i).join("/");
-      try {
-        if (lstatSync(join(cwd, prefix)).isSymbolicLink()) return prefix;
-      } catch {
-        return undefined; // nothing there, so nothing to cross
-      }
-    }
-    return undefined;
-  };
+  // the host (`.claude` -> the operator's own). A path that goes through one, or past a directory that cannot be read,
+  // is left alone, and said so: the removal and the write below run on the host, before any guard check.
   const safe = (path: string) => {
-    const link = through(path);
-    if (link === undefined) return true;
-    console.log(`lean-apply: left ${path} alone - ${link} is a symlink in this worktree`);
+    const v = containedHostPath(cwd, path);
+    if (v.kind === "allow") return true;
+    console.log(`lean-apply: left ${path} alone - ${v.detail}`);
     return false;
   };
   const hide = p.hide.filter(safe);

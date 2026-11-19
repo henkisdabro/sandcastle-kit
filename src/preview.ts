@@ -13,6 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { sh } from "./sandbox.ts";
 import { refOf } from "./tracker.ts";
 import { largeFiles, protectedChanges } from "./guard.ts";
+import { heldWords } from "./verdict.ts";
 
 export type PreviewRow = { branch: string; id: string; head: string; result: "clean" | "conflict" | "error"; files: string[]; detail?: string };
 export type Runner = (script: string, args: string[], dirs: { gitDir: string; scratch: string }) => { status: number | null; stdout: string; stderr: string };
@@ -107,15 +108,9 @@ export const previewLines = (project: Project, base: string, rows: PreviewRow[])
   }
   const lines = [`Landing preview: ${rows.length} unlanded branch(es) against ${at}, oldest first. Nothing is merged.`];
   // A clean merge that landing would still hold for a person (a protected path, a file over 50 MB)
-  // read as "clean", as if it would land.
-  const heldFor = (r: PreviewRow) => {
-    if (r.result !== "clean") return [];
-    try {
-      return [...protectedChanges(project, r.branch), ...largeFiles(project, r.branch)];
-    } catch {
-      return [];
-    }
-  };
+  // read as "clean", as if it would land. Read at the commit previewed; one that cannot be read is held, as landing
+  // holds it.
+  const heldFor = (r: PreviewRow) => (r.result === "clean" ? [...heldWords(protectedChanges(project, r.head)), ...heldWords(largeFiles(project, r.head))] : []);
   let held = 0;
   for (const r of rows) {
     const human = heldFor(r);

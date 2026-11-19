@@ -33,7 +33,8 @@ import { PERSON_MARK } from "./autonomy.ts";
 import { localConfigLine, type Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, exitWords, FAILING_TESTS_SHOWN, type Failure, type Gate, type GateRun, disjointReds, flakedTests, landingFlaked, threeRunsNote, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, timingLines, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, setLoadHold, noteGreenCommit, type ProofKind, likelyLoad, loadMade, wholeTests, repairCheck, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart, removeOwnScratchOnExit, type Fingerprint } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart, removeOwnScratchOnExit, replaceRefsWarning, type Fingerprint } from "./guard.ts";
+import { heldWords } from "./verdict.ts";
 import { alwaysLoadedRules, alwaysLoadedSegment, checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { terminalHost } from "./terminal-host.ts";
@@ -3384,6 +3385,8 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // sandbox, the run's first, opens behind a check against it (the run's own fingerprint is taken once that sandbox
   // has closed). Sandcastle's open runs host git in the project, and the image build and preflight come between.
   const atStart = gitFingerprint(project);
+  const replaceNote = replaceRefsWarning(atStart);
+  if (replaceNote) console.log(replaceNote);
   // A held branch merged by hand leaves its backup entry behind: only a landing drops one. One deleted by hand
   // unmerged keeps its entry, the only copy of that work, until `clean --all`.
   const swept = pruneBackup(project);
@@ -4190,10 +4193,12 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
     if (earlier >= 0) results.splice(earlier, 1);
   };
   // What will hold a green branch for a person at landing. Said as its pipeline ends: before, a
-  // human merge was news only at the end of the run.
+  // human merge was news only at the end of the run. Read at the gated commit, as the landing reads it; a reader
+  // that failed is named, not thrown into `bookkeep`, where the ready line was lost with it.
   const heldAtLanding = (o: Outcome): string[] => {
     if (o.status !== "green") return [];
-    const held = [...protectedChanges(project, o.branch), ...largeFiles(project, o.branch)];
+    const tip = o.head ?? o.branch;
+    const held = [...heldWords(protectedChanges(project, tip)), ...heldWords(largeFiles(project, tip))];
     if (o.unreviewed) held.push("repair not reviewed");
     return held;
   };
