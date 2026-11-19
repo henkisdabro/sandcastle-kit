@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
 import { protectedChanges } from "../src/guard.ts";
+import { heldWords } from "../src/verdict.ts";
 
 const BRANCH = "agent/issue-1";
 
@@ -37,7 +38,7 @@ const scenario = (base: Files, change: Files, protectedPaths?: string[]) => {
   commit({ "README.md": "base\n", ...base }, "base");
   git("checkout", "-q", "-b", BRANCH);
   commit(change, "change");
-  return protectedChanges({ root, baseBranch: "main", protectedPaths } as Project, BRANCH);
+  return heldWords(protectedChanges({ root, baseBranch: "main", protectedPaths } as Project, BRANCH));
 };
 
 const pkg = (scripts: Record<string, string>) => JSON.stringify({ name: "demo", scripts }, null, 2) + "\n";

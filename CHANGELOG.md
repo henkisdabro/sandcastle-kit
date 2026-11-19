@@ -9,8 +9,48 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **A run now refuses a `GH_TOKEN` that can push to the repository.** The check `sandcastle doctor
+  --verify` made only on request (Contents: write) now runs at every run's start, before any
+  sandbox. If doctor gives a FIX on `GH_TOKEN cannot push`, edit the token on GitHub to Issues: read
+  and write and Metadata: read only. When GitHub does not answer or is rate-limited, a run goes
+  ahead only if the token was found unable to push within the last 7 days, so a first run needs
+  GitHub to answer. `SANDCASTLE_ALLOW_BROAD_TOKEN=1` is the one override, and a run prints a line
+  while it is set. (#997)
+- **More of a branch is held for you to merge: all of `.claude/`, editor and package-manager hooks,
+  and unknown root dotfiles.** A ticket that edits the project's skills, agents or commands, a
+  `.vscode/` or `.devcontainer/` file, `opencode.json`, or a root dotfile not on the inert list
+  (`.prettierrc`, `.eslintrc.*`, a new tool's config) now ends held rather than landing. To let such
+  paths land as before, list them in `unheldPaths` in `.sandcastle/config.ts`
+  (`unheldPaths: [".claude/skills/", ".prettierrc.json"]`): a directory, or one exact file.
+  `/sandcastle update` looks for them. Hooks, CI, `.sandcastle/`, Claude Code's settings and hooks,
+  `.envrc`, mise's config and `.tool-versions` stay held whatever it says.
+
 ### Fixed
 
+- **A run checks that `GH_TOKEN` cannot push, and doctor and the run decide alike.** Only a token
+  GitHub cannot see used to stop a run; a token with Contents: write, no connection and a
+  rate-limited 403 all went ahead. One verdict now serves both: a can-push token is refused, and an
+  unclear answer is refused unless a clean one for the same token (recorded by its hash in
+  `.sandcastle/.run/token-verdict.json`) is under 7 days old. Doctor reads a rate-limited 403 as
+  not checked rather than as "cannot push". A project whose tickets are in files and that has no
+  GitHub remote no longer passes `GH_TOKEN` to its sandboxes. (#997)
+- **Files that run on your machine without anyone reading them no longer land unheld.** The
+  protected-path list is now a table naming what runs each entry, and gains pnpm's `.pnpmfile.*`,
+  Yarn's `.yarnrc` and `.yarn/releases/` and `.yarn/plugins/`, `bunfig.toml`, the whole of
+  `.claude/` at any depth (skills, agents and commands can carry hooks), `opencode.json` and
+  `.opencode/`, `.vscode/`, `.devcontainer/`, `.envrc`, mise's config and `.tool-versions`. Any
+  other root entry whose name starts with a dot is held too, except an inert few (`.gitignore`,
+  `.editorconfig`, `.nvmrc` and the like); the new `unheldPaths` setting lets a project release the
+  ones it trusts. The prompts' protected list, `docs/safety.md` and `docs/architecture.md` are
+  tested against the table (#993, #994).
+
+- **A paused run no longer keeps a sandbox slot while a worker waits for a conflict's resolve.**
+  When every queued ticket was held back for a ticket sent back after a conflict, the worker that
+  waited for it kept its machine-wide slot for the whole pause - until the plan window reset, under
+  a usage pause - while the run told the other runs it needed none. It now gives the slot back for
+  the pause and asks for one again after the resume.
 - **The in-sandbox git guard reads a command before it decides.** It was a regex over the raw
   command string, so `git --git-dir .git gc`, `git -p gc`, `git "gc"`, `env git gc`, `xargs git gc`,
   a git alias of `gc` and `git branch -m agent/...` got through. It now tokenises the command, strips
@@ -35,6 +75,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   install script is checked like `package.json`'s. `lean-apply` now leaves a path alone when a
   directory on its way cannot be read (`EACCES`, `ENOTDIR`), not only when it crosses a symlink.
   (#991, #995)
+- **The landing holds read the commit that was gated, with replace refs off.** A sandbox could
+  write `refs/replace/` in the shared `.git` and map its real commit to a benign one, so the
+  protected-path and large-file holds judged the benign one while the real one landed; the kit's
+  git now reads with substitution off, and the holds read the exact commit the gates passed. A
+  branch that adds a symlink into a protected path or out of the repository, or a submodule
+  pointer, is held. A branch the kit cannot read, or whose `package.json` does not parse, is held
+  with the reason (`reader-failed`, `manifest-unparseable`) instead of landing or losing its ready
+  line, and `sandcastle preview` shows it held. (#992, #995)
 - **A sandbox can no longer swap the objects the host reads without stopping the run.** The `.git`
   fingerprint now watches replace refs (`refs/replace/*`, loose or packed), `.git/shallow` and
   `.git/objects/info/alternates`: one added or changed mid-run stops the run and names it.

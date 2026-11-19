@@ -123,8 +123,8 @@ test("the kit's own tree keeps the verdicts the raw prefix match gave it", () =>
   const p = project();
   const values = protectedRules(p).map((r) => r.value);
   const files = execFileSync("git", ["-C", join(import.meta.dirname, ".."), "ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
-  // Paths the normalised match holds that the raw one did not; none in the kit's tree today.
-  const expectedNewHolds: string[] = [];
+  // Paths the normalised match holds that the raw one did not: root dot entries, which the rule table holds by default.
+  const expectedNewHolds = [".env.example", ".oxlintrc.json"];
   const held = new Set(protectedAmong(p, files));
   const changed = files.filter((f) => values.some((v) => f === v || f.startsWith(v)) !== held.has(f));
   assert.deepEqual(changed, expectedNewHolds);

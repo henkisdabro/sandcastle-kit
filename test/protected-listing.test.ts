@@ -12,11 +12,12 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
 import { largeFiles, protectedChanges } from "../src/guard.ts";
+import { heldWords, type Verdict } from "../src/verdict.ts";
 
 const BRANCH = "agent/issue-1";
 
 // A repo with `base` on main; `change` runs in the checkout on a branch off it and its result is committed.
-const scenario = (base: Record<string, string>, change: (root: string) => void, list: (project: Project, branch: string) => string[] = protectedChanges) => {
+const scenario = (base: Record<string, string>, change: (root: string) => void, list: (project: Project, branch: string) => Verdict = protectedChanges) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-protected-listing-"));
   const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", ...args], { encoding: "utf8" });
   const write = (name: string, content: string) => {
@@ -31,7 +32,7 @@ const scenario = (base: Record<string, string>, change: (root: string) => void, 
   change(root);
   git("add", "-A");
   git("commit", "-q", "--allow-empty", "-m", "change");
-  return list({ root, baseBranch: "main" } as Project, BRANCH);
+  return heldWords(list({ root, baseBranch: "main" } as Project, BRANCH));
 };
 
 const put = (root: string, name: string, content: string) => {
@@ -81,7 +82,23 @@ const ENTRIES: [string, string][] = [
   [".sandcastle/", ".sandcastle/config.json"],
   [".npmrc", ".npmrc"],
   ["pnpm-workspace.yaml", "pnpm-workspace.yaml"],
-  [".yarnrc.yml", ".yarnrc.yml"],
+  [".yarnrc", ".yarnrc.yml"],
+  [".pnpmfile.", ".pnpmfile.cjs"],
+  [".yarn/releases/", ".yarn/releases/yarn-4.cjs"],
+  [".yarn/plugins/", ".yarn/plugins/plugin.cjs"],
+  ["bunfig.toml", "bunfig.toml"],
+  [".claude/", ".claude/skills/x/SKILL.md"],
+  [".claude/ in a package", "packages/app/.claude/agents/x.md"],
+  ["opencode.json", "opencode.json"],
+  [".opencode/", ".opencode/plugin/x.ts"],
+  [".vscode/", ".vscode/tasks.json"],
+  [".devcontainer/", ".devcontainer/devcontainer.json"],
+  [".envrc", ".envrc"],
+  [".mise.", ".mise.toml"],
+  ["mise.toml", "mise.toml"],
+  ["mise.local.toml", "mise.local.toml"],
+  [".tool-versions", ".tool-versions"],
+  ["a root dot entry", ".foorc"],
   [".lintstagedrc", ".lintstagedrc"],
   ["lint-staged.config.", "lint-staged.config.js"],
   [".pre-commit-config.yaml", ".pre-commit-config.yaml"],

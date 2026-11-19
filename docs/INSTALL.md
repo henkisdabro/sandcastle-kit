@@ -114,7 +114,10 @@ end-of-run notification and the Claude Code mod's idle mark switch go in an opti
 > [!IMPORTANT]
 > Classic (`ghp_`) and OAuth (`gho_`, e.g. `gh auth token`) tokens are refused, because sandbox
 > agents run with permission prompts off and such a token could push or edit workflows.
-> `SANDCASTLE_ALLOW_BROAD_TOKEN=1` lifts the refusal, for a throwaway repo only.
+> A fine-grained token with Contents: write on the repository is refused too: each run asks GitHub
+> whether the token can push before any sandbox starts. If GitHub does not answer, the run goes ahead
+> only when that token was found unable to push within the last 7 days.
+> `SANDCASTLE_ALLOW_BROAD_TOKEN=1` lifts these refusals, for a throwaway repo only.
 
 Run `sandcastle doctor` until it reports no `FIX` lines. `sandcastle doctor --verify` also asks
 GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of each, never the value),
