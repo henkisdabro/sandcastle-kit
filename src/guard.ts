@@ -13,7 +13,7 @@ import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 import { pinnedHooksPath, REWRITE_NOTE, rewrittenHooksPath, trackedHooksPath as trackedHooksDir } from "./hooks-path.ts";
-import { matchRules, type PathRule } from "./host-path.ts";
+import { hostKey, matchRules, type PathRule } from "./host-path.ts";
 import { ALLOW, readerFailed, type ReasonCode, refuses, type Verdict } from "./verdict.ts";
 
 // ---------------------------------------------------------------------------
@@ -1542,20 +1542,57 @@ export const removeOwnScratchOnExit = (project: Project, check: (when: string) =
 // standing for a human merge.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PROTECTED = [
-  ".husky/", ".githooks/", ".github/", ".gitmodules", ".gitattributes",
-  ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/",
-  ".mcp.json", ".codex/", ".agents/", ".sandcastle/",
-  ".npmrc", "pnpm-workspace.yaml", ".yarnrc.yml",
-  ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml",
+/** A protected-path rule; `fixed` ones hold whatever the project's `unheldPaths` says. */
+export type ProtectedRule = PathRule & { fixed?: boolean };
+const rule = (kind: PathRule["kind"], runner: string, fixed: boolean, ...values: string[]): ProtectedRule[] =>
+  values.map((value) => ({ kind, value, runner, ...(fixed ? { fixed } : {}) }));
+
+// Each entry names what runs it on the host: the gates ran the branch's own copy in a sandbox, so they cannot vouch for
+// it. A `dir` rule also holds a file or symlink committed under the directory's own name (a bare `.codex` link); a
+// `prefix` covers every extension (`.huskyrc` holds `.huskyrc.json`). The fixed entries are the kit's own guards and
+// what runs the moment a shell enters the directory: a project's `unheldPaths` cannot let one land.
+const DEFAULT_PROTECTED: ProtectedRule[] = [
+  ...rule("dir", "git commit hooks", true, ".husky/", ".githooks/"),
+  ...rule("dir", "CI, with the repository's secrets", true, ".github/"),
+  ...rule("dir", "the kit's own config and guards", true, ".sandcastle/"),
+  ...rule("prefix", "Claude Code's settings and hooks, on the host", true, ".claude/settings.json", ".claude/settings.local.json"),
+  ...rule("dir", "Claude Code's settings and hooks, on the host", true, ".claude/hooks/"),
+  ...rule("prefix", "direnv, mise and asdf, on entering the directory", true, ".envrc", ".mise.", "mise.toml", "mise.local.toml", ".tool-versions"),
+  ...rule("prefix", "git's checkout filters and submodules", false, ".gitmodules", ".gitattributes"),
+  // Claude Code loads skills, agents, commands, output styles and whatever comes next from `.claude/`, in a package
+  // directory too, and their frontmatter can carry hooks that run on the host.
+  ...rule("basename", "Claude Code: skills, agents and commands, whose frontmatter can run hooks", false, ".claude/"),
+  ...rule("prefix", "the agents' MCP servers and config", false, ".mcp.json", "opencode.json"),
+  ...rule("dir", "the agents' MCP servers and config", false, ".codex/", ".agents/", ".opencode/"),
+  ...rule("dir", "the editor, on opening the folder", false, ".vscode/", ".devcontainer/"),
+  // pnpm `require`s `.pnpmfile.cjs` on every install; `.yarnrc` (Yarn 1's `yarn-path`, and `.yarnrc.yml`'s
+  // `yarnPath`) names the yarn binary, which lives in `.yarn/releases/`; bun preloads what `bunfig.toml` names.
+  ...rule("prefix", "the package manager, at the next install", false, ".npmrc", "pnpm-workspace.yaml", ".pnpmfile.", ".yarnrc"),
+  ...rule("dir", "the package manager, at the next install", false, ".yarn/releases/", ".yarn/plugins/"),
+  ...rule("file", "the package manager, at the next install", false, "bunfig.toml"),
   // Commit-hook runners' own config: their commands run on the host at the person's next commit. lefthook reads
   // `lefthook`, `.lefthook` and the `-local` variants (yml, yaml, json, toml) at the root and in `.config/`; husky 4
   // reads `.huskyrc*` and `husky.config.*`; simple-git-hooks `.simple-git-hooks.*` and `simple-git-hooks.*`. lefthook
   // also runs the scripts in its `source_dir` and `source_dir_local`, `.lefthook/` and `.lefthook-local/` by default.
-  "lefthook.", "lefthook-local.", ".lefthook.", ".lefthook-local.", ".config/lefthook.", ".config/lefthook-local.",
-  ".lefthook/", ".lefthook-local/",
-  ".huskyrc", "husky.config.", ".simple-git-hooks.", "simple-git-hooks.",
+  ...rule("prefix", "the commit-hook runner, at the next commit", false,
+    ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml",
+    "lefthook.", "lefthook-local.", ".lefthook.", ".lefthook-local.", ".config/lefthook.", ".config/lefthook-local.",
+    ".huskyrc", "husky.config.", ".simple-git-hooks.", "simple-git-hooks."),
+  ...rule("dir", "the commit-hook runner, at the next commit", false, ".lefthook/", ".lefthook-local/"),
 ];
+
+// Root dot entries that no tool runs: ignore lists, editor whitespace, a runtime's version pin, an empty marker and
+// yarn's package archives. Any other dot entry at the root is held, because a new tool's config usually lives there and
+// a list of the dangerous ones is always one tool behind.
+export const INERT_ROOT_ENTRIES: PathRule[] = [
+  ...[".gitignore", ".gitkeep", ".editorconfig", ".nvmrc", ".node-version", ".prettierignore", ".eslintignore", ".dockerignore", ".mailmap"]
+    .map((value): PathRule => ({ kind: "file", value, runner: "nothing" })),
+  { kind: "dir", value: ".yarn/cache/", runner: "nothing" },
+];
+const rootDot = (path: string) => {
+  const key = hostKey(path);
+  return typeof key === "string" && key.startsWith(".");
+};
 // The tracked directory the local `core.hooksPath` names: its scripts run on the person's own next commit as the
 // defaults' `.husky/` and `.githooks/` do, and the start takes such a path without a question after a clean end.
 const hooksDirProtected = (project: Project): string[] => {
@@ -1563,18 +1600,24 @@ const hooksDirProtected = (project: Project): string[] => {
   const value = pinnedHooksPath(project.root);
   if (!value) return [];
   const dir = `${value.split("/").filter((p) => p && p !== ".").join("/")}/`;
-  return DEFAULT_PROTECTED.includes(dir) ? [] : [dir];
+  return DEFAULT_PROTECTED.some((r) => r.value === dir) ? [] : [dir];
 };
-const protectedPrefixes = (project: Project) => [...DEFAULT_PROTECTED, ...hooksDirProtected(project), ...(project.protectedPaths ?? [])];
-// An entry ending in `/` is a directory, which also covers a file or symlink committed under its own name (a bare
-// `.codex` link); any other entry keeps its prefix match (`.huskyrc` covers `.huskyrc.json`).
+// A project entry ending in `/` is a directory, which also covers a file or symlink committed under its own name; any
+// other `protectedPaths` entry keeps its prefix match.
 const ruleFor = (value: string, runner: string): PathRule => ({ kind: value.endsWith("/") ? "dir" : "prefix", value, runner });
-/** The protected paths as rules: the defaults, the tracked `core.hooksPath` directory and the project's `protectedPaths`. */
-export const protectedRules = (project: Project): PathRule[] => [
-  ...DEFAULT_PROTECTED.map((v) => ruleFor(v, "host tooling")),
-  ...hooksDirProtected(project).map((v) => ruleFor(v, "git commit hooks")),
-  ...(project.protectedPaths ?? []).map((v) => ruleFor(v, "the project's protectedPaths")),
+/**
+ * The protected paths as rules: the defaults, the tracked `core.hooksPath` directory and the project's `protectedPaths`.
+ * The hooks directory and the project's own entries are fixed: `unheldPaths` releases only the kit's defaults.
+ */
+export const protectedRules = (project: Project): ProtectedRule[] => [
+  ...DEFAULT_PROTECTED,
+  ...hooksDirProtected(project).map((v) => ({ ...ruleFor(v, "git commit hooks"), fixed: true })),
+  ...(project.protectedPaths ?? []).map((v) => ({ ...ruleFor(v, "the project's protectedPaths"), fixed: true })),
 ];
+// What a project's `unheldPaths` lets land. Exact, unlike `protectedPaths`' prefixes: `.prettierrc.json` releases
+// that file and not `.prettierrc.json5`, so a release is never wider than the person wrote.
+const unheldRules = (project: Project): PathRule[] =>
+  (project.unheldPaths ?? []).map((value) => ({ kind: value.endsWith("/") ? "dir" : "file", value, runner: "the project's unheldPaths" }));
 const MANIFEST_RULE: PathRule = { kind: "basename", value: "package.json", runner: "the package manager's install scripts" };
 // The top-level `package.json` keys a commit-hook runner reads its commands from (the same config as the rc files
 // above), held when their value differs between the base and the branch. `gitHooks` is yorkie's (Vue CLI), `precommit`
@@ -1583,12 +1626,14 @@ const HOOK_RUNNER_KEYS = ["lint-staged", "husky", "simple-git-hooks", "pre-commi
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
 
 /**
- * The prompts' `{{KIT_PROTECTED}}`: the protected paths (the defaults and the project's `protectedPaths`) and what a
- * change to one costs. An agent that is not told adds a comment to one for no reason, and the branch it spent a pipeline
- * on is held for a person. The review is told to revert such a change when the ticket did not need it.
+ * The prompts' `{{KIT_PROTECTED}}`: the protected paths (the rule table, the root dot entries, and the project's
+ * `protectedPaths` and `unheldPaths`) and what a change to one costs. An agent that is not told adds a comment to one
+ * for no reason, and the branch it spent a pipeline on is held for a person. The review is told to revert such a change when the ticket did not need it.
  */
 export const protectedPathsNote = (project: Project, role: "implement" | "review"): string => {
-  const list = protectedPrefixes(project).map((p) => `\`${p}\``).join(", ");
+  const code = (values: string[]) => values.map((v) => `\`${v}\``).join(", ");
+  const list = protectedRules(project).map((r) => (r.kind === "basename" ? `\`${r.value}\` (at any depth)` : `\`${r.value}\``)).join(", ");
+  const unheld = project.unheldPaths ?? [];
   const ask =
     role === "review"
       ? "If the branch changes one and the ticket did not need that change, revert it in a commit of your own: the rest of the work then lands by itself."
@@ -1596,6 +1641,8 @@ export const protectedPathsNote = (project: Project, role: "implement" | "review
   return (
     "# Protected paths\n\n" +
     `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}) or its commit-hook runner keys (${HOOK_RUNNER_KEYS.map((k) => `\`${k}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ` +
+    `So does any other new or changed entry at the root whose name starts with a dot (a \`.foorc\`, a \`.config/\`), except ${code(INERT_ROOT_ENTRIES.map((r) => r.value))}. ` +
+    (unheld.length ? `This project's \`unheldPaths\` lets these land all the same: ${code(unheld)}; never a path under ${code(protectedRules(project).filter((r) => r.fixed).map((r) => r.value))}. ` : "") +
     "Matching ignores case, and a directory also covers a file or symlink of its own name (`.codex` as well as `.codex/`). " +
     `${ask}\n`
   );
@@ -1606,7 +1653,15 @@ export const protectedPathsNote = (project: Project, role: "implement" | "review
  * on the form the host resolves (`hostKey`): a macOS or Windows host runs `.Husky/pre-commit` as `.husky/`'s. The
  * files come back as given, so a hold names the real file.
  */
-export const protectedAmong = (project: Project, files: string[]): string[] => matchRules(files, protectedRules(project));
+export const protectedAmong = (project: Project, files: string[]): string[] => {
+  const rules = protectedRules(project);
+  // An unnormalisable path comes back from every matchRules call, so it is held by the fixed rules and never released.
+  const fixed = new Set(matchRules(files, rules.filter((r) => r.fixed)));
+  const held = new Set(matchRules(files, rules.filter((r) => !r.fixed)));
+  for (const f of files) if (rootDot(f) && !matchRules([f], INERT_ROOT_ENTRIES).length) held.add(f);
+  const released = new Set(matchRules(files, unheldRules(project)));
+  return files.filter((f) => fixed.has(f) || (held.has(f) && !released.has(f)));
+};
 
 /**
  * The protected files a ticket body's `Touches:` line names, read against the base branch's tree.

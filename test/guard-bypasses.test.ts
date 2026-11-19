@@ -1,7 +1,7 @@
 // The bypass corpus: one row per reproduction in the guard audit issues, each run against the guard it names in a
 // throwaway directory. A ticket that closes a bypass adds its rows here before its fix, so they fail at HEAD; a row
 // that later passes a bypass back through fails here, whichever guard changed.
-// Row: { guard, input, expect: "refuse" | "allow", code?, issue } (test/fixtures/guard-bypasses.json).
+// Row: { guard, input, expect: "refuse" | "allow", code?, issue, protectedPaths?, unheldPaths? } (test/fixtures/guard-bypasses.json).
 //
 //   pnpm test:file test/guard-bypasses.test.ts
 
@@ -20,7 +20,7 @@ const { largeFiles, protectedAmong, protectedChanges } = await import("../src/gu
 const { refuses } = await import("../src/verdict.ts");
 const { apply } = await import("../src/lean.ts");
 
-type Row = { guard: string; input: any; expect: "refuse" | "allow"; code?: string; issue: number; protectedPaths?: string[] };
+type Row = { guard: string; input: any; expect: "refuse" | "allow"; code?: string; issue: number; protectedPaths?: string[]; unheldPaths?: string[] };
 const rows: Row[] = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/guard-bypasses.json"), "utf8"));
 
 const repo = () => {
@@ -75,13 +75,13 @@ const guards: Record<string, (row: Row) => Promise<boolean> | boolean> = {
   // Held only when the path comes back as given: a hold message and `git show` must name the real file.
   "protected-path": (row) => {
     const { root } = repo();
-    const hits = protectedAmong({ root, baseBranch: "main", protectedPaths: row.protectedPaths } as Project, [row.input]);
+    const hits = protectedAmong({ root, baseBranch: "main", protectedPaths: row.protectedPaths, unheldPaths: row.unheldPaths } as Project, [row.input]);
     if (hits.length) assert.deepEqual(hits, [row.input]);
     return hits.length > 0;
   },
   "protected-changes": (row) => {
     const { root, tip } = branchRepo(row);
-    return held(row, protectedChanges({ root, baseBranch: "main", protectedPaths: row.protectedPaths } as Project, tip));
+    return held(row, protectedChanges({ root, baseBranch: "main", protectedPaths: row.protectedPaths, unheldPaths: row.unheldPaths } as Project, tip));
   },
   // A branch that adds a 51 MB file (zeros: a few kilobytes in git, but the blob's size is what GitHub counts).
   "large-files": (row) => {
@@ -119,7 +119,8 @@ const guards: Record<string, (row: Row) => Promise<boolean> | boolean> = {
 const asRoot = process.getuid?.() === 0;
 
 for (const row of rows) {
-  const name = `#${row.issue} ${row.guard}: ${JSON.stringify(row.input)} is ${row.expect === "refuse" ? "refused" : "allowed"}`;
+  const unheld = row.unheldPaths ? ` (unheldPaths ${JSON.stringify(row.unheldPaths)})` : "";
+  const name = `#${row.issue} ${row.guard}: ${JSON.stringify(row.input)}${unheld} is ${row.expect === "refuse" ? "refused" : "allowed"}`;
   const skip = asRoot && JSON.stringify(row.input).includes("dir-noaccess") ? "root reads past a mode-000 directory" : false;
   test(name, { skip }, async () => {
     const run = guards[row.guard];

@@ -9,7 +9,28 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **More of a branch is held for you to merge: all of `.claude/`, editor and package-manager hooks,
+  and unknown root dotfiles.** A ticket that edits the project's skills, agents or commands, a
+  `.vscode/` or `.devcontainer/` file, `opencode.json`, or a root dotfile not on the inert list
+  (`.prettierrc`, `.eslintrc.*`, a new tool's config) now ends held rather than landing. To let such
+  paths land as before, list them in `unheldPaths` in `.sandcastle/config.ts`
+  (`unheldPaths: [".claude/skills/", ".prettierrc.json"]`): a directory, or one exact file.
+  `/sandcastle update` looks for them. Hooks, CI, `.sandcastle/`, Claude Code's settings and hooks,
+  `.envrc`, mise's config and `.tool-versions` stay held whatever it says.
+
 ### Fixed
+
+- **Files that run on your machine without anyone reading them no longer land unheld.** The
+  protected-path list is now a table naming what runs each entry, and gains pnpm's `.pnpmfile.*`,
+  Yarn's `.yarnrc` and `.yarn/releases/` and `.yarn/plugins/`, `bunfig.toml`, the whole of
+  `.claude/` at any depth (skills, agents and commands can carry hooks), `opencode.json` and
+  `.opencode/`, `.vscode/`, `.devcontainer/`, `.envrc`, mise's config and `.tool-versions`. Any
+  other root entry whose name starts with a dot is held too, except an inert few (`.gitignore`,
+  `.editorconfig`, `.nvmrc` and the like); the new `unheldPaths` setting lets a project release the
+  ones it trusts. The prompts' protected list, `docs/safety.md` and `docs/architecture.md` are
+  tested against the table (#993, #994).
 
 - **`USAGE_STOP` checks Claude's 5-hour window again.** A fresh agent reading that carried only the
   weekly window - what Claude Code writes in each pass - stood in for the usage endpoint, so a
