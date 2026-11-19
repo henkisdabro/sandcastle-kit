@@ -228,6 +228,13 @@ Declining is not skipping: every step still runs its check, and only the asking 
        red `out of memory: the VM ran out` is the VM's, not the limit's: propose a lower
        `maxSandboxes` (from `sandcastle size`), never a higher `memory`. `no limit (N of the 10
        gate samples ...)` and a green gates run: nothing to do.
+   23. **A token that can push.** A run refuses a `GH_TOKEN` with Contents: write on the
+       repository. Ask the user to run `sandcastle doctor --verify` from the project's root (it asks
+       GitHub, with no model call). A FIX on `GH_TOKEN cannot push to <repo>` means the next run
+       would stop: the user edits the token on GitHub to Issues: read and write and Metadata: read
+       only. An `opt ... not checked` line means GitHub did not answer: run it again later, since a
+       run that cannot ask GitHub goes ahead only on a clean check of the token under 7 days old.
+       An `ok GH_TOKEN cannot push` line, or no GitHub remote: nothing to do.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

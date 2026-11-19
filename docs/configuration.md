@@ -101,7 +101,7 @@ optional, untracked `.sandcastle/config.local.json` holds your own run settings,
 | `LOAD_PAUSE=<percent>` | `60`, or `loadPause` in the project config | Each gate pass waits while the machine-wide CPU pressure (PSI `some` `avg60`; on macOS an estimate from the load average) is at or over this percent (1 to 100; anything else is refused at the start), releasing once it has stayed under for 2 minutes, for at most 30 minutes in all per run. `LOAD_PAUSE=0` turns it off. [Concurrency](concurrency.md#-concurrency) |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
 | `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say. [Sleep](running.md#-sleep) |
-| `SANDCASTLE_ALLOW_BROAD_TOKEN=1` | off | Accept a `GH_TOKEN` that is not fine-grained. Not advised: unattended agents could then push and edit workflows with it. For a throwaway repo, or a GitHub host without fine-grained tokens |
+| `SANDCASTLE_ALLOW_BROAD_TOKEN=1` | off | Accept a `GH_TOKEN` that is not fine-grained, that can push to the repository, or whose push access GitHub could not check at the run's start. Not advised: unattended agents could then push and edit workflows with it. For a throwaway repo, or a GitHub host without fine-grained tokens. A run prints a line each time it is set |
 | `NO_COLOR` | unset | Set to anything: the status view drops colour (as it does when piped) and `sandcastle report` prints plain headings without emoji |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `~/.config`, `~/.cache` | Where `sandcastle-kit/` keeps your personal settings, and the version cache and slot locks |
 
