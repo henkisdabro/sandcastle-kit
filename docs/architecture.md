@@ -3585,7 +3585,7 @@ Two preloads (`--import`, from `pnpm test`, `test:shard`, `test:file`, `test:rel
 `test:weights` and `test/run-shards.sh`) shape every test file's process: `test/hermetic-env.ts`
 gives each the same environment - `TMPDIR` a directory of the file's own, removed when its process
 exits (most test files never remove their `sandcastle-*` fixtures, some of them 51 MB; `test/in-temp.sh`
-fails a run that leaves anything in its directory or a new `sandcastle-*` entry outside it), and a
+fails a run that leaves anything in its directory or a new test fixture's directory outside it), and a
 realpath (a macOS `/var/...` against git's `/private/var/...`), the running node's directory first on `PATH` (a mise or asdf shim fails
 in a temp cwd) with a no-op `docker` (`exit 0`, lists nothing) right after it, so no test reaches
 the machine's real Docker (a slow daemon on a Mac, a stopped one on Linux, a `docker stop` on a live

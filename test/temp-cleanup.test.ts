@@ -72,22 +72,34 @@ test("a passing run that left something in its own TMPDIR fails, names it, and s
   assert.deepEqual(readdirSync(outer), []);
 });
 
-test("a passing run that made a sandcastle entry outside its TMPDIR fails and names it", () => {
+/** A command that makes `name` (a directory) in the outer TMPDIR, as a child started without the run's TMPDIR would. */
+const makeOutside = (outer: string, ...names: string[]) =>
+  names.map((n) => `require("node:fs").mkdirSync(require("node:path").join(${JSON.stringify(outer)}, ${JSON.stringify(n)}));`).join(" ");
+
+test("a passing run that made a test fixture's directory outside its TMPDIR fails and names it", () => {
   const outer = outerTmp("escaped");
-  // A child started without the run's TMPDIR, as one given a hand-built environment is.
-  const escape = `require("node:fs").mkdirSync(require("node:path").join(${JSON.stringify(outer)}, "sandcastle-escaped"));`;
-  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", escape], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
+  // `sandcastle-leak-` is a prefix MAKE_DIR above gives mkdtemp, so it counts as a test fixture's.
+  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", makeOutside(outer, "sandcastle-leak-abc123")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
   assert.equal(r.status, 1);
-  assert.ok(r.stderr.includes(`New in the machine's temp directory (escaped TMPDIR, or made by another process meanwhile):\n  ${outer}/sandcastle-escaped\n`), r.stderr);
-  assert.deepEqual(readdirSync(outer), ["sandcastle-escaped"], "an entry outside the run's directory is named, not removed");
+  assert.ok(r.stderr.includes(`New test-fixture directories in the machine's temp directory (a process escaped TMPDIR):\n  ${outer}/sandcastle-leak-abc123\n`), r.stderr);
+  assert.deepEqual(readdirSync(outer), ["sandcastle-leak-abc123"], "an entry outside the run's directory is named, not removed");
 });
 
-test("one that was there before the run is not counted", () => {
+test("what a live run on the machine makes meanwhile does not fail the run: only test fixtures' prefixes count", () => {
+  const outer = outerTmp("live-run");
+  // src/resolution.ts's and src/lean.ts's run-time prefixes, the dependency's, bin/sandcastle's probe, and a name no test gives mkdtemp.
+  const theirs = ["sandcastle-merge-x1", "sandcastle-lean-x2", "sandcastle-bundle-x3", "sandcastle-probe.x4", "sandcastle-something-else"];
+  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", `${makeOutside(outer, ...theirs)} ${MAKE_AND_REMOVE}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+});
+
+test("a fixture's directory that was there before the run is not counted", () => {
   const outer = outerTmp("before");
-  mkdirSync(join(outer, "sandcastle-older"));
+  mkdirSync(join(outer, "sandcastle-leak-older"));
   const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", MAKE_AND_REMOVE], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(readdirSync(outer), ["sandcastle-older"]);
+  assert.deepEqual(readdirSync(outer), ["sandcastle-leak-older"]);
 });
 
 test("a run that fails gives its status and leaves nothing", () => {
