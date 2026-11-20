@@ -14,12 +14,48 @@
 # command itself - and the directory is removed once that group is empty. A process that starts a
 # session of its own (a detached run) is outside the group and outlives it.
 # Only mktemp -d with a template is used (the one form GNU and BSD share).
+#
+# A leak gate: a run that ends normally fails (status 1, the paths on stderr) when it left anything in that
+# directory - every test file's process removes its own (test/hermetic-env.ts), so a leftover is a process that
+# was killed or wrote after its removal - or when a test fixture's directory that was not there before
+# appeared in the outer temp directory or /tmp: something escaped TMPDIR (a hard-coded /tmp, a child started
+# without TMPDIR). Only the prefixes test files give mkdtemp count there, less any the kit or its dependency
+# also uses at run time: a live burndown on the same machine makes its own `sandcastle-*` temp directories
+# meanwhile (`sandcastle-merge-`, `sandcastle-lean-`, ...), and those must not fail this run.
 set -u
 [ "$#" -ge 1 ] || { echo "usage: in-temp.sh COMMAND [ARGS...]" >&2; exit 2; }
 
 base="${TMPDIR:-/tmp}"
 dir=$(mktemp -d "${base%/}/kit-test-run.XXXXXX") || exit 1
 pid=""
+
+kit=$(cd "$(dirname "$0")/.." && pwd)
+# Every `sandcastle-...-` or `sandcastle-....` the kit's run-time code or its dependency names, and every
+# `"sandcastle-...-"` prefix a test file passes to mkdtemp. Read once, before the run.
+runtime=$(cd "$kit" && grep -rhoE 'sandcastle-[A-Za-z0-9-]*[-.]' src bin container herdr herdr-app mod status.sh node_modules/@ai-hero/sandcastle/dist 2>/dev/null | sort -u)
+fixtures=$(cd "$kit" && grep -h mkdtemp test/*.ts 2>/dev/null | grep -oE '"sandcastle-[A-Za-z0-9-]*-"' | tr -d '"' | sort -u)
+# The test-fixture entries in the outer temp directories, one path per line, sorted: an entry that starts with a
+# fixture prefix, where neither that prefix nor the entry starts with (or is the start of) a run-time one.
+outer() {
+  for d in "${base%/}" /tmp; do
+    [ -d "$d" ] || continue
+    ls -A "$d" 2>/dev/null | RUNTIME="$runtime" FIXTURES="$fixtures" DIR="$d" awk '
+      BEGIN {
+        nr = split(ENVIRON["RUNTIME"], rt, "\n")
+        n = split(ENVIRON["FIXTURES"], all, "\n")
+        for (i = 1; i <= n; i++) {
+          shared = (all[i] == "")
+          for (j = 1; j <= nr; j++) if (index(rt[j], all[i]) == 1) shared = 1
+          if (!shared) fx[++nf] = all[i]
+        }
+      }
+      {
+        for (i = 1; i <= nr; i++) if (rt[i] != "" && index($0, rt[i]) == 1) next
+        for (i = 1; i <= nf; i++) if (index($0, fx[i]) == 1) { print ENVIRON["DIR"] "/" $0; next }
+      }'
+  done | sort -u
+}
+before=$(outer)
 
 cleanup() {
   if [ -n "$pid" ]; then
@@ -52,4 +88,16 @@ set +m
 wait "$pid"
 status=$?
 pid=""
+left=$(ls -A "$dir")
+new=$(outer)
+# Each line of $before is one fixed pattern, matched as a whole line.
+[ -z "$before" ] || new=$(printf '%s\n' "$new" | grep -Fxv -e "$before")
+if [ -n "$left$new" ]; then
+  {
+    echo "in-temp.sh: this test run leaked temp files."
+    [ -z "$left" ] || { echo "Left in the run's own temp directory (a test file's process did not remove its own):"; echo "$left" | sed "s|^|  $dir/|" | head -20; }
+    [ -z "$new" ] || { echo "New test-fixture directories in the machine's temp directory (a process escaped TMPDIR):"; echo "$new" | sed 's/^/  /' | head -20; }
+  } >&2
+  [ "$status" -ne 0 ] || status=1
+fi
 exit "$status"

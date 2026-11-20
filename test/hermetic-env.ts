@@ -3,8 +3,9 @@
 // same environment, whatever shell the developer runs it in. Nine things in a developer's shell change what
 // the code under test does, and a Linux sandbox with a clean environment passes them all:
 //
-//  - `TMPDIR` is the realpath of `os.tmpdir()`: on macOS it is a `/var/...` path that git and `process.cwd()`
-//    report as `/private/var/...`, and a test comparing the two fails.
+//  - `TMPDIR` is a new directory of the test file's own under `os.tmpdir()`, removed when its process exits, and a
+//    realpath: on macOS the temp root is a `/var/...` path that git and `process.cwd()` report as `/private/var/...`,
+//    and a test comparing the two fails.
 //  - The running node's directory leads `PATH`: a version-manager shim (mise, asdf) found first fails in a temp
 //    cwd ("No version is set for shim: node") when a child runs `bin/sandcastle` or `herdr/entry.sh`, which find
 //    node through the inherited `PATH`, and a test that prepends fakes to `PATH` keeps it.
@@ -56,6 +57,7 @@
 // Only a test file's own process is changed (node:test's child sets NODE_TEST_CONTEXT, the runner process
 // that prints the reporter lines does not), as in test/no-stray.ts.
 
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -107,7 +109,36 @@ const addGitConfig = (key: string, value: string): void => {
 export const NO_DOCKER_DIR = "SANDCASTLE_TEST_NO_DOCKER_DIR";
 
 if (process.env.NODE_TEST_CONTEXT) {
-  process.env.TMPDIR = realpathSync(tmpdir());
+  // A temp directory of this test file's own, removed when the file's process exits, failed or not: most test files
+  // make `sandcastle-*` directories and never remove them (some hold a 51 MB file), and a file run outside
+  // test/in-temp.sh - or under one that was killed - left them in the machine's temp directory, thousands a day.
+  // test/in-temp.sh fails a run that leaves anything behind.
+  const own = realpathSync(mkdtempSync(join(tmpdir(), "kit-test-file-")));
+  process.env.TMPDIR = own;
+  const remove = () => {
+    // A test that made a directory unreadable and failed before restoring it would stop the removal at that one.
+    try {
+      rmSync(own, { recursive: true, force: true });
+    } catch {
+      execFileSync("chmod", ["-R", "u+rwx", own], { stdio: "ignore" });
+      rmSync(own, { recursive: true, force: true });
+    }
+  };
+  process.on("exit", remove);
+  // Kept behind every exit listener added after it, as test/no-stray.ts keeps its check: the kit's own exit handlers
+  // (a run's record, a lock's release) write into this directory, and run after the removal they recreated it.
+  const append = process.on.bind(process);
+  for (const method of ["on", "addListener", "once", "prependListener", "prependOnceListener"] as const) {
+    const add = process[method].bind(process) as (event: string | symbol, listener: (...args: any[]) => void) => NodeJS.Process;
+    process[method] = ((event: string | symbol, listener: (...args: any[]) => void) => {
+      add(event, listener);
+      if (event === "exit" && listener !== remove) {
+        process.removeListener("exit", remove);
+        append("exit", remove);
+      }
+      return process;
+    }) as typeof process.on;
+  }
   const node = dirname(process.execPath);
   const path = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
   if (path[0] !== node) path.unshift(node);
@@ -121,8 +152,6 @@ if (process.env.NODE_TEST_CONTEXT) {
       chmodSync(join(bin, name), 0o755);
     }
     process.env[NO_DOCKER_DIR] = bin;
-    const owned = bin;
-    process.on("exit", () => rmSync(owned, { recursive: true, force: true }));
   }
   if (!path.includes(bin)) path.splice(1, 0, bin);
   process.env.PATH = path.join(delimiter);
@@ -140,11 +169,6 @@ if (process.env.NODE_TEST_CONTEXT) {
   process.env.HERDR_APP_HOME = join(cache, "herdr-app");
   process.env.HERDR_CONFIG_PATH = join(cache, "herdr", "config.toml");
   process.env.HERDR_PLUGIN_STATE_DIR = join(cache, "herdr-plugin-state");
-  // One listener for both: a test file that adds its own exit listeners would pass Node's warning limit of ten.
-  process.on("exit", () => {
-    rmSync(globalConfig, { force: true });
-    rmSync(cache, { recursive: true, force: true });
-  });
   process.env.GIT_CONFIG_GLOBAL = globalConfig;
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   for (const name of GIT_IDENTITY) delete process.env[name];
