@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -62,7 +62,11 @@ const branchRepo = (row: Row) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     symlinkSync(target, join(root, path));
   }
-  if (row.input.big) writeFileSync(join(root, "data.bin"), Buffer.alloc(51 * 1024 * 1024));
+  // Sparse (truncateSync): the blob is 51 MB to git, the working-tree copy takes no blocks.
+  if (row.input.big) {
+    writeFileSync(join(root, "data.bin"), "");
+    truncateSync(join(root, "data.bin"), 51 * 1024 * 1024);
+  }
   git("add", "-A");
   for (const path of (row.input.gitlinks ?? []) as string[]) git("update-index", "--add", "--cacheinfo", `160000,${git("rev-parse", "main").trim()},${path}`);
   git("commit", "-q", "--allow-empty", "-m", "change");

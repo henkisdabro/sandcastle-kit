@@ -497,17 +497,23 @@ test("a landing sandbox whose worktree's .git is repointed is never closed: the 
     };
   };
   // The landing gate runs the branch's code: it points the worktree at a git directory of its own.
+  let named = "";
   const gate = async (box: { worktreePath: string }) => {
     const planted = join(box.worktreePath, ".planted");
     git(TMP, "init", "-q", planted);
-    writeFileSync(join(box.worktreePath, ".git"), `gitdir: ${join(planted, ".git")}\n`);
+    named = join(planted, ".git");
+    writeFileSync(join(box.worktreePath, ".git"), `gitdir: ${named}\n`);
     return GREEN;
   };
   const head = git(root, "rev-parse", "agent/issue-1");
-  await assert.rejects(
-    landInSandbox(project, { branch: "agent/issue-1", head, message: "Merge agent/issue-1 (closes #1)" }, open, gate, gitFingerprint(project)),
-    /^Error: STOPPED after landing agent\/issue-1 in a sandbox: the worktree record of sandcastle-land-agent-issue-1-\d+ is not the one git wrote: the worktree's \.git names ".*\.planted\/\.git", not \.git\/worktrees\/sandcastle-land-agent-issue-1-\d+\./,
+  const stopped = await landInSandbox(project, { branch: "agent/issue-1", head, message: "Merge agent/issue-1 (closes #1)" }, open, gate, gitFingerprint(project)).then(
+    () => assert.fail("the landing went on"),
+    (e: Error) => e.message,
   );
+  assert.match(stopped, /^STOPPED after landing agent\/issue-1 in a sandbox: the worktree record of sandcastle-land-agent-issue-1-\d+ is not the one git wrote: the worktree's \.git names "/);
+  // The planted path, cut at 200 characters as the message cuts it: a long temp root (macOS's) passes that.
+  const shown = named.length > 200 ? `${named.slice(0, 200)}...` : named;
+  assert.ok(stopped.includes(`names ${JSON.stringify(shown)}, not .git/worktrees/sandcastle-land-agent-issue-1-`), stopped);
   assert.deepEqual(closed, [], "Sandcastle's close ran its host git status in the worktree");
   assert.ok(dockerCalls().includes("rm -f sandcastle-made-up"), dockerCalls().join("\n"));
   assert.equal(git(root, "rev-parse", "main"), base, "the base was fast-forwarded");

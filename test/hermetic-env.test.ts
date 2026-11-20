@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { KIT, runNode } from "./cli-spawn.ts";
 import { scrubs } from "./hermetic-env.ts";
@@ -115,7 +115,10 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   const r = runNode(["--import", join(KIT, "test/hermetic-env.ts"), "--test", "--test-reporter=spec", file], { cwd: dir, env, encoding: "utf8", timeoutMs: 120_000 });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const seen = JSON.parse(readFileSync(out, "utf8")) as { tmp: string; path: string; docker: string; env: Record<string, string> };
-  assert.equal(seen.tmp, realpathSync(real));
+  // A directory of the test file's own under the realpath of the shell's TMPDIR, gone once its process has exited.
+  assert.equal(dirname(seen.tmp), realpathSync(real));
+  assert.match(basename(seen.tmp), /^kit-test-file-/);
+  assert.equal(existsSync(seen.tmp), false, "the test file's own temp directory outlived its process");
   assert.equal(seen.path.split(delimiter)[0], dirname(process.execPath));
   assert.ok(seen.path.split(delimiter).includes("/shim"), "the host's own PATH entries stay");
   // The shell's own docker never answers: the no-op one, in the test's own TMPDIR, comes first.

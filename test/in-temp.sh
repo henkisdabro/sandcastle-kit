@@ -14,12 +14,26 @@
 # command itself - and the directory is removed once that group is empty. A process that starts a
 # session of its own (a detached run) is outside the group and outlives it.
 # Only mktemp -d with a template is used (the one form GNU and BSD share).
+#
+# A leak gate: a run that ends normally fails (status 1, the paths on stderr) when it left anything in that
+# directory - every test file's process removes its own (test/hermetic-env.ts), so a leftover is a process that
+# was killed or wrote after its removal - or when a `sandcastle-*` entry that was not there before appeared in
+# the outer temp directory or /tmp: something escaped TMPDIR (a hard-coded /tmp, a child started without
+# TMPDIR). Another process on the machine making one meanwhile (a live run's) shows up too; the message says so.
 set -u
 [ "$#" -ge 1 ] || { echo "usage: in-temp.sh COMMAND [ARGS...]" >&2; exit 2; }
 
 base="${TMPDIR:-/tmp}"
 dir=$(mktemp -d "${base%/}/kit-test-run.XXXXXX") || exit 1
 pid=""
+
+# The `sandcastle-*` entries in the outer temp directories, one path per line, sorted.
+outer() {
+  for d in "${base%/}" /tmp; do
+    [ -d "$d" ] && ls -A "$d" 2>/dev/null | grep '^sandcastle-' | sed "s|^|$d/|"
+  done | sort -u
+}
+before=$(outer)
 
 cleanup() {
   if [ -n "$pid" ]; then
@@ -52,4 +66,16 @@ set +m
 wait "$pid"
 status=$?
 pid=""
+left=$(ls -A "$dir")
+new=$(outer)
+# Each line of $before is one fixed pattern, matched as a whole line.
+[ -z "$before" ] || new=$(printf '%s\n' "$new" | grep -Fxv -e "$before")
+if [ -n "$left$new" ]; then
+  {
+    echo "in-temp.sh: this test run leaked temp files."
+    [ -z "$left" ] || { echo "Left in the run's own temp directory (a test file's process did not remove its own):"; echo "$left" | sed "s|^|  $dir/|" | head -20; }
+    [ -z "$new" ] || { echo "New in the machine's temp directory (escaped TMPDIR, or made by another process meanwhile):"; echo "$new" | sed 's/^/  /' | head -20; }
+  } >&2
+  [ "$status" -ne 0 ] || status=1
+fi
 exit "$status"

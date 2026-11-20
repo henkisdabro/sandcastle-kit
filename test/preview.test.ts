@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -180,8 +180,10 @@ test("a clean branch that landing would hold - a protected path, a file over 50 
   r.git("add", "-A");
   r.git("commit", "-q", "-m", "hook");
   r.git("checkout", "-q", "-b", "agent/issue-31", "main");
-  // Zeros: git stores 51 MB of them in a few kilobytes, but the blob's size is what GitHub counts.
-  writeFileSync(join(r.root, "data.bin"), Buffer.alloc(51 * 1024 * 1024));
+  // Zeros, sparse on disk (truncateSync): git stores 51 MB of them in a few kilobytes, but the blob's size is what
+  // GitHub counts, and the working-tree copy takes no blocks.
+  writeFileSync(join(r.root, "data.bin"), "");
+  truncateSync(join(r.root, "data.bin"), 51 * 1024 * 1024);
   r.git("add", "-A");
   r.git("commit", "-q", "-m", "big");
   r.git("checkout", "-q", "main");

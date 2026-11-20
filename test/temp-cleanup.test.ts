@@ -1,6 +1,7 @@
 // A host test run leaves no temp directory and no fixture process behind. `pnpm test`, `test:shard`,
 // `test:weights` and test/run-shards.sh run through test/in-temp.sh, which makes one directory for the whole run,
-// exports it as TMPDIR and removes it on the way out - also when killed; a node child started
+// exports it as TMPDIR and removes it on the way out - also when killed - and fails a run that left anything in it
+// or a new `sandcastle-*` entry outside it; a node child started
 // through test/cli-spawn.ts dies with the test process, also when that was killed outright.
 // No Docker, model calls or network.
 //
@@ -48,16 +49,45 @@ const outerTmp = (name: string) => {
   return outer;
 };
 
-// What a test file does: make a `sandcastle-*` directory in os.tmpdir() and never remove it.
+// What a test file once did: make a `sandcastle-*` directory in os.tmpdir() and never remove it.
 const MAKE_DIR = 'require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "sandcastle-leak-"));';
+// What one does now: the same, removed before it ends (test/hermetic-env.ts removes the file's own TMPDIR).
+const MAKE_AND_REMOVE = 'require("node:fs").rmSync(require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "sandcastle-leak-")), { recursive: true });';
 
 test("a run leaves no new sandcastle directory in the outer TMPDIR, and its command sees a TMPDIR inside it", () => {
   const outer = outerTmp("clean");
-  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", `${MAKE_DIR} console.log(require("node:os").tmpdir())`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
+  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", `${MAKE_AND_REMOVE} console.log(require("node:os").tmpdir())`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
   assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
   const seen = r.stdout.trim();
   assert.ok(seen.startsWith(outer + "/"), `the command's tmpdir ${seen} is inside ${outer}`);
   assert.deepEqual(readdirSync(outer), [], "the outer TMPDIR is as it was");
+});
+
+test("a passing run that left something in its own TMPDIR fails, names it, and still removes it", () => {
+  const outer = outerTmp("left");
+  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", MAKE_DIR], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /leaked temp files[\s\S]*Left in the run's own temp directory[\s\S]*\/kit-test-run\.[^/\n]+\/sandcastle-leak-/);
+  assert.deepEqual(readdirSync(outer), []);
+});
+
+test("a passing run that made a sandcastle entry outside its TMPDIR fails and names it", () => {
+  const outer = outerTmp("escaped");
+  // A child started without the run's TMPDIR, as one given a hand-built environment is.
+  const escape = `require("node:fs").mkdirSync(require("node:path").join(${JSON.stringify(outer)}, "sandcastle-escaped"));`;
+  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", escape], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
+  assert.equal(r.status, 1);
+  assert.ok(r.stderr.includes(`New in the machine's temp directory (escaped TMPDIR, or made by another process meanwhile):\n  ${outer}/sandcastle-escaped\n`), r.stderr);
+  assert.deepEqual(readdirSync(outer), ["sandcastle-escaped"], "an entry outside the run's directory is named, not removed");
+});
+
+test("one that was there before the run is not counted", () => {
+  const outer = outerTmp("before");
+  mkdirSync(join(outer, "sandcastle-older"));
+  const r = spawnSync("bash", [IN_TEMP, process.execPath, "-e", MAKE_AND_REMOVE], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: outer } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readdirSync(outer), ["sandcastle-older"]);
 });
 
 test("a run that fails gives its status and leaves nothing", () => {

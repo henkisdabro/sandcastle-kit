@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -61,8 +61,12 @@ test("a new workflow with a non-ASCII name is held, named as it is on disk", () 
 });
 
 test("a file over 50 MB with a non-ASCII name is held as large, named as it is on disk", () => {
-  // Zeros: git stores 51 MB of them in a few kilobytes, but the blob's size is what GitHub counts.
-  const hits = scenario({}, (root) => writeFileSync(join(root, "donn\u00e9es.bin"), Buffer.alloc(51 * 1024 * 1024)), largeFiles);
+  // Zeros, sparse on disk (truncateSync): git stores 51 MB of them in a few kilobytes, but the blob's size is what
+  // GitHub counts, and the working-tree copy takes no blocks.
+  const hits = scenario({}, (root) => {
+    writeFileSync(join(root, "donn\u00e9es.bin"), "");
+    truncateSync(join(root, "donn\u00e9es.bin"), 51 * 1024 * 1024);
+  }, largeFiles);
   assert.deepEqual(hits, ["donn\u00e9es.bin (51 MB)"]);
 });
 
