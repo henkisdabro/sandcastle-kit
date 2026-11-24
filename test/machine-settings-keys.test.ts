@@ -41,7 +41,7 @@ test("a key near none is refused and points at the docs", () => {
 });
 
 test("every documented key is accepted", () => {
-  const body = { maxSandboxes: 4, maxGates: 1, keepAwake: false, notify: ["true"] };
+  const body = { maxSandboxes: 4, maxGates: 1, keepAwake: false, notify: ["true"], attribution: false };
   const { config } = configWith(JSON.stringify(body));
   assert.deepEqual(JSON.parse(read(config)), body);
 });
