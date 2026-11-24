@@ -1,6 +1,6 @@
-// `sandcastle doctor`'s machine-wide settings check on the `keepWarm` switch: false (and
-// true) pass, any other value is reported with its fix. The session's keep-warm only reads the file, so
-// doctor is where a typo is told. No Docker, no network.
+// `sandcastle doctor`'s machine-wide settings check on the `keepWarm` and `attribution` switches:
+// false (and true) pass, any other value is reported with its fix. The session's keep-warm and a run's
+// attribution only read the file, so doctor is where a typo is told. No Docker, no network.
 //
 //   pnpm test:file test/doctor-keep-warm.test.ts
 
@@ -46,7 +46,7 @@ const doctor = (settings: string | undefined) => {
     },
   });
   const out = r.stdout + r.stderr;
-  return out.split("\n").filter((l) => l.includes("machine-wide settings") || l.includes("keepWarm")).join("\n");
+  return out.split("\n").filter((l) => l.includes("machine-wide settings") || l.includes("keepWarm") || l.includes(`"attribution"`)).join("\n");
 };
 
 test('"keepWarm": false, true and no value pass', () => {
@@ -61,5 +61,15 @@ test("a keepWarm that is not a boolean is reported with its fix", () => {
     assert.match(out, /^FIX +machine-wide settings/, value);
     assert.ok(out.includes(`"keepWarm" in `) && out.includes(`is ${value}, not true or false.`), out);
     assert.match(out, /Set it to `false` to stop the session keeping its prompt cache warm during a run, or delete the line to keep it on\./);
+  }
+});
+
+test("an attribution that is not a boolean is reported with its fix, and false passes", () => {
+  assert.match(doctor('{"attribution": false}'), /^ok +machine-wide settings/);
+  for (const value of ['"false"', "0"]) {
+    const out = doctor(`{"attribution": ${value}}`);
+    assert.match(out, /^FIX +machine-wide settings/, value);
+    assert.ok(out.includes(`"attribution" in `) && out.includes(`is ${value}, not true or false.`), out);
+    assert.match(out, /Set it to `false` to drop Claude Code's Co-Authored-By trailers and PR footer from sandbox agents' work, or delete the line to keep them\./);
   }
 });

@@ -3360,7 +3360,7 @@ const burndownTurn = async (project: Project, turn?: TurnOptions): Promise<boole
   // good work back.
   // The turn's own settings, so the record it writes and what the run does cannot differ.
   const settings = turn?.settings ?? resolveSettings({ env: process.env, project, machine: machineSettings() });
-  configureAttribution(machineSettings().attribution);
+  configureAttribution(settings.attribution);
   const TEST_RED_GATE = process.env.SANDCASTLE_TEST_RED_GATE === "1" && settings.repair > 0;
   // Four by default, not one-per-issue. Twelve at once saturated a 15-core
   // machine to load 33 and starved a vitest run into a false gate failure -

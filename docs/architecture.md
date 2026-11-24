@@ -3522,14 +3522,19 @@ run passes without the cut (an unknown name in `--tools` is ignored silently by 
 once (`loadProject` refuses one that `src/claude-tools.ts` does not list, or that the managed
 settings deny); `configureTools` sets it from `loadProject`, as `configureModels` sets the models.
 With `"attribution": false` in the personal `config.json`, `claude()` also puts
-`--settings '{"attribution":{"commit":"","pr":"","sessionUrl":false}}'` there (`NO_ATTRIBUTION`), so
-an agent's commits carry no `Co-Authored-By` or `Claude-Session` trailer and its pull request text
-no "Generated with Claude Code" footer; `configureAttribution` sets it at the run's start, and only
-the boolean `false` turns it off (`test/attribution-off.test.ts`).
+`--settings '{"attribution":{"commit":"","pr":"","sessionUrl":false},"includeCoAuthoredBy":false}'`
+there (`NO_ATTRIBUTION`), so an agent's commits carry no `Co-Authored-By` or `Claude-Session` trailer
+and its pull request text no "Generated with Claude Code" footer.
+`resolveSettings` reads it with the run's other settings (`attribution`, true unless the machine
+settings hold the boolean `false`), each turn hands it to `configureAttribution`, and the run record's
+settings group says `attribution: false` when it is off (`test/attribution-off.test.ts`).
 It is a flag and not a key of `container/managed-settings.json` because it is a person's
-preference, off by default, and the mounted directory is the same for everyone; flag settings
-still outrank the branch's own `.claude/settings.json`, so a branch cannot turn the trailers back
-on. The object form, not `false`, because older Claude Code versions refuse a boolean there.
+preference, and the mounted directory is the same for everyone; flag settings still outrank the
+branch's own `.claude/settings.json`, so a branch's settings cannot turn the trailers back on.
+A branch's `CLAUDE.md` or rules can still tell the agent to type a trailer into a commit message
+by hand: the setting stops Claude Code adding one, not an agent writing one.
+The object form, not `false`, because older Claude Code versions refuse a boolean there;
+`includeCoAuthoredBy` too, because versions older than the object ignore it and read only that key.
 `claude()` also gives the agent its own environment (`claudeEnv`: `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
 and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` when `autoCompactWindow` is set), which Sandcastle puts on each
 pass's command as `export KEY='value'; ` before it (`withAgentEnv`, from 0.14.0: 0.12.0 dropped it,

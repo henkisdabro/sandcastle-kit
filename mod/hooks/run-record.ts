@@ -280,6 +280,8 @@ export type RunSettings = {
   loadPause?: number;
   /** The session that started the run keeps its prompt cache warm while the run is live; absent in records from older kits, read as true. */
   keepWarm?: boolean;
+  /** False when the run's Claude passes added no Claude Code attribution; absent when they did. */
+  attribution?: boolean;
   /** True when the sandboxes spend `ANTHROPIC_API_KEY`, billing API credits; absent otherwise. */
   apiKey?: boolean;
   /** The dotted keys (`autonomy`, `implement.model`) whose value came from `.sandcastle/config.local.json`, not the environment or the committed config; the view marks the ones it draws. Absent when there are none. */

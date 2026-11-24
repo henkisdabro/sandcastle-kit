@@ -65,7 +65,7 @@ test("the resolver reads nothing but its arguments", () => {
 });
 
 test("the settings group carries the level, the turn and the cap; level 1 has no cap", () => {
-  const rest = { crossReview: OFF, repair: 1, concurrency: { asked: 4, effective: 4 }, usageGuard: false, loadPause: 60, keepWarm: true };
+  const rest = { crossReview: OFF, repair: 1, concurrency: { asked: 4, effective: 4 }, usageGuard: false, loadPause: 60, keepWarm: true, attribution: true };
   const also = { crossReview: false, repair: 1, concurrency: 4, asked: 4, usageGuard: false, loadPause: 60, keepWarm: true };
   assert.deepEqual(settingsGroup({ ...rest, autonomy: 0 }, 1), { autonomy: 0, turn: 1, cap: 1, ...also });
   assert.deepEqual(settingsGroup({ ...rest, autonomy: 3 }, 2), { autonomy: 3, turn: 2, cap: 3, ...also });

@@ -17,7 +17,7 @@ export type SettingsSources = {
   env: Record<string, string | undefined>;
   /** The project's `.sandcastle/config.ts` with `.sandcastle/config.local.json` merged over it, as far as settings are concerned. */
   project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown }; usagePause?: unknown; loadPause?: unknown; keepWarm?: unknown; localKeys?: string[] };
-  /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency. */
+  /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency, and the person's `keepWarm` and `attribution` switches. */
   machine: Record<string, unknown>;
   /** Whether the credentials files put `ANTHROPIC_API_KEY` in the sandboxes (`projectApiKeySpend`); read by the caller, so this stays pure. */
   apiKey?: boolean;
@@ -43,6 +43,8 @@ export type ResolvedSettings = {
   loadPause?: number;
   /** Whether the session that started the run keeps its prompt cache warm while the run is live: false when the machine settings say `false`, else the project's value, else true. */
   keepWarm: boolean;
+  /** Whether Claude passes add Claude Code's attribution: false only when the machine settings say the boolean `false`. */
+  attribution: boolean;
   /** True when the sandboxes spend an API key, billing API credits; absent otherwise. */
   apiKey?: true;
   /** The dotted keys `.sandcastle/config.local.json` set whose value the run took from the file, not from the environment; absent when there are none. */
@@ -80,6 +82,8 @@ export const resolveSettings = ({ env, project, machine, apiKey = false }: Setti
     ...(loadPause === undefined ? {} : { loadPause }),
     // The machine's `false` is a person's off switch for every project, so it beats the project's `true`.
     keepWarm: machine.keepWarm === false ? false : project.keepWarm !== false,
+    // Only the boolean `false`: doctor reports any other value, which leaves the attribution on.
+    attribution: machine.attribution !== false,
     ...(apiKey ? { apiKey: true as const } : {}),
     ...(local.length ? { local } : {}),
   };
@@ -110,6 +114,8 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number, noReadin
     ...(settings.loadPause === undefined ? {} : { loadPause: settings.loadPause }),
     // Always, true or false, so a reader never has to guess a default.
     keepWarm: settings.keepWarm,
+    // Only when it is off: a record without it reads as the default.
+    ...(settings.attribution ? {} : { attribution: false }),
     // Only when it does: a subscription run's record and view stay as they were.
     ...(settings.apiKey ? { apiKey: true } : {}),
     // Only when the clone's local file set a value the run took: a project without the file records nothing new.

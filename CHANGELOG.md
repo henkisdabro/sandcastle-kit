@@ -39,8 +39,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 - **`"attribution": false` in `~/.config/sandcastle-kit/config.json` drops Claude Code's
   attribution from sandbox agents' work**: no `Co-Authored-By` or `Claude-Session` commit trailer
-  and no "Generated with Claude Code" pull request footer. Off by default, so runs are unchanged
-  until you set it.
+  and no "Generated with Claude Code" pull request footer. Attribution stays on unless the key is
+  set to `false`, so runs are unchanged until you set it.
 
 ### Fixed
 
