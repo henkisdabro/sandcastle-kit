@@ -144,13 +144,14 @@ in the other, and Claude Code spends the API key first: `sandcastle doctor` then
 | `updateCheck` | `true` | `false` stops `sandcastle doctor` and the idle mark looking up the kit's newest release (`git ls-remote --tags` on the kit checkout's `origin`, at most once in six hours; nothing is fetched) |
 | `idleMark` | `true` | `false` turns off the idle mark the Claude Code mod draws between runs, in every project ([The Claude Code mod](claude-mod.md#-the-claude-code-mod)) |
 | `keepWarm` | `true` | `false` stops the session that started a run keeping its prompt cache warm while the run is live, in every project, and beats a project's `keepWarm: true`. A refresh request reads the cached conversation at about 0.1x the input price; a cold restart re-reads it at the full price, so leave it on unless you would rather not spend the allowance |
+| `attribution` | `true` | `false` stops sandbox agents adding Claude Code's attribution, in every project: no `Co-Authored-By` or `Claude-Session` trailer on their commits and no "Generated with Claude Code" footer on pull request text they write, so the commits carry your authorship alone. The kit passes Claude Code's own `attribution` setting to each Claude pass; a branch's `.claude/settings.json` cannot turn it back on |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
 A key not in this table is refused, naming the nearest real one, as the project config does.
 `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a
-bad limit, has an `idleMark`, a `keepWarm` or an `updateCheck` that is not `true` or `false`, or a
-`herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint
-that names both keys.
+bad limit, has an `idleMark`, a `keepWarm`, an `updateCheck` or an `attribution` that is not
+`true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status
+view then shows the hint that names both keys.
 
 ## 🐳 The image's agent versions
 

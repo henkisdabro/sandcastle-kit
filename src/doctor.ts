@@ -607,6 +607,9 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       // The session's keep-warm reads this one too, and a typo would leave it on without a word.
       const keepWarm = machineSettings().keepWarm;
       if (keepWarm !== undefined && typeof keepWarm !== "boolean") return `"keepWarm" in ${settingsFile} is ${JSON.stringify(keepWarm)}, not true or false.`;
+      // A run reads only `false` as off, so `"false"` would leave the trailers on without a word.
+      const attribution = machineSettings().attribution;
+      if (attribution !== undefined && typeof attribution !== "boolean") return `"attribution" in ${settingsFile} is ${JSON.stringify(attribution)}, not true or false.`;
       // The status view falls back on a bad value without a word, so this is the one place it is said.
       return herdrSettingProblem(machineSettings().herdr, settingsFile);
     } catch (error) {
@@ -627,6 +630,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
           ? `Set it to \`false\` to stop doctor and the idle mark looking up the kit's newest release on its remote, or delete the line to keep the lookup on.`
           : settingsProblem?.startsWith('"keepWarm"')
           ? `Set it to \`false\` to stop the session keeping its prompt cache warm during a run, or delete the line to keep it on.`
+          : settingsProblem?.startsWith('"attribution"')
+          ? `Set it to \`false\` to drop Claude Code's Co-Authored-By trailers and PR footer from sandbox agents' work, or delete the line to keep them.`
           : settingsProblem?.startsWith('"herdr')
           ? `Set it to \`{"clickHint": "auto"}\` (or "ctrl" or "cmd"), or delete it to sense the terminal.`
           : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),

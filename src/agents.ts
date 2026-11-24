@@ -125,6 +125,16 @@ export const configureAutoCompact = (window?: number) => {
   AUTO_COMPACT_WINDOW = window;
 };
 
+// Claude Code's own shape for "no attribution": no Co-Authored-By or Claude-Session commit trailers and no PR footer.
+// The object form, not `false`: older Claude Code versions refuse a boolean here, and a project may pin one.
+export const NO_ATTRIBUTION = { attribution: { commit: "", pr: "", sessionUrl: false } };
+let ATTRIBUTION = true;
+// The run calls this with the personal config.json's `attribution`; only `false` turns it off. A `--settings` flag
+// sits above the branch's own `.claude/settings.json`, so a branch cannot turn the trailers back on.
+export const configureAttribution = (setting: unknown) => {
+  ATTRIBUTION = setting !== false;
+};
+
 // Where the kit's flags go in Sandcastle's claude command: right after `--output-format stream-json`, which both of
 // its shapes carry - 0.14.0's, which ends in ` -p -`, and the later one that drops that tail (upstream 7fdca8c6).
 const STREAM_JSON = " --output-format stream-json";
@@ -482,7 +492,8 @@ const claude = (model: string, effort: Effort, passEnv: Record<string, string> =
       const printed = provider.buildPrintCommand(options);
       // Each command is one iteration: the capture describes the last one only.
       capture?.reset();
-      const command = withTools(printed.command, TOOLS);
+      const tooled = withTools(printed.command, TOOLS);
+      const command = ATTRIBUTION ? tooled : withFlag(tooled, `--settings ${shq(JSON.stringify(NO_ATTRIBUTION))}`, "--settings flag", "claude");
       return { ...printed, command: capture ? withSchema(command, reportSchemaJson()) : command };
     },
     parseStreamLine(line: string) {

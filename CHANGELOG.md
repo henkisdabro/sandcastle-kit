@@ -35,6 +35,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `/sandcastle update` looks for them. Hooks, CI, `.sandcastle/`, Claude Code's settings and hooks,
   `.envrc`, mise's config and `.tool-versions` stay held whatever it says.
 
+### Added
+
+- **`"attribution": false` in `~/.config/sandcastle-kit/config.json` drops Claude Code's
+  attribution from sandbox agents' work**: no `Co-Authored-By` or `Claude-Session` commit trailer
+  and no "Generated with Claude Code" pull request footer. Off by default, so runs are unchanged
+  until you set it.
+
 ### Fixed
 
 - `sandcastle clean` no longer stops at the first ticket worktree git fails to remove (a stale
