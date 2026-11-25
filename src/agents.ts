@@ -127,12 +127,13 @@ export const configureAutoCompact = (window?: number) => {
 
 // Claude Code's own shape for "no attribution": no Co-Authored-By or Claude-Session commit trailers and no PR footer.
 // The object form, not `false`: older Claude Code versions refuse a boolean here, and a project may pin one.
-export const NO_ATTRIBUTION = { attribution: { commit: "", pr: "", sessionUrl: false } };
+// `includeCoAuthoredBy` too: a version older than the `attribution` object ignores it and reads only this key.
+export const NO_ATTRIBUTION = { attribution: { commit: "", pr: "", sessionUrl: false }, includeCoAuthoredBy: false };
 let ATTRIBUTION = true;
-// The run calls this with the personal config.json's `attribution`; only `false` turns it off. A `--settings` flag
-// sits above the branch's own `.claude/settings.json`, so a branch cannot turn the trailers back on.
-export const configureAttribution = (setting: unknown) => {
-  ATTRIBUTION = setting !== false;
+// The run calls this with its resolved `attribution` (`resolveSettings`). A `--settings` flag sits above the
+// branch's own `.claude/settings.json`, so a branch's settings cannot turn the trailers back on.
+export const configureAttribution = (on: boolean) => {
+  ATTRIBUTION = on;
 };
 
 // Where the kit's flags go in Sandcastle's claude command: right after `--output-format stream-json`, which both of

@@ -28,15 +28,15 @@ after(() => rmSync(TMP, { recursive: true, force: true }));
 const resolve = (env: Record<string, string | undefined>) => resolveSettings({ env, project: {}, machine: {} });
 
 test("resolver: the guard unset, on with the default threshold, on with a set threshold", () => {
-  assert.deepEqual(resolve({}), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: false, loadPause: 60, keepWarm: true });
-  assert.deepEqual(resolve({ USAGE_CHECK: "0" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: false, loadPause: 60, keepWarm: true });
-  assert.deepEqual(resolve({ USAGE_CHECK: "1" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: true, usageStop: 90, loadPause: 60, keepWarm: true });
-  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: true, usageStop: 90, loadPause: 60, keepWarm: true });
-  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "75" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: true, usageStop: 75, loadPause: 60, keepWarm: true });
+  assert.deepEqual(resolve({}), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: false, loadPause: 60, keepWarm: true, attribution: true });
+  assert.deepEqual(resolve({ USAGE_CHECK: "0" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: false, loadPause: 60, keepWarm: true, attribution: true });
+  assert.deepEqual(resolve({ USAGE_CHECK: "1" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: true, usageStop: 90, loadPause: 60, keepWarm: true, attribution: true });
+  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: true, usageStop: 90, loadPause: 60, keepWarm: true, attribution: true });
+  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "75" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: true, usageStop: 75, loadPause: 60, keepWarm: true, attribution: true });
 });
 
 test("resolver: a USAGE_STOP is only read, and so only refused, while the guard is on", () => {
-  assert.deepEqual(resolve({ USAGE_STOP: "abc" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: false, loadPause: 60, keepWarm: true });
+  assert.deepEqual(resolve({ USAGE_STOP: "abc" }), { autonomy: 0, repair: 1, concurrency: { asked: 4, effective: 4 }, crossReview: { on: false }, usageGuard: false, loadPause: 60, keepWarm: true, attribution: true });
   assert.throws(() => resolve({ USAGE_CHECK: "1", USAGE_STOP: "abc" }), OperatorError);
   assert.throws(() => resolve({ USAGE_CHECK: "1", USAGE_STOP: "101" }), OperatorError);
 });
