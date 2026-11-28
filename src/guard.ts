@@ -98,10 +98,12 @@ export const pinHostGitConfig = (root: string) => {
   }
   for (const entry of entries.split("\0").filter(Boolean)) {
     const at = entry.indexOf("\n");
-    const hook = HOOK_COMMAND.exec(entry.slice(0, at));
+    if (at <= 0) continue;
+    const key = entry.slice(0, at);
+    const hook = HOOK_COMMAND.exec(key);
     // A config-defined hook is switched off by its name (git 2.54 has no switch per event), not pinned.
     if (hook) hostGitConfig(`hook.${hook[1]}.enabled`, "false");
-    else if (at > 0) hostGitConfig(entry.slice(0, at), entry.slice(at + 1));
+    else hostGitConfig(key, entry.slice(at + 1));
   }
 };
 

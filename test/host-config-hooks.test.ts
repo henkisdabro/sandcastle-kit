@@ -14,10 +14,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { disableHostGitHooks, pinHostGitConfig } from "../src/guard.ts";
 
-const gitAtLeast = (major: number, minor: number) => {
-  const [a, b] = execFileSync("git", ["--version"], { encoding: "utf8" }).match(/(\d+)\.(\d+)/)!.slice(1).map(Number);
-  return a > major || (a === major && b >= minor);
-};
+const [major, minor] = execFileSync("git", ["--version"], { encoding: "utf8" }).match(/(\d+)\.(\d+)/)!.slice(1).map(Number);
+const gitAtLeast = (a: number, b: number) => major > a || (major === a && minor >= b);
 
 test("the host's git runs no config-defined hook, from .git/config, config.worktree or planted after the start", { skip: !gitAtLeast(2, 54) && "git before 2.54 has no config-defined hooks" }, () => {
   const saved = { ...process.env };
