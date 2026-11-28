@@ -11,6 +11,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **The first start after this update takes the shared `.git`'s start record again, once**, since
+  the record now holds `hook.*` keys: a line says so, and nothing is refused - unless the last run
+  under the earlier kit did not end cleanly, when what that record holds is compared first.
 - **A run now refuses a `GH_TOKEN` that can push to the repository.** The check `sandcastle doctor
   --verify` made only on request (Contents: write) now runs at every run's start, before any
   sandbox. If doctor gives a FIX on `GH_TOKEN cannot push`, edit the token on GitHub to Issues: read
@@ -44,6 +47,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The host's git no longer runs hooks defined in git config.** From git 2.54 a hook can be
+  defined in config (`hook.<name>.command`), which the kit's hooks-off setting did not reach: one
+  written into `.git/config` or `.git/config.worktree` ran on your machine at the host's next commit,
+  and a `reference-transaction` one at every landing. A run now turns them all off on the host, and
+  a `hook.*` key that changed between two runs is refused at the start like any other
+  program-running key.
 - `sandcastle clean` no longer stops at the first ticket worktree git fails to remove (a stale
   `index.lock`, a busy directory): that worktree is left with git's reason and its branch, and the
   rest are cleaned, as scratch worktrees already were.

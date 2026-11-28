@@ -2076,6 +2076,12 @@ opened, since a blocking read would hang the whole run.
   `core.useReplaceRefs=false`), and `core.hooksPath` and `core.fsmonitor` by environment, with
   `GIT_NO_REPLACE_OBJECTS=1` (`disableHostGitHooks`), so Sandcastle's host `git worktree add`
   checks out the real tree a replace ref would hide.
+  `core.hooksPath` does not reach a hook defined in config (git 2.54+, `hook.<name>.command` and
+  `.event`), which would run on the host's next commit, or on every ref a landing moves
+  (`reference-transaction`): `disableHostGitHooks` sets `hook.<event>.enabled=false` for every
+  githooks(5) event (git 2.55+, so a name planted after the start is off too), and
+  `pinHostGitConfig` sets `hook.<name>.enabled=false` for every name defined at the start, all git
+  2.54 has (`test/host-config-hooks.test.ts`).
   `pinHostGitConfig` reads only git's exit 1 as "none of the keys is set"; any other failure (a
   config git cannot parse) throws `NOT STARTED`, since reading it as none would leave a planted
   program unpinned.
@@ -2125,7 +2131,7 @@ opened, since a blocking read would hang the whole run.
   `credential.*`, `protocol.*`, `http.*proxy`, `http.*sslCAInfo`/`sslCAPath`),
   `merge.verifySignatures` and `log.showSignature` (they run `gpg.program`), `extensions.*`, and
   what a person's own later git command runs (`alias.*`, which a repo-local alias overrides the
-  user's with, and `MORE_PROGRAM_KEYS`: `pager.*`, `difftool.*.cmd`, `mergetool.*.cmd`,
+  user's with, and `MORE_PROGRAM_KEYS`: `hook.*`, `pager.*`, `difftool.*.cmd`, `mergetool.*.cmd`,
   `submodule.*.update`, `interactive.diffFilter`, `gpg.ssh.defaultKeyCommand`,
   `core.alternateRefsCommand`, `lfs.*`; none of these shows its value), while `branch.*` and
   `remote.*.fetch` stay free - the hash of `info/attributes`, and every file under `hooks/` and

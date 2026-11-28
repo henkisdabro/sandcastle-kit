@@ -152,7 +152,7 @@ test("a record with no version is taken again once, with a line and no refusal, 
   assert.equal(lines.length, 1);
   assert.match(lines[0], /taken again from the present state, once/);
   const record = JSON.parse(readFileSync(baselinePath(project.root), "utf8"));
-  assert.equal(record.version, 2);
+  assert.equal(record.version, 3);
   assert.ok(record.entries.some((e: string) => e.startsWith("alias.st\n")));
   recordGitConfigEnd(project);
   // From here the record is current: the line is not printed again, and a change is refused.
