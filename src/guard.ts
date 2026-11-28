@@ -40,8 +40,21 @@ const hostGitConfig = (key: string, value: string) => {
 // place of the real one: the holds judge one commit and the landing moves the base to another (#992). Off here, for
 // this process and every git it starts, so Sandcastle's host `git worktree add` also checks out the real tree that
 // the landing gates then test; `pinHostGitConfig` pins `core.useReplaceRefs=false` as well.
+// From git 2.54 a hook can also be defined in config (`hook.<name>.command` and `.event`), which `core.hooksPath`
+// does not reach: one in `.git/config` or `config.worktree` ran on the host's next commit, and a
+// `reference-transaction` one on every ref the landing moves. git 2.55 added a switch per event, which a command-scope
+// value holds whatever the files say, and which covers a name planted after the start; git 2.54 has only the switch
+// per name, which `pinHostGitConfig` sets for every name defined at the start. The events are githooks(5)'s.
+const HOOK_EVENTS = [
+  "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit", "prepare-commit-msg", "commit-msg",
+  "post-commit", "pre-rebase", "post-checkout", "post-merge", "pre-push", "pre-receive", "update", "proc-receive", "post-receive",
+  "post-update", "reference-transaction", "push-to-checkout", "pre-auto-gc", "post-rewrite", "sendemail-validate",
+  "fsmonitor-watchman", "p4-changelist", "p4-prepare-changelist", "p4-post-changelist", "p4-pre-submit", "post-index-change",
+];
+
 export const disableHostGitHooks = () => {
   hostGitConfig("core.hooksPath", "/dev/null");
+  for (const event of HOOK_EVENTS) hostGitConfig(`hook.${event}.enabled`, "false");
   process.env.GIT_NO_REPLACE_OBJECTS = "1";
 };
 
@@ -66,6 +79,7 @@ export const disableHostGitGc = () => {
 const COMMAND_KEYS =
   "^(filter\\.[^.]+\\.(clean|smudge|process)|merge\\.[^.]+\\.driver|diff\\.[^.]+\\.(command|textconv)|diff\\.external" +
   "|core\\.(pager|editor|askpass|sshcommand)|gpg\\.(.+\\.)?program|sequence\\.editor)$";
+const HOOK_COMMAND = /^hook\.(.+)\.command$/;
 
 export const pinHostGitConfig = (root: string) => {
   hostGitConfig("core.fsmonitor", "false");
@@ -74,7 +88,7 @@ export const pinHostGitConfig = (root: string) => {
   hostGitConfig("tag.gpgSign", "false");
   let entries = "";
   try {
-    entries = sh("git", ["config", "-z", "--get-regexp", COMMAND_KEYS], root);
+    entries = sh("git", ["config", "-z", "--get-regexp", `${COMMAND_KEYS}|${HOOK_COMMAND.source}`], root);
   } catch (error) {
     // Exit 1 alone means none of the keys is set. Any other failure (a config git cannot parse or open) read as
     // "none" would leave a planted program unpinned for the host's next git call.
@@ -84,7 +98,10 @@ export const pinHostGitConfig = (root: string) => {
   }
   for (const entry of entries.split("\0").filter(Boolean)) {
     const at = entry.indexOf("\n");
-    if (at > 0) hostGitConfig(entry.slice(0, at), entry.slice(at + 1));
+    const hook = HOOK_COMMAND.exec(entry.slice(0, at));
+    // A config-defined hook is switched off by its name (git 2.54 has no switch per event), not pinned.
+    if (hook) hostGitConfig(`hook.${hook[1]}.enabled`, "false");
+    else if (at > 0) hostGitConfig(entry.slice(0, at), entry.slice(at + 1));
   }
 };
 
@@ -426,12 +443,13 @@ const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"], b
 const UPSTREAM_KEY = /^branch\.(.+)\.(remote|merge)$/;
 const PLAIN_REMOTE = /^[A-Za-z0-9._-]+$/;
 
-// Keys, beyond `COMMAND_KEYS` and `alias.*`, that run a program on a person's own later git command: a pager per
+// Keys, beyond `COMMAND_KEYS` and `alias.*`, that run a program on a person's own later git command: a config-defined
+// hook (git 2.54+; the host's git runs none, `disableHostGitHooks`), a pager per
 // command, the difftool and mergetool commands, a submodule's `update = !cmd`, the interactive diff filter, the
 // key command of ssh signing, the command a fetch reads for alternate refs, and git-lfs's keys (a custom transfer
 // agent, among others). Held by the start record (`PROGRAM_KEYS`) and shown without values.
 const MORE_PROGRAM_KEYS =
-  "pager\\..+|difftool\\..+\\.cmd|mergetool\\..+\\.cmd|submodule\\..+\\.update|interactive\\.difffilter|gpg\\.ssh\\.defaultkeycommand|core\\.alternaterefscommand|lfs\\..+";
+  "hook\\..+|pager\\..+|difftool\\..+\\.cmd|mergetool\\..+\\.cmd|submodule\\..+\\.update|interactive\\.difffilter|gpg\\.ssh\\.defaultkeycommand|core\\.alternaterefscommand|lfs\\..+";
 
 // Keys whose values are not shown: they run a program or load more config, and the value is the
 // sandbox's to choose. The others show old and new (a URL's credentials hidden).
@@ -551,7 +569,8 @@ type BaselineRecord = ProgramState & { clean: boolean };
 // The record's version, written beside it. A record of an earlier version (or none) compared with today's state would name
 // every key the version added to the list as added, so the start takes the state again once instead (`readBaseline`).
 // 2: the executable bits (`modes`), and the keys `MORE_PROGRAM_KEYS` and `alias.*` added to the list.
-const BASELINE_VERSION = 2;
+// 3: `hook.*`, config-defined hooks, added to `MORE_PROGRAM_KEYS`.
+const BASELINE_VERSION = 3;
 const LISTED_SINCE_V1 = new RegExp(`^(alias\\..+|${MORE_PROGRAM_KEYS})$`, "i");
 
 const baselineFile = (project: Project) => join(project.root, ".sandcastle", ".run", "git-config-baseline.json");

@@ -81,6 +81,8 @@ sockets (`NET_RAW` dropped). The container is the boundary, and the kit narrows 
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not
   run it on your machine when it lands.
+  That includes hooks defined in git config (`hook.<name>.command`, git 2.54+), which
+  `core.hooksPath` does not reach: the host's git turns each one off, by event and by name.
 - 🔏 **Read-only git control files.** Sandcastle mounts `.git/config`, `.git/hooks/`, `.git/info/`,
   the sandbox worktree's `.git` file and its record's `commondir` read-only in every container, and
   creates `.git/hooks/` and `.git/info/` on your machine when they are missing, to mount them (the

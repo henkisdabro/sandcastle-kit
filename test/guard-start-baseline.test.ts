@@ -115,6 +115,7 @@ test("every kind of program-running key is held, and a changed or removed one is
     ["core.sshCommand", "touch owned"],
     ["include.path", "../elsewhere"],
     ["includeIf.gitdir:/x/.path", "../elsewhere"],
+    ["hook.x.command", "touch owned"],
   ] as const) {
     const { project, git } = repo();
     start(project);
